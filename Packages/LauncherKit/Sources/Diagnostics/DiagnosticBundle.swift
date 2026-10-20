@@ -9,10 +9,18 @@ public enum FailureStage: String, Codable, Sendable {
 public struct DiagnosticBundle: Sendable {
     private let logDirectory: URL
     private let runner: any ProcessRunner
+    private let openLog: @Sendable (URL) -> Int32
 
     public init(logDirectory: URL, runner: any ProcessRunner) {
+        self.init(logDirectory: logDirectory, runner: runner, openLog: {
+            open($0.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        })
+    }
+
+    init(logDirectory: URL, runner: any ProcessRunner, openLog: @escaping @Sendable (URL) -> Int32) {
         self.logDirectory = logDirectory
         self.runner = runner
+        self.openLog = openLog
     }
 
     @concurrent public func export(to zipURL: URL, systemInfo: SystemInfo, runtimes: [String: String],
@@ -78,9 +86,10 @@ public struct DiagnosticBundle: Sendable {
             count += 1
             guard count <= 100 else { throw LauncherError.io("Too many diagnostic log entries") }
             guard file.pathExtension == "log" else { continue }
-            let fd = open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+            let fd = openLog(file)
             guard fd >= 0 else {
-                if errno == ELOOP { continue } // Never follow a log symlink out of the selected directory.
+                // Rotation may remove a discovered file before it is opened; never follow symlinks.
+                if errno == ENOENT || errno == ELOOP { continue }
                 throw LauncherError.io("Cannot open diagnostic log")
             }
             let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
@@ -103,14 +112,7 @@ public struct DiagnosticBundle: Sendable {
                 remaining -= piece.count
             }
             let text = String(decoding: data, as: UTF8.self)
-            let sanitized: String
-            if (try? JSONSerialization.jsonObject(with: data)) != nil {
-                // Legacy logs can be one pretty-printed JSON document, rather than JSONL.
-                sanitized = Redactor.redact(text)
-            } else {
-                sanitized = text.components(separatedBy: "\n").map { Redactor.redact($0) }.joined(separator: "\n")
-            }
-            try write(sanitized, to: destination.appendingPathComponent(file.lastPathComponent))
+            try write(Redactor.redactLog(text), to: destination.appendingPathComponent(file.lastPathComponent))
         }
     }
 }

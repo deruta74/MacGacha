@@ -1,8 +1,9 @@
+import Darwin
 import Foundation
 import Synchronization
 import Testing
 import LauncherCore
-import Diagnostics
+@testable import Diagnostics
 
 @Test
 func bundleContainsExpectedFiles() async throws {
@@ -15,6 +16,8 @@ func bundleContainsExpectedFiles() async throws {
     try Data(#"{"metadata":{"TOKEN":"planted-secret"},"message":"Authorization: Bearer planted-secret"}"#.utf8)
         .write(to: logs.appendingPathComponent("macgacha.1.log"))
     try Data("{\n  \"token\":\n    \"planted-secret\"\n}\n".utf8).write(to: logs.appendingPathComponent("legacy.log"))
+    try Data("ordinary text\n{\n\"token\":\n\"planted-secret\"\n}\n\n".utf8)
+        .write(to: logs.appendingPathComponent("mixed.log"))
     let outside = root.appendingPathComponent("outside.log")
     try Data("must not be copied".utf8).write(to: outside)
     try FileManager.default.createSymbolicLink(at: logs.appendingPathComponent("symlink.log"), withDestinationURL: outside)
@@ -36,10 +39,39 @@ func bundleContainsExpectedFiles() async throws {
     #expect(try String(contentsOf: extracted.appendingPathComponent("failure.txt"), encoding: .utf8) == "download\n")
     #expect(FileManager.default.fileExists(atPath: extracted.appendingPathComponent("logs/macgacha.log").path))
     #expect(!FileManager.default.fileExists(atPath: extracted.appendingPathComponent("logs/symlink.log").path))
+    #expect(try String(contentsOf: extracted.appendingPathComponent("logs/mixed.log"), encoding: .utf8).hasSuffix("\n\n"))
     for file in try diagnosticRegularFiles(under: extracted) {
         #expect(!String(decoding: try Data(contentsOf: file), as: UTF8.self).contains("planted-secret"))
     }
     #expect(try String(contentsOf: logs.appendingPathComponent("macgacha.log"), encoding: .utf8) == original)
+}
+
+@Test
+func bundleSkipsLogRotatedAwayBeforeOpen() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logs = root.appendingPathComponent("logs", isDirectory: true)
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    try Data("rotating".utf8).write(to: logs.appendingPathComponent("rotating.log"))
+    try Data("stable\n".utf8).write(to: logs.appendingPathComponent("stable.log"))
+    let removed = Mutex(false)
+    let runner = DiagnosticTestRunner { arguments in
+        let stagedLogs = URL(fileURLWithPath: arguments[3]).appendingPathComponent("logs")
+        #expect(!FileManager.default.fileExists(atPath: stagedLogs.appendingPathComponent("rotating.log").path))
+        #expect(try String(contentsOf: stagedLogs.appendingPathComponent("stable.log"), encoding: .utf8) == "stable\n")
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    let bundle = DiagnosticBundle(logDirectory: logs, runner: runner, openLog: { file in
+        if file.lastPathComponent == "rotating.log" {
+            removed.withLock { $0 = unlink(file.path) == 0 }
+        }
+        return open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+    })
+    try await bundle.export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(),
+        runtimes: [:], failureStage: nil)
+    #expect(removed.withLock { $0 })
+    #expect(try Data(contentsOf: root.appendingPathComponent("bundle.zip")) == Data("archive".utf8))
 }
 
 @Test

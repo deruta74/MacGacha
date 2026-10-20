@@ -54,8 +54,8 @@ func eventLogRedactsBeforeBoundingMetadataKeys() async throws {
     #expect(!text.contains("priva"))
 }
 
-@Test
-func eventLogDoesNotRemoveDirectoriesDuringRotation() async throws {
+@Test(arguments: [1, 2, 3])
+func eventLogDoesNotRemoveDirectoriesDuringRotation(keepFiles: Int) async throws {
     let directory = try eventLogTempDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let unrelated = directory.appendingPathComponent("macgacha.1.log", isDirectory: true)
@@ -63,8 +63,41 @@ func eventLogDoesNotRemoveDirectoriesDuringRotation() async throws {
     let marker = unrelated.appendingPathComponent("keep")
     try Data("preserved".utf8).write(to: marker)
     try Data(repeating: 120, count: 200).write(to: directory.appendingPathComponent("macgacha.log"))
-    await EventLog(directory: directory, maxFileBytes: 200, keepFiles: 1).log(.info, "test", "rotate")
+    await EventLog(directory: directory, maxFileBytes: 200, keepFiles: keepFiles).log(.info, "test", "rotate")
     #expect(FileManager.default.fileExists(atPath: marker.path))
+    let current = try String(contentsOf: directory.appendingPathComponent("macgacha.log"), encoding: .utf8)
+    #expect(current.contains("rotate"))
+}
+
+@Test
+func eventLogRedactsBeforeTruncatingMessagesAndMetadata() async throws {
+    let directory = try eventLogTempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let input = #"{"\u0074oken":"planted-secret","padding":""# + String(repeating: "x", count: 6000) + "\"}"
+    let log = EventLog(directory: directory, maxFileBytes: 1024, keepFiles: 2)
+    await log.log(.info, "test", input)
+    await log.log(.info, "test", "metadata", metadata: ["detail": input])
+    for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+        #expect(!String(decoding: try Data(contentsOf: file), as: UTF8.self).contains("planted-secret"))
+    }
+}
+
+@Test
+func eventLogTinyLimitWithMultibyteTextReturnsPromptly() async throws {
+    let directory = try eventLogTempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let clock = ContinuousClock()
+    let started = clock.now
+    for limit in [1, 32, 64, 100, 129] {
+        let log = EventLog(directory: directory, maxFileBytes: limit)
+        await log.log(.info, "é", String(repeating: "é", count: 101))
+    }
+    #expect(started.duration(to: clock.now) < .seconds(3))
+    for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+        let text = try String(contentsOf: file, encoding: .utf8)
+        #expect(!text.contains("\u{FFFD}"))
+        for line in text.split(separator: "\n") { _ = try JSONSerialization.jsonObject(with: Data(line.utf8)) }
+    }
 }
 
 @Test

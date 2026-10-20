@@ -2,6 +2,41 @@ import Foundation
 import Testing
 import LauncherCore
 
+@Test(arguments: [
+    ("token=\"secret with spaces", "token=<redacted>"),
+    ("token='secret with spaces\nnext line", "token=<redacted>\nnext line"),
+    (#"password=\"secret\"&lang=en"#, "password=<redacted>&lang=en"),
+    (#"password=\"secret with spaces"#, "password=<redacted>"),
+    ("password=ab'cd&lang=en", "password=<redacted>&lang=en"),
+    ("password=ab\"cd&lang=en", "password=<redacted>&lang=en"),
+    (#"token="secret \"with\" spaces"&lang=en"#, "token=<redacted>&lang=en"),
+])
+func redactsMalformedAndEscapedQuotedValues(input: String, expected: String) {
+    #expect(Redactor.redact(input) == expected)
+}
+
+@Test
+func redactsStringifiedJSONAndBalancedCompositeValues() throws {
+    let stringified = #"{"message":"{\"\\u0074oken\":\"planted-secret\"}"}"#
+    #expect(!Redactor.redact(stringified).contains("planted-secret"))
+    for value in [#"{"id":1,"secret":"xyz"}"#, #"[{"id":1},"xyz",[1,2]]"#,
+        #"{"nested":[{"value":"a}b\"c"}],"secret":"xyz"}"#] {
+        let input = "failed: {\"session\":\(value),\"lang\":\"en\"} trailing text"
+        let result = Redactor.redact(input)
+        #expect(result == "failed: {\"session\":\"<redacted>\",\"lang\":\"en\"} trailing text")
+        #expect(!result.contains("xyz"))
+    }
+}
+
+@Test
+func redactsMixedMultilinePayloadsWithoutLosingTrailingNewlines() {
+    let input = "request failed\n{\n  \"token\":\n    \"planted-secret\",\n  \"lang\": \"en\"\n}\n\n"
+    let result = Redactor.redact(input)
+    #expect(!result.contains("planted-secret"))
+    #expect(result.contains("\"lang\": \"en\""))
+    #expect(result.hasSuffix("\n\n"))
+}
+
 @Test
 func redactsKnownSecrets() throws {
     #expect(Redactor.redact("GET /x?authkey=abc123&lang=en") == "GET /x?authkey=<redacted>&lang=en")
