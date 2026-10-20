@@ -7,6 +7,7 @@ struct DiagnosticsView: View {
     @Environment(AppModel.self) private var model
     @State private var exporting = false
     @State private var bundle: DiagnosticZip?
+    @State private var exportTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -51,8 +52,13 @@ struct DiagnosticsView: View {
                 }
                 Button("Export Diagnostic Bundle…", systemImage: "square.and.arrow.up") {
                     // Build the complete bundle first; the save panel only ever gets a finished file.
-                    Task {
+                    exportTask = Task {
                         guard let file = try? await model.makeDiagnosticBundle() else { return }
+                        // Closed while the bundle was being built: nobody will save it.
+                        guard !Task.isCancelled else {
+                            await TemporaryDiagnosticBundle.discard(file)
+                            return
+                        }
                         bundle = DiagnosticZip(url: file)
                         exporting = true
                     }
@@ -74,6 +80,14 @@ struct DiagnosticsView: View {
             bundle = nil
         }
         .task { await model.refreshLogs() }
+        .onDisappear {
+            exportTask?.cancel()
+            exportTask = nil
+            if let file = bundle?.url, !exporting {
+                Task { await TemporaryDiagnosticBundle.discard(file) }
+                bundle = nil
+            }
+        }
     }
 
     static func defaultFilename(now: Date = .now) -> String {
