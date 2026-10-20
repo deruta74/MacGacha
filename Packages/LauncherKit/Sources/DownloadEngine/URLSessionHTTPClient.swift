@@ -61,15 +61,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         var terminalError: LauncherError?
     }
 
-    private enum Admission {
-        case buffered, wait, finished
-        case deliver(CheckedContinuation<Data?, any Error>, Data)
-    }
-
     private let state = Mutex(State())
-    // A suspended URLSession task can still have an in-flight callback. Gate that
-    // callback as well, so it cannot create another unbounded queue of Data.
-    private let pressure = NSCondition()
     private let highWaterMark: Int
     private let lowWaterMark: Int
     private let bufferObserver: (@Sendable (Int, Bool) -> Void)?
@@ -105,8 +97,8 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
 
     func next() async throws -> Data? {
         try await withCheckedThrowingContinuation { continuation in
-            pressure.lock()
             let result: Result<Data?, LauncherError>? = state.withLock { state in
+                defer { bufferObserver?(state.bufferedBytes, state.suspended) }
                 if state.readIndex < state.pieces.count {
                     // Only consumed prefix slots are nil; readIndex points to a queued piece.
                     let data = state.pieces[state.readIndex]!
@@ -132,9 +124,6 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
                 state.waiter = continuation
                 return nil
             }
-            observeBuffer()
-            pressure.broadcast()
-            pressure.unlock()
             if let result { continuation.resume(with: result.mapError { $0 as any Error }) }
         }
     }
@@ -165,65 +154,28 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        var offset = data.startIndex
-        while offset < data.endIndex {
-            let end = offset + min(highWaterMark, data.endIndex - offset)
-            guard enqueue(data, range: offset..<end) else { return }
-            offset = end
-        }
-    }
-
-    private func enqueue(_ data: Data, range: Range<Data.Index>) -> Bool {
-        pressure.lock()
-        while true {
-            let admission: Admission = state.withLock { state in
-                guard !state.finished else { return .finished }
-                if let waiter = state.waiter {
-                    state.waiter = nil
-                    return .deliver(waiter, piece(of: data, in: range))
-                }
-                if range.count > highWaterMark - state.bufferedBytes {
-                    suspend(&state)
-                    return .wait
-                }
-                // Allocate a slice only after capacity is available; the callback
-                // itself is the sole in-flight piece outside the bounded queue.
-                state.pieces.append(piece(of: data, in: range))
-                state.bufferedBytes += range.count
-                if state.bufferedBytes >= highWaterMark { suspend(&state) }
-                return .buffered
+        guard !data.isEmpty else { return }
+        let waiter = state.withLock { state -> CheckedContinuation<Data?, any Error>? in
+            guard !state.finished else { return nil }
+            defer { bufferObserver?(state.bufferedBytes, state.suspended) }
+            if let waiter = state.waiter {
+                state.waiter = nil
+                return waiter
             }
-            observeBuffer()
-            switch admission {
-            case .wait:
-                pressure.wait()
-            case .finished:
-                pressure.unlock()
-                return false
-            case .buffered:
-                pressure.unlock()
-                return true
-            case .deliver(let waiter, let piece):
-                pressure.unlock()
-                waiter.resume(returning: piece)
-                return true
-            }
+            // Accept the entire callback, including its possible watermark overshoot.
+            // Waiting here would block every task sharing this session's delegate queue.
+            state.pieces.append(data)
+            state.bufferedBytes += data.count
+            if state.bufferedBytes >= highWaterMark { suspend(&state) }
+            return nil
         }
-    }
-
-    private func piece(of data: Data, in range: Range<Data.Index>) -> Data {
-        range == data.startIndex..<data.endIndex ? data : data.subdata(in: range)
+        waiter?.resume(returning: data)
     }
 
     private func suspend(_ state: inout State) {
         guard !state.suspended else { return }
         state.suspended = true
         state.task?.suspend()
-    }
-
-    private func observeBuffer() {
-        let snapshot = state.withLock { ($0.bufferedBytes, $0.suspended) }
-        bufferObserver?(snapshot.0, snapshot.1)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
@@ -239,9 +191,9 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
     }
 
     private func finish(_ error: LauncherError?, cancelTask: Bool = false) {
-        pressure.lock()
         let completed = state.withLock { state -> State? in
             guard !state.finished || cancelTask else { return nil }
+            defer { bufferObserver?(state.bufferedBytes, state.suspended) }
             state.finished = true
             state.terminalError = error ?? (state.head == nil ? nil : .transport("HTTP transfer ended before response headers"))
             if cancelTask {
@@ -256,11 +208,8 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
             state.suspended = false
             return completed
         }
-        observeBuffer()
-        pressure.broadcast()
-        pressure.unlock()
         guard let completed else { return }
-        // Complete outside both locks; native cancellation can schedule delegate callbacks.
+        // Complete outside the lock; native cancellation can schedule delegate callbacks.
         if cancelTask { completed.task?.cancel() }
         if let head = completed.head {
             head.resume(throwing: completed.terminalError ?? .transport("Missing HTTP response"))

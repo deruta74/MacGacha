@@ -232,14 +232,64 @@ func urlSessionBackpressureHandlesAnOversizedCallback() async throws {
     defer { fixture.close() }
     let (_, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
     var received = Data()
+    var largestPiece = 0
     for try await piece in body {
-        #expect(piece.count <= 65_536)
+        largestPiece = max(largestPiece, piece.count)
         received.append(piece)
         try await Task.sleep(for: .milliseconds(2))
     }
     #expect(received == data)
-    #expect(metrics.snapshot.peak <= 65_536)
-    #expect(metrics.snapshot.suspensions > 0)
+    #expect(metrics.snapshot.peak <= 65_536 + largestPiece)
+    if metrics.snapshot.peak >= 65_536 { #expect(metrics.snapshot.suspensions > 0) }
+}
+
+@Test
+func backpressuredBodyDoesNotBlockOtherRequests() async throws {
+    let data = Data((0..<(4 << 20)).map { UInt8($0 % 251) })
+    let metrics = HTTPBufferMetrics()
+    let fixture = HTTPFixture(.response(200, [
+        "Content-Type": "application/octet-stream", "Content-Length": "\(data.count)",
+    ], [data]), highWaterMark: 262_144, lowWaterMark: 65_536, timeout: 10,
+        bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
+    defer { fixture.close() }
+    let secondURL = URL(string: "https://http.test/\(UUID().uuidString)")!
+    let secondControl = HTTPStubControl()
+    let smallBody = Data("second response".utf8)
+    HTTPStubProtocol.routes.withLock {
+        $0[secondURL] = (.response(200, ["Content-Length": "\(smallBody.count)"], [smallBody]), secondControl)
+    }
+    defer { HTTPStubProtocol.routes.withLock { $0[secondURL] = nil } }
+
+    let (_, firstBody) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+    try await waitForHTTPCondition { metrics.snapshot.suspensions > 0 }
+    #expect(metrics.snapshot.bytes >= 262_144)
+    let clock = ContinuousClock()
+    let startedAt = clock.now
+    let second = Task {
+        let (head, body) = try await fixture.client.get(secondURL, byteRangeFrom: nil)
+        var received = Data()
+        for try await piece in body { received.append(piece) }
+        return (head.status, received)
+    }
+    defer { second.cancel() }
+    // Cancellation completes the pending get even if the old delegate is blocked.
+    let watchdog = Task {
+        try await Task.sleep(for: .milliseconds(5_500))
+        second.cancel()
+    }
+    defer { watchdog.cancel() }
+    do {
+        let (status, received) = try await second.value
+        #expect(startedAt.duration(to: clock.now) < .seconds(5))
+        #expect(status == 200)
+        #expect(received == smallBody)
+    } catch {
+        Issue.record("Request B must finish before request A is consumed: \(error)")
+    }
+    watchdog.cancel()
+    var received = Data()
+    for try await piece in firstBody { received.append(piece) }
+    #expect(received == data)
 }
 
 private final class HTTPBufferMetrics: Sendable {
@@ -279,6 +329,7 @@ private struct HTTPFixture: Sendable {
         _ mode: HTTPStubMode,
         highWaterMark: Int = 16 << 20,
         lowWaterMark: Int = 4 << 20,
+        timeout: TimeInterval = 2,
         bufferObserver: (@Sendable (Int, Bool) -> Void)? = nil
     ) {
         let url = URL(string: "https://http.test/\(UUID().uuidString)")!
@@ -288,8 +339,8 @@ private struct HTTPFixture: Sendable {
         HTTPStubProtocol.routes.withLock { $0[url] = (mode, control) }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HTTPStubProtocol.self]
-        configuration.timeoutIntervalForRequest = 2
-        configuration.timeoutIntervalForResource = 2
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
         session = URLSession(configuration: configuration)
         client = URLSessionHTTPClient(session: session, highWaterMark: highWaterMark,
             lowWaterMark: lowWaterMark, bufferObserver: bufferObserver)
@@ -323,6 +374,7 @@ private final class HTTPStubProtocol: URLProtocol, @unchecked Sendable {
     static let routes = Mutex([URL: (HTTPStubMode, HTTPStubControl)]())
 
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "http.test" }
+    override class func canInit(with task: URLSessionTask) -> Bool { task.currentRequest?.url?.host == "http.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
@@ -337,6 +389,10 @@ private final class HTTPStubProtocol: URLProtocol, @unchecked Sendable {
                 "Content-Length": "\(chunks.reduce(0) { $0 + $1.count })"])
             DispatchQueue.global(qos: .utility).async { [self] in
                 for chunk in chunks {
+                    // A custom URLProtocol producer must honor native task suspension itself.
+                    while task?.state == .suspended && !control.stopped {
+                        Thread.sleep(forTimeInterval: 0.001)
+                    }
                     guard !control.stopped else { return }
                     client?.urlProtocol(self, didLoad: chunk)
                     Thread.sleep(forTimeInterval: 0.001)
