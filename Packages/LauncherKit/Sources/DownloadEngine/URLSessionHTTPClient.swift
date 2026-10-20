@@ -2,6 +2,7 @@ import Foundation
 import Synchronization
 import LauncherCore
 
+/// Create once and share; call invalidate() when done.
 public struct URLSessionHTTPClient: HTTPClient {
     private let session: URLSession
     private let highWaterMark: Int
@@ -9,11 +10,19 @@ public struct URLSessionHTTPClient: HTTPClient {
     private let bufferObserver: (@Sendable (Int, Bool) -> Void)?
 
     public init(
-        session: URLSession = .init(configuration: .ephemeral),
+        session: URLSession = {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.urlCache = nil
+            return URLSession(configuration: configuration)
+        }(),
         highWaterMark: Int = 16 << 20,
         lowWaterMark: Int = 4 << 20
     ) {
         self.init(session: session, highWaterMark: highWaterMark, lowWaterMark: lowWaterMark, bufferObserver: nil)
+    }
+
+    public func invalidate() {
+        session.invalidateAndCancel()
     }
 
     init(session: URLSession, highWaterMark: Int, lowWaterMark: Int,
@@ -27,7 +36,8 @@ public struct URLSessionHTTPClient: HTTPClient {
 
     public func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let offset { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
         let delegate = HTTPStreamDelegate(highWaterMark: highWaterMark, lowWaterMark: lowWaterMark,
             bufferObserver: bufferObserver)
@@ -49,6 +59,13 @@ public struct URLSessionHTTPClient: HTTPClient {
 }
 
 private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
+    private enum Effect {
+        case resume(URLSessionDataTask)
+        case suspend(URLSessionDataTask)
+        case cancel(URLSessionDataTask)
+        case observe(bytes: Int, suspended: Bool)
+    }
+
     private struct State {
         var task: URLSessionDataTask?
         var head: CheckedContinuation<HTTPResponseHead, any Error>?
@@ -59,6 +76,9 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         var suspended = false
         var finished = false
         var terminalError: LauncherError?
+        var cancelledByUs = false
+        var effects: [Effect] = []
+        var drainingEffects = false
     }
 
     private let state = Mutex(State())
@@ -78,27 +98,26 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
     }
 
     func start(_ continuation: CheckedContinuation<HTTPResponseHead, any Error>) {
-        let result: Result<URLSessionDataTask, LauncherError> = state.withLock { state in
+        let error: LauncherError? = state.withLock { state in
             guard !state.finished, let task = state.task else {
-                return .failure(state.terminalError ?? .transport("HTTP request already finished"))
+                return state.terminalError ?? .transport("HTTP request already finished")
             }
             state.head = continuation
-            return .success(task)
+            state.effects.append(.resume(task))
+            return nil
         }
-        switch result {
-        case .success(let task): task.resume()
-        case .failure(let error): continuation.resume(throwing: error)
-        }
+        performEffects()
+        if let error { continuation.resume(throwing: error) }
     }
 
     func cancel() {
-        finish(.cancelled, cancelTask: true)
+        finish(.cancelled, cancelTask: true, cancelledByUs: true)
     }
 
     func next() async throws -> Data? {
         try await withCheckedThrowingContinuation { continuation in
             let result: Result<Data?, LauncherError>? = state.withLock { state in
-                defer { bufferObserver?(state.bufferedBytes, state.suspended) }
+                defer { observe(&state) }
                 if state.readIndex < state.pieces.count {
                     // Only consumed prefix slots are nil; readIndex points to a queued piece.
                     let data = state.pieces[state.readIndex]!
@@ -114,7 +133,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
                     }
                     if state.suspended && state.bufferedBytes <= lowWaterMark {
                         state.suspended = false
-                        state.task?.resume()
+                        if let task = state.task { state.effects.append(.resume(task)) }
                     }
                     return .success(data)
                 }
@@ -124,6 +143,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
                 state.waiter = continuation
                 return nil
             }
+            performEffects()
             if let result { continuation.resume(with: result.mapError { $0 as any Error }) }
         }
     }
@@ -157,7 +177,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         guard !data.isEmpty else { return }
         let waiter = state.withLock { state -> CheckedContinuation<Data?, any Error>? in
             guard !state.finished else { return nil }
-            defer { bufferObserver?(state.bufferedBytes, state.suspended) }
+            defer { observe(&state) }
             if let waiter = state.waiter {
                 state.waiter = nil
                 return waiter
@@ -166,16 +186,49 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
             // Waiting here would block every task sharing this session's delegate queue.
             state.pieces.append(data)
             state.bufferedBytes += data.count
-            if state.bufferedBytes >= highWaterMark { suspend(&state) }
+            if state.bufferedBytes >= highWaterMark && !state.suspended {
+                state.suspended = true
+                if let task = state.task { state.effects.append(.suspend(task)) }
+            }
             return nil
         }
+        performEffects()
         waiter?.resume(returning: data)
     }
 
-    private func suspend(_ state: inout State) {
-        guard !state.suspended else { return }
-        state.suspended = true
-        state.task?.suspend()
+    private func observe(_ state: inout State) {
+        if bufferObserver != nil {
+            state.effects.append(.observe(bytes: state.bufferedBytes, suspended: state.suspended))
+        }
+    }
+
+    private func performEffects() {
+        let shouldDrain = state.withLock { state in
+            guard !state.drainingEffects else { return false }
+            state.drainingEffects = true
+            return true
+        }
+        guard shouldDrain else { return }
+        // One drainer preserves transition order, including reentrant observer calls.
+        // All native task operations and observer callbacks run outside the mutex.
+        while let effects = state.withLock({ state -> [Effect]? in
+            guard !state.effects.isEmpty else {
+                state.drainingEffects = false
+                return nil
+            }
+            let effects = state.effects
+            state.effects.removeAll(keepingCapacity: true)
+            return effects
+        }) {
+            for effect in effects {
+                switch effect {
+                case .resume(let task): task.resume()
+                case .suspend(let task): task.suspend()
+                case .cancel(let task): task.cancel()
+                case .observe(let bytes, let suspended): bufferObserver?(bytes, suspended)
+                }
+            }
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
@@ -183,6 +236,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         if let error {
             let nsError = error as NSError
             failure = nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+                && state.withLock({ $0.cancelledByUs })
                 ? .cancelled : .transport(error.localizedDescription)
         } else {
             failure = nil
@@ -190,10 +244,10 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         finish(failure)
     }
 
-    private func finish(_ error: LauncherError?, cancelTask: Bool = false) {
+    private func finish(_ error: LauncherError?, cancelTask: Bool = false, cancelledByUs: Bool = false) {
         let completed = state.withLock { state -> State? in
             guard !state.finished || cancelTask else { return nil }
-            defer { bufferObserver?(state.bufferedBytes, state.suspended) }
+            state.cancelledByUs = state.cancelledByUs || cancelledByUs
             state.finished = true
             state.terminalError = error ?? (state.head == nil ? nil : .transport("HTTP transfer ended before response headers"))
             if cancelTask {
@@ -202,15 +256,16 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
                 state.bufferedBytes = 0
             }
             let completed = state
+            if cancelTask, let task = state.task { state.effects.append(.cancel(task)) }
             state.task = nil
             state.head = nil
             state.waiter = nil
             state.suspended = false
+            observe(&state)
             return completed
         }
         guard let completed else { return }
-        // Complete outside the lock; native cancellation can schedule delegate callbacks.
-        if cancelTask { completed.task?.cancel() }
+        performEffects()
         if let head = completed.head {
             head.resume(throwing: completed.terminalError ?? .transport("Missing HTTP response"))
         }

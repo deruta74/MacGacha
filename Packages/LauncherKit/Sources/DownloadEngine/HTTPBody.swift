@@ -16,15 +16,14 @@ public struct HTTPBody: AsyncSequence, Sendable {
     }
 
     public func makeAsyncIterator() -> Iterator {
-        source.claimIterator()
-        return Iterator(lifetime: HTTPBodyIteratorLifetime(source))
+        Iterator(lifetime: source.claimIterator() ? HTTPBodyIteratorLifetime(source) : nil)
     }
 
     public struct Iterator: AsyncIteratorProtocol, Sendable {
-        fileprivate let lifetime: HTTPBodyIteratorLifetime
+        fileprivate let lifetime: HTTPBodyIteratorLifetime?
 
         public mutating func next() async throws -> Data? {
-            let source = lifetime.source
+            guard let source = lifetime?.source else { throw LauncherError.transport("body already consumed") }
             return try await withTaskCancellationHandler {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 let data = try await source.next()
@@ -53,10 +52,11 @@ fileprivate final class HTTPBodySource: Sendable {
 
     deinit { cancel() }
 
-    func claimIterator() {
+    func claimIterator() -> Bool {
         state.withLock {
-            precondition(!$0.claimed, "HTTPBody supports a single iterator")
+            guard !$0.claimed else { return false }
             $0.claimed = true
+            return true
         }
     }
 

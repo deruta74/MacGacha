@@ -30,7 +30,7 @@ func mockServesRangeAndFaults() async throws {
         for try await chunk in droppedBody { received += chunk.count }
         Issue.record("An injected dropped transfer must throw")
     } catch LauncherError.transport {
-        #expect(received >= 70_000)
+        #expect(received == 70_000)
     }
     cdn.enqueueFault("blob", .status(503, retryAfter: .seconds(7)))
     let (status, statusBody) = try await cdn.get(url, byteRangeFrom: nil)
@@ -96,4 +96,34 @@ private func collectMockBody(_ stream: HTTPBody) async throws -> Data {
     var result = Data()
     for try await chunk in stream { result.append(chunk) }
     return result
+}
+
+@Test(arguments: [0, 3, 4, 10])
+func mockDropAlwaysThrowsEvenAtOrBeyondEnd(dropPoint: Int) async throws {
+    let cdn = MockCDN()
+    let url = URL(string: "https://mock.cdn/blob")!
+    cdn.serve("blob", data: Data([0, 1, 2, 3, 4, 5]))
+    cdn.enqueueFault("blob", .dropAfter(bytes: dropPoint))
+    let (_, body) = try await cdn.get(url, byteRangeFrom: 2)
+    var received = Data()
+    do {
+        for try await piece in body { received.append(piece) }
+        Issue.record("An injected dropped transfer must throw, including beyond EOF")
+    } catch LauncherError.transport {}
+    #expect(received == Data([2, 3, 4, 5].prefix(min(dropPoint, 4))))
+}
+
+@Test
+func httpBodyRejectsSecondIteratorWithoutCancellingFirst() async throws {
+    let cdn = MockCDN()
+    let url = URL(string: "https://mock.cdn/blob")!
+    cdn.serve("blob", data: Data([1, 2, 3]))
+    let (_, body) = try await cdn.get(url, byteRangeFrom: nil)
+    var first = body.makeAsyncIterator()
+    do {
+        var second = body.makeAsyncIterator()
+        await #expect(throws: LauncherError.transport("body already consumed")) { try await second.next() }
+    }
+    #expect(try await first.next() == Data([1, 2, 3]))
+    #expect(try await first.next() == nil)
 }

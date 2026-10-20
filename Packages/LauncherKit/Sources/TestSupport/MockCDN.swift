@@ -91,9 +91,11 @@ private actor MockBody {
 
     func next() throws -> Data? {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
-        if let dropAfter, offset >= dropAfter { throw LauncherError.transport("Injected dropped transfer") }
+        if let dropAfter, offset >= min(dropAfter, data.count) {
+            throw LauncherError.transport("Injected dropped transfer")
+        }
         guard offset < data.count else { return nil }
-        let end = min(data.count, offset + 65_536)
+        let end = min(data.count, offset + 65_536, dropAfter ?? data.count)
         defer { offset = end }
         return data.subdata(in: offset..<end)
     }
@@ -107,7 +109,7 @@ public final class InstantSleeper: Sleeper, Sendable {
     public var delays: [Duration] { recorded.withLock { $0 } }
 
     public func sleep(for duration: Duration) async throws {
-        try Task.checkCancellation()
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
         recorded.withLock { $0.append(duration) }
     }
 }

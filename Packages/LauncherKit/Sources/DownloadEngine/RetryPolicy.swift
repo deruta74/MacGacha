@@ -5,12 +5,15 @@ public struct RetryPolicy: Sendable {
     public let maxAttempts: Int
     public let baseDelay: Duration
     public let maxDelay: Duration
+    public let maxRetryAfter: Duration
 
-    public init(maxAttempts: Int = 6, baseDelay: Duration = .milliseconds(500), maxDelay: Duration = .seconds(30)) {
-        precondition(maxAttempts > 0 && baseDelay >= .zero && maxDelay >= .zero)
+    public init(maxAttempts: Int = 6, baseDelay: Duration = .milliseconds(500), maxDelay: Duration = .seconds(30),
+        maxRetryAfter: Duration = .seconds(300)) {
+        precondition(maxAttempts > 0 && baseDelay >= .zero && maxDelay >= .zero && maxRetryAfter >= .zero)
         self.maxAttempts = maxAttempts
         self.baseDelay = baseDelay
         self.maxDelay = maxDelay
+        self.maxRetryAfter = maxRetryAfter
     }
 
     public func delay(forAttempt n: Int, retryAfter: Duration?) -> Duration {
@@ -21,7 +24,7 @@ public struct RetryPolicy: Sendable {
             remaining -= 1
         }
         let jitter = ceiling * Double.random(in: 0...1)
-        return max(jitter, retryAfter ?? .zero)
+        return max(jitter, min(retryAfter ?? .zero, maxRetryAfter))
     }
 
     public func isRetryable(_ error: any Error) -> Bool {
@@ -42,6 +45,11 @@ public struct ContinuousSleeper: Sleeper {
     public init() {}
 
     public func sleep(for duration: Duration) async throws {
-        try await Task.sleep(for: duration)
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        do {
+            try await Task.sleep(for: duration)
+        } catch is CancellationError {
+            throw LauncherError.cancelled
+        }
     }
 }
