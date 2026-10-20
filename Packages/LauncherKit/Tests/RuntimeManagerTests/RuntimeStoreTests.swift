@@ -205,6 +205,7 @@ func invalidKindEntryDoesNotHideOtherKinds(shape: String) throws {
     #expect(entry.kind == nil)
     #expect(entry.rawName == "wine")
     #expect(!entry.reason.isEmpty)
+    #expect(entry.removable)
     let store = RuntimeStore(paths: paths)
     let pending = paths.runtimes.appendingPathComponent("dxmt/.incoming-stale", isDirectory: true)
     try FileManager.default.createDirectory(at: pending, withIntermediateDirectories: true)
@@ -276,6 +277,30 @@ func removeInvalidRejectsMultiComponentNamesWithoutTouchingFiles() throws {
         #expect(throws: LauncherError.unsafePath(rawName)) { try store.removeInvalid(entry) }
     }
     #expect(try fs.readFile(at: SafeRelativePath("Runtimes/wine/control"), maxBytes: 100) == Data("preserved".utf8))
+}
+
+@Test
+func kindInspectionFailureCannotAuthorizeRemoval() throws {
+    let directory = try TempDir()
+    let paths = AppPaths(root: directory.url)
+    let store = RuntimeStore(paths: paths)
+    let valid = try InstalledComponent(kind: .wine, version: "11.0", installedAt: Date(), source: .download)
+    try writeRuntimeMarker(valid, paths: paths)
+    let wine = paths.runtimes.appendingPathComponent("wine")
+    let marker = wine.appendingPathComponent("11.0/.macgacha-component.json")
+    let original = try Data(contentsOf: marker)
+    for index in 0..<1024 {
+        try FileManager.default.createDirectory(at: wine.appendingPathComponent(".incoming-\(index)"), withIntermediateDirectories: true)
+    }
+    let scan = try store.scan()
+    let entry = try #require(scan.invalid.first { $0.kind == nil && $0.rawName == "wine" })
+    #expect(entry.reason == "Too many runtime directory entries")
+    #expect(!entry.removable)
+    #expect(throws: LauncherError.io("Runtime entry is report-only")) { try store.removeInvalid(entry) }
+    let forged = InvalidRuntimeEntry(kind: nil, rawName: "wine", reason: entry.reason, removable: true)
+    #expect(throws: LauncherError.io("Runtime entry is report-only")) { try store.removeInvalid(forged) }
+    #expect(FileManager.default.fileExists(atPath: marker.path))
+    if FileManager.default.fileExists(atPath: marker.path) { #expect(try Data(contentsOf: marker) == original) }
 }
 
 private func writeRuntimeMarker(_ record: InstalledComponent, paths: AppPaths) throws {

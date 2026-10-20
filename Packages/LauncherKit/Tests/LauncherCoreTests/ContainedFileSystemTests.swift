@@ -98,6 +98,11 @@ func containedFileSystemRefusesLeafSymlinksAndPreservesAtomicWritesOnCancellatio
         catch LauncherError.unsafePath {}
     }
     #expect(try Data(contentsOf: control) == original)
+    #expect(try fs.itemType(at: link, allowingLeafSymlink: true) == .other)
+    do {
+        _ = try fs.itemType(at: SafeRelativePath("link/child"), allowingLeafSymlink: true)
+        Issue.record("Allowing a leaf symlink must still refuse symlink ancestors")
+    } catch LauncherError.unsafePath {}
     let path = try SafeRelativePath("Data/control")
     try fs.writeAtomically(original, to: path)
     let task = Task {

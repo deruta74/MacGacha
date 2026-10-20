@@ -162,15 +162,18 @@ public struct ContainedFileSystem: Sendable {
         return (paths, invalid)
     }
 
-    /// Returns nil for a missing item; refuses symlinks, including a symlink at the leaf.
-    public func itemType(at path: SafeRelativePath) throws -> ItemType? {
+    /// Returns nil for a missing item. Cleanup may classify a leaf symlink as .other;
+    /// symlink ancestors are always refused, and leaf symlinks are refused by default.
+    public func itemType(at path: SafeRelativePath, allowingLeafSymlink: Bool = false) throws -> ItemType? {
         guard let parent = try directory(Array(path.components.dropLast()), create: false) else { return nil }
         defer { close(parent) }
         guard let info = try entry(path.components.last!, parent: parent) else { return nil }
         switch info.st_mode & S_IFMT {
         case S_IFREG: return .regularFile
         case S_IFDIR: return .directory
-        case S_IFLNK: throw LauncherError.unsafePath(display(path.components))
+        case S_IFLNK:
+            guard allowingLeafSymlink else { throw LauncherError.unsafePath(display(path.components)) }
+            return .other
         default: return .other
         }
     }

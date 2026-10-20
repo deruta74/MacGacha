@@ -31,21 +31,14 @@ public struct InvalidRuntimeEntry: Sendable, Equatable {
     /// A single filesystem name, retained verbatim for reporting even when unsafe.
     public let rawName: String
     public let reason: String
-    fileprivate let reportOnly: Bool
+    /// Inspection failures are report-only; true requires a positively identified invalid entry.
+    public let removable: Bool
 
-    public init(kind: ComponentKind?, rawName: String, reason: String) {
-        self.init(kind: kind, rawName: rawName, reason: reason, reportOnly: false)
-    }
-
-    fileprivate init(kind: ComponentKind?, rawName: String, reason: String, reportOnly: Bool) {
+    public init(kind: ComponentKind?, rawName: String, reason: String, removable: Bool = false) {
         self.kind = kind
         self.rawName = rawName
         self.reason = reason
-        self.reportOnly = reportOnly
-    }
-
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.kind == rhs.kind && lhs.rawName == rhs.rawName && lhs.reason == rhs.reason
+        self.removable = removable
     }
 }
 
@@ -83,8 +76,12 @@ public struct RuntimeStore: Sendable {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let kindPath = try SafeRelativePath(runtimes.description + "/" + kind.rawValue)
             do {
-                guard let type = try fs.itemType(at: kindPath) else { continue }
-                guard type == .directory else { throw LauncherError.io("Runtime kind path is not a directory") }
+                guard let type = try fs.itemType(at: kindPath, allowingLeafSymlink: true) else { continue }
+                guard type == .directory else {
+                    invalid.append(InvalidRuntimeEntry(kind: nil, rawName: kind.rawValue,
+                        reason: "Runtime kind path is not a directory", removable: true))
+                    continue
+                }
                 let entries = try fs.contentsOfDirectoryReportingInvalid(at: kindPath)
                 guard entries.paths.count + entries.invalid.count <= 1024 else {
                     throw LauncherError.io("Too many runtime directory entries")
@@ -92,7 +89,7 @@ public struct RuntimeStore: Sendable {
                 let prefixBytes = (kindPath.description + "/").utf8.count
                 for rawPath in entries.invalid {
                     let rawName = String(decoding: rawPath.utf8.dropFirst(prefixBytes), as: UTF8.self)
-                    invalid.append(InvalidRuntimeEntry(kind: kind, rawName: rawName, reason: Self.invalidPathReason, reportOnly: true))
+                    invalid.append(InvalidRuntimeEntry(kind: kind, rawName: rawName, reason: Self.invalidPathReason))
                 }
                 for versionPath in entries.paths {
                     guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -100,21 +97,11 @@ public struct RuntimeStore: Sendable {
                     // Installer staging and other hidden directories are never installed versions.
                     guard version.utf8.first != 0x2e else { continue }
                     do {
-                        _ = try SafeIdentifier(version)
-                        guard try fs.itemType(at: versionPath) == .directory else {
-                            throw LauncherError.io("Runtime path is not a directory")
-                        }
-                        let marker = try SafeRelativePath(versionPath.description + "/.macgacha-component.json")
-                        guard let data = try RuntimeJSONFile.read(marker, in: fs, limit: 65_536) else {
-                            throw LauncherError.io("Runtime marker is missing")
-                        }
-                        let record = try JSONDecoder().decode(InstalledComponent.self, from: data)
-                        guard record.kind == kind, record.version == version else {
-                            throw LauncherError.io("Runtime marker does not match its directory")
-                        }
-                        result.append(record)
+                        result.append(try inspectVersion(at: versionPath, kind: kind, version: version, in: fs))
                     } catch LauncherError.cancelled {
                         throw LauncherError.cancelled
+                    } catch let failure as BadVersion {
+                        invalid.append(InvalidRuntimeEntry(kind: kind, rawName: version, reason: failure.reason, removable: true))
                     } catch {
                         invalid.append(InvalidRuntimeEntry(kind: kind, rawName: version, reason: Self.reason(for: error)))
                     }
@@ -152,17 +139,22 @@ public struct RuntimeStore: Sendable {
         try deleting(fs, hidden)
     }
 
-    /// Unsafe raw names remain report-only and throw unsafePath. Already repaired/missing entries are ignored.
+    /// Unsafe names throw unsafePath; inspection failures throw io. Repaired/missing entries are ignored.
     public func removeInvalid(_ entry: InvalidRuntimeEntry) throws {
         let name = try SafeRelativePath(entry.rawName)
         guard name.components.count == 1 else { throw LauncherError.unsafePath(entry.rawName) }
+        guard entry.removable else { throw LauncherError.io("Runtime entry is report-only") }
         let current = try scan().invalid.first { $0.kind == entry.kind && $0.rawName == entry.rawName }
         guard let current else { return }
-        guard !current.reportOnly else { throw LauncherError.unsafePath(entry.rawName) }
+        guard current.removable else { throw LauncherError.io("Runtime entry is report-only") }
         let fs = try ContainedFileSystem(root: paths.root)
         let runtimes = try RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root)
         let parent = entry.kind.map { runtimes.description + "/" + $0.rawValue } ?? runtimes.description
         let source = try SafeRelativePath(parent + "/" + entry.rawName)
+        if entry.kind == nil {
+            guard let type = try fs.itemType(at: source, allowingLeafSymlink: true) else { return }
+            guard type != .directory else { throw LauncherError.io("Runtime kind directories cannot be removed as invalid entries") }
+        }
         let hidden = try SafeRelativePath(parent + "/.removing-" + UUID().uuidString)
         // A directory container also allows a source leaf symlink to be unlinked safely inside the tree.
         try fs.createDirectory(at: hidden)
@@ -207,6 +199,33 @@ public struct RuntimeStore: Sendable {
             } catch LauncherError.unsafePath { continue }
             try deleting(fs, child)
         }
+    }
+
+    private struct BadVersion: Error {
+        let reason: String
+    }
+
+    private func inspectVersion(at path: SafeRelativePath, kind: ComponentKind, version: String,
+        in fs: ContainedFileSystem) throws -> InstalledComponent {
+        do { _ = try SafeIdentifier(version) }
+        catch { throw BadVersion(reason: "Invalid runtime version identifier") }
+        guard let type = try fs.itemType(at: path, allowingLeafSymlink: true) else {
+            throw LauncherError.io("Runtime entry disappeared during inspection")
+        }
+        guard type == .directory else { throw BadVersion(reason: "Runtime path is not a directory") }
+        let marker = try SafeRelativePath(path.description + "/.macgacha-component.json")
+        let data: Data?
+        do { data = try RuntimeJSONFile.read(marker, in: fs, limit: 65_536) }
+        catch LauncherError.fileTooLarge { throw BadVersion(reason: "Runtime marker exceeds size limit") }
+        catch LauncherError.unsafePath { throw BadVersion(reason: "Unsafe runtime marker path") }
+        guard let data else { throw BadVersion(reason: "Runtime marker is missing") }
+        let record: InstalledComponent
+        do { record = try JSONDecoder().decode(InstalledComponent.self, from: data) }
+        catch { throw BadVersion(reason: "Invalid runtime marker JSON") }
+        guard record.kind == kind, record.version == version else {
+            throw BadVersion(reason: "Runtime marker does not match its directory")
+        }
+        return record
     }
 
     private func runtimesPath(in fs: ContainedFileSystem) throws -> SafeRelativePath? {
