@@ -15,6 +15,6 @@ MacGacha is an unofficial, community project. It is not affiliated with, endorse
 
 ## License
 
-Copyright (C) 2026 deruta74. MacGacha is free software under the [GNU General Public License v3.0](LICENSE), with one additional term under GPL section 7(b) (see [NOTICE](NOTICE)): every copy or fork must keep a visible link to the original project, https://github.com/deruta74/MacGacha, both in its source and in the app's About screen. Any distributed version, modified or paid, must stay under GPL-3.0 with its source available.
+Copyright (C) 2026 deruta74. MacGacha is free software under the [GNU General Public License v3.0](LICENSE), with one additional term under GPL section 7(b) (see [NOTICE](NOTICE)): the link to the original project, https://github.com/deruta74/MacGacha, must be kept by every conveyed (distributed) copy and every distributed work based on MacGacha, both in its source and in its About screen. Private modifications that aren't distributed aren't affected. Any distributed version, modified or paid, must stay under GPL-3.0 with its source available.
 
 Components the launcher downloads at runtime (Wine, DXMT, D3DMetal) and the games themselves are under their own licenses and terms.

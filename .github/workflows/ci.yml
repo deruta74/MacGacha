@@ -27,6 +27,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Check license headers
+        run: scripts/check-headers.sh
+
       - name: Run package tests
         run: |
           mkdir -p test-results
