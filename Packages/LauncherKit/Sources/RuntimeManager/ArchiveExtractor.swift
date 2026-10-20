@@ -44,11 +44,6 @@ public struct ArchiveExtractor: Sendable {
         try fs.createDirectory(at: target)
         do {
             let targetURL = try fs.directoryURL(at: target)
-            // The formatted listing is a separate tool-level format/readability check; security
-            // decisions use structured metadata, never ambiguous human-readable path columns.
-            let listingTool = format == .zip ? "/usr/bin/zipinfo" : "/usr/bin/tar"
-            let listingArgs = format == .zip ? ["-l", archiveURL.path] : ["-tvf", archiveURL.path, "--numeric-owner"]
-            try await run(listingTool, listingArgs)
             if format == .zip {
                 try await run("/usr/bin/ditto", ["-x", "-k", archiveURL.path, targetURL.path])
             } else {
@@ -75,7 +70,7 @@ public struct ArchiveExtractor: Sendable {
 
     private func run(_ executable: String, _ arguments: [String]) async throws {
         let result = try await runner.run(URL(fileURLWithPath: executable), arguments: arguments,
-            environment: ["LC_ALL": "C", "COPYFILE_DISABLE": "1"], currentDirectory: nil)
+            environment: ["LC_ALL": "en_US.UTF-8", "COPYFILE_DISABLE": "1"], currentDirectory: nil)
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard result.exitCode == 0 else {
             throw LauncherError.processFailed(executable: executable, exitCode: result.exitCode,
@@ -93,6 +88,11 @@ public struct ArchiveExtractor: Sendable {
             archive_read_support_filter_gzip(reader)
             archive_read_support_filter_xz(reader)
             archive_read_support_format_tar(reader)
+            // USTAR/GNU names are ASCII. PAX path/linkpath fields carry their own UTF-8
+            // provenance and override this fallback charset, independent of process locale.
+            guard archive_read_set_format_option(reader, "tar", "hdrcharset", "ASCII") == 0 else {
+                throw LauncherError.io("Cannot configure tar filename encoding")
+            }
         }
         guard archive_read_open_fd(reader, handle.fileDescriptor, 65_536) == 0 else { throw LauncherError.io("Cannot read archive") }
         var result: [ArchiveEntry] = []
@@ -104,20 +104,29 @@ public struct ArchiveExtractor: Sendable {
             var entry: OpaquePointer?
             let status = archive_read_next_header(reader, &entry)
             if status == 1 { break } // ARCHIVE_EOF
-            guard status == 0, let entry else { throw LauncherError.io("Invalid archive header") }
+            guard let entry else { throw LauncherError.io("Invalid archive header") }
             guard result.count < maxEntries else { throw LauncherError.io("Archive entry limit exceeded") }
             guard let pointer = archive_entry_pathname_utf8(entry), let path = String(validatingCString: pointer) else {
                 throw LauncherError.unsafePath("Invalid archive entry name")
             }
+            // A PAX UTF-8 path can override a non-ASCII raw USTAR fallback. libarchive
+            // still reports that fallback's ASCII conversion warning, while retaining
+            // the valid UTF-8 PAX path above. Raw non-ASCII USTAR names fail fatally.
+            let pax = [0x30002, 0x30003].contains(archive_format(reader))
+            let warning = archive_error_string(reader).map { String(cString: $0) } ?? ""
+            let overriddenFallback = status == -20 && pax &&
+                (warning == "Pathname can't be converted from ASCII to current locale." ||
+                 warning == "Linkname can't be converted from ASCII to current locale.")
+            guard status == 0 || overriddenFallback else { throw LauncherError.unsafePath("Invalid archive entry name") }
             let size = archive_entry_size(entry)
             guard size >= 0, archive_entry_is_encrypted(entry) == 0 else { throw LauncherError.io("Invalid or encrypted archive entry") }
-            total = try addSize(total, size, limit: limit)
             let kind: ArchiveEntry.Kind
             if let link = archive_entry_hardlink_utf8(entry) {
                 guard let target = String(validatingCString: link) else { throw LauncherError.unsafePath(path) }
                 kind = .hardlink(target)
             } else {
                 switch archive_entry_filetype(entry) {
+                case 0 where format == .zip: kind = path.utf8.last == 47 ? .directory : .file
                 case S_IFREG: kind = .file
                 case S_IFDIR: kind = .directory
                 case S_IFLNK:
@@ -128,6 +137,8 @@ public struct ArchiveExtractor: Sendable {
                 default: throw LauncherError.unsafePath(path)
                 }
             }
+            // A hardlink header does not carry new payload, regardless of its size field.
+            if case .hardlink = kind { } else { total = try addSize(total, size, limit: limit) }
             metadata += path.utf8.count + (kind.link?.utf8.count ?? 0)
             guard metadata <= 16 << 20, path.utf8.count <= 4096, (kind.link?.utf8.count ?? 0) <= 4096 else {
                 throw LauncherError.io("Archive metadata limit exceeded")
@@ -172,13 +183,19 @@ private enum ArchivePolicy {
         value.precomposedStringWithCanonicalMapping.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
     }
 
+    // Shared by every link in this validation, not reset for each recursion or entry.
+    private static let resolutionStepLimit = 4096
+
     static func validate(_ entries: [ArchiveEntry]) throws {
+        var remainingSteps = resolutionStepLimit
+        var byExactPath: [String: (kind: ArchiveEntry.Kind, index: Int)] = [:]
         var byPath: [String: ArchiveEntry.Kind] = [:]
-        for entry in entries {
+        for (index, entry) in entries.enumerated() {
             let path = try normalized(entry.path, directory: { if case .directory = entry.kind { return true }; return false }())
             guard byPath.updateValue(entry.kind, forKey: key(path)) == nil else { throw LauncherError.unsafePath(entry.path) }
+            byExactPath[path] = (entry.kind, index)
         }
-        for entry in entries {
+        for (index, entry) in entries.enumerated() {
             let path = try normalized(entry.path, directory: { if case .directory = entry.kind { return true }; return false }())
             if path.isEmpty { continue } // A tar root directory entry (./).
             let parts = try SafeRelativePath(path).components
@@ -189,11 +206,21 @@ private enum ArchivePolicy {
             }
             switch entry.kind {
             case .symlink(let target):
-                _ = try resolve(target, base: Array(parts.dropLast()), byPath: byPath, visited: [])
-            case .hardlink(let target):
-                let resolved = try resolve(target, base: [], byPath: byPath, visited: [])
-                guard let kind = byPath[key(resolved.joined(separator: "/"))], case .file = kind else {
+                var visited: Set<String> = [key(path)]
+                let resolved = try resolve(target, base: Array(parts.dropLast()), byPath: byPath,
+                    visited: &visited, remainingSteps: &remainingSteps)
+                guard resolved.count > parts.count || key(resolved.joined(separator: "/")) != key(parts.prefix(resolved.count).joined(separator: "/")) else {
                     throw LauncherError.unsafePath(entry.path)
+                }
+            case .hardlink(let target):
+                let literal = try normalized(target, directory: false)
+                guard let prior = byExactPath[literal], prior.index < index, case .file = prior.kind else {
+                    throw LauncherError.unsafePath(entry.path)
+                }
+                let targetParts = try SafeRelativePath(literal).components
+                for count in 1..<targetParts.count {
+                    guard let ancestor = byExactPath[targetParts.prefix(count).joined(separator: "/")],
+                        case .directory = ancestor.kind else { throw LauncherError.unsafePath(entry.path) }
                 }
             default: break
             }
@@ -214,13 +241,18 @@ private enum ArchivePolicy {
         return safe.description
     }
 
-    private static func resolve(_ value: String, base: [String], byPath: [String: ArchiveEntry.Kind], visited: Set<String>) throws -> [String] {
+    private static func resolve(_ value: String, base: [String], byPath: [String: ArchiveEntry.Kind], visited: inout Set<String>, remainingSteps: inout Int) throws -> [String] {
         guard !value.isEmpty, value.utf8.first != 47, !value.utf8.contains(0), !value.utf8.contains(92), visited.count < 128 else {
             throw LauncherError.unsafePath(value)
         }
         var result = base
         // Byte splitting is essential: a slash followed by a combining mark is still a separator.
         for bytes in value.utf8.split(separator: 47, omittingEmptySubsequences: false) {
+            guard remainingSteps > 0, !Task.isCancelled else {
+                if Task.isCancelled { throw LauncherError.cancelled }
+                throw LauncherError.unsafePath("Archive link resolution budget exceeded")
+            }
+            remainingSteps -= 1
             let part = String(decoding: bytes, as: UTF8.self)
             if part.isEmpty || part == "." { continue }
             if part == ".." {
@@ -232,11 +264,10 @@ private enum ArchivePolicy {
             result.append(part)
             guard result.count <= 120 else { throw LauncherError.unsafePath(value) }
             let path = key(result.joined(separator: "/"))
-            if let kind = byPath[path], let target = kind.link {
-                guard !visited.contains(path) else { throw LauncherError.unsafePath(value) }
-                let parent: [String]
-                if case .hardlink = kind { parent = [] } else { parent = Array(result.dropLast()) }
-                result = try resolve(target, base: parent, byPath: byPath, visited: visited.union([path]))
+            if case .symlink(let target) = byPath[path] {
+                guard visited.insert(path).inserted else { throw LauncherError.unsafePath(value) }
+                result = try resolve(target, base: Array(result.dropLast()), byPath: byPath,
+                    visited: &visited, remainingSteps: &remainingSteps)
             }
         }
         return result

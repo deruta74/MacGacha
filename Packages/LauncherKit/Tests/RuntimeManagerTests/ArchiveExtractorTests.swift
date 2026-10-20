@@ -119,7 +119,7 @@ func archiveExtractionBoundsExpandedSizeAndPreservesNonemptyTarget() async throw
 }
 
 struct ArchiveTestEntry {
-    enum Kind { case file, directory, symlink, hardlink, device }
+    enum Kind { case file, directory, symlink, hardlink, device, pax }
     let name: String
     var body: String = ""
     var type: Kind = .file
@@ -130,19 +130,27 @@ struct ArchiveTestEntry {
 }
 
 /// Deliberately writes raw headers, allowing fixtures that normal archive tools refuse to create.
-func archiveTestData(_ entries: [ArchiveTestEntry], format: ArchiveFormat) -> Data {
+func archiveTestData(_ entries: [ArchiveTestEntry], format: ArchiveFormat, paxNames: Bool = true) -> Data {
     if format == .zip { return zipTestData(entries) }
     var result = Data()
     for entry in entries {
+        let usePax = paxNames && entry.name.utf8.contains { $0 >= 128 }
+        if usePax {
+            let body = " path=\(entry.name)\n"
+            var length = body.utf8.count + 1
+            while String(length).utf8.count + body.utf8.count != length { length = String(length).utf8.count + body.utf8.count }
+            let header = ArchiveTestEntry("PaxHeader", body: "\(length)" + body, type: .pax)
+            result.append(archiveTestData([header], format: format, paxNames: false).dropLast(1024))
+        }
         var h = [UInt8](repeating: 0, count: 512)
         func put(_ value: String, _ offset: Int, _ length: Int) {
             for (i, byte) in value.utf8.prefix(length).enumerated() { h[offset + i] = byte }
         }
-        let body = entry.type == .file ? Data(entry.body.utf8) : Data()
-        put(entry.name, 0, 100); put("0000755", 100, 7); put("0000000", 108, 7); put("0000000", 116, 7)
+        let body = (entry.type == .file || entry.type == .pax) ? Data(entry.body.utf8) : Data()
+        put(usePax ? "PaxPayload" : entry.name, 0, 100); put("0000755", 100, 7); put("0000000", 108, 7); put("0000000", 116, 7)
         put(String(format: "%011o", body.count), 124, 11); put("00000000000", 136, 11)
         for i in 148..<156 { h[i] = 32 }
-        h[156] = entry.type == .directory ? 53 : entry.type == .symlink ? 50 : entry.type == .hardlink ? 49 : entry.type == .device ? 51 : 48
+        h[156] = entry.type == .pax ? 120 : entry.type == .directory ? 53 : entry.type == .symlink ? 50 : entry.type == .hardlink ? 49 : entry.type == .device ? 51 : 48
         put(entry.link, 157, 100); put("ustar", 257, 5); put("00", 263, 2)
         put(String(format: "%06o", h.reduce(0) { $0 + Int($1) }), 148, 6)
         result.append(contentsOf: h); result.append(body)
@@ -152,7 +160,7 @@ func archiveTestData(_ entries: [ArchiveTestEntry], format: ArchiveFormat) -> Da
     return result
 }
 
-private func zipTestData(_ entries: [ArchiveTestEntry], unicodeOverride: String? = nil) -> Data {
+private func zipTestData(_ entries: [ArchiveTestEntry], unicodeOverride: String? = nil, flags: UInt16 = 0x800, fat: Bool = false) -> Data {
     var result = Data(); var central = Data()
     for entry in entries {
         let name = Data(entry.name.utf8)
@@ -166,14 +174,14 @@ private func zipTestData(_ entries: [ArchiveTestEntry], unicodeOverride: String?
             extra.le16(0x7075); extra.le16(UInt16(utf8.count + 5)); extra.append(1); extra.le32(0); extra.append(utf8)
         }
         let offset = UInt32(result.count)
-        result.le32(0x04034b50); result.le16(20); result.le16(0x800); result.le16(0); result.le16(0); result.le16(0)
+        result.le32(0x04034b50); result.le16(20); result.le16(flags); result.le16(0); result.le16(0); result.le16(0)
         result.le32(crc); result.le32(UInt32(body.count)); result.le32(UInt32(body.count)); result.le16(UInt16(name.count)); result.le16(UInt16(extra.count))
         result.append(name); result.append(extra); result.append(body)
-        central.le32(0x02014b50); central.le16(0x0314); central.le16(20); central.le16(0x800); central.le16(0); central.le16(0); central.le16(0)
+        central.le32(0x02014b50); central.le16(fat ? 0x0014 : 0x0314); central.le16(20); central.le16(flags); central.le16(0); central.le16(0); central.le16(0)
         central.le32(crc); central.le32(UInt32(body.count)); central.le32(UInt32(body.count)); central.le16(UInt16(name.count)); central.le16(UInt16(extra.count)); central.le16(0)
         central.le16(0); central.le16(0)
         let mode: UInt32 = (entry.type == .directory ? 0o040000 : entry.type == .symlink ? 0o120000 : entry.type == .device ? 0o020000 : 0o100000) | 0o755
-        central.le32(mode << 16); central.le32(offset); central.append(name); central.append(extra)
+        central.le32(fat ? 0 : mode << 16); central.le32(offset); central.append(name); central.append(extra)
     }
     let start = UInt32(result.count); result.append(central)
     result.le32(0x06054b50); result.le16(0); result.le16(0); result.le16(UInt16(entries.count)); result.le16(UInt16(entries.count))
@@ -262,15 +270,17 @@ func extractsSystemCompressedArchive(format: ArchiveFormat) async throws {
     try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
     let content = Data(repeating: 97, count: 8192)
     try content.write(to: source.appendingPathComponent("file"))
+    if format == .tarXZ { try content.write(to: source.appendingPathComponent("日本語")) }
     let archive = temp.url.appendingPathComponent(format == .zip ? "fixture.zip" : "fixture.tar.xz")
     let runner = SystemProcessRunner()
     let result = try await runner.run(URL(fileURLWithPath: format == .zip ? "/usr/bin/ditto" : "/usr/bin/tar"),
-        arguments: format == .zip ? ["-c", "-k", "--norsrc", source.path, archive.path] : ["-cJf", archive.path, "-C", source.path, "."],
+        arguments: format == .zip ? ["-c", "-k", "--norsrc", source.path, archive.path] : ["-cJf", archive.path, "--format", "pax", "-C", source.path, "."],
         environment: [:], currentDirectory: nil)
     try #require(result.exitCode == 0)
     let target = temp.url.appendingPathComponent("target")
     try await ArchiveExtractor(runner: runner).extract(archive, format: format, into: target)
     #expect(try Data(contentsOf: target.appendingPathComponent("file")) == content)
+    if format == .tarXZ { #expect(try Data(contentsOf: target.appendingPathComponent("日本語")) == content) }
 }
 
 @Test
@@ -302,4 +312,126 @@ func extractsZIP64Directory() async throws {
     let target = temp.url.appendingPathComponent("target")
     try await ArchiveExtractor(runner: SystemProcessRunner()).extract(archive, format: .zip, into: target)
     #expect(try Data(contentsOf: target.appendingPathComponent("file")) == Data("ok".utf8))
+}
+
+
+@Test(arguments: ["self", "ancestor", "exponential", "repeated", "budget"])
+func rejectsSymlinkResolutionAbuse(attack: String) async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
+    let entries: [ArchiveTestEntry]
+    switch attack {
+    case "self": entries = [ArchiveTestEntry("a", type: .symlink, link: ".")]
+    case "ancestor": entries = [ArchiveTestEntry("sub/", type: .directory), ArchiveTestEntry("sub/a", type: .symlink, link: "..")]
+    case "exponential":
+        entries = (0..<14).map { ArchiveTestEntry("s\($0)", type: .symlink, link: "s\($0 + 1)/s\($0 + 1)") } + [ArchiveTestEntry("s14", type: .symlink, link: ".")]
+    case "repeated":
+        entries = [ArchiveTestEntry("dir/", type: .directory)]
+            + (0..<14).map { ArchiveTestEntry("s\($0)", type: .symlink, link: "s\($0 + 1)/../s\($0 + 1)") }
+            + [ArchiveTestEntry("s14", type: .symlink, link: "dir")]
+    default:
+        entries = [ArchiveTestEntry("dir/", type: .directory), ArchiveTestEntry("dir/file", body: "ok")]
+            + (0..<2200).map { ArchiveTestEntry("link\($0)", type: .symlink, link: "dir/file") }
+    }
+    try archiveTestData(entries, format: .tarGZ).write(to: archive)
+    let runner = FakeProcessRunner(); let start = ContinuousClock.now
+    do {
+        try await ArchiveExtractor(runner: runner).extract(archive, format: .tarGZ, into: temp.url.appendingPathComponent("target"))
+        Issue.record("Unsafe link resolution accepted")
+    } catch LauncherError.unsafePath { }
+    #expect(start.duration(to: .now) < .seconds(3))
+    #expect(runner.invocations.isEmpty)
+}
+
+@Test(arguments: ["forward", "symlink", "parent", "case"])
+func rejectsNonliteralOrForwardHardlinks(attack: String) async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
+    let file = ArchiveTestEntry("file", body: "ok")
+    let entries: [ArchiveTestEntry]
+    switch attack {
+    case "forward": entries = [ArchiveTestEntry("hard", type: .hardlink, link: "file"), file]
+    case "symlink": entries = [file, ArchiveTestEntry("link", type: .symlink, link: "file"), ArchiveTestEntry("hard", type: .hardlink, link: "link")]
+    case "parent": entries = [ArchiveTestEntry("dir/", type: .directory), ArchiveTestEntry("dir/file", body: "ok"),
+        ArchiveTestEntry("alias", type: .symlink, link: "dir"), ArchiveTestEntry("hard", type: .hardlink, link: "alias/file")]
+    default: entries = [file, ArchiveTestEntry("hard", type: .hardlink, link: "File")]
+    }
+    try archiveTestData(entries, format: .tarGZ).write(to: archive)
+    let runner = FakeProcessRunner()
+    do {
+        try await ArchiveExtractor(runner: runner).extract(archive, format: .tarGZ, into: temp.url.appendingPathComponent("target"))
+        Issue.record("Nonliteral or forward hardlink accepted")
+    } catch LauncherError.unsafePath { }
+    #expect(runner.invocations.isEmpty)
+}
+
+@Test
+func hardlinksCountOnlyUniquePayloadBytes() async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
+    var bytes = archiveTestData([ArchiveTestEntry("dir/", type: .directory), ArchiveTestEntry("dir/file", body: "1234"),
+        ArchiveTestEntry("hard", type: .hardlink, link: "dir/file")], format: .tarGZ)
+    // A hardlink header's size is not payload, even when nonzero.
+    let header = 1536
+    bytes.replaceSubrange((header + 124)..<(header + 135), with: Data("00000000010".utf8))
+    for i in (header + 148)..<(header + 156) { bytes[i] = 32 }
+    let checksum = bytes[header..<(header + 512)].reduce(0) { $0 + Int($1) }
+    bytes.replaceSubrange((header + 148)..<(header + 154), with: Data(String(format: "%06o", checksum).utf8))
+    try bytes.write(to: archive)
+    let target = temp.url.appendingPathComponent("target")
+    try await ArchiveExtractor(runner: SystemProcessRunner(), maxExpandedBytes: 4).extract(archive, format: .tarGZ, into: target)
+    #expect(try Data(contentsOf: target.appendingPathComponent("hard")) == Data("1234".utf8))
+}
+
+@Test
+func extractsFATZipWithZeroUnixMode() async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture.zip")
+    try zipTestData([ArchiveTestEntry("dir/", type: .directory), ArchiveTestEntry("dir/file", body: "ok")], flags: 0, fat: true).write(to: archive)
+    let target = temp.url.appendingPathComponent("target")
+    try await ArchiveExtractor(runner: SystemProcessRunner()).extract(archive, format: .zip, into: target)
+    #expect(try Data(contentsOf: target.appendingPathComponent("dir/file")) == Data("ok".utf8))
+}
+
+@Test(arguments: ["zip-unflagged", "zip-invalid", "tar-ustar", "tar-invalid", "tar-pax-invalid", "tar-ustar-after-pax"])
+func rejectsAmbiguousArchiveFilenameEncoding(encoding: String) async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
+    let format: ArchiveFormat = encoding.hasPrefix("zip") ? .zip : .tarGZ
+    var bytes: Data
+    if encoding == "zip-unflagged" { bytes = zipTestData([ArchiveTestEntry("日本語", body: "ok")], flags: 0) }
+    else if encoding == "zip-invalid" {
+        bytes = zipTestData([ArchiveTestEntry("a", body: "ok")])
+        bytes[30] = 0xff; bytes[30 + 1 + 2 + 46] = 0xff
+    } else if encoding == "tar-ustar-after-pax" {
+        bytes = archiveTestData([ArchiveTestEntry("PaxHeader", body: "13 path=safe\n", type: .pax),
+            ArchiveTestEntry("safe", body: "ok")], format: .tarGZ, paxNames: false)
+        bytes.removeLast(1024)
+        bytes.append(archiveTestData([ArchiveTestEntry("日本語", body: "ok")], format: .tarGZ, paxNames: false))
+    } else if encoding == "tar-pax-invalid" {
+        bytes = archiveTestData([ArchiveTestEntry("日本語", body: "ok")], format: .tarGZ)
+        let range = try #require(bytes.range(of: Data("日本語".utf8)))
+        bytes[range.lowerBound] = 0xff
+    } else {
+        bytes = archiveTestData([ArchiveTestEntry(encoding == "tar-invalid" ? "a" : "日本語", body: "ok")], format: .tarGZ, paxNames: false)
+        if encoding == "tar-invalid" {
+            bytes[0] = 0xff
+            for i in 148..<156 { bytes[i] = 32 }
+            let checksum = bytes.prefix(512).reduce(0) { $0 + Int($1) }
+            bytes.replaceSubrange(148..<154, with: Data(String(format: "%06o", checksum).utf8))
+        }
+    }
+    try bytes.write(to: archive)
+    let runner = FakeProcessRunner()
+    do {
+        try await ArchiveExtractor(runner: runner).extract(archive, format: format, into: temp.url.appendingPathComponent("target"))
+        Issue.record("Ambiguous filename encoding accepted")
+    } catch LauncherError.unsafePath { }
+    #expect(runner.invocations.isEmpty)
+}
+
+@Test(arguments: [ArchiveFormat.tarGZ, .zip])
+func extractionUsesOnlyOneProcessAndMatchingUTF8Locale(format: ArchiveFormat) async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
+    try archiveTestData([ArchiveTestEntry("file", body: "ok")], format: format).write(to: archive)
+    let system = SystemProcessRunner()
+    let runner = FakeProcessRunner { try await system.run($0.executable, arguments: $0.arguments, environment: $0.environment, currentDirectory: $0.currentDirectory) }
+    try await ArchiveExtractor(runner: runner).extract(archive, format: format, into: temp.url.appendingPathComponent("target"))
+    #expect(runner.invocations.count == 1)
+    #expect(runner.invocations.allSatisfy { $0.environment["LC_ALL"] == "en_US.UTF-8" })
 }

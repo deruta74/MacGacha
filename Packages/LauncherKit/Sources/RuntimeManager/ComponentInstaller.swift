@@ -13,13 +13,14 @@ public struct ComponentInstaller: Sendable {
     private let fetcher: ChunkFetcher
     private let extractor: ArchiveExtractor
     private let disk: any DiskSpaceProbe
+    private let fileOps: any FileOps
     private let failurePoint: @Sendable (PublishPoint) throws -> Void
 
     public init(store: RuntimeStore, consent: ConsentStore, fetcher: ChunkFetcher,
-        extractor: ArchiveExtractor, disk: any DiskSpaceProbe,
+        extractor: ArchiveExtractor, disk: any DiskSpaceProbe, fileOps: any FileOps = SystemFileOps(),
         failurePoint: @escaping @Sendable (PublishPoint) throws -> Void = { _ in }) {
         self.store = store; self.consent = consent; self.fetcher = fetcher
-        self.extractor = extractor; self.disk = disk; self.failurePoint = failurePoint
+        self.extractor = extractor; self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
     }
 
     /// Pull-driven: dropping the stream releases the store lock; cancelling its consumer
@@ -27,7 +28,7 @@ public struct ComponentInstaller: Sendable {
     /// This download installer does not implement GPTK import or prefix creation.
     public func install(_ component: RuntimeComponent) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = ComponentInstallSession(component: component, store: store, consent: consent,
-            fetcher: fetcher, extractor: extractor, disk: disk, failurePoint: failurePoint)
+            fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
 }
@@ -40,6 +41,7 @@ private actor ComponentInstallSession {
     private let fetcher: ChunkFetcher
     private let extractor: ArchiveExtractor
     private let disk: any DiskSpaceProbe
+    private let fileOps: any FileOps
     private let failurePoint: @Sendable (ComponentInstaller.PublishPoint) throws -> Void
     private var step = Step.start
     private var fs: ContainedFileSystem?
@@ -48,12 +50,13 @@ private actor ComponentInstallSession {
     private var incoming: SafeRelativePath?
     private var downloads: SafeRelativePath?
     private var pulling = false
+    private var publicationUncertain = false
 
     init(component: RuntimeComponent, store: RuntimeStore, consent: ConsentStore, fetcher: ChunkFetcher,
-        extractor: ArchiveExtractor, disk: any DiskSpaceProbe,
+        extractor: ArchiveExtractor, disk: any DiskSpaceProbe, fileOps: any FileOps,
         failurePoint: @escaping @Sendable (ComponentInstaller.PublishPoint) throws -> Void) {
         self.component = component; self.store = store; self.consent = consent; self.fetcher = fetcher
-        self.extractor = extractor; self.disk = disk; self.failurePoint = failurePoint
+        self.extractor = extractor; self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
     }
 
     func next() async throws -> OperationEvent? {
@@ -72,7 +75,7 @@ private actor ComponentInstallSession {
                     throw LauncherError.consentRequired(component.id.rawValue)
                 }
                 guard component.sourceMode == .download else { throw LauncherError.io("GPTK import requires the GPTK importer") }
-                let fs = try ContainedFileSystem(root: store.paths.root)
+                let fs = try ContainedFileSystem(root: store.paths.root, fileOps: fileOps)
                 let runtimes = try RuntimeJSONFile.relativePath(store.paths.runtimes, root: store.paths.root)
                 try fs.createDirectory(at: runtimes)
                 lock = try InstallLock(fs: fs, path: SafeRelativePath("\(runtimes)/.lock"))
@@ -98,8 +101,8 @@ private actor ComponentInstallSession {
                 guard available >= required else { throw LauncherError.insufficientSpace(required: required, available: available) }
                 let runtimes = try RuntimeJSONFile.relativePath(store.paths.runtimes, root: store.paths.root)
                 let downloads = try SafeRelativePath("\(runtimes)/.downloads/\(component.id)")
-                try fs.createDirectory(at: downloads)
                 self.downloads = downloads
+                try fs.createDirectory(at: downloads)
                 let file = try SafeRelativePath("archive")
                 let object = ChunkObject(id: "archive", urls: [url], transferSize: size, transferDigest: digest,
                     decodedSize: size, decodedDigest: digest, codec: .identity)
@@ -113,7 +116,7 @@ private actor ComponentInstallSession {
                         extents: [Extent(source: .chunk(id: object.id), fileOffset: 0, length: size, digest: digest)])
                 ])
                 let root = try fs.directoryURL(at: downloads)
-                download = try InstallOperation(plan: plan, installRoot: root, fetcher: fetcher, disk: disk).run().makeAsyncIterator()
+                download = try InstallOperation(plan: plan, installRoot: root, fetcher: fetcher, disk: disk, fileOps: fileOps).run().makeAsyncIterator()
                 step = .download
                 return .phase(.staging)
             case .download:
@@ -144,10 +147,13 @@ private actor ComponentInstallSession {
                 try await extractor.extract(archive: archive, archiveFS: fs, archiveURL: archive.resolved(against: store.paths.root),
                     format: format, fs: fs, target: incoming, expandedLimit: installedSize)
                 try fs.removeQuarantineRecursively(at: incoming)
+                try fs.synchronizeTree(at: incoming)
                 let marker = try InstalledComponent(kind: component.kind, version: component.version.rawValue,
                     installedAt: Date(), source: .download)
                 let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-                try fs.writeAtomically(encoder.encode(marker), to: SafeRelativePath("\(incoming)/.macgacha-component.json"))
+                let markerPath = try SafeRelativePath("\(incoming)/.macgacha-component.json")
+                try fs.writeAtomically(encoder.encode(marker), to: markerPath)
+                try fs.fullSync(at: markerPath)
                 step = .publish
                 return .phase(.committing)
             case .publish:
@@ -156,7 +162,9 @@ private actor ComponentInstallSession {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 try failurePoint(.beforePublish)
                 let destination = try RuntimeJSONFile.relativePath(store.installURL(for: component), root: store.paths.root)
+                publicationUncertain = true
                 try fs.publishDirectory(at: incoming, to: destination)
+                publicationUncertain = false
                 try failurePoint(.afterPublish)
                 step = .cleanup
                 return .phase(.cleaningUp)
@@ -170,7 +178,20 @@ private actor ComponentInstallSession {
             }
         } catch {
             download = nil
-            if let incoming, let fs { try? fs.removeItem(at: incoming) }
+            if let fs {
+                // If publish/rollback failed, incoming might still be the old version.
+                // Preserve it for recovery rather than deleting an uncertain tree here.
+                let abandoned = [publicationUncertain ? nil : incoming, downloads].compactMap { $0 }
+                let downloadRoot = downloads.flatMap { try? SafeRelativePath($0.components.dropLast().joined(separator: "/")) }
+                // Cleanup must finish even when the consumer is cancelled. Await this bounded,
+                // uncancelled task while retaining the store lock; no producer outlives the stream.
+                await Task.detached {
+                    for path in abandoned { try? fs.removeItem(at: path) }
+                    if let downloadRoot, (try? fs.contentsOfDirectory(at: downloadRoot).isEmpty) == true {
+                        try? fs.removeItem(at: downloadRoot)
+                    }
+                }.value
+            }
             step = .done; lock = nil
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
             throw error

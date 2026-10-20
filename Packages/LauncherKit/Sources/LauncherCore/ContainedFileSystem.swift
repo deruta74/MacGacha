@@ -321,8 +321,21 @@ public struct ContainedFileSystem: Sendable, Hashable {
         } else {
             try fileOps.rename(from: name, in: parent, to: targetName, in: target, exclusive: true)
         }
-        try synchronize(parent)
-        try synchronize(target)
+        do {
+            try synchronize(parent)
+            try synchronize(target)
+        } catch {
+            // A failed publication barrier must not discard the prior install. Restore
+            // the original names, keeping both trees if even rollback itself fails.
+            if existing != nil {
+                try fileOps.swap(from: name, in: parent, to: targetName, in: target)
+            } else {
+                try fileOps.rename(from: targetName, in: target, to: name, in: parent, exclusive: true)
+            }
+            try? synchronize(parent)
+            try? synchronize(target)
+            throw error
+        }
         return existing != nil
     }
 
@@ -353,6 +366,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
             let relative = try SafeRelativePath(components.joined(separator: "/"))
             let type = info.st_mode & S_IFMT
             var target: String?
+            var uniqueSize: Int64 = 0
             if type == S_IFLNK {
                 var bytes = [UInt8](repeating: 0, count: 4097)
                 let count = bytes.withUnsafeMutableBytes { readlinkat(parent, name, $0.baseAddress, $0.count) }
@@ -364,12 +378,46 @@ public struct ContainedFileSystem: Sendable, Hashable {
                 let key = "\(info.st_dev):\(info.st_ino)"
                 let old = hardlinks[key]?.count ?? 0
                 hardlinks[key] = (old + 1, Int(info.st_nlink))
+                uniqueSize = old == 0 ? info.st_size : 0
             } else if type != S_IFDIR { throw LauncherError.unsafePath(relative.description) }
             result.append(TreeEntry(path: relative, type: type == S_IFDIR ? .directory : type == S_IFREG ? .regularFile : .other,
-                linkTarget: target, size: type == S_IFREG ? info.st_size : 0))
+                linkTarget: target, size: uniqueSize))
         }
         guard hardlinks.values.allSatisfy({ $0.count == $0.expected }) else { throw LauncherError.unsafePath(path.description) }
         return result
+    }
+
+    /// Flushes regular files and then directories bottom-up, never following links.
+    /// Directory sync persists symlink entries; no symlink target is opened or flushed.
+    package func synchronizeTree(at path: SafeRelativePath) throws {
+        guard let fd = try directory(path.components, create: false) else { throw LauncherError.io("Directory is missing") }
+        defer { close(fd) }
+        var budget = Self.entryLimit
+        func flush(_ parent: Int32, depth: Int) throws {
+            guard depth < 128 else { throw LauncherError.io("Directory depth exceeds limit") }
+            for name in try names(in: parent, budget: &budget) {
+                guard !Task.isCancelled else { throw LauncherError.cancelled }
+                guard let info = try entry(name, parent: parent) else { throw LauncherError.io("Tree entry disappeared") }
+                switch info.st_mode & S_IFMT {
+                case S_IFDIR:
+                    let child = openat(parent, name, Self.directoryFlags)
+                    guard child >= 0 else { throw accessError(name) }
+                    defer { close(child) }
+                    try flush(child, depth: depth + 1)
+                case S_IFREG:
+                    let child = openat(parent, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+                    guard child >= 0 else { throw accessError(name) }
+                    defer { close(child) }
+                    var opened = stat()
+                    guard fstat(child, &opened) == 0, opened.st_mode & S_IFMT == S_IFREG else { throw LauncherError.unsafePath(name) }
+                    try fileOps.synchronize(child, durable: false)
+                case S_IFLNK: break
+                default: throw LauncherError.unsafePath(name)
+                }
+            }
+            try fileOps.synchronize(parent, durable: false)
+        }
+        try flush(fd, depth: 0)
     }
 
     /// Removes quarantine from every file, directory and symlink without following links.

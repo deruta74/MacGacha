@@ -49,6 +49,10 @@ enum ZIPDirectory {
             guard metadata <= 16 << 20 else { throw LauncherError.io("Archive metadata limit exceeded") }
             let name = try read(handle, at: offset + 46, count: nameLength)
             guard !name.contains(0) else { throw LauncherError.unsafePath("NUL in ZIP path") }
+            guard String(data: name, encoding: .utf8) != nil,
+                !name.contains(where: { $0 >= 128 }) || central.u16(8) & 0x800 != 0 else {
+                throw LauncherError.unsafePath("Invalid ZIP filename encoding")
+            }
             let extra = try read(handle, at: offset + 46 + UInt64(nameLength), count: extraLength)
             try validateUnicode(extra, name: name)
             var localOffset = UInt64(central.u32(42))
