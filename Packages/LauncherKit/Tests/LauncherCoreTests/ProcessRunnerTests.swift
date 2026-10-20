@@ -224,6 +224,37 @@ func bufferedOutputIsNotLostWithZeroGrace() async throws {
     }
 }
 
+@Test
+func continuouslyWritingDescendantDoesNotBlock() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let pidFile = directory.appendingPathComponent("descendant.pid")
+    let runner = SystemProcessRunner(pipeDrainGracePeriod: .milliseconds(200))
+    let clock = ContinuousClock()
+    let startedAt = clock.now
+    let task = Task {
+        try await runner.run(
+            URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "(yes > /dev/stdout & printf '%s' \"$!\" > \"$DESCENDANT_PID_FILE\"); echo done"],
+            environment: ["DESCENDANT_PID_FILE": pidFile.path],
+            currentDirectory: nil
+        )
+    }
+    defer { task.cancel() }
+    let descendant = try await readChildPID(from: pidFile)
+    defer { kill(descendant, SIGKILL) }
+    let watchdog = Task {
+        try await Task.sleep(for: .milliseconds(5_500))
+        kill(descendant, SIGKILL)
+    }
+    defer { watchdog.cancel() }
+    let result = try await task.value
+    #expect(startedAt.duration(to: clock.now) < .seconds(5))
+    #expect(result.exitCode == 0)
+    #expect(result.stdout.range(of: Data("done".utf8)) != nil)
+}
+
 private func readChildPID(from file: URL) async throws -> Int32 {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: .seconds(5))

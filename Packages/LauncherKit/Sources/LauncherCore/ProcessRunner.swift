@@ -96,6 +96,9 @@ public struct SystemProcessRunner: ProcessRunner {
 // Nonblocking reads let the deadline close a pipe even when descendants keep
 // its write end open. Each event reads a bounded amount so timers can run.
 private final class ProcessPipeReader: Sendable {
+    // Darwin FIONREAD (_IOR('f', 127, int)) is a C macro unavailable to Swift.
+    private static let fionread: UInt = 0x4004_667f
+
     private struct State {
         var data = Data()
         var failure: LauncherError?
@@ -135,8 +138,15 @@ private final class ProcessPipeReader: Sendable {
     func close(after gracePeriod: Duration) {
         queue.asyncAfter(deadline: dispatchDeadline(after: gracePeriod)) { [weak self] in
             guard let self else { return }
-            drain(untilEmpty: true)
-            // Descendant output produced after this final drain is intentionally discarded.
+            guard !state.withLock({ $0.stopping }) else { return }
+            var bufferedBytes: Int32 = 0
+            guard ioctl(handle.fileDescriptor, Self.fionread, &bufferedBytes) == 0 else {
+                let error = errno
+                stop(LauncherError.io("Querying buffered process output: \(String(cString: strerror(error)))"))
+                return
+            }
+            drain(byteLimit: Int(bufferedBytes), readLimit: .max)
+            // Descendant output produced after this snapshot is intentionally discarded.
             stop()
         }
     }
@@ -160,17 +170,19 @@ private final class ProcessPipeReader: Sendable {
         }
     }
 
-    private func drain(untilEmpty: Bool = false) {
+    private func drain(byteLimit: Int = .max, readLimit: Int = 16) {
         guard !state.withLock({ $0.stopping }) else { return }
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        var remainingReads = 16
-        while untilEmpty || remainingReads > 0 {
-            if !untilEmpty { remainingReads -= 1 }
+        var remainingBytes = byteLimit
+        var remainingReads = readLimit
+        while remainingBytes > 0 && remainingReads > 0 {
+            remainingReads -= 1
             let count = buffer.withUnsafeMutableBytes {
-                Darwin.read(handle.fileDescriptor, $0.baseAddress, $0.count)
+                Darwin.read(handle.fileDescriptor, $0.baseAddress, min($0.count, remainingBytes))
             }
             if count > 0 {
                 state.withLock { $0.data.append(contentsOf: buffer.prefix(count)) }
+                remainingBytes -= count
             } else if count == 0 {
                 stop()
                 return
