@@ -4,7 +4,10 @@ import LauncherCore
 
 @Test
 func safePathRejects() {
-    for raw in ["", "/etc/passwd", "../x", "a/../../x", "a//b", "./a", "a\\b", "a\u{0}b"] {
+    for raw in [
+        "", "/etc/passwd", "../x", "a/../../x", "a//b", "./a", "a\\b", "a\u{0}b",
+        "/\u{0301}etc", "a/\u{0301}b", "a\\\u{0301}b", "a/", ".", "..", "a/.", "a/..",
+    ] {
         #expect(throws: LauncherError.unsafePath(raw)) {
             try SafeRelativePath(raw)
         }

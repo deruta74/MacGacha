@@ -13,10 +13,21 @@ func digestNormalizesCaseAndWhitespace() throws {
 }
 
 @Test
-func digestRejectsWrongLength() {
-    for raw in [String(repeating: "a", count: 31), String(repeating: "z", count: 32)] {
+func digestRejectsWrongLength() throws {
+    let cases: [(DigestAlgorithm, String)] = [
+        (.md5, String(repeating: "a", count: 31)),
+        (.md5, String(repeating: "z", count: 32)),
+        (.sha256, String(repeating: "a", count: 32)),
+        (.md5, String(repeating: "a", count: 33)),
+        (.sha256, String(repeating: "a", count: 65)),
+    ]
+    for (algorithm, raw) in cases {
         #expect(throws: LauncherError.invalidDigest(raw)) {
-            try Digest(algorithm: .md5, hex: raw)
+            try Digest(algorithm: algorithm, hex: raw)
+        }
+        let json = try JSONEncoder().encode(["algorithm": algorithm.rawValue, "hex": raw])
+        #expect(throws: LauncherError.invalidDigest(raw)) {
+            try JSONDecoder().decode(Digest.self, from: json)
         }
     }
 }

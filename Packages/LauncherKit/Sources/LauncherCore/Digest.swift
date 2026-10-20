@@ -92,7 +92,8 @@ public enum FileHasher {
             var hasher = StreamingHasher(algorithm)
             while true {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
-                guard let data = try handle.read(upToCount: bufferSize), !data.isEmpty else { break }
+                let data = try autoreleasepool { try handle.read(upToCount: bufferSize) }
+                guard let data, !data.isEmpty else { break }
                 hasher.update(data)
             }
             return hasher.finalize()

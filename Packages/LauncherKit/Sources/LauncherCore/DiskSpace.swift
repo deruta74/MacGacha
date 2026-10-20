@@ -9,7 +9,15 @@ public struct SystemDiskSpaceProbe: DiskSpaceProbe {
 
     public func availableBytes(at url: URL) throws -> Int64 {
         do {
-            let values = try url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            var ancestor = url.standardizedFileURL
+            while !FileManager.default.fileExists(atPath: ancestor.path) {
+                let parent = ancestor.deletingLastPathComponent()
+                guard parent.path != ancestor.path else {
+                    throw LauncherError.io("No existing ancestor for disk capacity query")
+                }
+                ancestor = parent
+            }
+            let values = try ancestor.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             guard let bytes = values.volumeAvailableCapacityForImportantUsage else {
                 throw LauncherError.io("Available disk capacity is unavailable")
             }
