@@ -29,8 +29,8 @@ jobs:
 
       - name: Run package tests
         run: |
-          mkdir -p .build
-          swift test --package-path Packages/LauncherKit --parallel --xunit-output .build/test-results.xml
+          mkdir -p test-results
+          swift test --package-path Packages/LauncherKit --parallel --xunit-output test-results/test-results.xml
 
       - name: Generate Xcode project
         run: scripts/bootstrap.sh
@@ -61,4 +61,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ github.sha }}
-          path: .build/test-results*.xml
+          path: test-results/*.xml
