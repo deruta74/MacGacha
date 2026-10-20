@@ -99,11 +99,11 @@ public actor ChunkFetcher {
             throw StatusFailure(error: .http(status: head.status, url: url), retryAfter: head.retryAfter)
         }
         try handle.seek(toOffset: UInt64(offset))
-        try await consume(body, object: object, handle: handle, offset: offset, progress: progress)
+        try await consume(body, object: object, handle: handle, fileOps: fs.fileOps, offset: offset, progress: progress)
         try await verify(object, fs: fs, part: part)
     }
 
-    private func consume(_ body: HTTPBody, object: ChunkObject, handle: FileHandle, offset: Int64,
+    private func consume(_ body: HTTPBody, object: ChunkObject, handle: FileHandle, fileOps: any FileOps, offset: Int64,
         progress: @Sendable (Int64) -> Void) async throws {
         var received = offset
         var iterator = body.makeAsyncIterator()
@@ -114,7 +114,7 @@ public actor ChunkFetcher {
                 let (actual, overflow) = received.addingReportingOverflow(Int64(piece.count))
                 throw LauncherError.sizeMismatch(path: object.id, expected: object.transferSize, actual: overflow ? Int64.max : actual)
             }
-            try handle.write(contentsOf: piece)
+            try fileOps.writeAll(piece, to: handle.fileDescriptor)
             received += Int64(piece.count)
             progress(received)
         }

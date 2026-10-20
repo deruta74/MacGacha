@@ -14,18 +14,20 @@ public struct InstallOperation: Sendable {
     private let fetcher: ChunkFetcher
     private let disk: any DiskSpaceProbe
     private let mode: Mode
+    private let crashHooks: CrashHooks
 
     public init(plan: InstallPlan, installRoot: URL, fetcher: ChunkFetcher,
-        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), mode: Mode = .automatic) throws {
+        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), mode: Mode = .automatic,
+        fileOps: any FileOps = SystemFileOps(), crashHooks: CrashHooks = .none) throws {
         try plan.validate()
-        self.plan = plan; fs = try ContainedFileSystem(root: installRoot)
-        self.fetcher = fetcher; self.disk = disk; self.mode = mode
+        self.plan = plan; fs = try ContainedFileSystem(root: installRoot, fileOps: fileOps)
+        self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks
     }
 
     /// Pull-driven events: cancellation follows the consumer task, and discarding the
     /// stream releases the root lock without leaving a producer running in the background.
     public func run() -> AsyncThrowingStream<OperationEvent, any Error> {
-        let session = CommitSession(requested: plan, fs: fs, fetcher: fetcher, disk: disk, mode: mode)
+        let session = CommitSession(requested: plan, fs: fs, fetcher: fetcher, disk: disk, mode: mode, crashHooks: crashHooks)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
 }
@@ -51,6 +53,7 @@ private actor CommitSession {
     private let fetcher: ChunkFetcher
     private let disk: any DiskSpaceProbe
     private let mode: InstallOperation.Mode
+    private let crashHooks: CrashHooks
     private var lock: InstallLock?
     private var active: Stored?
     private var state = JournalState()
@@ -64,8 +67,8 @@ private actor CommitSession {
     private static let planLimit = 64 << 20
 
     init(requested: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher,
-        disk: any DiskSpaceProbe, mode: InstallOperation.Mode) {
-        self.requested = requested; self.fs = fs; self.fetcher = fetcher; self.disk = disk; self.mode = mode
+        disk: any DiskSpaceProbe, mode: InstallOperation.Mode, crashHooks: CrashHooks) {
+        self.requested = requested; self.fs = fs; self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks
     }
 
     func next() async throws -> OperationEvent? {
@@ -99,6 +102,7 @@ private actor CommitSession {
                 return .phase(.checkingSpace)
             case .delete:
                 try await deleteFiles()
+                crashHooks.reach(.beforeCompleted)
                 try await record(.operationCompleted)
                 step = .cleanup
                 return .phase(.cleaningUp)
@@ -166,7 +170,7 @@ private actor CommitSession {
             do { plan = try JSONDecoder().decode(InstallPlan.self, from: bytes) }
             catch { throw LauncherError.journalCorrupt("Invalid stored install plan") }
             guard plan.id == id else { throw LauncherError.journalCorrupt("Stored plan directory mismatch") }
-            let journal = try OperationJournal(fs: fs, path: paths.journal)
+            let journal = try OperationJournal(fs: fs, path: paths.journal, crashHooks: crashHooks)
             let replay = try OperationJournal.replay(fs: fs, path: paths.journal)
             guard (replay.planID == nil || replay.planID == plan.id),
                   (replay.planDigest == nil || replay.planDigest == plan.planDigest) else {
@@ -213,7 +217,7 @@ private actor CommitSession {
         let bytes = try encoder.encode(requested)
         guard bytes.count <= Self.planLimit else { throw LauncherError.fileTooLarge(path: try paths.plan.description, limit: Self.planLimit) }
         try fs.writeAtomically(bytes, to: paths.plan)
-        let journal = try OperationJournal(fs: fs, path: paths.journal)
+        let journal = try OperationJournal(fs: fs, path: paths.journal, crashHooks: crashHooks)
         active = Stored(plan: requested, journal: journal, state: JournalState()); state = JournalState()
         try await record(.planStored(planID: requested.id, planDigest: requested.planDigest))
         try await record(.operationStarted)
@@ -289,7 +293,7 @@ private actor CommitSession {
             guard !overflow else { throw LauncherError.journalCorrupt("Batch index overflow") }
             batchIndex = next
         }
-        let stager = try Stager(plan: pending, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk)
+        let stager = try Stager(plan: pending, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, crashHooks: crashHooks)
         staging = stager.stage(files: batch).makeAsyncIterator()
         step = .staging
         return .phase(.staging)
@@ -394,6 +398,7 @@ private actor CommitSession {
         try await record(.batchStarted(index: batchIndex))
         try ensureMarker(context().plan.id)
         try await record(.commitStarted(batch: batchIndex))
+        crashHooks.reach(.afterCommitStartedBeforeFirstRename)
         step = .commit
     }
 
@@ -414,18 +419,20 @@ private actor CommitSession {
             let stagedSize = try fs.size(at: staged)
             if state.stagedFiles.contains(file.path), stagedSize == file.size {
                 try fs.rename(from: staged, to: file.path)
+                crashHooks.reach(.afterRenameBeforeJournal)
             } else if stagedSize == nil, try destinationMatches(file) {
                 // Rename persisted, but its journal append did not.
                 try fs.fullSync(at: file.path)
             } else {
                 try await record(.fileUnstaged(path: file.path))
-                let stager = try Stager(plan: pendingPlan(), fs: fs, fetcher: fetcher, journal: context().journal, disk: disk)
+                let stager = try Stager(plan: pendingPlan(), fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, crashHooks: crashHooks)
                 for try await _ in stager.stage(files: [file]) {}
                 try refresh()
                 guard state.stagedFiles.contains(file.path), try fs.size(at: staged) == file.size else {
                     throw LauncherError.journalCorrupt("Restaged file is missing")
                 }
                 try fs.rename(from: staged, to: file.path)
+                crashHooks.reach(.afterRenameBeforeJournal)
             }
             try await record(.fileCommitted(path: file.path))
         }

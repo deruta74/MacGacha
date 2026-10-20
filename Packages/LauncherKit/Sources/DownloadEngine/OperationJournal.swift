@@ -134,14 +134,16 @@ public actor OperationJournal {
 
     private let fs: ContainedFileSystem
     private let path: SafeRelativePath
-    private let synchronize: ContainedFileSystem.FileSynchronizer
+    private let synchronize: ContainedFileSystem.FileSynchronizer?
+    private let crashHooks: CrashHooks
     private var needsRecovery = false
 
     public init(fs: ContainedFileSystem, path: SafeRelativePath,
-        synchronize: @escaping ContainedFileSystem.FileSynchronizer = ContainedFileSystem.synchronizeFileDescriptor) throws {
+        synchronize: ContainedFileSystem.FileSynchronizer? = nil, crashHooks: CrashHooks = .none) throws {
         self.fs = fs
         self.path = path
         self.synchronize = synchronize
+        self.crashHooks = crashHooks
         if try fs.itemType(at: path) == nil {
             try fs.append(Data(), to: path, synchronize: synchronize)
         } else {
@@ -165,7 +167,15 @@ public actor OperationJournal {
         default: false
         }
         do {
-            try fs.append(bytes, to: path, durable: durable, synchronize: synchronize)
+            // Only explicit harness injection splits a fileCommitted line at the rename gap.
+            if case .fileCommitted = record, crashHooks.enabled(.midJournalWrite) {
+                let split = bytes.count / 2
+                try fs.append(Data(bytes.prefix(split)), to: path, synchronize: synchronize)
+                crashHooks.reach(.midJournalWrite)
+                try fs.append(Data(bytes.dropFirst(split)), to: path, durable: durable, synchronize: synchronize)
+            } else {
+                try fs.append(bytes, to: path, durable: durable, synchronize: synchronize)
+            }
         } catch {
             needsRecovery = true
             throw error
