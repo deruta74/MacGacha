@@ -43,17 +43,21 @@ public struct PrefixManager: Sendable {
             let url = try prefixURL(game: game, backend: backend)
             let marker = try SafeRelativePath("\(prefix)/.macgacha-prefix.json")
             let pending = try SafeRelativePath("\(prefix)/.macgacha-prefix.pending")
-            let existing = try readMarker(fs: fs, path: marker, backend: backend)
+            let existing = try readMarker(fs: fs, path: marker, game: game, backend: backend)
             let binary = wineBinary.standardizedFileURL
             let identity = try await binaryIdentity(binary, fs: fs)
-            if let existing, existing.wineBinaryPath == binary.path, existing.wineBinaryIdentity == identity {
+            if let existing, existing.state == .ready,
+               existing.wineBinaryPath == binary.path, existing.wineBinaryIdentity == identity {
                 return url
             }
 
             let arguments: [String]
-            if existing != nil {
-                // Keep user data and the old marker throughout an upgrade. A failed
-                // wineboot must not discard readiness for the previously used runtime.
+            if let existing {
+                // Persist uncertainty before Wine can modify the initialized tree.
+                // Failed/cancelled upgrades remain upgrading for every runtime request.
+                let upgrading = PrefixMarker(schemaVersion: PrefixMarker.schema, game: game, backend: backend.rawValue,
+                    state: .upgrading, wineBinaryPath: binary.path, wineBinaryIdentity: identity, createdAt: existing.createdAt)
+                try writeMarker(upgrading, fs: fs, to: marker, pending: pending)
                 arguments = ["wineboot", "-u"]
             } else {
                 // Wine writes by path, so an incomplete prefix must not retain links
@@ -72,18 +76,9 @@ public struct PrefixManager: Sendable {
                 throw LauncherError.processFailed(executable: wineBinary.path, exitCode: result.exitCode,
                     stderrTail: String(decoding: result.stderr.suffix(4096), as: UTF8.self))
             }
-            let readiness = PrefixMarker(schemaVersion: PrefixMarker.schema, backend: backend.rawValue,
-                wineBinaryPath: binary.path, wineBinaryIdentity: identity, createdAt: existing?.createdAt ?? Date())
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(readiness)
-            guard data.count <= Self.markerLimit else { throw LauncherError.io("Prefix marker exceeds size limit") }
-            // Never publish before the file is fully durable. A failed/cancelled write or
-            // sync leaves only this private pending file, which the next attempt replaces.
-            try fs.writeAtomically(data, to: pending)
-            try fs.fullSync(at: pending)
-            try fs.rename(from: pending, to: marker)
+            let readiness = PrefixMarker(schemaVersion: PrefixMarker.schema, game: game, backend: backend.rawValue,
+                state: .ready, wineBinaryPath: binary.path, wineBinaryIdentity: identity, createdAt: existing?.createdAt ?? Date())
+            try writeMarker(readiness, fs: fs, to: marker, pending: pending)
             return url
         } catch {
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
@@ -108,7 +103,21 @@ public struct PrefixManager: Sendable {
         }
     }
 
-    private func readMarker(fs: ContainedFileSystem, path: SafeRelativePath, backend: ComponentKind) throws -> PrefixMarker? {
+    private func writeMarker(_ value: PrefixMarker, fs: ContainedFileSystem, to path: SafeRelativePath,
+        pending: SafeRelativePath) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(value)
+        guard data.count <= Self.markerLimit else { throw LauncherError.io("Prefix marker exceeds size limit") }
+        // Both upgrading and ready must be fully durable before publication. Failure
+        // before rename leaves the prior marker and only a private pending file.
+        try fs.writeAtomically(data, to: pending)
+        try fs.fullSync(at: pending)
+        try fs.rename(from: pending, to: path)
+    }
+
+    private func readMarker(fs: ContainedFileSystem, path: SafeRelativePath, game: String, backend: ComponentKind) throws -> PrefixMarker? {
         guard try fs.itemType(at: path, allowingLeafSymlink: true) == .regularFile else { return nil }
         let data: Data
         do { data = try fs.readFile(at: path, maxBytes: Self.markerLimit) }
@@ -122,6 +131,7 @@ public struct PrefixManager: Sendable {
         decoder.dateDecodingStrategy = .iso8601
         guard let marker = try? decoder.decode(PrefixMarker.self, from: data),
               marker.schemaVersion == PrefixMarker.schema, marker.createdAt.timeIntervalSince1970.isFinite else { return nil }
+        if let storedGame = marker.game, storedGame != game { throw LauncherError.io("Prefix game mismatch") }
         return marker
     }
 
@@ -137,10 +147,32 @@ public struct PrefixManager: Sendable {
 
 private struct BackendHeader: Decodable { let backend: String }
 private struct PrefixMarker: Codable {
+    enum State: String, Codable { case ready, upgrading }
     static let schema = 1
     let schemaVersion: Int
+    let game: String?
     let backend: String
+    let state: State
     let wineBinaryPath: String
     let wineBinaryIdentity: Digest
     let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, game, backend, state, wineBinaryPath, wineBinaryIdentity, createdAt
+    }
+}
+
+private extension PrefixMarker {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        game = try container.decodeIfPresent(String.self, forKey: .game)
+        backend = try container.decode(String.self, forKey: .backend)
+        // Original schema-1 markers have no state or game field. Their game is
+        // identified by the containing directory, and they certify a ready prefix.
+        state = container.contains(.state) ? try container.decode(State.self, forKey: .state) : .ready
+        wineBinaryPath = try container.decode(String.self, forKey: .wineBinaryPath)
+        wineBinaryIdentity = try container.decode(Digest.self, forKey: .wineBinaryIdentity)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+    }
 }

@@ -30,7 +30,9 @@ func prefixCreationRunsWinebootOnce() async throws {
     #expect(call.currentDirectory == nil)
     let json = try prefixTestJSON(fs, marker)
     #expect(json["schemaVersion"] as? Int == 1)
+    #expect(json["game"] as? String == "genshin")
     #expect(json["backend"] as? String == "dxmt")
+    #expect(json["state"] as? String == "ready")
     #expect(json["wineBinaryPath"] as? String == wine.path)
     let identity = try #require(json["wineBinaryIdentity"] as? [String: String])
     #expect(identity == ["algorithm": "sha256", "hex": "9113a829a33711e589fe9a23b01aaadafc6943f331616b99cecf53a659192e58"])
@@ -223,18 +225,19 @@ func concurrentPrefixCallsRunWinebootOnce() async throws {
     #expect(runner.invocations.count == 1)
 }
 
-@Test
-func prefixMarkerForDifferentBackendIsAnError() async throws {
+@Test(arguments: ["game", "backend"])
+func prefixMarkerForDifferentGameOrBackendIsAnError(field: String) async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
     let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner)
     _ = try await manager.createPrefix(game: "backend", backend: .dxmt, wineBinary: wine)
     let marker = try prefixTestMarker("backend", .dxmt); var json = try prefixTestJSON(fs, marker)
-    json["backend"] = "d3dmetal"; try fs.writeAtomically(JSONSerialization.data(withJSONObject: json), to: marker)
-    await #expect(throws: LauncherError.io("Prefix backend mismatch")) {
+    json[field] = "different"; try fs.writeAtomically(JSONSerialization.data(withJSONObject: json), to: marker)
+    let error = LauncherError.io(field == "backend" ? "Prefix backend mismatch" : "Prefix game mismatch")
+    await #expect(throws: error) {
         try await manager.createPrefix(game: "backend", backend: .dxmt, wineBinary: wine)
     }
     #expect(runner.invocations.count == 1)
-    #expect(try prefixTestJSON(fs, marker)["backend"] as? String == "d3dmetal")
+    #expect(try prefixTestJSON(fs, marker)[field] as? String == "different")
 }
 
 @Test
@@ -256,6 +259,8 @@ func prefixWineIdentityChangesUpgradeInPlace() async throws {
         #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
         #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("user settings".utf8))
         #expect(try fs.itemType(at: marker) == .regularFile)
+        #expect(try prefixTestJSON(fs, marker)["state"] as? String == "upgrading")
+        #expect(try prefixTestJSON(fs, marker)["wineBinaryPath"] as? String == invocation.executable.path)
         return prefixTestSuccess()
     }
     let manager = PrefixManager(paths: paths, runner: runner)
@@ -264,6 +269,7 @@ func prefixWineIdentityChangesUpgradeInPlace() async throws {
     #expect(runner.invocations.count == 1)
     #expect(runner.invocations.first?.executable == wine)
     #expect(try prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String] != oldIdentity)
+    #expect(try prefixTestJSON(fs, marker)["state"] as? String == "ready")
     #expect(try prefixTestJSON(fs, marker)["wineBinaryPath"] as? String == wine.path)
     let updatedIdentity = try #require(prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String])
     #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
@@ -276,6 +282,7 @@ func prefixWineIdentityChangesUpgradeInPlace() async throws {
     #expect(runner.invocations.last?.executable == nextWine)
     #expect(try prefixTestJSON(fs, marker)["wineBinaryPath"] as? String == nextWine.path)
     #expect(try prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String] == updatedIdentity)
+    #expect(try prefixTestJSON(fs, marker)["state"] as? String == "ready")
     #expect(try prefixTestJSON(fs, marker)["createdAt"] as? String == createdAt)
     #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
     #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("user settings".utf8))
@@ -285,38 +292,158 @@ func prefixWineIdentityChangesUpgradeInPlace() async throws {
 }
 
 @Test(arguments: [false, true])
-func failedPrefixUpgradePreservesOldMarkerAndData(changedPath: Bool) async throws {
+func failedPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData(changedPath: Bool) async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
     let wine = try prefixTestWine(paths)
     let url = try await PrefixManager(paths: paths, runner: FakeProcessRunner()).createPrefix(game: "failed-upgrade", backend: .dxmt, wineBinary: wine)
     let marker = try prefixTestMarker("failed-upgrade", .dxmt)
-    let markerBytes = try fs.readFile(at: marker, maxBytes: 16_384)
-    let markerDate = try prefixTestModificationDate(marker.resolved(against: paths.root))
+    let oldIdentity = try #require(prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String])
+    let createdAt = try #require(prefixTestJSON(fs, marker)["createdAt"] as? String)
     let save = try SafeRelativePath("Prefixes/failed-upgrade-dxmt/drive_c/users/player/save.dat")
     let registry = try SafeRelativePath("Prefixes/failed-upgrade-dxmt/user.reg")
     try fs.writeAtomically(Data("saved game".utf8), to: save)
     try fs.writeAtomically(Data("user settings".utf8), to: registry)
     let nextWine = try prefixTestWine(paths, version: changedPath ? "2.0" : "1.0", body: "wine-v2")
+    let upgradingBytes = Mutex<Data?>(nil)
     let runner = FakeProcessRunner { invocation async throws in
         #expect(invocation.arguments == ["wineboot", "-u"])
         #expect(invocation.environment == ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": "winemenubuilder.exe=d"])
-        #expect(try fs.readFile(at: marker, maxBytes: 16_384) == markerBytes)
+        let json = try prefixTestJSON(fs, marker)
+        #expect(json["state"] as? String == "upgrading")
+        #expect(json["game"] as? String == "failed-upgrade")
+        #expect(json["backend"] as? String == "dxmt")
+        #expect(json["wineBinaryPath"] as? String == nextWine.path)
+        #expect(json["wineBinaryIdentity"] as? [String: String] != oldIdentity)
+        let data = try fs.readFile(at: marker, maxBytes: 16_384)
+        upgradingBytes.withLock { $0 = data }
         #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
         #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("user settings".utf8))
+        try fs.writeAtomically(Data("partially upgraded settings".utf8), to: registry)
         return ProcessResult(exitCode: 9, stdout: Data(), stderr: Data("upgrade failed".utf8))
     }
     let manager = PrefixManager(paths: paths, runner: runner)
     await #expect(throws: LauncherError.processFailed(executable: nextWine.path, exitCode: 9, stderrTail: "upgrade failed")) {
         try await manager.createPrefix(game: "failed-upgrade", backend: .dxmt, wineBinary: nextWine)
     }
-    #expect(try fs.readFile(at: marker, maxBytes: 16_384) == markerBytes)
-    #expect(try prefixTestModificationDate(marker.resolved(against: paths.root)) == markerDate)
+    let persisted = try #require(upgradingBytes.withLock { $0 })
+    #expect(try fs.readFile(at: marker, maxBytes: 16_384) == persisted)
+    #expect(try prefixTestJSON(fs, marker)["state"] as? String == "upgrading")
     #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
-    #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("user settings".utf8))
-    // A request for the old runtime still recognizes the preserved marker.
+    #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("partially upgraded settings".utf8))
+    // Even the original runtime must repair the partially upgraded prefix.
     if !changedPath { _ = try prefixTestWine(paths) }
-    _ = try await manager.createPrefix(game: "failed-upgrade", backend: .dxmt, wineBinary: wine)
+    let recovery = FakeProcessRunner { invocation async throws in
+        #expect(invocation.executable == wine)
+        #expect(invocation.arguments == ["wineboot", "-u"])
+        let json = try prefixTestJSON(fs, marker)
+        #expect(json["state"] as? String == "upgrading")
+        #expect(json["wineBinaryPath"] as? String == wine.path)
+        #expect(json["wineBinaryIdentity"] as? [String: String] == oldIdentity)
+        #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
+        #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("partially upgraded settings".utf8))
+        return prefixTestSuccess()
+    }
+    let resumed = PrefixManager(paths: paths, runner: recovery)
+    _ = try await resumed.createPrefix(game: "failed-upgrade", backend: .dxmt, wineBinary: wine)
+    #expect(recovery.invocations.count == 1)
+    #expect(try prefixTestJSON(fs, marker)["state"] as? String == "ready")
+    #expect(try prefixTestJSON(fs, marker)["wineBinaryPath"] as? String == wine.path)
+    #expect(try prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String] == oldIdentity)
+    #expect(try prefixTestJSON(fs, marker)["createdAt"] as? String == createdAt)
+    #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
+    #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("partially upgraded settings".utf8))
+    _ = try await resumed.createPrefix(game: "failed-upgrade", backend: .dxmt, wineBinary: wine)
+    #expect(recovery.invocations.count == 1)
     #expect(runner.invocations.count == 1)
+}
+
+@Test
+func cancelledPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData() async throws {
+    let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
+    let wine = try prefixTestWine(paths)
+    _ = try await PrefixManager(paths: paths, runner: FakeProcessRunner()).createPrefix(game: "cancel-upgrade", backend: .dxmt, wineBinary: wine)
+    let marker = try prefixTestMarker("cancel-upgrade", .dxmt)
+    let oldIdentity = try #require(prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String])
+    let save = try SafeRelativePath("Prefixes/cancel-upgrade-dxmt/drive_c/users/player/save.dat")
+    let registry = try SafeRelativePath("Prefixes/cancel-upgrade-dxmt/user.reg")
+    try fs.writeAtomically(Data("saved game".utf8), to: save)
+    try fs.writeAtomically(Data("user settings".utf8), to: registry)
+    let nextWine = try prefixTestWine(paths, version: "2.0", body: "wine-v2")
+    let modified = Mutex(false)
+    let runner = FakeProcessRunner { invocation async throws in
+        #expect(invocation.arguments == ["wineboot", "-u"])
+        #expect(try prefixTestJSON(fs, marker)["state"] as? String == "upgrading")
+        #expect(try prefixTestJSON(fs, marker)["wineBinaryPath"] as? String == nextWine.path)
+        try fs.writeAtomically(Data("partially upgraded settings".utf8), to: registry)
+        modified.withLock { $0 = true }
+        try await Task.sleep(for: .seconds(30))
+        return prefixTestSuccess()
+    }
+    let task = Task { try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "cancel-upgrade", backend: .dxmt, wineBinary: nextWine) }
+    defer { task.cancel() }
+    try await prefixTestWait { modified.withLock { $0 } }
+    let upgradingBytes = try fs.readFile(at: marker, maxBytes: 16_384)
+    task.cancel()
+    await #expect(throws: LauncherError.cancelled) { try await task.value }
+    #expect(try fs.readFile(at: marker, maxBytes: 16_384) == upgradingBytes)
+    #expect(try prefixTestJSON(fs, marker)["state"] as? String == "upgrading")
+    let recovery = FakeProcessRunner { invocation async throws in
+        #expect(invocation.executable == wine)
+        #expect(invocation.arguments == ["wineboot", "-u"])
+        #expect(try prefixTestJSON(fs, marker)["state"] as? String == "upgrading")
+        #expect(try prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String] == oldIdentity)
+        #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
+        #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("partially upgraded settings".utf8))
+        return prefixTestSuccess()
+    }
+    _ = try await PrefixManager(paths: paths, runner: recovery).createPrefix(game: "cancel-upgrade", backend: .dxmt, wineBinary: wine)
+    #expect(recovery.invocations.count == 1)
+    #expect(try prefixTestJSON(fs, marker)["state"] as? String == "ready")
+    #expect(try prefixTestJSON(fs, marker)["wineBinaryPath"] as? String == wine.path)
+    #expect(try prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String] == oldIdentity)
+    #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
+    #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("partially upgraded settings".utf8))
+}
+
+@Test
+func upgradingPrefixWithMatchingWineIdentityRunsAgain() async throws {
+    let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
+    let wine = try prefixTestWine(paths)
+    _ = try await PrefixManager(paths: paths, runner: FakeProcessRunner()).createPrefix(game: "same-target", backend: .dxmt, wineBinary: wine)
+    let marker = try prefixTestMarker("same-target", .dxmt)
+    var json = try prefixTestJSON(fs, marker)
+    json["state"] = "upgrading"
+    try fs.writeAtomically(JSONSerialization.data(withJSONObject: json), to: marker)
+    let save = try SafeRelativePath("Prefixes/same-target-dxmt/drive_c/users/player/save.dat")
+    try fs.writeAtomically(Data("saved game".utf8), to: save)
+    let runner = FakeProcessRunner { invocation async throws in
+        #expect(invocation.arguments == ["wineboot", "-u"])
+        #expect(try prefixTestJSON(fs, marker)["state"] as? String == "upgrading")
+        #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
+        return prefixTestSuccess()
+    }
+    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "same-target", backend: .dxmt, wineBinary: wine)
+    #expect(runner.invocations.count == 1)
+    #expect(try prefixTestJSON(fs, marker)["state"] as? String == "ready")
+    #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
+}
+
+@Test
+func legacyPrefixMarkerWithoutStateIsReady() async throws {
+    let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
+    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner)
+    _ = try await manager.createPrefix(game: "legacy", backend: .dxmt, wineBinary: wine)
+    let marker = try prefixTestMarker("legacy", .dxmt)
+    var json = try prefixTestJSON(fs, marker)
+    json.removeValue(forKey: "state"); json.removeValue(forKey: "game")
+    let legacyBytes = try JSONSerialization.data(withJSONObject: json)
+    try fs.writeAtomically(legacyBytes, to: marker)
+    let save = try SafeRelativePath("Prefixes/legacy-dxmt/drive_c/users/player/save.dat")
+    try fs.writeAtomically(Data("saved game".utf8), to: save)
+    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "legacy", backend: .dxmt, wineBinary: wine)
+    #expect(runner.invocations.count == 1)
+    #expect(try fs.readFile(at: marker, maxBytes: 16_384) == legacyBytes)
+    #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
 }
 
 @Test
