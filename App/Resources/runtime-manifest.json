@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "id": "wine-10.0",
+      "kind": "wine",
+      "version": "10.0",
+      "sourceMode": "download",
+      "url": "https://example.invalid/wine.tar.xz",
+      "size": 1,
+      "installedSize": 1,
+      "sha256": {
+        "algorithm": "sha256",
+        "hex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "archive": "tar.xz",
+      "license": {
+        "name": "LGPL-2.1",
+        "url": "https://example.invalid/license",
+        "redistributable": true,
+        "termsRevision": "placeholder-1"
+      }
+    },
+    {
+      "id": "dxmt-0.62",
+      "kind": "dxmt",
+      "version": "0.62",
+      "sourceMode": "download",
+      "url": "https://example.invalid/dxmt.tar.xz",
+      "size": 1,
+      "installedSize": 1,
+      "sha256": {
+        "algorithm": "sha256",
+        "hex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "archive": "tar.xz",
+      "license": {
+        "name": "MIT",
+        "url": "https://example.invalid/license",
+        "redistributable": true,
+        "termsRevision": "placeholder-1"
+      }
+    },
+    {
+      "id": "d3dmetal-3.0",
+      "kind": "d3dmetal",
+      "version": "3.0",
+      "sourceMode": "download",
+      "url": "https://example.invalid/d3dmetal.tar.xz",
+      "size": 1,
+      "installedSize": 1,
+      "sha256": {
+        "algorithm": "sha256",
+        "hex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "archive": "tar.xz",
+      "license": {
+        "name": "Apple Game Porting Toolkit",
+        "url": "https://developer.apple.com/games/game-porting-toolkit/",
+        "redistributable": false,
+        "termsRevision": "placeholder-1"
+      },
+      "consent": "appleGPTK"
+    }
+  ]
+}

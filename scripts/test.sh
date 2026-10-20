@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+derived_data_path="${MACGACHA_DERIVED_DATA_PATH:-.build/xcode}"
+
 scripts/check-headers.sh
 swift test --package-path Packages/LauncherKit
 scripts/bootstrap.sh
@@ -9,5 +11,12 @@ xcodebuild \
   -scheme MacGacha \
   -configuration Debug \
   -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath .build/xcode \
+  -derivedDataPath "$derived_data_path" \
+  test
+xcodebuild \
+  -project MacGacha.xcodeproj \
+  -scheme MacGacha \
+  -configuration Release \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath "$derived_data_path" \
   build

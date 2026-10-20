@@ -6,7 +6,7 @@ header2='// MacGacha — https://github.com/deruta74/MacGacha — see LICENSE an
 failed=0
 file_count=0
 
-for dir in App Packages; do
+for dir in App Packages MacGachaTests; do
   if [[ ! -d "$dir" ]]; then
     printf 'error: required source directory is missing: %s\n' "$dir" >&2
     exit 1
@@ -16,7 +16,7 @@ done
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
-if ! find App Packages -type f -name '*.swift' -not -path '*/.build/*' -print0 > "$tmp"; then
+if ! find App Packages MacGachaTests -type f -name '*.swift' -not -path '*/.build/*' -print0 > "$tmp"; then
   printf 'error: failed to enumerate Swift files under App/ and Packages/\n' >&2
   exit 1
 fi
