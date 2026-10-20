@@ -11,6 +11,7 @@ public struct URLSessionHTTPClient: HTTPClient {
     private let highWaterMark: Int
     private let lowWaterMark: Int
     private let bufferObserver: (@Sendable (Int, Bool) -> Void)?
+    private let redirectPolicy: @Sendable (URL) -> Bool
 
     public init(
         session: URLSession = {
@@ -19,9 +20,10 @@ public struct URLSessionHTTPClient: HTTPClient {
             return URLSession(configuration: configuration)
         }(),
         highWaterMark: Int = 16 << 20,
-        lowWaterMark: Int = 4 << 20
+        lowWaterMark: Int = 4 << 20,
+        redirectPolicy: @escaping @Sendable (URL) -> Bool = { _ in true }
     ) {
-        self.init(session: session, highWaterMark: highWaterMark, lowWaterMark: lowWaterMark, bufferObserver: nil)
+        self.init(session: session, highWaterMark: highWaterMark, lowWaterMark: lowWaterMark, bufferObserver: nil, redirectPolicy: redirectPolicy)
     }
 
     public func invalidate() {
@@ -34,13 +36,14 @@ public struct URLSessionHTTPClient: HTTPClient {
     }
 
     init(session: URLSession, highWaterMark: Int, lowWaterMark: Int,
-        bufferObserver: (@Sendable (Int, Bool) -> Void)?) {
+        bufferObserver: (@Sendable (Int, Bool) -> Void)?, redirectPolicy: @escaping @Sendable (URL) -> Bool = { _ in true }) {
         precondition(highWaterMark > 0 && lowWaterMark >= 0 && lowWaterMark < highWaterMark)
         self.session = session
         self.lifecycle = HTTPSessionLifecycle()
         self.highWaterMark = highWaterMark
         self.lowWaterMark = lowWaterMark
         self.bufferObserver = bufferObserver
+        self.redirectPolicy = redirectPolicy
     }
 
     public func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
@@ -50,7 +53,7 @@ public struct URLSessionHTTPClient: HTTPClient {
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let offset { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
         let delegate = HTTPStreamDelegate(highWaterMark: highWaterMark, lowWaterMark: lowWaterMark,
-            bufferObserver: bufferObserver, lifecycle: lifecycle)
+            bufferObserver: bufferObserver, lifecycle: lifecycle, redirectPolicy: redirectPolicy)
         try lifecycle.invalidated.withLock { invalidated in
             guard !invalidated else { throw LauncherError.cancelled }
             let task = session.dataTask(with: request)
@@ -104,14 +107,21 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
     private let lowWaterMark: Int
     private let bufferObserver: (@Sendable (Int, Bool) -> Void)?
     private let lifecycle: HTTPSessionLifecycle
+    private let redirectPolicy: @Sendable (URL) -> Bool
 
     init(highWaterMark: Int, lowWaterMark: Int, bufferObserver: (@Sendable (Int, Bool) -> Void)?,
-        lifecycle: HTTPSessionLifecycle) {
+        lifecycle: HTTPSessionLifecycle, redirectPolicy: @escaping @Sendable (URL) -> Bool) {
         self.highWaterMark = highWaterMark
         self.lowWaterMark = lowWaterMark
         self.bufferObserver = bufferObserver
         self.lifecycle = lifecycle
+        self.redirectPolicy = redirectPolicy
         super.init()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(request.url.map(redirectPolicy) == true ? request : nil)
     }
 
     func attach(_ task: URLSessionDataTask) {

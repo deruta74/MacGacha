@@ -4,9 +4,21 @@ import SwiftUI
 
 @main
 struct MacGachaApp: App {
+    @State private var model = AppModel.live()
+
     var body: some Scene {
-        WindowGroup {
-            Text("MacGacha")
+        Window("MacGacha", id: "launcher") {
+            RootView()
+                .environment(model)
+                .task { await model.start() }
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 1280, height: 720)
+
+        Settings {
+            SettingsView()
+                .environment(model)
         }
     }
 }

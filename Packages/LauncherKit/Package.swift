@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "DownloadEngine", targets: ["DownloadEngine"]),
         .library(name: "RuntimeManager", targets: ["RuntimeManager"]),
         .library(name: "Diagnostics", targets: ["Diagnostics"]),
+        .library(name: "HoYoPlayAPI", targets: ["HoYoPlayAPI"]),
     ],
     targets: [
         .target(name: "LauncherCore"),
@@ -18,12 +19,14 @@ let package = Package(
         .systemLibrary(name: "CArchive"),
         .target(name: "RuntimeManager", dependencies: ["LauncherCore", "DownloadEngine", "CArchive"]),
         .target(name: "Diagnostics", dependencies: ["LauncherCore"]),
+        .target(name: "HoYoPlayAPI", dependencies: ["LauncherCore", "DownloadEngine"]),
         .target(name: "TestSupport", dependencies: ["LauncherCore", "DownloadEngine"]),
         .executableTarget(name: "CrashHarness", dependencies: ["DownloadEngine", "TestSupport"], path: "Tests/CrashHarness"),
         .testTarget(name: "LauncherCoreTests", dependencies: ["LauncherCore", "TestSupport"]),
         .testTarget(name: "DownloadEngineTests", dependencies: ["DownloadEngine", "TestSupport", "CrashHarness"]),
         .testTarget(name: "RuntimeManagerTests", dependencies: ["RuntimeManager", "TestSupport"]),
         .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "LauncherCore"]),
+        .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )
