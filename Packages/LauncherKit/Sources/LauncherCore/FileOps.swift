@@ -10,6 +10,8 @@ public protocol FileOps: Sendable {
     func synchronize(_ descriptor: Int32, durable: Bool) throws
     func rename(from source: String, in sourceDirectory: Int32, to destination: String,
         in destinationDirectory: Int32, exclusive: Bool) throws
+    func swap(from source: String, in sourceDirectory: Int32, to destination: String,
+        in destinationDirectory: Int32) throws
     func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws
 }
 
@@ -45,6 +47,16 @@ public struct SystemFileOps: FileOps {
 }
 
 extension FileOps {
+    /// Atomic directory exchange on macOS. A default preserves existing fault doubles;
+    /// override this requirement to inject a failure at the swap syscall boundary.
+    public func swap(from source: String, in sourceDirectory: Int32, to destination: String,
+        in destinationDirectory: Int32) throws {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard renameatx_np(sourceDirectory, source, destinationDirectory, destination, UInt32(RENAME_SWAP)) == 0 else {
+            throw LauncherError.io("Cannot swap runtime directories (errno \(errno))")
+        }
+    }
+
     /// Bounded writes; retry short writes without dropping bytes and refuse non-progressing doubles.
     public func writeAll(_ data: Data, to descriptor: Int32, checkingCancellation: Bool = true,
         didWrite: (Int) -> Void = { _ in }) throws {

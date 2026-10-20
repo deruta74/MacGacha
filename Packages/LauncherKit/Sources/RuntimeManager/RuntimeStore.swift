@@ -55,7 +55,7 @@ public struct RuntimeScan: Sendable, Equatable {
 }
 
 public struct RuntimeStore: Sendable {
-    private let paths: AppPaths
+    let paths: AppPaths
     private static let invalidPathReason = "Invalid runtime path component"
 
     public init(paths: AppPaths) { self.paths = paths }
@@ -189,6 +189,13 @@ public struct RuntimeStore: Sendable {
         guard let runtimes = try runtimesPath(in: fs) else { return }
         // Invalid kind cleanup stages directly under Runtimes.
         try sweepDirectory(runtimes, in: fs, incoming: false, deleting: deleting)
+        let downloads = try SafeRelativePath("\(runtimes)/.downloads")
+        if let type = try fs.itemType(at: downloads) {
+            guard type == .directory else { throw LauncherError.unsafePath(downloads.description) }
+            let abandoned = try SafeRelativePath("\(runtimes)/.removing-\(UUID().uuidString)")
+            try fs.moveItem(at: downloads, to: abandoned)
+            try deleting(fs, abandoned)
+        }
         for kind in ComponentKind.allCases {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let path = try SafeRelativePath(runtimes.description + "/" + kind.rawValue)
