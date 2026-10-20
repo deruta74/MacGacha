@@ -6,6 +6,32 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
+@Test(arguments: ["missing", "short", "digest"])
+func fallbackBudgetVerifiesLocalRangesAndDeduplicatesObjects(failure: String) async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let good = try SafeRelativePath("good"); let bad = try SafeRelativePath("bad")
+    try fs.writeAtomically(Data("xxGOODyy".utf8), to: good)
+    if failure != "missing" {
+        try fs.writeAtomically(Data((failure == "short" ? "xxGOO" : "xxBAD!yy").utf8), to: bad)
+    }
+    let object = stagingObject("shared", "GOOD")
+    let files = try [good, bad, bad].enumerated().map { index, path in
+        try stagingFile("new-\(index)", "GOOD", [Extent(source: .local(path: path, offset: 2),
+            fileOffset: 0, length: 4, digest: object.decodedDigest, fallbackChunkID: object.id)])
+    }
+    let plan = try stagingPlan([object], files); let journal = try stagingJournal(fs, plan)
+    let state = try await journal.snapshot()
+    let budget = try SpaceBudget.required(plan: plan, state: state, fs: fs)
+    #expect(budget.disk == SpaceBudget.margin + 16)
+    #expect(budget.network == 4)
+    #expect(try SpaceBudget.requiredLargestFile(plan: plan, state: state, fs: fs) == SpaceBudget.margin + 8)
+    let cdn = MockCDN(); cdn.serve("shared", data: Data("GOOD".utf8))
+    let events = try await collectStaging(stagingEngine(plan, fs, cdn, journal).stage(files: files))
+    #expect(cdn.requestLog.count == 1)
+    #expect(events.last == .progress(downloaded: 4, totalNetwork: 4, staged: 12, totalStaged: 12))
+    #expect(try fs.size(at: objectPath(plan, object)) == nil)
+}
+
 @Test
 func spaceBudgetCountsDecodedAndTransfer() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)

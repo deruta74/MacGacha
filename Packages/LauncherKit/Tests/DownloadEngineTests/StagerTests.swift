@@ -8,6 +8,66 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
+@Test(arguments: [false, true], ["missing", "wrong-size", "no-staged-record"])
+func committedBatchIsDoneForBudgetProgressAndObjectCleanup(includeCommittedInBatch: Bool, stagedState: String) async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let object = stagingObject("shared", "abc")
+    let a = try stagingFile("a", "abc", [stagingChunk("shared", "abc")])
+    let b = try stagingFile("b", "abc", [stagingChunk("shared", "abc")])
+    let plan = try stagingPlan([object], [a, b]); let journal = try stagingJournal(fs, plan)
+    let cdn = MockCDN(); cdn.serve("shared", data: Data("abc".utf8))
+    let stager = try stagingEngine(plan, fs, cdn, journal)
+    _ = try await collectStaging(stager.stage(files: [a]))
+    try fs.rename(from: stagedPath(plan, a.path), to: a.path)
+    try await journal.append(.fileCommitted(path: a.path))
+    if stagedState == "wrong-size" { try fs.writeAtomically(Data("x".utf8), to: stagedPath(plan, a.path)) }
+    // Recovery must also tolerate a committed path whose staged record was invalidated earlier.
+    if stagedState == "no-staged-record" { try await journal.append(.fileUnstaged(path: a.path)) }
+    let state = try await journal.snapshot()
+    let budget = try SpaceBudget.required(plan: plan, state: state, fs: fs)
+    #expect(budget.disk == SpaceBudget.margin + 3)
+    #expect(budget.network == 0)
+    #expect(try SpaceBudget.requiredLargestFile(plan: plan, state: state, fs: fs) == SpaceBudget.margin + 3)
+    let before = try fs.readFile(at: journalPath(plan), maxBytes: 16_384)
+    let events = try await collectStaging(stager.stage(files: includeCommittedInBatch ? [a, b] : [b]))
+    #expect(events == [.progress(downloaded: 0, totalNetwork: 0, staged: 0, totalStaged: 3),
+        .fileVerified(b.path), .progress(downloaded: 0, totalNetwork: 0, staged: 3, totalStaged: 3)])
+    let after = try fs.readFile(at: journalPath(plan), maxBytes: 16_384)
+    let records = try after.dropFirst(before.count).split(separator: 0x0a).map {
+        try JSONDecoder().decode(JournalRecord.self, from: Data($0))
+    }
+    #expect(records == [.fileStaged(path: b.path)])
+    #expect(try fs.size(at: objectPath(plan, object)) == nil)
+    #expect(try fs.readFile(at: a.path, maxBytes: 3) == Data("abc".utf8))
+    #expect(cdn.requestLog.count == 1)
+    let doneState = try await journal.snapshot()
+    #expect(try SpaceBudget.required(plan: plan, state: doneState, fs: fs).disk == SpaceBudget.margin)
+}
+
+@Test
+func matchingLocalRangeWithFallbackNeedsNoNetwork() async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let installed = try SafeRelativePath("installed")
+    try fs.writeAtomically(Data("xxGOODyy".utf8), to: installed)
+    let object = stagingObject("fallback", "GOOD")
+    let extent = Extent(source: .local(path: installed, offset: 2), fileOffset: 0, length: 4,
+        digest: object.decodedDigest, fallbackChunkID: object.id)
+    let file = try stagingFile("new", "GOOD", [extent]); let plan = try stagingPlan([object], [file])
+    let journal = try stagingJournal(fs, plan); let cdn = MockCDN()
+    let state = try await journal.snapshot()
+    let budget = try SpaceBudget.required(plan: plan, state: state, fs: fs)
+    #expect(budget.disk == SpaceBudget.margin + 4)
+    #expect(budget.network == 0)
+    #expect(try SpaceBudget.requiredLargestFile(plan: plan, state: state, fs: fs) == SpaceBudget.margin + 4)
+    let stager = try Stager(plan: plan, fs: fs, fetcher: stagingFetcher(cdn), journal: journal,
+        disk: FixedDiskSpace(bytes: SpaceBudget.margin + 4))
+    let events = try await collectStaging(stager.stage(files: [file]))
+    #expect(events == [.progress(downloaded: 0, totalNetwork: 0, staged: 0, totalStaged: 4),
+        .fileVerified(file.path), .progress(downloaded: 0, totalNetwork: 0, staged: 4, totalStaged: 4)])
+    #expect(cdn.requestLog.isEmpty)
+    #expect(try fs.readFile(at: stagedPath(plan, file.path), maxBytes: 4) == Data("GOOD".utf8))
+}
+
 @Test
 func stagesFilesFromSharedObjectOnce() async throws {
     let temp = try TempDir()

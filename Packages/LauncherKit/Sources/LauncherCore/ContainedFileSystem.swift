@@ -48,7 +48,10 @@ public struct ContainedFileSystem: Sendable, Hashable {
         }
         defer { close(parent) }
         let sourceName = source.components.last!
-        guard let info = try entry(sourceName, parent: parent), info.st_mode & S_IFMT == S_IFREG else {
+        guard let info = try entry(sourceName, parent: parent) else {
+            throw LauncherError.io("Rename source is missing")
+        }
+        guard info.st_mode & S_IFMT == S_IFREG else {
             throw LauncherError.unsafePath(display(source.components))
         }
         guard let target = try directory(Array(destination.components.dropLast()), create: true) else {
@@ -400,28 +403,26 @@ public struct ContainedFileSystem: Sendable, Hashable {
             if errno == ENOENT && !create { return nil }
             throw accessError(root.path)
         }
-        do {
-            for (index, component) in components.enumerated() {
-                guard !Task.isCancelled else { throw LauncherError.cancelled }
-                var info = try entry(component, parent: fd)
-                if info == nil {
-                    if !create { close(fd); return nil }
-                    if mkdirat(fd, component, 0o700) == 0 { try synchronize(fd) }
-                    else if errno != EEXIST { throw LauncherError.io("Cannot create contained directory") }
-                    info = try entry(component, parent: fd)
-                }
-                let location = display(Array(components.prefix(index + 1)))
-                guard let info, info.st_mode & S_IFMT == S_IFDIR else { throw LauncherError.unsafePath(location) }
-                let next = openat(fd, component, Self.directoryFlags)
-                guard next >= 0 else { throw accessError(location) }
-                close(fd)
-                fd = next
+        var transferred = false
+        defer { if !transferred { close(fd) } }
+        for (index, component) in components.enumerated() {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            var info = try entry(component, parent: fd)
+            if info == nil {
+                if !create { return nil }
+                if mkdirat(fd, component, 0o700) == 0 { try synchronize(fd) }
+                else if errno != EEXIST { throw LauncherError.io("Cannot create contained directory") }
+                info = try entry(component, parent: fd)
             }
-            return fd
-        } catch {
+            let location = display(Array(components.prefix(index + 1)))
+            guard let info, info.st_mode & S_IFMT == S_IFDIR else { throw LauncherError.unsafePath(location) }
+            let next = openat(fd, component, Self.directoryFlags)
+            guard next >= 0 else { throw accessError(location) }
             close(fd)
-            throw error
+            fd = next
         }
+        transferred = true
+        return fd
     }
 
     private func entry(_ name: String, parent: Int32) throws -> stat? {

@@ -1,9 +1,64 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Darwin
 import Testing
 import LauncherCore
 import TestSupport
+
+@Test(arguments: ["missing", "parent/missing", "absent/missing"])
+func containedRenameReportsMissingSource(source: String) throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    try fs.createDirectory(at: SafeRelativePath("parent"))
+    let target = try SafeRelativePath("new/target")
+    #expect(throws: LauncherError.io("Rename source is missing")) {
+        try fs.rename(from: SafeRelativePath(source), to: target)
+    }
+    #expect(try fs.itemType(at: SafeRelativePath("new")) == nil)
+}
+
+@Test(arguments: ["directory", "symlink", "fifo"])
+func containedRenameRejectsNonRegularSource(kind: String) throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let source = try SafeRelativePath("source"); let url = temp.url.appendingPathComponent("source")
+    if kind == "directory" { try fs.createDirectory(at: source) }
+    else if kind == "symlink" {
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: temp.url.appendingPathComponent("missing"))
+    } else { try #require(mkfifo(url.path, 0o600) == 0) }
+    #expect(throws: LauncherError.unsafePath(url.path)) { try fs.rename(from: source, to: SafeRelativePath("target")) }
+    #expect(try fs.itemType(at: SafeRelativePath("target")) == nil)
+}
+
+@Test
+func containedDirectoryTraversalClosesDescriptorsOnFailure() async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let safe = temp.url.appendingPathComponent("safe")
+    try fs.createDirectory(at: SafeRelativePath("safe"))
+    try FileManager.default.createSymbolicLink(at: safe.appendingPathComponent("link"), withDestinationURL: temp.url)
+    func openDescriptors(at url: URL) throws -> Int {
+        var expected = stat(); try #require(stat(url.path, &expected) == 0)
+        return (0..<getdtablesize()).filter { fd in
+            var actual = stat()
+            return fstat(fd, &actual) == 0 && actual.st_dev == expected.st_dev && actual.st_ino == expected.st_ino
+        }.count
+    }
+    let before = try [openDescriptors(at: temp.url), openDescriptors(at: safe)]
+    for _ in 0..<16 {
+        #expect(throws: LauncherError.unsafePath(safe.appendingPathComponent("link").path)) {
+            try fs.createDirectory(at: SafeRelativePath("safe/link/new"))
+        }
+        #expect(throws: LauncherError.unsafePath(safe.appendingPathComponent("link").path)) {
+            try fs.size(at: SafeRelativePath("safe/link/file"))
+        }
+        #expect(try fs.size(at: SafeRelativePath("safe/absent/file")) == nil)
+    }
+    let cancelled = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        #expect(throws: LauncherError.cancelled) { try fs.createDirectory(at: SafeRelativePath("safe/new")) }
+    }
+    await cancelled.value
+    #expect(try [openDescriptors(at: temp.url), openDescriptors(at: safe)] == before)
+}
 
 @Test
 func containedRenameReplacesOnlyRegularFileDestinations() throws {

@@ -99,7 +99,7 @@ private actor StagingSession {
             case .file:
                 while cursor < files.count {
                     let file = files[cursor]; cursor += 1
-                    if state.stagedFiles.contains(file.path) { continue }
+                    if state.stagedFiles.contains(file.path) || state.committedFiles.contains(file.path) { continue }
                     try await stageFile(file)
                     staged = try SpaceBudget.adding(staged, file.size)
                     step = .progress
@@ -121,23 +121,20 @@ private actor StagingSession {
             throw LauncherError.io("Staging files are not a unique subset of the plan")
         }
         state = try await journal.snapshot()
-        for file in plan.files where state.stagedFiles.contains(file.path) {
+        for file in plan.files where state.stagedFiles.contains(file.path) && !state.committedFiles.contains(file.path) {
             if try fs.size(at: layout.file(file.path)) != file.size { try await record(.fileUnstaged(path: file.path)) }
         }
         // Account only for the requested batch, while keeping full-plan refcounts below.
         let ids = Set(files.flatMap { SpaceBudget.references($0) })
         let subset = InstallPlan(id: plan.id, objects: plan.objects.filter { ids.contains($0.key) }, files: files)
-        let budget = try SpaceBudget.required(plan: subset, state: state, fs: fs)
+        let budget = try SpaceBudget.estimate(plan: subset, state: state, fs: fs)
         let available = try fs.availableBytes(using: disk)
         guard available >= budget.disk else { throw LauncherError.insufficientSpace(required: budget.disk, available: available) }
         totalNetwork = budget.network
-        for id in Set(try SpaceBudget.remainingFiles(plan: subset, state: state, fs: fs).flatMap { SpaceBudget.references($0) }) {
-            guard let object = plan.objects[id] else { throw LauncherError.io("Missing plan object") }
-            if state.verifiedObjects.contains(id), try fs.size(at: layout.object(object)) == object.transferSize { continue }
-            networkObjects.insert(id)
-        }
-        totalStaged = try files.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
-        staged = try files.filter { state.stagedFiles.contains($0.path) }.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
+        networkObjects = budget.objects
+        let uncommitted = files.filter { !state.committedFiles.contains($0.path) }
+        totalStaged = try uncommitted.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
+        staged = try uncommitted.filter { state.stagedFiles.contains($0.path) }.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
         try cleanupObjects(ids: Set(plan.objects.keys))
     }
 
@@ -245,10 +242,19 @@ private actor StagingSession {
         let input = try fs.openForReading(at: layout.object(object))
         defer { try? input.close() }
         do {
+            guard object.decodedSize == extent.length else {
+                throw LauncherError.sizeMismatch(path: id, expected: extent.length, actual: object.decodedSize)
+            }
             try object.codec.decoder().decode(input, expectedSize: object.decodedSize, into: output, at: extent.fileOffset)
             let actual = try hashRange(staged, offset: extent.fileOffset, length: extent.length, algorithm: object.decodedDigest.algorithm)
             guard actual == object.decodedDigest else {
                 throw LauncherError.digestMismatch(path: id, expected: object.decodedDigest.hex, actual: actual.hex)
+            }
+            let extentActual: Digest
+            if extent.digest.algorithm == object.decodedDigest.algorithm { extentActual = actual }
+            else { extentActual = try hashRange(staged, offset: extent.fileOffset, length: extent.length, algorithm: extent.digest.algorithm) }
+            guard extentActual == extent.digest else {
+                throw LauncherError.digestMismatch(path: id, expected: extent.digest.hex, actual: extentActual.hex)
             }
         } catch let error as LauncherError {
             switch error {
@@ -259,7 +265,8 @@ private actor StagingSession {
     }
 
     private func copyLocal(_ path: SafeRelativePath, offset: Int64, extent: Extent, output: FileHandle) throws -> Bool {
-        guard let size = try fs.size(at: path), offset <= size, extent.length <= size - offset else { return false }
+        guard offset >= 0, extent.length >= 0, extent.fileOffset >= 0,
+            let size = try fs.size(at: path), offset <= size, extent.length <= size - offset else { return false }
         let input = try fs.openForReading(at: path)
         defer { try? input.close() }
         try input.seek(toOffset: UInt64(offset)); try output.seek(toOffset: UInt64(extent.fileOffset))
@@ -290,9 +297,10 @@ private actor StagingSession {
     }
 
     private func cleanupObjects(ids: Set<String>) throws {
+        let done = state.stagedFiles.union(state.committedFiles)
         for id in ids {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
-            if let refs = referrers[id], refs.isSubset(of: state.stagedFiles), let object = plan.objects[id] {
+            if let refs = referrers[id], refs.isSubset(of: done), let object = plan.objects[id] {
                 try fs.removeFile(at: layout.object(object))
             }
         }

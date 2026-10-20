@@ -127,7 +127,9 @@ public struct InstallPlan: Codable, Sendable {
             guard file.size != 0 || file.extents.isEmpty else { throw invalidPlan("empty files must have no extents") }
             var covered: Int64 = 0
             for extent in file.extents {
-                guard extent.fileOffset == covered, extent.length > 0 else { throw invalidPlan("extent gap, overlap or invalid length") }
+                guard extent.fileOffset >= 0, extent.fileOffset == covered, extent.length > 0 else {
+                    throw invalidPlan("extent gap, overlap or invalid length")
+                }
                 let (end, overflow) = covered.addingReportingOverflow(extent.length)
                 guard !overflow, end <= file.size else { throw invalidPlan("extent exceeds file size") }
                 covered = end

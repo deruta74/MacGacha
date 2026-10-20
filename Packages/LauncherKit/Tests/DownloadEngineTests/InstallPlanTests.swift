@@ -6,6 +6,20 @@ import Testing
 import LauncherCore
 @testable import DownloadEngine
 
+@Test(arguments: [Int64.min, -1])
+func planRejectsNegativeSourceAndDestinationOffsets(offset: Int64) throws {
+    let digest = planObject().decodedDigest
+    for (localOffset, fileOffset) in [(offset, Int64(0)), (Int64(0), offset)] {
+        let extent = Extent(source: .local(path: try SafeRelativePath("old"), offset: localOffset),
+            fileOffset: fileOffset, length: 3, digest: digest)
+        let plan = try makePlan(objects: [:], files: [planFile(extents: [extent])])
+        try rejectsInvalidPlan(plan)
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(InstallPlan.self, from: JSONEncoder().encode(plan))
+        }
+    }
+}
+
 @Test
 func planRejectsGapOverlapAndShortCoverage() throws {
     let object = planObject()
