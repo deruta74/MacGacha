@@ -32,7 +32,7 @@ struct RuntimesView: View {
         .toolbar {
             ToolbarItem {
                 Button("Refresh", systemImage: "arrow.clockwise") {
-                    Task { await model.start() }
+                    Task { await model.refreshRuntimes() }
                 }
                 .disabled(model.isStarting)
                 .help("Check installed runtimes again")
@@ -127,8 +127,11 @@ struct RuntimeRowView: View {
                         .help("Import D3DMetal from Apple's Game Porting Toolkit")
                 }
                 Button(row.state == .notInstalled ? "Install" : "Try Again") { model.install(row.id) }
-            case .working:
-                Button("Cancel") { model.cancel(row.id) }
+            case .working(let phase, _):
+                // Removing files and final cleanup always run to the end.
+                if phase != .deleting && phase != .cleaningUp {
+                    Button("Cancel") { model.cancel(row.id) }
+                }
             case .installed:
                 Button("Remove") { confirmingRemoval = true }
             case .invalid(_, let removable):

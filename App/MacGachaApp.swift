@@ -4,7 +4,7 @@ import SwiftUI
 
 @main
 struct MacGachaApp: App {
-    @State private var model = AppModel.live()
+    @State private var model = AppModel.forCurrentProcess()
 
     var body: some Scene {
         Window("MacGacha", id: "launcher") {

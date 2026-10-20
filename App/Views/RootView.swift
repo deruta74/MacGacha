@@ -51,12 +51,8 @@ struct RootView: View {
         .sheet(item: $panel) { panel in
             PanelSheet(panel: panel)
         }
-        .sheet(item: consentBinding) { request in
-            ConsentSheet(request: request)
-        }
-        .sheet(isPresented: importSheetBinding) {
-            GPTKImportSheet()
-        }
+        // While a panel is open, its sheet presents the consent and import flow instead.
+        .modifier(RuntimeFlowSheets(active: panel == nil))
         .alert("Something went wrong", isPresented: errorBinding, presenting: model.lastError) { _ in
             Button("OK", role: .cancel) { model.dismissError() }
         } message: { message in
@@ -82,19 +78,6 @@ struct RootView: View {
     }
     #endif
 
-    // The consent sheet comes first; the import sheet opens only once consent is settled.
-    private var importSheetBinding: Binding<Bool> {
-        Binding(
-            get: { model.importState != nil && model.consentRequest == nil },
-            set: { if !$0 { model.cancelImport() } }
-        )
-    }
-
-    // Only the sheet's own buttons answer consent; the sheet can't be dismissed otherwise.
-    private var consentBinding: Binding<ConsentRequest?> {
-        Binding(get: { model.consentRequest }, set: { _ in })
-    }
-
     private var errorBinding: Binding<Bool> {
         Binding(get: { model.lastError != nil }, set: { if !$0 { model.dismissError() } })
     }
@@ -119,7 +102,29 @@ private struct PanelSheet: View {
                 }
             }
         }
+        .modifier(RuntimeFlowSheets(active: true))
         .frame(minWidth: 620, idealWidth: 680, minHeight: 320, idealHeight: 380)
+    }
+}
+
+/// The consent sheet comes first; the import sheet opens only once consent is settled.
+/// SwiftUI presents one sheet per surface, so the frontmost surface owns this flow.
+struct RuntimeFlowSheets: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: Binding(get: { active ? model.consentRequest : nil }, set: { _ in })) { request in
+                // Only the sheet's own buttons answer consent; it can't be dismissed otherwise.
+                ConsentSheet(request: request)
+            }
+            .sheet(isPresented: Binding(
+                get: { active && model.importState != nil && model.consentRequest == nil },
+                set: { if !$0 { model.cancelImport() } }
+            )) {
+                GPTKImportSheet()
+            }
     }
 }
 

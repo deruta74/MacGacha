@@ -57,14 +57,10 @@ struct DiagnosticsView: View {
         }
         .fileExporter(
             isPresented: $exporting,
-            item: DiagnosticPlaceholder(),
+            item: DiagnosticExport { [model] in try await model.makeDiagnosticBundle() },
             contentTypes: [.zip],
             defaultFilename: Self.defaultFilename()
-        ) { result in
-            if case .success(let url) = result {
-                Task { await model.exportDiagnostics(to: url) }
-            }
-        }
+        ) { _ in }
         .task { await model.refreshLogs() }
     }
 
@@ -145,11 +141,15 @@ private struct LogRow: View {
     }
 }
 
-/// The exporter only picks the destination; the bundle is written to it afterwards by
-/// the model, off the main actor, so this placeholder carries no data.
-private struct DiagnosticPlaceholder: Transferable {
+/// Builds the bundle into a temporary file when the user confirms the save panel, so the
+/// destination only ever receives a complete zip, never an empty or partial one.
+private struct DiagnosticExport: Transferable {
+    let make: @Sendable () async throws -> URL
+
     static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .zip) { _ in Data() }
+        FileRepresentation(exportedContentType: .zip) { export in
+            SentTransferredFile(try await export.make())
+        }
     }
 }
 

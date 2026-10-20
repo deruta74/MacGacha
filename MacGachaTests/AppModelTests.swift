@@ -135,17 +135,157 @@ struct AppModelTests {
         #expect(fake.snapshot.installs.first?.candidate == found)
     }
 
-    @Test func exportIsNotReentrant() async throws {
+    @Test func diagnosticBundleIsCompleteFreshAndNotReentrant() async throws {
         let (model, fake, _) = try fixture()
-        let url = URL(fileURLWithPath: "/tmp/not-written-by-fake.zip")
-        let first = Task { await model.exportDiagnostics(to: url) }
+        let first = Task { try await model.makeDiagnosticBundle() }
         try await eventually { fake.snapshot.exportCount == 1 }
         #expect(model.isExporting)
-        await model.exportDiagnostics(to: url)
+        await #expect(throws: LauncherError.busy("Diagnostics export already in progress")) {
+            try await model.makeDiagnosticBundle()
+        }
         #expect(fake.snapshot.exportCount == 1)
         fake.releaseExport()
-        await first.value
+        let url = try await first.value
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(try Data(contentsOf: url) == completedDiagnosticBytes)
         #expect(!model.isExporting)
+        let second = Task { try await model.makeDiagnosticBundle() }
+        try await eventually { fake.snapshot.exportCount == 2 }
+        fake.releaseExport()
+        let other = try await second.value
+        defer { try? FileManager.default.removeItem(at: other) }
+        #expect(other != url)
+        #expect(try Data(contentsOf: other) == completedDiagnosticBytes)
+    }
+
+    @Test func diagnosticFailureRemovesPartialTemporaryFile() async throws {
+        let (model, fake, _) = try fixture()
+        let failure = LauncherError.io("injected failure")
+        fake.state.withLock { $0.exportError = failure }
+        let export = Task { try await model.makeDiagnosticBundle() }
+        try await eventually { fake.snapshot.exportCount == 1 }
+        let partial = try #require(fake.snapshot.exportURLs.first)
+        #expect(FileManager.default.fileExists(atPath: partial.path))
+        fake.releaseExport()
+        await #expect(throws: failure) { try await export.value }
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
+        #expect(!model.isExporting && model.lastError == failure.userMessage)
+    }
+
+    @Test func diagnosticCancellationRemovesPartialTemporaryFile() async throws {
+        let (model, fake, _) = try fixture()
+        let export = Task { try await model.makeDiagnosticBundle() }
+        try await eventually { fake.snapshot.exportCount == 1 }
+        let partial = try #require(fake.snapshot.exportURLs.first)
+        export.cancel(); fake.releaseExport()
+        await #expect(throws: LauncherError.cancelled) { try await export.value }
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
+        #expect(!model.isExporting && model.lastError == nil)
+    }
+
+    @Test func emptyDiagnosticResultIsRejectedAndRemoved() async throws {
+        let (model, fake, _) = try fixture()
+        fake.state.withLock { $0.exportData = Data() }
+        let export = Task { try await model.makeDiagnosticBundle() }
+        try await eventually { fake.snapshot.exportCount == 1 }
+        let output = try #require(fake.snapshot.exportURLs.first)
+        fake.releaseExport()
+        await #expect(throws: LauncherError.io("Diagnostics export produced no bundle")) { try await export.value }
+        #expect(!FileManager.default.fileExists(atPath: output.path))
+        #expect(!model.isExporting)
+    }
+
+    @Test func legacyDiagnosticExportPreservesDestinationOnFailureThenPublishesCompleteFile() async throws {
+        let (model, fake, _) = try fixture()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacGachaExportTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent("saved.zip")
+        let original = Data("previous bundle".utf8)
+        try original.write(to: destination)
+        fake.state.withLock { $0.exportError = .io("injected") }
+        let failed = Task { await model.exportDiagnostics(to: destination) }
+        try await eventually { fake.snapshot.exportCount == 1 }
+        let partial = try #require(fake.snapshot.exportURLs.first)
+        #expect(partial != destination)
+        #expect(try Data(contentsOf: destination) == original)
+        fake.releaseExport(); await failed.value
+        #expect(try Data(contentsOf: destination) == original)
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
+        fake.state.withLock { $0.exportError = nil }
+        let retry = Task { await model.exportDiagnostics(to: destination) }
+        try await eventually { fake.snapshot.exportCount == 2 }
+        #expect(try Data(contentsOf: destination) == original)
+        fake.releaseExport(); await retry.value
+        #expect(try Data(contentsOf: destination) == completedDiagnosticBytes)
+        for url in fake.snapshot.exportURLs { #expect(!FileManager.default.fileExists(atPath: url.path)) }
+    }
+
+    @Test func refreshRuntimesScansWithoutSweepAndPreservesActiveWork() async throws {
+        let (model, fake, component) = try fixture()
+        defer { fake.finish() }
+        await model.start()
+        model.install(component.id.rawValue)
+        try await eventually { fake.snapshot.installs.count == 1 }
+        fake.emit(.phase(.verifying))
+        try await eventually { model.rows.first?.state == .working(phase: .verifying, fraction: nil) }
+        let dxmt = try InstalledComponent(kind: .dxmt, version: "1.0", installedAt: Date(), source: .download)
+        fake.setInstalled(dxmt)
+        await model.refreshRuntimes()
+        #expect(model.rows.first?.state == .working(phase: .verifying, fraction: nil))
+        #expect(model.rows.contains { $0.id == "dxmt-1.0" && $0.state == .installed(source: .download) })
+        await model.start()
+        #expect(fake.snapshot.calls.filter { $0 == "sweep" }.count == 1)
+        #expect(fake.snapshot.calls.filter { $0 == "scan" }.count == 2)
+        fake.state.withLock { $0.scanError = .io("https://example.invalid/?cursor=private-value") }
+        await model.refreshRuntimes()
+        #expect(model.lastError == LauncherError.io("").userMessage)
+        #expect(model.rows.first?.state == .working(phase: .verifying, fraction: nil))
+    }
+
+    @Test func staleRefreshCannotUndoCompletedInstall() async throws {
+        let (model, fake, component) = try fixture()
+        model.install(component.id.rawValue)
+        try await eventually { fake.snapshot.installs.count == 1 }
+        fake.state.withLock { $0.holdNextScan = true }
+        let refresh = Task { await model.refreshRuntimes() }
+        try await eventually { fake.snapshot.scanWaiter != nil }
+        fake.setInstalled(try InstalledComponent(kind: .wine, version: component.version.rawValue,
+            installedAt: Date(), source: .download))
+        fake.emit(.phase(.completed)); fake.finish()
+        try await eventually { model.rows.first?.state == .installed(source: .download) }
+        fake.releaseScan()
+        await refresh.value
+        #expect(model.rows.first?.state == .installed(source: .download))
+    }
+
+    @Test func startRemainsOneShotAfterFailureAndRefreshCanRetryScan() async throws {
+        let (model, fake, component) = try fixture()
+        fake.state.withLock { $0.scanError = .io("injected scan failure") }
+        await model.start()
+        #expect(!model.isStarting && model.lastError == LauncherError.io("").userMessage)
+        await model.start()
+        #expect(fake.snapshot.calls == ["sweep", "scan"])
+        fake.state.withLock { $0.scanError = nil }
+        fake.setInstalled(try InstalledComponent(kind: component.kind, version: component.version.rawValue,
+            installedAt: Date(), source: .download))
+        await model.refreshRuntimes()
+        #expect(model.rows.first?.state == .installed(source: .download))
+        #expect(fake.snapshot.calls == ["sweep", "scan", "scan"])
+    }
+
+    @Test func currentProcessFactoryIsInertUnderXCTest() async throws {
+        try #require(ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil)
+        for model in [AppModel.forCurrentProcess(), AppModel.live()] {
+            #expect(model.rows.isEmpty && model.gameArt.isEmpty && model.logLines.isEmpty)
+            #expect(model.installRoot.path.hasPrefix(FileManager.default.temporaryDirectory.path))
+            let root = model.installRoot.deletingLastPathComponent()
+            await model.start()
+            await model.refreshRuntimes()
+            await model.loadGameArt()
+            #expect(!FileManager.default.fileExists(atPath: root.path))
+            #expect(model.rows.isEmpty && !model.isStarting && model.lastError == nil)
+        }
     }
 
     @Test func startupSweepsStagingAndShowsInvalidEntries() async throws {
@@ -192,7 +332,7 @@ struct AppModelTests {
         try await eventually { model.rows.first?.state == .working(phase: .verifying, fraction: nil) }
         time.withLock { $0 = start.advanced(by: .milliseconds(100)) }
         fake.emit(.progress(downloaded: 95, totalNetwork: 100, staged: 0, totalStaged: 100))
-        try await eventually { model.rows.first?.state == .working(phase: .staging, fraction: 0.95) }
+        try await eventually { model.rows.first?.state == .working(phase: .verifying, fraction: 0.95) }
         let preview = AppModel.preview()
         #expect(preview.rows.count == 3 && !preview.isStarting)
     }
@@ -286,11 +426,30 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
         var loggedErrors: [LauncherError] = []
         var exportCount = 0
         var exporter: CheckedContinuation<Void, Never>?
+        var exportURLs: [URL] = []
+        var exportError: LauncherError?
+        var exportData = completedDiagnosticBytes
+        var scanError: LauncherError?
+        var holdNextScan = false
+        var scanWaiter: CheckedContinuation<RuntimeScan, any Error>?
+        var heldScan: RuntimeScan?
     }
     let state = Mutex(State())
     var snapshot: State { state.withLock { $0 } }
     func scan() async throws -> RuntimeScan {
-        state.withLock { $0.calls.append("scan"); return RuntimeScan(components: $0.components, invalid: $0.invalid) }
+        try await withCheckedThrowingContinuation { continuation in
+            let result: Result<RuntimeScan, any Error>? = state.withLock {
+                $0.calls.append("scan")
+                if let error = $0.scanError { return .failure(error) }
+                let scan = RuntimeScan(components: $0.components, invalid: $0.invalid)
+                if $0.holdNextScan {
+                    $0.holdNextScan = false; $0.scanWaiter = continuation; $0.heldScan = scan
+                    return nil
+                }
+                return .success(scan)
+            }
+            if let result { continuation.resume(with: result) }
+        }
     }
     func sweepStaging() async throws { state.withLock { $0.calls.append("sweep") } }
     func install(_ c: RuntimeComponent, from candidate: GPTKCandidate?) -> AsyncThrowingStream<OperationEvent, any Error> {
@@ -309,8 +468,15 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
     func locateGPTK(extraRoots: [URL]) async throws -> [GPTKCandidate] {
         state.withLock { $0.calls.append("locate"); $0.searchRoots.append(extraRoots); return $0.candidates }
     }
-    func exportDiagnostics(to url: URL) async throws {
-        await withCheckedContinuation { continuation in state.withLock { $0.exportCount += 1; $0.exporter = continuation } }
+    @concurrent func exportDiagnostics(to url: URL) async throws {
+        #expect(!exporterIsOnMainThread())
+        try Data("partial".utf8).write(to: url)
+        await withCheckedContinuation { continuation in
+            state.withLock { $0.exportCount += 1; $0.exportURLs.append(url); $0.exporter = continuation }
+        }
+        try Task.checkCancellation()
+        if let error = snapshot.exportError { throw error }
+        try snapshot.exportData.write(to: url)
     }
     func recentLogLines(limit: Int) async -> [String] { state.withLock { $0.calls.append("logs") }; return ["sample log"] }
     func setInstalled(_ c: InstalledComponent) { state.withLock { $0.components = [c] } }
@@ -318,7 +484,18 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
     func finish() { snapshot.continuation?.finish() }
     func fail(_ error: LauncherError) { state.withLock { $0.loggedErrors.append(error) }; snapshot.continuation?.finish(throwing: error) }
     func releaseExport() { state.withLock { let c = $0.exporter; $0.exporter = nil; return c }?.resume() }
+    func releaseScan() {
+        let held = state.withLock { value in
+            let pair = (value.scanWaiter, value.heldScan)
+            value.scanWaiter = nil; value.heldScan = nil
+            return pair
+        }
+        if let waiter = held.0, let scan = held.1 { waiter.resume(returning: scan) }
+    }
 }
+
+private let completedDiagnosticBytes = Data("PK complete synthetic bundle".utf8)
+private func exporterIsOnMainThread() -> Bool { Thread.isMainThread }
 
 private final class FakeGameArt: GameArtProviding, Sendable {
     let cachedArt: [String: GameArt]

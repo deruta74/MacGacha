@@ -16,7 +16,14 @@ protocol RuntimeServices: Sendable {
     func acceptConsent(for component: RuntimeComponent) async throws
     func locateGPTK(extraRoots: [URL]) async throws -> [GPTKCandidate]
     func exportDiagnostics(to url: URL) async throws
+    func makeDiagnosticBundle() async throws -> URL
     func recentLogLines(limit: Int) async -> [String]
+}
+
+extension RuntimeServices {
+    @concurrent func makeDiagnosticBundle() async throws -> URL {
+        try await TemporaryDiagnosticBundle.make { try await self.exportDiagnostics(to: $0) }
+    }
 }
 
 /// Core adapters own error logging, including errors thrown while pulling an install.
@@ -92,15 +99,24 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
     }
 
     @concurrent func exportDiagnostics(to url: URL) async throws {
+        do { try await writeDiagnosticBundle(to: url) }
+        catch { throw await record(error) }
+    }
+
+    @concurrent func makeDiagnosticBundle() async throws -> URL {
         do {
-            let scan = try store.scan()
-            let runtimes = Dictionary(uniqueKeysWithValues: scan.components.map {
-                ("\($0.kind.rawValue)-\($0.version)", $0.source.rawValue)
-            })
-            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
-            try await DiagnosticBundle(logDirectory: paths.logs, runner: SystemProcessRunner())
-                .export(to: url, systemInfo: .current(appVersion: version), runtimes: runtimes, failureStage: nil)
+            return try await TemporaryDiagnosticBundle.make { try await self.writeDiagnosticBundle(to: $0) }
         } catch { throw await record(error) }
+    }
+
+    @concurrent private func writeDiagnosticBundle(to url: URL) async throws {
+        let scan = try store.scan()
+        let runtimes = Dictionary(uniqueKeysWithValues: scan.components.map {
+            ("\($0.kind.rawValue)-\($0.version)", $0.source.rawValue)
+        })
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+        try await DiagnosticBundle(logDirectory: paths.logs, runner: SystemProcessRunner())
+            .export(to: url, systemInfo: .current(appVersion: version), runtimes: runtimes, failureStage: nil)
     }
 
     @concurrent func recentLogLines(limit: Int) async -> [String] {
@@ -140,7 +156,8 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
 
     private func record(_ error: any Error) async -> LauncherError {
         let error = launcherError(error)
-        await eventLog.log(error == .cancelled ? .info : .error, "runtime", runtimeErrorLogMessage(error))
+        let entry = RuntimeErrorLog(error)
+        await eventLog.log(error == .cancelled ? .info : .error, "runtime", entry.message, metadata: entry.metadata)
         return error
     }
 }
@@ -199,13 +216,42 @@ private actor LoggedRuntimeInstall {
         } catch {
             done = true; iterator = nil
             let error = launcherError(error)
-            await log.log(error == .cancelled ? .info : .error, "runtime", runtimeErrorLogMessage(error))
+            let entry = RuntimeErrorLog(error)
+            await log.log(error == .cancelled ? .info : .error, "runtime", entry.message, metadata: entry.metadata)
             throw error
         }
     }
 }
 
-private func runtimeErrorLogMessage(_ error: LauncherError) -> String {
-    if case .http(let status, let url) = error { return "http(status: \(status), host: \(url.host ?? "unknown"))" }
-    return String(describing: error)
+/// Associated free text is untrusted; only fixed case names and approved structured values are logged.
+struct RuntimeErrorLog {
+    let message: String
+    let metadata: [String: String]
+
+    init(_ error: LauncherError) {
+        message = error == .cancelled ? "Runtime operation cancelled" : "Runtime operation failed"
+        var fields: [String: String] = [:]
+        let name: String
+        switch error {
+        case .unsafePath: name = "unsafePath"
+        case .invalidDigest: name = "invalidDigest"
+        case .sizeMismatch(_, let expected, let actual):
+            name = "sizeMismatch"; fields = ["expectedSize": String(expected), "actualSize": String(actual)]
+        case .digestMismatch: name = "digestMismatch"
+        case .insufficientSpace(let required, let available):
+            name = "insufficientSpace"; fields = ["required": String(required), "available": String(available)]
+        case .http(let status, let url):
+            name = "http"; fields = ["host": url.host ?? "unknown", "status": String(status)]
+        case .transport: name = "transport"
+        case .io: name = "io"
+        case .busy: name = "busy"
+        case .fileTooLarge(_, let limit): name = "fileTooLarge"; fields = ["limit": String(limit)]
+        case .consentRequired: name = "consentRequired"
+        case .processFailed(_, let exitCode, _): name = "processFailed"; fields = ["exitCode": String(exitCode)]
+        case .cancelled: name = "cancelled"
+        case .journalCorrupt: name = "journalCorrupt"
+        }
+        fields["case"] = name
+        metadata = fields
+    }
 }

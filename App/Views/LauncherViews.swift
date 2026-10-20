@@ -24,20 +24,25 @@ extension LauncherGame {
 // MARK: - Images
 
 /// Decodes a cached image file off the main actor and fades it in when ready.
+/// It always fills the space it's offered and never changes layout: an image's own size
+/// must not push the window's controls around while art loads or games switch.
 struct LocalImage: View {
     let url: URL
     @State private var image: NSImage?
 
     var body: some View {
-        Group {
-            if let image {
-                Image(nsImage: image).resizable().transition(.opacity)
-            } else {
-                Color.clear
+        Color.clear
+            .overlay {
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .transition(.opacity)
+                }
             }
-        }
-        .animation(.easeOut(duration: 0.25), value: image != nil)
-        .task(id: url) { image = await Self.load(url) }
+            .clipped()
+            .animation(.easeOut(duration: 0.25), value: image != nil)
+            .task(id: url) { image = await Self.load(url) }
     }
 
     @concurrent private static func load(_ url: URL) async -> NSImage? {
@@ -95,7 +100,7 @@ private struct GameIcon: View {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(game.tint.gradient)
             if let url = art?.icon {
-                LocalImage(url: url).scaledToFill()
+                LocalImage(url: url)
             } else {
                 Text(game.name.prefix(1))
                     .font(.title2.weight(.bold))
@@ -197,7 +202,10 @@ struct GameFooter: View {
             Button {
                 panel = .runtimes
             } label: {
-                Text("Set Up Runtimes").frame(minWidth: 180)
+                // Game tints are light, so the label takes the game's dark tone for contrast.
+                Text("Set Up Runtimes")
+                    .frame(minWidth: 180)
+                    .foregroundStyle(game.deepTint)
             }
             .buttonStyle(.glassProminent)
             .tint(game.tint)

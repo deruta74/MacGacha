@@ -4,7 +4,7 @@ import Foundation
 import LauncherCore
 
 extension LauncherError {
-    /// Payloads belong in the redacting event log, never in alerts or row labels.
+    /// Associated payloads never appear in alerts or row labels; logs use approved structured fields only.
     var userMessage: String {
         switch self {
         case .unsafePath: "The selected files contain an unsafe path or link. Choose another source."

@@ -67,28 +67,30 @@ struct GameBackdrop: View {
             LinearGradient(colors: [game.deepTint, game.deepTint.mix(with: .black, by: 0.5)], startPoint: .top, endPoint: .bottom)
             if let url = art?.background {
                 LocalImage(url: url)
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
             }
-            if animated, let page = art?.videoPage {
-                // The static image stays underneath, so there's no flash while the video starts.
-                AnimatedBackdrop(page: page, paused: activeState == .inactive || scenePhase != .active)
-                    .transition(.opacity)
-                if let theme = art?.theme {
-                    LocalImage(url: theme)
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                        .allowsHitTesting(false)
+            if let page = art?.videoPage {
+                // The video and its overlay fade in together as one layer. The overlay stays
+                // mounted (decoded ahead of time) so it never lags the video by a frame; only
+                // the web view comes and goes, and the still image stays underneath.
+                ZStack {
+                    if animated {
+                        AnimatedBackdrop(page: page, paused: activeState == .inactive || scenePhase != .active)
+                    }
+                    if let theme = art?.theme {
+                        LocalImage(url: theme)
+                    }
                 }
+                .opacity(animated ? 1 : 0)
+                // An instant swap: the still image and the video's first frame match, while a
+                // fade can't be synchronised with the web view, which AppKit composites itself.
+                .animation(nil, value: animated)
+                .allowsHitTesting(false)
             }
             // A scrim only behind the footer keeps the art clean while text stays legible.
             LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
                 .frame(height: 260)
                 .allowsHitTesting(false)
         }
-        .animation(.easeInOut(duration: 0.3), value: animated)
         .accessibilityHidden(true)
     }
 }

@@ -64,6 +64,7 @@ final class AppModel {
     @ObservationIgnored private var extraRoots: [URL] = []
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var searchGeneration = UUID()
+    @ObservationIgnored private var scanGeneration = UUID()
 
     init(paths: AppPaths = .standard(), manifest: RuntimeManifest? = nil,
         services: (any RuntimeServices)? = nil, defaults: UserDefaults? = .standard,
@@ -79,6 +80,8 @@ final class AppModel {
     }
 
     static func live() -> AppModel {
+        // Keep legacy entry points safe too while the app switches to forCurrentProcess().
+        if isRunningUnderXCTest { return inert() }
         let paths = AppPaths.standard()
         let log = EventLog(directory: paths.logs)
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
@@ -86,6 +89,18 @@ final class AppModel {
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artService: GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
                 bundleIdentifier: Bundle.main.bundleIdentifier), log: log))
+    }
+
+    static func forCurrentProcess() -> AppModel {
+        isRunningUnderXCTest ? inert() : live()
+    }
+
+    private static var isRunningUnderXCTest: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    private static func inert() -> AppModel {
+        preview(rows: [], logLines: [])
     }
 
     static func gameArtCacheDirectory(in caches: URL, bundleIdentifier: String?) -> URL {
@@ -118,9 +133,22 @@ final class AppModel {
         do {
             if manifest == nil { manifest = try await BundledRuntimeManifest.load() }
             try await services.sweepStaging()
-            apply(try await services.scan())
+            try await scanAndApply()
             await refreshLogs()
-        } catch { started = false; show(error) }
+        } catch { show(error) }
+    }
+
+    func refreshRuntimes() async {
+        do { try await scanAndApply() }
+        catch { show(error) }
+    }
+
+    private func scanAndApply() async throws {
+        let generation = UUID(); scanGeneration = generation
+        let scan = try await services.scan()
+        try Task.checkCancellation()
+        guard scanGeneration == generation else { return }
+        apply(scan)
     }
 
     func install(_ id: String) { request(id, mode: .download) }
@@ -246,8 +274,8 @@ final class AppModel {
                     guard self?.generations[id] == generation else { return }
                     switch event {
                     case .phase(.completed):
-                        let scan = try await services.scan()
-                        self?.apply(scan); completed = true
+                        try await self?.scanAndApply()
+                        completed = true
                     case .failed(let error): throw error
                     case .needsBatchApproval(let required, let available):
                         throw LauncherError.insufficientSpace(required: required, available: available)
@@ -266,8 +294,10 @@ final class AppModel {
             } catch {
                 if launcherError(error) == .cancelled {
                     // Publication can win a late cancellation; show the actual visible tree.
+                    let scanToken = UUID(); self?.scanGeneration = scanToken
                     let scan = await Task.detached { try? await services.scan() }.value
-                    if self?.generations[id] == generation, let scan { self?.apply(scan) }
+                    if self?.generations[id] == generation, self?.scanGeneration == scanToken,
+                        let scan { self?.apply(scan) }
                 } else if self?.generations[id] == generation {
                     self?.errors[id] = launcherError(error).userMessage; self?.show(error)
                 }
@@ -283,7 +313,8 @@ final class AppModel {
         let total = network > 0 ? network : totalStaged
         let count = network > 0 ? downloaded : staged
         let fraction = total > 0 ? min(1, max(0, Double(count) / Double(total))) : nil
-        working[id] = .working(phase: .staging, fraction: fraction)
+        guard case .working(let phase, _) = working[id] else { return }
+        working[id] = .working(phase: phase, fraction: fraction)
         rebuildRows()
     }
 
@@ -303,18 +334,33 @@ final class AppModel {
         do {
             if let component { try await services.remove(component) }
             else if let bad { try await services.removeInvalid(bad) }
-            apply(try await services.scan())
+            try await scanAndApply()
             errors[id] = nil
         } catch { errors[id] = launcherError(error).userMessage; show(error) }
     }
 
     func refreshLogs() async { logLines = Array((await services.recentLogLines(limit: 200)).suffix(200)) }
 
+    /// Returns a complete temporary ZIP. The caller owns the returned file.
+    func makeDiagnosticBundle() async throws -> URL {
+        guard !isExporting else { throw LauncherError.busy("Diagnostics export already in progress") }
+        isExporting = true
+        defer { isExporting = false }
+        do { return try await services.makeDiagnosticBundle() }
+        catch { show(error); throw launcherError(error) }
+    }
+
+    // Compatibility for existing views: never write to the destination until the bundle is complete.
     func exportDiagnostics(to url: URL) async {
         guard !isExporting else { return }
         isExporting = true
         defer { isExporting = false }
-        do { try await services.exportDiagnostics(to: url) }
+        do {
+            let bundle = try await services.makeDiagnosticBundle()
+            do { try await TemporaryDiagnosticBundle.publish(bundle, to: url) }
+            catch { await TemporaryDiagnosticBundle.discard(bundle); throw error }
+            await TemporaryDiagnosticBundle.discard(bundle)
+        }
         catch { show(error) }
     }
 
@@ -327,6 +373,8 @@ final class AppModel {
     func dismissError() { lastError = nil }
 
     private func apply(_ scan: RuntimeScan) {
+        // Invalidate any older in-flight refresh before it can overwrite this snapshot.
+        scanGeneration = UUID()
         installed = scan.components
         invalid = Dictionary(uniqueKeysWithValues: scan.invalid.enumerated().map { index, entry in
             ("invalid:\(entry.kind?.rawValue ?? "unknown"):\(entry.rawName):\(index)", entry)
