@@ -395,6 +395,84 @@ func bundleCancellationTakesPrecedenceOverEveryThrownError() async throws {
     }
 }
 
+@Test
+func bundleRedactsAllLauncherErrorPayloads() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let pairs: [(LauncherError, LauncherError)] = [
+        (.unsafePath("token=error-private"), .unsafePath("token=<redacted>")),
+        (.invalidDigest("token=error-private"), .invalidDigest("token=<redacted>")),
+        (.sizeMismatch(path: "token=error-private", expected: 2, actual: 1), .sizeMismatch(path: "token=<redacted>", expected: 2, actual: 1)),
+        (.digestMismatch(path: "token=error-private", expected: "token=error-private", actual: "token=error-private"),
+            .digestMismatch(path: "token=<redacted>", expected: "token=<redacted>", actual: "token=<redacted>")),
+        (.insufficientSpace(required: 2, available: 1), .insufficientSpace(required: 2, available: 1)),
+        (.http(status: 401, url: URL(string: "https://example.test/?token=error-private&lang=en")!),
+            .http(status: 401, url: URL(string: "https://example.test/?token=%3Credacted%3E&lang=en")!)),
+        (.transport("token=error-private"), .transport("token=<redacted>")),
+        (.io("token=error-private"), .io("token=<redacted>")),
+        (.consentRequired("token=error-private"), .consentRequired("token=<redacted>")),
+        (.processFailed(executable: "token=error-private", exitCode: 2, stderrTail: "token=error-private"),
+            .processFailed(executable: "token=<redacted>", exitCode: 2, stderrTail: "token=<redacted>")),
+        (.cancelled, .cancelled),
+        (.journalCorrupt("token=error-private"), .journalCorrupt("token=<redacted>")),
+    ]
+    for (source, expected) in pairs {
+        let runner = DiagnosticTestRunner { _ in throw source }
+        await #expect(throws: expected) {
+            try await DiagnosticBundle(logDirectory: root.appendingPathComponent("missing"), runner: runner)
+                .export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+        }
+    }
+}
+
+@Test(arguments: [999, 1000, 1001])
+func enumerationStoppedRequiresAnAdditionalEntry(entryCount: Int) async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logs = root.appendingPathComponent("logs")
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    for index in 0..<entryCount { try Data().write(to: logs.appendingPathComponent("ignored\(index).txt")) }
+    let runner = DiagnosticTestRunner { arguments in
+        let staged = URL(fileURLWithPath: arguments[3])
+        let report = try String(contentsOf: staged.appendingPathComponent("skipped.txt"), encoding: .utf8)
+        #expect(report.contains("Enumeration stopped") == (entryCount > 1000))
+        #expect(report.contains("Entries examined: \(min(1000, entryCount))"))
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    try await DiagnosticBundle(logDirectory: logs, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
+        systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+}
+
+@Test
+func fiveMiBOfRecordsAreStructurallyReredactedWithinCoarseBudget() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logs = root.appendingPathComponent("logs")
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    var metadata = Dictionary(uniqueKeysWithValues: (0..<32).map { ("version\($0)", "1.2.3") })
+    metadata["TOKEN"] = "performance-private"
+    let record = try diagnosticRecord(message: "password=performance-private " + String(repeating: "x", count: 512), metadata: metadata)
+    var data = Data()
+    var count = 0
+    while data.count < 5 << 20 { data.append(record); count += 1 }
+    let expectedRecords = count
+    try data.write(to: logs.appendingPathComponent("macgacha.log"))
+    let runner = DiagnosticTestRunner { arguments in
+        let staged = URL(fileURLWithPath: arguments[3])
+        let output = try Data(contentsOf: staged.appendingPathComponent("logs/macgacha.log"))
+        #expect(output.split(separator: 10).count == expectedRecords)
+        #expect(!String(decoding: output, as: UTF8.self).contains("performance-private"))
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    let clock = ContinuousClock()
+    let start = clock.now
+    try await DiagnosticBundle(logDirectory: logs, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
+        systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+    #expect(start.duration(to: clock.now) < .seconds(10))
+}
+
 private func diagnosticRecord(message: String, metadata: [String: String] = [:]) throws -> Data {
     var data = try JSONSerialization.data(withJSONObject: ["ts": "2026-10-20T12:00:00Z", "level": "info",
         "category": "test", "message": message, "metadata": metadata], options: [.sortedKeys, .withoutEscapingSlashes])

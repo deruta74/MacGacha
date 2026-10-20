@@ -9,8 +9,9 @@ public enum Redactor {
         pattern: #"(?:AnyHashable\([\t ]*)?"((?:\\.|[^"\\])*)"(?:[\t ]*\))?[\t ]*[:=]\s*"#)
     private static let singleQuotedKeys = try! NSRegularExpression(
         pattern: #"(?:AnyHashable\([\t ]*)?'([^']*)'(?:[\t ]*\))?[\t ]*[:=][\t ]*"#)
-    private static let acronymBoundary = try! NSRegularExpression(pattern: "([A-Z]+)([A-Z][a-z])")
-    private static let camelBoundary = try! NSRegularExpression(pattern: "([a-z0-9])([A-Z])")
+    private static let tokenShapes = try! NSRegularExpression(pattern: #"eyJ[\w-]+\.[\w-]+\.[\w-]+|v2_[A-Za-z0-9_-]{17,}"#)
+    private static let cookieFields = try! NSRegularExpression(
+        pattern: #"(?i)(?<![a-z0-9_-])(name|value)[\t ]*[:=][\t ]*"#)
     private static let assignments = try! NSRegularExpression(
         pattern: #"(?i)((?:%[0-9a-f]{2})+[a-z0-9_-]+|(?<![a-z0-9_-])[a-z0-9_-]+)[\t ]*(?:=|%3d)[\t ]*"#)
     private static let colonValues = try! NSRegularExpression(
@@ -60,21 +61,56 @@ public enum Redactor {
         return result
     }
 
+    /// Normalizes only the uncommon camelCase/encoded-prefix path, in one scalar pass.
     private static func normalized(_ key: String) -> String {
-        var key = key
-        while key.utf8.count >= 3, key.hasPrefix("%"), UInt8(key.dropFirst().prefix(2), radix: 16) != nil {
-            key.removeFirst(3)
+        let scalars = key.unicodeScalars
+        var index = scalars.startIndex
+        while index < scalars.endIndex && scalars[index] == "%" {
+            let hex1 = scalars.index(after: index)
+            guard hex1 < scalars.endIndex else { break }
+            let hex2 = scalars.index(after: hex1)
+            guard hex2 < scalars.endIndex, isHex(scalars[hex1].value), isHex(scalars[hex2].value) else { break }
+            index = scalars.index(after: hex2)
         }
-        key = acronymBoundary.stringByReplacingMatches(in: key, range: NSRange(key.startIndex..., in: key), withTemplate: "$1_$2")
-        key = camelBoundary.stringByReplacingMatches(in: key, range: NSRange(key.startIndex..., in: key), withTemplate: "$1_$2")
-        return key.lowercased().replacingOccurrences(of: "-", with: "_")
+        var result = ""
+        var previous: UInt32 = 0
+        while index < scalars.endIndex {
+            let scalar = scalars[index]
+            let value = scalar.value
+            let next = scalars.index(after: index)
+            let nextIsLower = next < scalars.endIndex && (97...122).contains(scalars[next].value)
+            if (65...90).contains(value) {
+                if (97...122).contains(previous) || (48...57).contains(previous)
+                    || ((65...90).contains(previous) && nextIsLower) { result.append("_") }
+                // ASCII uppercase + 32 is always a valid lowercase Unicode scalar.
+                result.unicodeScalars.append(UnicodeScalar(value + 32)!)
+            } else if value == 45 {
+                result.append("_")
+            } else if value > 127 {
+                result += String(scalar).lowercased()
+            } else {
+                result.unicodeScalars.append(scalar)
+            }
+            previous = value
+            index = next
+        }
+        return result
+    }
+
+    private static func isHex(_ value: UInt32) -> Bool {
+        (48...57).contains(value) || (65...70).contains(value) || (97...102).contains(value)
+    }
+
+    private static func matchesSensitiveFragment(_ key: String) -> Bool {
+        legacyKeys.contains(key) || sensitiveFragments.contains { key.contains($0) }
     }
 
     private static func isSensitive(_ key: String) -> Bool {
-        let plain = key.lowercased().replacingOccurrences(of: "-", with: "_")
-        let snake = normalized(key)
-        return legacyKeys.contains(plain) || legacyKeys.contains(snake)
-            || sensitiveFragments.contains { plain.contains($0) || snake.contains($0) }
+        let lower = key.lowercased()
+        if matchesSensitiveFragment(lower) { return true }
+        if lower.contains("-"), matchesSensitiveFragment(lower.replacingOccurrences(of: "-", with: "_")) { return true }
+        guard key.hasPrefix("%") || key.utf8.contains(where: { (65...90).contains($0) }) else { return false }
+        return matchesSensitiveFragment(normalized(key))
     }
 
     static func uniqueKey<Value>(_ key: String, in dictionary: [String: Value], maxBytes: Int = .max) -> String {
@@ -109,10 +145,13 @@ public enum Redactor {
     }
 
     private static func redactText(_ s: String) -> String {
-        let quoted = replaceValues(in: s, matching: jsonKeys, json: true)
+        let cookies = redactCookieValues(s)
+        let quoted = replaceValues(in: cookies, matching: jsonKeys, json: true)
         let result = replaceValues(in: quoted, matching: singleQuotedKeys, json: false)
         let assignmentsRedacted = replaceValues(in: result, matching: assignments, json: false)
-        return replaceValues(in: assignmentsRedacted, matching: colonValues, json: false, colon: true)
+        let sanitized = replaceValues(in: assignmentsRedacted, matching: colonValues, json: false, colon: true)
+        return tokenShapes.stringByReplacingMatches(in: sanitized, range: NSRange(sanitized.startIndex..., in: sanitized),
+            withTemplate: "<redacted>")
     }
 
     private static func replaceValues(in text: String, matching expression: NSRegularExpression,
@@ -120,28 +159,35 @@ public enum Redactor {
         let bytes = Array(text.utf8)
         var result: [UInt8] = []
         var copied = 0
+        var context = TextContext()
         for match in expression.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
             guard let range = Range(match.range, in: text), let keyRange = Range(match.range(at: 1), in: text) else { continue }
             let rawKey = String(text[keyRange])
             let key = json && rawKey.contains("\\")
                 ? (try? JSONDecoder().decode(String.self, from: Data(("\"" + rawKey + "\"").utf8))) ?? rawKey : rawKey
-            guard isSensitive(key) else { continue }
+            let lowerKey = key.lowercased()
+            let headerStyle = lowerKey.contains("authorization") || lowerKey.contains("cookie") || lowerKey.hasPrefix("x-rpc-")
+            guard isSensitive(key) || (!json && headerStyle) else { continue }
             let prefixStart = text.utf8.distance(from: text.utf8.startIndex, to: range.lowerBound)
             guard prefixStart >= copied else { continue }
             let start = text.utf8.distance(from: text.utf8.startIndex, to: range.upperBound)
-            let preceding = colon ? bytes[..<prefixStart].last(where: { $0 != 9 && $0 != 32 }) : nil
-            let headerLine = colon && (preceding == nil || preceding == 10 || preceding == 13)
-            let lowerKey = key.lowercased()
+            context.advance(in: bytes, to: prefixStart)
             let query = !json && (prefixStart > 0 && (bytes[prefixStart - 1] == 63 || bytes[prefixStart - 1] == 38)
                 || rawKey.lowercased().contains("%3f") || rawKey.lowercased().contains("%26"))
-            let wholeLine = !json && !query && (headerLine || lowerKey.contains("authorization") || lowerKey.contains("cookie"))
+            // Foundation's activity labels are ordinary text, while quoted/structured session fields
+            // and fields inside printed Swift values retain sensitive-key treatment.
+            if colon && !query && context.parentheses == 0 && context.jsonDepth == 0
+                && (key == "Session" || key == "URLSession"), start < bytes.count,
+                bytes[start] != 34 && bytes[start] != 39 { continue }
+            let wholeLine = !json && !query && headerStyle
             let end: Int
             if query {
                 end = queryValueEnd(in: bytes, start: start)
             } else if wholeLine {
                 end = bytes[start...].firstIndex { $0 == 10 || $0 == 13 } ?? bytes.count
             } else {
-                end = valueEnd(in: bytes, start: start, json: json)
+                end = valueEnd(in: bytes, start: start, json: json && context.jsonDepth > 0,
+                    closesParenthesis: context.parentheses > 0)
             }
             guard end > start else { continue }
             result.append(contentsOf: bytes[copied..<start])
@@ -152,7 +198,8 @@ public enum Redactor {
         return String(decoding: result, as: UTF8.self)
     }
 
-    private static func valueEnd(in bytes: [UInt8], start: Int, json: Bool, authScheme: Bool = true) -> Int {
+    private static func valueEnd(in bytes: [UInt8], start: Int, json: Bool,
+        closesParenthesis: Bool = false, authScheme: Bool = true) -> Int {
         guard start < bytes.count else { return start }
         if bytes[start] == 123 || bytes[start] == 91 || bytes[start] == 40 { return balancedEnd(in: bytes, start: start) }
         var identifierEnd = start
@@ -167,7 +214,7 @@ public enum Redactor {
            bytes[identifierEnd] == 32 || bytes[identifierEnd] == 9 {
             var valueStart = identifierEnd
             while valueStart < bytes.count && (bytes[valueStart] == 32 || bytes[valueStart] == 9) { valueStart += 1 }
-            return valueEnd(in: bytes, start: valueStart, json: json, authScheme: false)
+            return valueEnd(in: bytes, start: valueStart, json: json, closesParenthesis: closesParenthesis, authScheme: false)
         }
         if bytes[start] == 34 || bytes[start] == 39 {
             return quotedEnd(in: bytes, start: start, quote: bytes[start], escapedDelimiter: false)
@@ -176,14 +223,98 @@ public enum Redactor {
             return quotedEnd(in: bytes, start: start, quote: bytes[start + 1], escapedDelimiter: true)
         }
         var end = start
+        var innerParentheses = 0
         while end < bytes.count {
             let byte = bytes[end]
-            if byte == 9 || byte == 10 || byte == 13 || byte == 32 || byte == 38 || byte == 59 || byte == 35
-                || isEncodedTerminator(in: bytes, at: end) { break }
-            if byte == 44 || byte == 125 || byte == 93 || (!json && byte == 41) { break }
+            if byte <= 32 || byte == 38 || byte == 59 || isEncodedTerminator(in: bytes, at: end) { break }
+            if json && (byte == 44 || byte == 125 || byte == 93) { break }
+            if byte == 40 { innerParentheses += 1 }
+            if byte == 41 {
+                if innerParentheses > 0 { innerParentheses -= 1 }
+                else if closesParenthesis { break }
+            }
             end += 1 // Quotes in the middle of an unquoted token are part of that token.
         }
         return end
+    }
+
+    private struct TextContext {
+        var parentheses = 0
+        var jsonDepth = 0
+        private var cursor = 0
+        private var quote: UInt8?
+        private var escaped = false
+
+        mutating func advance(in bytes: [UInt8], to end: Int) {
+            while cursor < end {
+                let byte = bytes[cursor]
+                if let delimiter = quote {
+                    if escaped { escaped = false }
+                    else if byte == 92 { escaped = true }
+                    else if byte == delimiter { quote = nil }
+                } else {
+                    switch byte {
+                    case 34, 39: quote = byte
+                    case 40: parentheses += 1
+                    case 41: parentheses = max(0, parentheses - 1)
+                    case 123, 91: jsonDepth += 1
+                    case 125, 93: jsonDepth = max(0, jsonDepth - 1)
+                    default: break
+                    }
+                }
+                cursor += 1
+            }
+        }
+    }
+
+    private static func redactCookieValues(_ text: String) -> String {
+        guard text.localizedCaseInsensitiveContains("name"), text.localizedCaseInsensitiveContains("value") else { return text }
+        let bytes = Array(text.utf8)
+        var result: [UInt8] = []
+        var copied = 0
+        var sensitiveName = false
+        var scopeEnd = 0
+        for field in cookieFields.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let range = Range(field.range, in: text), let keyRange = Range(field.range(at: 1), in: text) else { continue }
+            let prefix = text.utf8.distance(from: text.utf8.startIndex, to: range.lowerBound)
+            guard prefix >= copied else { continue }
+            let start = text.utf8.distance(from: text.utf8.startIndex, to: range.upperBound)
+            if text[keyRange].lowercased() == "name" {
+                let end = valueEnd(in: bytes, start: start, json: false)
+                let rawName = String(decoding: bytes[start..<end], as: UTF8.self)
+                let name: String
+                if rawName.contains("\\"), let decoded = try? JSONDecoder().decode(String.self, from: Data(rawName.utf8)) {
+                    name = decoded
+                } else { name = rawName.trimmingCharacters(in: CharacterSet(charactersIn: "\"',;> \t\r\n")) }
+                sensitiveName = isSensitive(name)
+                let preceding = text[..<range.lowerBound]
+                if let opening = preceding.range(of: "<NSHTTPCookie", options: [.backwards, .caseInsensitive]),
+                   !preceding[opening.upperBound...].contains(">") {
+                    scopeEnd = bytes[start...].firstIndex(of: 62) ?? bytes.count
+                } else {
+                    scopeEnd = bytes[start...].firstIndex { $0 == 10 || $0 == 13 } ?? bytes.count
+                }
+            } else if sensitiveName && prefix < scopeEnd {
+                let quoted = start < bytes.count && (bytes[start] == 34 || bytes[start] == 39
+                    || (bytes[start] == 92 && start + 1 < bytes.count && (bytes[start + 1] == 34 || bytes[start + 1] == 39)))
+                let end: Int
+                if quoted {
+                    // A '>' inside a quoted cookie value belongs to the value, not the wrapper.
+                    end = valueEnd(in: bytes, start: start, json: false)
+                } else {
+                    // Foundation prints unquoted values as a complete field line, including spaces.
+                    let lineEnd = bytes[start...].firstIndex { $0 == 10 || $0 == 13 } ?? bytes.count
+                    end = min(lineEnd, scopeEnd)
+                }
+                guard end > start else { continue }
+                result.append(contentsOf: bytes[copied..<start])
+                result.append(contentsOf: "\"<redacted>\"".utf8)
+                copied = end
+                sensitiveName = false
+            }
+        }
+        result.append(contentsOf: bytes[copied...])
+        return String(decoding: result, as: UTF8.self)
     }
 
     private static func isEncodedTerminator(in bytes: [UInt8], at offset: Int) -> Bool {

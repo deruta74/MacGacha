@@ -59,11 +59,26 @@ public struct DiagnosticBundle: Sendable {
                 throw LauncherError.io(Redactor.redact(String(describing: error)))
             }
             switch launcherError {
+            case .unsafePath(let path): throw LauncherError.unsafePath(Redactor.redact(path))
+            case .invalidDigest(let digest): throw LauncherError.invalidDigest(Redactor.redact(digest))
+            case .sizeMismatch(let path, let expected, let actual):
+                throw LauncherError.sizeMismatch(path: Redactor.redact(path), expected: expected, actual: actual)
+            case .digestMismatch(let path, let expected, let actual):
+                throw LauncherError.digestMismatch(path: Redactor.redact(path), expected: Redactor.redact(expected),
+                    actual: Redactor.redact(actual))
+            case .insufficientSpace(let required, let available):
+                throw LauncherError.insufficientSpace(required: required, available: available)
+            case .http(let status, let url):
+                let safeURL = URL(string: Redactor.redact(url.absoluteString)) ?? URL(fileURLWithPath: "/redacted")
+                throw LauncherError.http(status: status, url: safeURL)
+            case .transport(let message): throw LauncherError.transport(Redactor.redact(message))
             case .io(let message): throw LauncherError.io(Redactor.redact(message))
+            case .consentRequired(let component): throw LauncherError.consentRequired(Redactor.redact(component))
             case .processFailed(let executable, let code, let stderr):
                 throw LauncherError.processFailed(executable: Redactor.redact(executable), exitCode: code,
                     stderrTail: Redactor.redact(stderr))
-            default: throw launcherError
+            case .cancelled: throw LauncherError.cancelled
+            case .journalCorrupt(let message): throw LauncherError.journalCorrupt(Redactor.redact(message))
             }
         }
     }
@@ -135,7 +150,7 @@ public struct DiagnosticBundle: Sendable {
                 files.append(file)
                 report.entries += 1
             }
-            report.enumerationStopped = report.entries == Self.entryLimit
+            report.enumerationStopped = report.entries == Self.entryLimit && enumerator.nextObject() != nil
             var count = 0
             var totalBytes = 0
             let logsLimit = Self.totalLimit - Self.reportLimit
