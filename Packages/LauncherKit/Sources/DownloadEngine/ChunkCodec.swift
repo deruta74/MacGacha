@@ -8,9 +8,9 @@ import LauncherCore
 public enum ChunkCodec: String, Codable, Sendable {
     case identity, zstd
 
-    public func decoder() throws -> any ChunkDecoder {
+    public func decoder(fileOps: any FileOps = SystemFileOps()) throws -> any ChunkDecoder {
         switch self {
-        case .identity: return IdentityDecoder()
+        case .identity: return IdentityDecoder(fileOps: fileOps)
         case .zstd: throw LauncherError.io("codec unsupported: zstd")
         }
     }
@@ -22,7 +22,8 @@ public protocol ChunkDecoder: Sendable {
 }
 
 public struct IdentityDecoder: ChunkDecoder {
-    public init() {}
+    private let fileOps: any FileOps
+    public init(fileOps: any FileOps = SystemFileOps()) { self.fileOps = fileOps }
 
     public func decode(_ transferred: FileHandle, expectedSize: Int64, into output: FileHandle, at offset: Int64) throws {
         guard expectedSize >= 0, offset >= 0,
@@ -48,7 +49,7 @@ public struct IdentityDecoder: ChunkDecoder {
                 guard !data.isEmpty else {
                     throw LauncherError.sizeMismatch(path: "transferred object", expected: expectedSize, actual: expectedSize - remaining)
                 }
-                try output.write(contentsOf: data)
+                try fileOps.writeAll(data, to: output.fileDescriptor)
                 remaining -= Int64(data.count)
             }
         } catch let error as LauncherError { throw error }

@@ -12,15 +12,21 @@ public struct ContainedFileSystem: Sendable, Hashable {
     }
 
     private let root: URL
+    package let fileOps: any FileOps
     private static let directoryFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
     private static let entryLimit = 100_000
 
-    public init(root: URL) throws {
+    public init(root: URL, fileOps: any FileOps = SystemFileOps()) throws {
         guard root.isFileURL, !root.path.isEmpty, !root.path.utf8.contains(0) else {
             throw LauncherError.unsafePath(root.absoluteString)
         }
         self.root = root
+        self.fileOps = fileOps
     }
+
+    // Filesystem identity is its trusted root; fault policy does not change path identity.
+    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.root == rhs.root }
+    public func hash(into hasher: inout Hasher) { hasher.combine(root) }
 
     /// A conservative in-process reservation key, including the standardized root.
     /// This folds case even on case-sensitive volumes; it is never used for file access.
@@ -61,7 +67,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
         let targetName = destination.components.last!
         try checkRegularDestination(targetName, parent: target, display: display(destination.components))
         guard !Task.isCancelled else { throw LauncherError.cancelled }
-        guard renameat(parent, sourceName, target, targetName) == 0 else { throw accessError(display(destination.components)) }
+        try fileOps.rename(from: sourceName, in: parent, to: targetName, in: target, exclusive: false)
         try synchronize(parent)
         try synchronize(target)
     }
@@ -83,27 +89,18 @@ public struct ContainedFileSystem: Sendable, Hashable {
     /// Refuses symlinks and hard-linked writable files. A failed write may leave a partial append;
     /// callers must repair it before writing again. The containing directory is also fsynced.
     public func append(_ data: Data, to path: SafeRelativePath, durable: Bool = false,
-        synchronize: FileSynchronizer = ContainedFileSystem.synchronizeFileDescriptor) throws {
+        synchronize: FileSynchronizer? = nil) throws {
         try withRegularDescriptor(at: path, writing: true, create: true) { fd, parent, _ in
-            try data.withUnsafeBytes { bytes in
-                guard let base = bytes.baseAddress else { return }
-                var written = 0
-                while written < bytes.count {
-                    guard !Task.isCancelled else { throw LauncherError.cancelled }
-                    let count = Darwin.write(fd, base.advanced(by: written), min(65_536, bytes.count - written))
-                    if count < 0 && errno == EINTR { continue }
-                    guard count > 0 else { throw LauncherError.io("Cannot append contained file") }
-                    written += count
-                }
-            }
-            try synchronize(fd, durable)
+            try fileOps.writeAll(data, to: fd)
+            if let synchronize { try synchronize(fd, durable) }
+            else { try fileOps.synchronize(fd, durable: durable) }
             try self.synchronize(parent)
         }
     }
 
     /// Shrinks an existing regular file without extending it, then fsyncs it.
     public func truncateFile(at path: SafeRelativePath, toByteCount count: Int64,
-        synchronize: FileSynchronizer = ContainedFileSystem.synchronizeFileDescriptor) throws {
+        synchronize: FileSynchronizer? = nil) throws {
         guard count >= 0 else { throw LauncherError.io("Invalid truncation length") }
         try withRegularDescriptor(at: path, writing: true, create: false) { fd, _, info in
             guard count <= info.st_size else { throw LauncherError.io("Invalid truncation length") }
@@ -112,7 +109,8 @@ public struct ContainedFileSystem: Sendable, Hashable {
                 if ftruncate(fd, count) == 0 { break }
                 guard errno == EINTR else { throw LauncherError.io("Cannot truncate contained file") }
             }
-            try synchronize(fd, false)
+            if let synchronize { try synchronize(fd, false) }
+            else { try fileOps.synchronize(fd, durable: false) }
         }
     }
 
@@ -180,7 +178,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
         let name = path.components.last!
         guard let info = try entry(name, parent: parent) else { try synchronize(parent); return }
         guard info.st_mode & S_IFMT == S_IFREG else { throw LauncherError.unsafePath(display(path.components)) }
-        guard unlinkat(parent, name, 0) == 0 || errno == ENOENT else { throw LauncherError.io("Cannot remove contained file") }
+        try fileOps.unlink(name, in: parent, isDirectory: false)
         try synchronize(parent)
     }
 
@@ -188,7 +186,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
     public func fullSync(at path: SafeRelativePath) throws {
         let opened = try openRegularDescriptors(at: path, writing: true, create: false, appending: false)
         defer { close(opened.file); close(opened.parent) }
-        try Self.synchronizeFileDescriptor(opened.file, durable: true)
+        try fileOps.synchronize(opened.file, durable: true)
         try synchronize(opened.parent)
     }
 
@@ -276,10 +274,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
             throw LauncherError.io("Move destination already exists")
         }
         guard !Task.isCancelled else { throw LauncherError.cancelled }
-        guard renameatx_np(parent, name, target, targetName, UInt32(RENAME_EXCL)) == 0 else {
-            if errno == EEXIST { throw LauncherError.io("Move destination already exists") }
-            throw accessError(display(destination.components))
-        }
+        try fileOps.rename(from: name, in: parent, to: targetName, in: target, exclusive: true)
         try synchronize(parent)
         try synchronize(target)
     }
@@ -296,22 +291,12 @@ public struct ContainedFileSystem: Sendable, Hashable {
         let temporary = ".macgacha-write-\(UUID().uuidString)"
         let fd = openat(parent, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw LauncherError.io("Cannot create temporary file") }
-        defer { close(fd); unlinkat(parent, temporary, 0) }
-        try data.withUnsafeBytes { bytes in
-            guard let base = bytes.baseAddress else { return }
-            var written = 0
-            while written < bytes.count {
-                guard !Task.isCancelled else { throw LauncherError.cancelled }
-                let count = Darwin.write(fd, base.advanced(by: written), min(65_536, bytes.count - written))
-                if count < 0 && errno == EINTR { continue }
-                guard count > 0 else { throw LauncherError.io("Cannot write temporary file") }
-                written += count
-            }
-        }
+        defer { close(fd); try? fileOps.unlink(temporary, in: parent, isDirectory: false) }
+        try fileOps.writeAll(data, to: fd)
         try synchronize(fd)
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         try checkRegularDestination(name, parent: parent, display: display(path.components))
-        guard renameat(parent, temporary, parent, name) == 0 else { throw LauncherError.io("Cannot publish file") }
+        try fileOps.rename(from: temporary, in: parent, to: name, in: parent, exclusive: false)
         try synchronize(parent)
     }
 
@@ -455,10 +440,10 @@ public struct ContainedFileSystem: Sendable, Hashable {
                 try removeEntry(child, parent: fd, display: display + "/" + child, insideTree: true,
                     depth: depth + 1, budget: &budget)
             }
-            guard unlinkat(parent, name, AT_REMOVEDIR) == 0 else { throw LauncherError.io("Cannot remove directory") }
+            try fileOps.unlink(name, in: parent, isDirectory: true)
         } else {
             guard insideTree || info.st_mode & S_IFMT == S_IFREG else { throw LauncherError.unsafePath(display) }
-            guard unlinkat(parent, name, 0) == 0 else { throw LauncherError.io("Cannot remove file") }
+            try fileOps.unlink(name, in: parent, isDirectory: false)
         }
     }
 
@@ -497,7 +482,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
     }
 
     private func synchronize(_ fd: Int32) throws {
-        try Self.synchronizeFileDescriptor(fd, durable: false)
+        try fileOps.synchronize(fd, durable: false)
     }
 
     private func display(_ components: [String]) -> String {

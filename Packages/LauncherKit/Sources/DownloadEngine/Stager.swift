@@ -13,21 +13,22 @@ public struct Stager: Sendable {
     private let journal: OperationJournal
     private let disk: any DiskSpaceProbe
     private let maxConcurrentObjects: Int
+    private let crashHooks: CrashHooks
     private let gate = StagingGate()
 
     public init(plan: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher, journal: OperationJournal,
-        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), maxConcurrentObjects: Int = 8) throws {
+        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), maxConcurrentObjects: Int = 8, crashHooks: CrashHooks = .none) throws {
         try plan.validate()
         guard maxConcurrentObjects > 0 else { throw LauncherError.io("Invalid object concurrency limit") }
         self.plan = plan; self.fs = fs; self.fetcher = fetcher; self.journal = journal
-        self.disk = disk; self.maxConcurrentObjects = maxConcurrentObjects
+        self.disk = disk; self.maxConcurrentObjects = maxConcurrentObjects; self.crashHooks = crashHooks
     }
 
     /// Pull-driven: no producer or unbounded event buffer survives a stopped consumer.
     /// Progress is emitted initially and after each file; every fileVerified event is delivered.
     public func stage(files: [FileTask]) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = StagingSession(plan: plan, files: files, fs: fs, fetcher: fetcher, journal: journal,
-            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate))
+            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
 }
@@ -62,6 +63,7 @@ private actor StagingSession {
     private let disk: any DiskSpaceProbe
     private let limit: Int
     private let lease: StagingLease
+    private let crashHooks: CrashHooks
     private let layout: StagingLayout
     private let referrers: [String: Set<SafeRelativePath>]
     private var step = Step.start
@@ -75,9 +77,9 @@ private actor StagingSession {
     private var totalStaged: Int64 = 0
 
     init(plan: InstallPlan, files: [FileTask], fs: ContainedFileSystem, fetcher: ChunkFetcher,
-        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease) {
+        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks) {
         self.plan = plan; self.files = files; self.fs = fs; self.fetcher = fetcher; self.journal = journal
-        self.disk = disk; self.limit = limit; self.lease = lease; layout = StagingLayout(id: plan.id)
+        self.disk = disk; self.limit = limit; self.lease = lease; self.crashHooks = crashHooks; layout = StagingLayout(id: plan.id)
         var refs: [String: Set<SafeRelativePath>] = [:]
         for file in plan.files { for id in SpaceBudget.references(file) { refs[id, default: []].insert(file.path) } }
         referrers = refs
@@ -154,13 +156,14 @@ private actor StagingSession {
             if state.verifiedObjects.contains(id), try fs.size(at: layout.object(object)) == object.transferSize { continue }
             needed.append(object)
         }
-        let fs = fs, fetcher = fetcher, journal = journal, layout = layout
+        let fs = fs, fetcher = fetcher, journal = journal, layout = layout, crashHooks = crashHooks
         try await withThrowingTaskGroup(of: ChunkObject.self) { group in
             var next = 0
             func submit(_ object: ChunkObject) {
                 group.addTask {
                     try await fetcher.fetch(object, fs: fs, part: layout.object(object), progress: { _ in })
                     try await journal.append(.objectVerified(id: object.id))
+                    crashHooks.reach(.afterObjectVerified)
                     return object
                 }
             }
@@ -196,6 +199,7 @@ private actor StagingSession {
                     throw LauncherError.digestMismatch(path: file.path.description, expected: file.digest.hex, actual: actual.hex)
                 }
                 try fs.fullSync(at: path)
+                crashHooks.reach(.afterFileStagedBeforeJournal)
                 try await record(.fileStaged(path: file.path))
                 try cleanupObjects(ids: SpaceBudget.references(file))
                 return
@@ -245,7 +249,7 @@ private actor StagingSession {
             guard object.decodedSize == extent.length else {
                 throw LauncherError.sizeMismatch(path: id, expected: extent.length, actual: object.decodedSize)
             }
-            try object.codec.decoder().decode(input, expectedSize: object.decodedSize, into: output, at: extent.fileOffset)
+            try object.codec.decoder(fileOps: fs.fileOps).decode(input, expectedSize: object.decodedSize, into: output, at: extent.fileOffset)
             let actual = try hashRange(staged, offset: extent.fileOffset, length: extent.length, algorithm: object.decodedDigest.algorithm)
             guard actual == object.decodedDigest else {
                 throw LauncherError.digestMismatch(path: id, expected: object.decodedDigest.hex, actual: actual.hex)
@@ -275,7 +279,7 @@ private actor StagingSession {
         while remaining > 0 {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             guard let data = try autoreleasepool(invoking: { try input.read(upToCount: Int(min(65_536, remaining))) }), !data.isEmpty else { return false }
-            hasher.update(data); try output.write(contentsOf: data); remaining -= Int64(data.count)
+            hasher.update(data); try fs.fileOps.writeAll(data, to: output.fileDescriptor); remaining -= Int64(data.count)
         }
         return hasher.finalize() == extent.digest
     }
