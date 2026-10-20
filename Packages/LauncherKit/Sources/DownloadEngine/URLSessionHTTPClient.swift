@@ -5,6 +5,7 @@ import LauncherCore
 /// Create once and share; call invalidate() when done.
 public struct URLSessionHTTPClient: HTTPClient {
     private let session: URLSession
+    private let lifecycle: HTTPSessionLifecycle
     private let highWaterMark: Int
     private let lowWaterMark: Int
     private let bufferObserver: (@Sendable (Int, Bool) -> Void)?
@@ -22,13 +23,19 @@ public struct URLSessionHTTPClient: HTTPClient {
     }
 
     public func invalidate() {
-        session.invalidateAndCancel()
+        let first = lifecycle.invalidated.withLock { invalidated in
+            guard !invalidated else { return false }
+            invalidated = true
+            return true
+        }
+        if first { session.invalidateAndCancel() }
     }
 
     init(session: URLSession, highWaterMark: Int, lowWaterMark: Int,
         bufferObserver: (@Sendable (Int, Bool) -> Void)?) {
         precondition(highWaterMark > 0 && lowWaterMark >= 0 && lowWaterMark < highWaterMark)
         self.session = session
+        self.lifecycle = HTTPSessionLifecycle()
         self.highWaterMark = highWaterMark
         self.lowWaterMark = lowWaterMark
         self.bufferObserver = bufferObserver
@@ -40,10 +47,14 @@ public struct URLSessionHTTPClient: HTTPClient {
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let offset { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
         let delegate = HTTPStreamDelegate(highWaterMark: highWaterMark, lowWaterMark: lowWaterMark,
-            bufferObserver: bufferObserver)
-        let task = session.dataTask(with: request)
-        task.delegate = delegate
-        delegate.attach(task)
+            bufferObserver: bufferObserver, lifecycle: lifecycle)
+        try lifecycle.invalidated.withLock { invalidated in
+            guard !invalidated else { throw LauncherError.cancelled }
+            let task = session.dataTask(with: request)
+            // Attach before invalidate() can cancel, so no completion callback is missed.
+            task.delegate = delegate
+            delegate.attach(task)
+        }
         let body = HTTPBody(next: { try await delegate.next() }, onCancel: { delegate.cancel() })
         let head = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { delegate.start($0) }
@@ -56,6 +67,10 @@ public struct URLSessionHTTPClient: HTTPClient {
         }
         return (head, body)
     }
+}
+
+private final class HTTPSessionLifecycle: Sendable {
+    let invalidated = Mutex(false)
 }
 
 private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
@@ -85,11 +100,14 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
     private let highWaterMark: Int
     private let lowWaterMark: Int
     private let bufferObserver: (@Sendable (Int, Bool) -> Void)?
+    private let lifecycle: HTTPSessionLifecycle
 
-    init(highWaterMark: Int, lowWaterMark: Int, bufferObserver: (@Sendable (Int, Bool) -> Void)?) {
+    init(highWaterMark: Int, lowWaterMark: Int, bufferObserver: (@Sendable (Int, Bool) -> Void)?,
+        lifecycle: HTTPSessionLifecycle) {
         self.highWaterMark = highWaterMark
         self.lowWaterMark = lowWaterMark
         self.bufferObserver = bufferObserver
+        self.lifecycle = lifecycle
         super.init()
     }
 
@@ -236,7 +254,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         if let error {
             let nsError = error as NSError
             failure = nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
-                && state.withLock({ $0.cancelledByUs })
+                && (state.withLock({ $0.cancelledByUs }) || lifecycle.invalidated.withLock({ $0 }))
                 ? .cancelled : .transport(error.localizedDescription)
         } else {
             failure = nil

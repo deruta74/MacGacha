@@ -102,6 +102,7 @@ struct URLSessionHTTPClientTests {
             #expect(head.status == 200)
         }
         try await waitForHTTPCondition { fixture.control.stopped }
+        #expect(fixture.control.stopReason != .timeout)
     }
 
     @Test
@@ -144,6 +145,7 @@ struct URLSessionHTTPClientTests {
             task.cancel()
             do { try await task.value } catch LauncherError.cancelled {}
             try await waitForHTTPCondition { fixture.control.stopped }
+            #expect(fixture.control.stopReason != .timeout)
         }
     }
 
@@ -253,7 +255,7 @@ struct URLSessionHTTPClientTests {
         let metrics = HTTPBufferMetrics()
         let fixture = HTTPFixture(.response(200, [
             "Content-Type": "application/octet-stream", "Content-Length": "\(data.count)",
-        ], [data]), highWaterMark: 262_144, lowWaterMark: 65_536, timeout: 10,
+        ], [data]), highWaterMark: 262_144, lowWaterMark: 65_536,
             bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
         defer { fixture.close() }
         let secondURL = URL(string: "https://http.test/\(UUID().uuidString)")!
@@ -340,6 +342,18 @@ struct URLSessionHTTPClientTests {
     }
 
     @Test
+    func getAfterInvalidateThrowsCancelled() async throws {
+        let fixture = HTTPFixture(.response(200, ["Content-Length": "0"], []))
+        defer { fixture.close() }
+        let copy = fixture.client
+        fixture.client.invalidate()
+        await #expect(throws: LauncherError.cancelled) {
+            _ = try await copy.get(fixture.url, byteRangeFrom: nil)
+        }
+        #expect(!fixture.control.started)
+    }
+
+    @Test
     func urlSessionInvalidationStopsPendingRequests() async throws {
         let fixture = HTTPFixture(.stallBeforeResponse)
         defer { fixture.close() }
@@ -349,11 +363,24 @@ struct URLSessionHTTPClientTests {
         defer { task.cancel() }
         try await waitForHTTPCondition { fixture.control.started }
         fixture.client.invalidate()
+        await #expect(throws: LauncherError.cancelled) { try await task.value }
+        try await waitForHTTPCondition { fixture.control.stopped }
+        #expect(fixture.control.stopReason != .timeout)
+    }
+
+    @Test
+    func httpStubRecordsTimeoutStopReason() async throws {
+        let fixture = HTTPFixture(.stallBeforeResponse)
+        defer { fixture.close() }
+        let task = Task { try await fixture.client.get(fixture.url, byteRangeFrom: nil) }
+        defer { task.cancel() }
+        try await waitForHTTPCondition { fixture.control.started }
+        fixture.control.expire()
         do {
             _ = try await task.value
-            Issue.record("Invalidation must fail pending requests")
+            Issue.record("The watchdog must fail the request")
         } catch LauncherError.transport {}
-        try await waitForHTTPCondition { fixture.control.stopped }
+        #expect(fixture.control.stopReason == .timeout)
     }
 }
 
@@ -395,7 +422,7 @@ private struct HTTPFixture: Sendable {
         _ mode: HTTPStubMode,
         highWaterMark: Int = 16 << 20,
         lowWaterMark: Int = 4 << 20,
-        timeout: TimeInterval = 5,
+        timeout: TimeInterval = 15,
         bufferObserver: (@Sendable (Int, Bool) -> Void)? = nil
     ) {
         let url = URL(string: "https://http.test/\(UUID().uuidString)")!
@@ -419,15 +446,21 @@ private struct HTTPFixture: Sendable {
 }
 
 private final class HTTPStubControl: Sendable {
+    enum StopReason {
+        case cancelled, timeout
+    }
+
     struct State {
         var started = false
         var stopped = false
         var request: URLRequest?
         var loader: HTTPStubProtocol?
+        var stopReason: StopReason?
     }
     let state = Mutex(State())
     var started: Bool { state.withLock { $0.started } }
     var stopped: Bool { state.withLock { $0.stopped } }
+    var stopReason: StopReason? { state.withLock { $0.stopReason } }
     var request: URLRequest? { state.withLock { $0.request } }
 
     func send(_ data: Data) {
@@ -436,7 +469,11 @@ private final class HTTPStubControl: Sendable {
     }
 
     func expire() {
-        let loader = state.withLock { $0.stopped ? nil : $0.loader }
+        let loader = state.withLock { state -> HTTPStubProtocol? in
+            guard !state.stopped, let loader = state.loader else { return nil }
+            state.stopReason = .timeout
+            return loader
+        }
         if let loader { loader.client?.urlProtocol(loader, didFailWithError: URLError(.timedOut)) }
     }
 }
@@ -499,7 +536,14 @@ private final class HTTPStubProtocol: URLProtocol, @unchecked Sendable {
 
     override func stopLoading() {
         guard let url = request.url, let (_, control) = Self.routes.withLock({ $0[url] }) else { return }
-        control.state.withLock { $0.stopped = true; $0.loader = nil }
+        let error = task?.error as NSError?
+        let timedOut = error?.domain == NSURLErrorDomain && error?.code == NSURLErrorTimedOut
+        control.state.withLock {
+            $0.stopped = true
+            $0.loader = nil
+            if timedOut { $0.stopReason = .timeout }
+            else if $0.stopReason == nil { $0.stopReason = .cancelled }
+        }
     }
 
     private func respond(_ status: Int, headers: [String: String] = [:]) {
@@ -509,7 +553,7 @@ private final class HTTPStubProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-private func waitForHTTPCondition(timeout: Duration = .seconds(5), _ condition: @Sendable () -> Bool) async throws {
+private func waitForHTTPCondition(timeout: Duration = .seconds(3), _ condition: @Sendable () -> Bool) async throws {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: timeout)
     while !condition() {
@@ -518,7 +562,7 @@ private func waitForHTTPCondition(timeout: Duration = .seconds(5), _ condition: 
     }
 }
 
-private func stallWatchdog(_ control: HTTPStubControl, timeout: Duration = .seconds(5)) -> Task<Void, any Error> {
+private func stallWatchdog(_ control: HTTPStubControl, timeout: Duration = .seconds(10)) -> Task<Void, any Error> {
     Task {
         try await Task.sleep(for: timeout)
         control.expire()
