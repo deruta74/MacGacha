@@ -8,11 +8,7 @@ public actor ChunkFetcher {
     private let http: any HTTPClient
     private let retry: RetryPolicy
     private let sleeper: any Sleeper
-    private struct Part: Hashable {
-        let fs: ContainedFileSystem
-        let path: SafeRelativePath
-    }
-    private var activeParts = Set<Part>()
+    private var activeParts = Set<String>()
 
     public init(http: any HTTPClient, retry: RetryPolicy, sleeper: any Sleeper) {
         self.http = http
@@ -22,12 +18,13 @@ public actor ChunkFetcher {
 
     /// All part access traverses checked ancestors within fs; missing parents are created.
     /// Progress is the current number of transfer bytes on disk; a restart may reset it to zero.
+    /// Concurrent requests for case variants of the same absolute part path throw .busy.
     public func fetch(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath,
         progress: @Sendable (Int64) -> Void) async throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         try object.validate()
-        let key = Part(fs: fs, path: part)
-        guard activeParts.insert(key).inserted else { throw LauncherError.io("Chunk part is already being fetched") }
+        let key = fs.caseFoldedPathKey(for: part)
+        guard activeParts.insert(key).inserted else { throw LauncherError.busy("Chunk part is already being fetched") }
         defer { activeParts.remove(key) }
         for attempt in 1...retry.maxAttempts {
             guard !Task.isCancelled else { throw LauncherError.cancelled }

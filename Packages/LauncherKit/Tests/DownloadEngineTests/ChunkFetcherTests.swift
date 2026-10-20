@@ -280,17 +280,82 @@ func zstdCodecReportsUnsupported() throws {
 @Test
 func identityDecoderCopiesAtOffsetAndChecksSize() throws {
     let directory = try TempDir()
-    let transferred = directory.url.appendingPathComponent("object")
-    try Data("hello".utf8).write(to: transferred)
-    let target = directory.url.appendingPathComponent("output")
-    try Data("XX".utf8).write(to: target)
-    let output = try FileHandle(forWritingTo: target)
+    let outside = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let part = try SafeRelativePath("object")
+    let target = try SafeRelativePath("output")
+    try fs.writeAtomically(Data("hello".utf8), to: part)
+    try fs.writeAtomically(Data("XX".utf8), to: target)
+    let transferred = try fs.openForReading(at: part)
+    defer { try? transferred.close() }
+    // The decoder must use this descriptor even if the old pathname now points outside.
+    try fs.removeFile(at: part)
+    let control = outside.url.appendingPathComponent("control")
+    try Data("secret".utf8).write(to: control)
+    try FileManager.default.createSymbolicLink(at: part.resolved(against: directory.url), withDestinationURL: control)
+    let output = try fs.openForWriting(at: target, truncate: false)
     defer { try? output.close() }
+    try transferred.seek(toOffset: 3)
     try ChunkCodec.identity.decoder().decode(transferred, expectedSize: 5, into: output, at: 2)
-    #expect(try Data(contentsOf: target) == Data("XXhello".utf8))
-    #expect(throws: LauncherError.sizeMismatch(path: transferred.path, expected: 4, actual: 5)) {
+    #expect(try fs.readFile(at: target, maxBytes: 20) == Data("XXhello".utf8))
+    #expect(throws: LauncherError.sizeMismatch(path: "transferred object", expected: 4, actual: 5)) {
         try IdentityDecoder().decode(transferred, expectedSize: 4, into: output, at: 0)
     }
+    try transferred.seek(toOffset: 0)
+    #expect(try transferred.read(upToCount: 5) == Data("hello".utf8))
+    try output.write(contentsOf: Data("!".utf8))
+    #expect(try fs.readFile(at: target, maxBytes: 20) == Data("XXhello!".utf8))
+    #expect(try Data(contentsOf: control) == Data("secret".utf8))
+}
+
+@Test
+func identityDecoderRejectsInvalidRangesAndSameFileHandles() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let path = try SafeRelativePath("object")
+    try fs.writeAtomically(Data("hello".utf8), to: path)
+    let source = try fs.openForReading(at: path)
+    defer { try? source.close() }
+    let output = try fs.openForWriting(at: try SafeRelativePath("output"), truncate: false)
+    defer { try? output.close() }
+    let decoder = IdentityDecoder()
+    for (size, offset) in [(Int64(-1), Int64(0)), (5, -1), (5, Int64.max)] {
+        #expect(throws: LauncherError.io("Invalid decode range")) {
+            try decoder.decode(source, expectedSize: size, into: output, at: offset)
+        }
+    }
+    let sameFile = try fs.openForWriting(at: path, truncate: false)
+    defer { try? sameFile.close() }
+    #expect(throws: LauncherError.io("Decoder requires distinct regular files")) {
+        try decoder.decode(source, expectedSize: 5, into: sameFile, at: 0)
+    }
+    #expect(try fs.readFile(at: path, maxBytes: 5) == Data("hello".utf8))
+}
+
+@Test(arguments: [false, true])
+func concurrentCaseVariantPartsAreBusy(varyRoot: Bool) async throws {
+    let directory = try TempDir()
+    let root = directory.url.appendingPathComponent("InstallRoot")
+    let fs = try ContainedFileSystem(root: root)
+    let otherFS = varyRoot ? try ContainedFileSystem(root: directory.url.appendingPathComponent("INSTALLROOT/./")) : fs
+    let state = FetchTestBodyState(pieces: [], stall: true)
+    let client = FixedFetchClient(head: HTTPResponseHead(status: 200, contentLength: 3), state: state)
+    let fetcher = testFetcher(client)
+    let object = fetchObject(Data("abc".utf8))
+    let first = Task { try await fetcher.fetch(object, fs: fs, part: SafeRelativePath("Parts/Object.part"), progress: { _ in }) }
+    defer { first.cancel() }
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(5))
+    while state.calls == 0 && clock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+    try #require(state.calls == 1)
+    let second = Task { try await fetcher.fetch(object, fs: otherFS, part: SafeRelativePath("parts/OBJECT.PART"), progress: { _ in }) }
+    let watchdog = Task { try await Task.sleep(for: .seconds(5)); second.cancel() }
+    defer { second.cancel(); watchdog.cancel() }
+    await #expect(throws: LauncherError.busy("Chunk part is already being fetched")) { try await second.value }
+    #expect(state.calls == 1)
+    first.cancel()
+    await #expect(throws: LauncherError.cancelled) { try await first.value }
+    #expect(state.cancelled)
 }
 
 private func fetchBlob() -> Data { Data((0..<200_000).map { UInt8($0 % 251) }) }

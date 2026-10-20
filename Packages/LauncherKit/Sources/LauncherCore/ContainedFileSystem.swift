@@ -22,6 +22,13 @@ public struct ContainedFileSystem: Sendable, Hashable {
         self.root = root
     }
 
+    /// A conservative in-process reservation key, including the standardized root.
+    /// This folds case even on case-sensitive volumes; it is never used for file access.
+    package func caseFoldedPathKey(for path: SafeRelativePath) -> String {
+        path.resolved(against: root.standardizedFileURL).path
+            .folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
+    }
+
     /// Creates missing parent directories as well as the requested directory.
     public func createDirectory(at path: SafeRelativePath) throws {
         guard let fd = try directory(path.components, create: true) else { throw LauncherError.io("Cannot create directory") }

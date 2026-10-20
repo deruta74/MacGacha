@@ -79,6 +79,7 @@ public struct DiagnosticBundle: Sendable {
                 throw LauncherError.http(status: status, url: safeURL)
             case .transport(let message): throw LauncherError.transport(Redactor.redact(message))
             case .io(let message): throw LauncherError.io(Redactor.redact(message))
+            case .busy(let message): throw LauncherError.busy(Redactor.redact(message))
             case .fileTooLarge(let path, let limit):
                 throw LauncherError.fileTooLarge(path: Redactor.redact(path), limit: limit)
             case .consentRequired(let component): throw LauncherError.consentRequired(Redactor.redact(component))
