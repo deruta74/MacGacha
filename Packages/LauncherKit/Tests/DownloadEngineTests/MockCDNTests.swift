@@ -92,7 +92,7 @@ func temporaryDirectoryCleansUp() throws {
     #expect(!FileManager.default.fileExists(atPath: url.path))
 }
 
-private func collectMockBody(_ stream: AsyncThrowingStream<Data, any Error>) async throws -> Data {
+private func collectMockBody(_ stream: HTTPBody) async throws -> Data {
     var result = Data()
     for try await chunk in stream { result.append(chunk) }
     return result

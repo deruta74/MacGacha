@@ -2,7 +2,7 @@ import Foundation
 import Synchronization
 import Testing
 import LauncherCore
-import DownloadEngine
+@testable import DownloadEngine
 
 @Test
 func urlSessionStreamsAndParsesResponseHeaders() async throws {
@@ -170,8 +170,102 @@ func urlSessionParsesUnknownTotalsAndRetryAfterDates() async throws {
     for try await _ in rangeBody {}
 }
 
+@Test
+func urlSessionSlowConsumerHasLosslessBoundedBuffering() async throws {
+    let pieceSize = 65_536
+    let highWaterMark = 4 * pieceSize
+    let lowWaterMark = pieceSize
+    let pieces = (0..<64).map { Data(repeating: UInt8($0), count: pieceSize) }
+    var expected = Data()
+    for piece in pieces { expected.append(piece) }
+    let metrics = HTTPBufferMetrics()
+    let fixture = HTTPFixture(.pacedResponse(pieces), highWaterMark: highWaterMark, lowWaterMark: lowWaterMark,
+        bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
+    defer { fixture.close() }
+    let (head, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+    #expect(head.status == 200)
+    var received = Data()
+    var largestPiece = 0
+    for try await piece in body {
+        received.append(piece)
+        largestPiece = max(largestPiece, piece.count)
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(received == expected)
+    #expect(metrics.snapshot.peak <= highWaterMark + largestPiece)
+    #expect(metrics.snapshot.suspensions > 0)
+    #expect(metrics.snapshot.resumptions > 0)
+    #expect(metrics.snapshot.bytes == 0)
+}
+
+@Test
+func urlSessionCancellationWhileBackpressuredStopsTask() async throws {
+    let pieces = (0..<64).map { Data(repeating: UInt8($0), count: 65_536) }
+    let metrics = HTTPBufferMetrics()
+    let fixture = HTTPFixture(.pacedResponse(pieces), highWaterMark: 262_144, lowWaterMark: 65_536,
+        bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
+    defer { fixture.close() }
+    let (_, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+    let task = Task {
+        for try await _ in body { try await Task.sleep(for: .seconds(30)) }
+    }
+    defer { task.cancel() }
+    try await waitForHTTPCondition { metrics.snapshot.suspended }
+    task.cancel()
+    do {
+        try await task.value
+        Issue.record("The cancelled consumer must throw")
+    } catch is CancellationError {
+    } catch LauncherError.cancelled {}
+    try await waitForHTTPCondition { metrics.snapshot.bytes == 0 }
+    try await waitForHTTPCondition { fixture.control.stopped }
+}
+
+@Test
+func urlSessionBackpressureHandlesAnOversizedCallback() async throws {
+    let data = Data((0..<(1 << 20)).map { UInt8($0 % 251) })
+    let metrics = HTTPBufferMetrics()
+    let fixture = HTTPFixture(.response(200, [
+        "Content-Type": "application/octet-stream", "Content-Length": "\(data.count)",
+    ], [data]), highWaterMark: 65_536, lowWaterMark: 16_384,
+        bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
+    defer { fixture.close() }
+    let (_, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+    var received = Data()
+    for try await piece in body {
+        #expect(piece.count <= 65_536)
+        received.append(piece)
+        try await Task.sleep(for: .milliseconds(2))
+    }
+    #expect(received == data)
+    #expect(metrics.snapshot.peak <= 65_536)
+    #expect(metrics.snapshot.suspensions > 0)
+}
+
+private final class HTTPBufferMetrics: Sendable {
+    struct Snapshot {
+        var bytes = 0
+        var peak = 0
+        var suspended = false
+        var suspensions = 0
+        var resumptions = 0
+    }
+    private let state = Mutex(Snapshot())
+    var snapshot: Snapshot { state.withLock { $0 } }
+    func record(bytes: Int, suspended: Bool) {
+        state.withLock {
+            $0.bytes = bytes
+            $0.peak = max($0.peak, bytes)
+            if suspended && !$0.suspended { $0.suspensions += 1 }
+            if !suspended && $0.suspended { $0.resumptions += 1 }
+            $0.suspended = suspended
+        }
+    }
+}
+
 private enum HTTPStubMode: Sendable {
     case response(Int, [String: String], [Data])
+    case pacedResponse([Data])
     case failBeforeResponse, failAfterResponse, stallBeforeResponse, stallAfterResponse, nonHTTP
 }
 
@@ -181,7 +275,12 @@ private struct HTTPFixture: Sendable {
     let client: URLSessionHTTPClient
     let control: HTTPStubControl
 
-    init(_ mode: HTTPStubMode) {
+    init(
+        _ mode: HTTPStubMode,
+        highWaterMark: Int = 16 << 20,
+        lowWaterMark: Int = 4 << 20,
+        bufferObserver: (@Sendable (Int, Bool) -> Void)? = nil
+    ) {
         let url = URL(string: "https://http.test/\(UUID().uuidString)")!
         let control = HTTPStubControl()
         self.url = url
@@ -192,7 +291,8 @@ private struct HTTPFixture: Sendable {
         configuration.timeoutIntervalForRequest = 2
         configuration.timeoutIntervalForResource = 2
         session = URLSession(configuration: configuration)
-        client = URLSessionHTTPClient(session: session)
+        client = URLSessionHTTPClient(session: session, highWaterMark: highWaterMark,
+            lowWaterMark: lowWaterMark, bufferObserver: bufferObserver)
     }
 
     func close() {
@@ -232,6 +332,17 @@ private final class HTTPStubProtocol: URLProtocol, @unchecked Sendable {
         }
         control.state.withLock { $0.started = true; $0.request = request; $0.loader = self }
         switch mode {
+        case .pacedResponse(let chunks):
+            respond(200, headers: ["Content-Type": "application/octet-stream",
+                "Content-Length": "\(chunks.reduce(0) { $0 + $1.count })"])
+            DispatchQueue.global(qos: .utility).async { [self] in
+                for chunk in chunks {
+                    guard !control.stopped else { return }
+                    client?.urlProtocol(self, didLoad: chunk)
+                    Thread.sleep(forTimeInterval: 0.001)
+                }
+                if !control.stopped { client?.urlProtocolDidFinishLoading(self) }
+            }
         case .response(let status, let headers, let chunks):
             respond(status, headers: headers)
             for data in chunks { client?.urlProtocol(self, didLoad: data) }

@@ -35,7 +35,7 @@ public final class MockCDN: HTTPClient, @unchecked Sendable {
     }
 
     public func get(_ url: URL, byteRangeFrom offset: Int64?) async throws
-        -> (HTTPResponseHead, AsyncThrowingStream<Data, any Error>) {
+        -> (HTTPResponseHead, HTTPBody) {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         let path = Self.normalized(url.path)
         let (data, fault) = state.withLock { state in
@@ -62,7 +62,7 @@ public final class MockCDN: HTTPClient, @unchecked Sendable {
         let dropAfter: Int?
         if case .dropAfter(let bytes) = fault { dropAfter = max(0, bytes) } else { dropAfter = nil }
         let source = MockBody(data: body, dropAfter: dropAfter)
-        let stream = AsyncThrowingStream<Data, any Error>(unfolding: { try await source.next() })
+        let stream = HTTPBody(next: { try await source.next() })
         return (HTTPResponseHead(status: start == nil ? 200 : 206, contentLength: Int64(body.count),
             contentRange: range, totalLength: Int64(data.count)), stream)
     }
@@ -72,10 +72,10 @@ public final class MockCDN: HTTPClient, @unchecked Sendable {
     }
 
     private static func response(status: Int, data: Data, totalLength: Int64? = nil, retryAfter: Duration? = nil)
-        -> (HTTPResponseHead, AsyncThrowingStream<Data, any Error>) {
+        -> (HTTPResponseHead, HTTPBody) {
         let source = MockBody(data: data, dropAfter: nil)
         return (HTTPResponseHead(status: status, contentLength: Int64(data.count), totalLength: totalLength,
-            retryAfter: retryAfter), AsyncThrowingStream(unfolding: { try await source.next() }))
+            retryAfter: retryAfter), HTTPBody(next: { try await source.next() }))
     }
 }
 

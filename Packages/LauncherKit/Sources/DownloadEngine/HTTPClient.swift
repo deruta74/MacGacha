@@ -64,5 +64,5 @@ public struct HTTPResponseHead: Sendable {
 
 public protocol HTTPClient: Sendable {
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws
-        -> (HTTPResponseHead, AsyncThrowingStream<Data, any Error>)
+        -> (HTTPResponseHead, HTTPBody)
 }
