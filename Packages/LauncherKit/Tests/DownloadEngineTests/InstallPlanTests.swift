@@ -4,7 +4,7 @@
 import Foundation
 import Testing
 import LauncherCore
-import DownloadEngine
+@testable import DownloadEngine
 
 @Test
 func planRejectsGapOverlapAndShortCoverage() throws {
@@ -59,21 +59,95 @@ func planRejectsOrphanObject() throws {
 
 @Test
 func planDigestIsStableAcrossKeyOrder() throws {
-    let first = planObject(id: "first")
-    let second = planObject(id: "second")
-    let files = try [planFile(path: "a", extents: [planExtent(id: "first")]), planFile(path: "b", extents: [planExtent(id: "second")])]
+    let ids = (0..<24).map { String(format: "object-%02d", $0) }
+    let files = try ids.map { try planFile(path: $0, extents: [planExtent(id: $0)]) }
     var forward: [String: ChunkObject] = [:]
-    forward["first"] = first; forward["second"] = second
+    for id in ids { forward[id] = planObject(id: id) }
     var reverse: [String: ChunkObject] = [:]
-    reverse["second"] = second; reverse["first"] = first
+    for id in ids.reversed() { reverse[id] = planObject(id: id) }
     let a = try makePlan(objects: forward, files: files)
     let b = try makePlan(objects: reverse, files: files)
     #expect(a.planDigest == b.planDigest)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
-    #expect(a.planDigest == planDigest(try encoder.encode(a), algorithm: .sha256))
+    let encoded = try encoder.encode(a)
+    #expect(encoded == (try encoder.encode(b)))
+    #expect(a.planDigest == planDigest(encoded, algorithm: .sha256))
+    let json = String(decoding: encoded, as: UTF8.self)
+    let keyPositions = try ids.map { id in try #require(json.range(of: "\"\(id)\":")).lowerBound }
+    #expect(keyPositions == keyPositions.sorted())
+    #expect(json.hasPrefix("{\"deletions\":[],\"files\":"))
     let roundTrip = try JSONDecoder().decode(InstallPlan.self, from: encoder.encode(a))
     #expect(roundTrip.planDigest == a.planDigest)
+}
+
+@Test
+func planRejectsAncestorDestinations() throws {
+    for paths in [["Data", "data/file.bin"], ["data/file.bin", "Data"], ["Straße", "STRASSE/file.bin"]] {
+        let files = try paths.map { try planFile(path: $0, extents: [planExtent()]) }
+        let plan = try makePlan(objects: ["object": planObject()], files: files)
+        #expect(throws: LauncherError.io("invalid plan: file path is an ancestor of another destination")) { try plan.validate() }
+    }
+    try makePlan(objects: ["object": planObject()], files: [
+        planFile(path: "Data", extents: [planExtent()]), planFile(path: "Data2/file.bin", extents: [planExtent()]),
+    ]).validate()
+}
+
+@Test
+func identityObjectsRequireMatchingTransferAndDecodedMetadata() throws {
+    let reference = planObject()
+    let sizeMismatch = ChunkObject(id: "object", urls: reference.urls, transferSize: 2,
+        decodedSize: 3, decodedDigest: reference.decodedDigest)
+    #expect(throws: LauncherError.io("invalid plan: identity object sizes differ")) { try sizeMismatch.validate() }
+    for digest in [planDigest(Data("xyz".utf8)), planDigest(Data("abc".utf8), algorithm: .sha256)] {
+        let mismatch = ChunkObject(id: "object", urls: reference.urls, transferSize: 3, transferDigest: digest,
+            decodedSize: 3, decodedDigest: reference.decodedDigest)
+        #expect(throws: LauncherError.io("invalid plan: identity object digests differ")) { try mismatch.validate() }
+    }
+    try ChunkObject(id: "object", urls: reference.urls, transferSize: 3,
+        decodedSize: 3, decodedDigest: reference.decodedDigest).validate()
+    try ChunkObject(id: "object", urls: reference.urls, transferSize: 2, transferDigest: planDigest(Data("zz".utf8)),
+        decodedSize: 3, decodedDigest: reference.decodedDigest, codec: .zstd).validate()
+}
+
+@Test
+func chunkObjectsRequirePositiveSizes() throws {
+    for (transfer, decoded) in [(Int64(0), Int64(3)), (3, 0), (0, 0), (-1, 3), (3, -1)] {
+        let object = ChunkObject(id: "object", urls: planObject().urls, transferSize: transfer,
+            decodedSize: decoded, decodedDigest: planObject().decodedDigest, codec: .zstd)
+        #expect(throws: LauncherError.io("invalid plan: object sizes must be positive")) { try object.validate() }
+    }
+}
+
+@Test
+func extentDigestsMustMatchReferencedObjects() throws {
+    let object = planObject()
+    for digest in [planDigest(Data("xyz".utf8)), planDigest(Data("abc".utf8), algorithm: .sha256)] {
+        for source in [ExtentSource.chunk(id: "object"), .local(path: try SafeRelativePath("old"), offset: 0)] {
+            let isLocal: Bool
+            if case .local = source { isLocal = true } else { isLocal = false }
+            let extent = Extent(source: source, fileOffset: 0, length: 3, digest: digest,
+                fallbackChunkID: isLocal ? "object" : nil)
+            let plan = try makePlan(objects: ["object": object], files: [planFile(extents: [extent])])
+            #expect(throws: LauncherError.io("invalid plan: extent and object decoded digest mismatch")) { try plan.validate() }
+        }
+    }
+    let fallbackOnChunk = Extent(source: .chunk(id: "object"), fileOffset: 0, length: 3,
+        digest: object.decodedDigest, fallbackChunkID: "object")
+    let plan = try makePlan(objects: ["object": object], files: [planFile(extents: [fallbackOnChunk])])
+    #expect(throws: LauncherError.io("invalid plan: fallback is only allowed on local extents")) { try plan.validate() }
+}
+
+@Test
+func sha256ObjectsAndExtentsValidate() throws {
+    let digest = planDigest(Data("abc".utf8), algorithm: .sha256)
+    let object = ChunkObject(id: "object", urls: planObject().urls, transferSize: 3,
+        transferDigest: digest, decodedSize: 3, decodedDigest: digest)
+    let chunk = Extent(source: .chunk(id: "object"), fileOffset: 0, length: 3, digest: digest)
+    let local = Extent(source: .local(path: try SafeRelativePath("old"), offset: 0), fileOffset: 0,
+        length: 3, digest: digest, fallbackChunkID: "object")
+    try makePlan(objects: ["object": object], files: [planFile(path: "chunk", extents: [chunk]),
+        planFile(path: "local", extents: [local])]).validate()
 }
 
 @Test

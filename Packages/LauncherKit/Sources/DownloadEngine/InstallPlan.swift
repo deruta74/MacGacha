@@ -32,7 +32,11 @@ public struct ChunkObject: Codable, Sendable, Hashable {
 
     func validate() throws {
         guard !id.isEmpty else { throw invalidPlan("empty object id") }
-        guard transferSize >= 0, decodedSize >= 0 else { throw invalidPlan("negative object size") }
+        guard transferSize > 0, decodedSize > 0 else { throw invalidPlan("object sizes must be positive") }
+        if codec == .identity {
+            guard transferSize == decodedSize else { throw invalidPlan("identity object sizes differ") }
+            if let transferDigest, transferDigest != decodedDigest { throw invalidPlan("identity object digests differ") }
+        }
         guard !urls.isEmpty, urls.allSatisfy({
             ["http", "https"].contains($0.scheme?.lowercased() ?? "") && $0.host?.isEmpty == false
                 && $0.user == nil && $0.password == nil
@@ -129,7 +133,8 @@ public struct InstallPlan: Codable, Sendable {
                 covered = end
                 switch extent.source {
                 case .chunk(let id):
-                    try validateReference(id, length: extent.length)
+                    guard extent.fallbackChunkID == nil else { throw invalidPlan("fallback is only allowed on local extents") }
+                    try validateReference(id, length: extent.length, digest: extent.digest)
                     referenced.insert(id)
                 case .local(let path, let offset):
                     try validateManifestPath(path)
@@ -138,11 +143,22 @@ public struct InstallPlan: Codable, Sendable {
                     }
                 }
                 if let fallback = extent.fallbackChunkID {
-                    try validateReference(fallback, length: extent.length)
+                    try validateReference(fallback, length: extent.length, digest: extent.digest)
                     referenced.insert(fallback)
                 }
             }
             guard covered == file.size else { throw invalidPlan("short file coverage") }
+        }
+        // Test component prefixes rather than string prefixes (Data and Data2 are distinct).
+        for file in files {
+            var ancestor = ""
+            for component in file.path.components.dropLast() {
+                if !ancestor.isEmpty { ancestor += "/" }
+                ancestor += component
+                if destinations.contains(caseFold(ancestor)) {
+                    throw invalidPlan("file path is an ancestor of another destination")
+                }
+            }
         }
         var deleted = Set<String>()
         for path in deletions {
@@ -154,9 +170,10 @@ public struct InstallPlan: Codable, Sendable {
         guard referenced == Set(objects.keys) else { throw invalidPlan("orphan object") }
     }
 
-    private func validateReference(_ id: String, length: Int64) throws {
+    private func validateReference(_ id: String, length: Int64, digest: Digest) throws {
         guard let object = objects[id] else { throw invalidPlan("missing object") }
         guard object.decodedSize == length else { throw invalidPlan("extent and object decoded size mismatch") }
+        guard object.decodedDigest == digest else { throw invalidPlan("extent and object decoded digest mismatch") }
     }
 }
 
@@ -168,7 +185,11 @@ private func validateManifestPath(_ path: SafeRelativePath) throws {
 }
 
 private func pathKey(_ path: SafeRelativePath) -> String {
-    path.description.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
+    caseFold(path.description)
+}
+
+private func caseFold(_ value: String) -> String {
+    value.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
 }
 
 func invalidPlan(_ reason: String) -> LauncherError { .io("invalid plan: " + reason) }
