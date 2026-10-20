@@ -6,6 +6,7 @@ public struct DiagnosticBundle: Sendable {
     private let logDirectory: URL
     private let runner: any ProcessRunner
     private let openLog: @Sendable (URL) -> (fd: Int32, error: Int32)
+    private let logByteLimit: Int
 
     public init(logDirectory: URL, runner: any ProcessRunner) {
         self.init(logDirectory: logDirectory, runner: runner, openLog: {
@@ -15,10 +16,13 @@ public struct DiagnosticBundle: Sendable {
         })
     }
 
-    init(logDirectory: URL, runner: any ProcessRunner, openLog: @escaping @Sendable (URL) -> (fd: Int32, error: Int32)) {
+    init(logDirectory: URL, runner: any ProcessRunner, openLog: @escaping @Sendable (URL) -> (fd: Int32, error: Int32),
+        logByteLimit: Int? = nil) {
         self.logDirectory = logDirectory
         self.runner = runner
         self.openLog = openLog
+        let maximum = Self.totalLimit - Self.reportLimit
+        self.logByteLimit = min(maximum, max(0, logByteLimit ?? maximum))
     }
 
     @concurrent public func export(to zipURL: URL, systemInfo: SystemInfo, runtimes: [String: String],
@@ -137,6 +141,22 @@ public struct DiagnosticBundle: Sendable {
         return !number.isEmpty && number.first != "0" && number.utf8.allSatisfy { (48...57).contains($0) }
     }
 
+    private func logPrecedes(_ lhs: URL, _ rhs: URL) -> Bool {
+        let left = lhs.lastPathComponent
+        let right = rhs.lastPathComponent
+        let leftIsLog = isEventLog(left)
+        let rightIsLog = isEventLog(right)
+        if leftIsLog != rightIsLog { return leftIsLog }
+        guard leftIsLog else { return left < right }
+        if left == "macgacha.log" { return right != "macgacha.log" }
+        if right == "macgacha.log" { return false }
+        let leftIndex = left.dropFirst(9).dropLast(4)
+        let rightIndex = right.dropFirst(9).dropLast(4)
+        // Canonical decimal indices compare by digit count, then digits, without integer overflow.
+        if leftIndex.count != rightIndex.count { return leftIndex.count < rightIndex.count }
+        return leftIndex.lexicographicallyPrecedes(rightIndex)
+    }
+
     private func copyLogs(to destination: URL) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -153,12 +173,12 @@ public struct DiagnosticBundle: Sendable {
             report.enumerationStopped = report.entries == Self.entryLimit && enumerator.nextObject() != nil
             var count = 0
             var totalBytes = 0
-            let logsLimit = Self.totalLimit - Self.reportLimit
+            let logsLimit = logByteLimit
             let decoder = JSONDecoder()
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             let timestamp = ISO8601DateFormatter()
-            for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            for file in files.sorted(by: logPrecedes) {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 let name = file.lastPathComponent
                 guard isEventLog(name) else {

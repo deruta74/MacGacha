@@ -474,6 +474,35 @@ func fiveMiBOfRecordsAreStructurallyReredactedWithinCoarseBudget() async throws 
     #expect(start.duration(to: clock.now) < .seconds(60))
 }
 
+@Test(arguments: [2, 3, 4])
+func bundlePrioritizesActiveThenNumericRotationsWithinBudget(fileBudget: Int) async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logs = root.appendingPathComponent("logs")
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    let record = try diagnosticRecord(message: "record")
+    let expectedOrder = ["macgacha.log", "macgacha.1.log", "macgacha.2.log", "macgacha.10.log"]
+    for name in expectedOrder.reversed() { try record.write(to: logs.appendingPathComponent(name)) }
+    let opened = Mutex<[String]>([])
+    let runner = DiagnosticTestRunner { arguments in
+        let stagedLogs = URL(fileURLWithPath: arguments[3]).appendingPathComponent("logs")
+        let names = try FileManager.default.contentsOfDirectory(atPath: stagedLogs.path)
+        #expect(Set(names) == Set(expectedOrder.prefix(fileBudget)))
+        for name in names { #expect(try Data(contentsOf: stagedLogs.appendingPathComponent(name)) == record) }
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    let bundle = DiagnosticBundle(logDirectory: logs, runner: runner, openLog: { file in
+        opened.withLock { $0.append(file.lastPathComponent) }
+        let fd = open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        let openError = errno
+        return (fd, openError)
+    }, logByteLimit: fileBudget * record.count)
+    try await bundle.export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(),
+        runtimes: [:], failureStage: nil)
+    #expect(opened.withLock { $0 } == Array(expectedOrder.prefix(fileBudget)))
+}
+
 private func diagnosticRecord(message: String, metadata: [String: String] = [:]) throws -> Data {
     var data = try JSONSerialization.data(withJSONObject: ["ts": "2026-10-20T12:00:00Z", "level": "info",
         "category": "test", "message": message, "metadata": metadata], options: [.sortedKeys, .withoutEscapingSlashes])
