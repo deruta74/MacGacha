@@ -12,8 +12,6 @@ targets:
     deploymentTarget: "27.0"
     sources:
       - path: App
-    resources:
-      - path: App/Resources/Credits.rtf
     dependencies:
       - package: LauncherKit
         product: LauncherCore
