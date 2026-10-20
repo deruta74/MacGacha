@@ -158,7 +158,7 @@ func manifestRejectsDuplicatesAndOversizedFiles() throws {
     let handle = try FileHandle(forWritingTo: file)
     try handle.truncate(atOffset: 2 << 20)
     try handle.close()
-    #expect(throws: LauncherError.io("File exceeds read limit")) { try RuntimeManifest.load(from: file) }
+    #expect(throws: LauncherError.fileTooLarge(path: file.path, limit: 1 << 20)) { try RuntimeManifest.load(from: file) }
 }
 
 private func manifestFixtureData(_ modify: (inout [[String: Any]]) -> Void = { _ in }) throws -> Data {

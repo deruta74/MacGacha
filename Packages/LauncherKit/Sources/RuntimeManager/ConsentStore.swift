@@ -82,7 +82,7 @@ public actor ConsentStore {
     private func load() throws -> [ConsentRecord] {
         let data: Data?
         do { data = try RuntimeJSONFile.read(url, root: root, limit: 65_536) }
-        catch LauncherError.io("File exceeds read limit") { throw Corruption.invalidRecords }
+        catch LauncherError.fileTooLarge { throw Corruption.invalidRecords }
         guard let data else { return [] }
         do {
             let records = try JSONDecoder().decode([ConsentRecord].self, from: data)

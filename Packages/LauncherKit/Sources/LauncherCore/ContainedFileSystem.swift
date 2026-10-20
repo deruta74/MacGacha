@@ -37,7 +37,8 @@ public struct ContainedFileSystem: Sendable {
 
     /// Atomically moves a regular file or directory without replacing the destination.
     /// Creates missing destination parents and fsyncs both parents after the rename.
-    public func moveItem(at source: SafeRelativePath, to destination: SafeRelativePath) throws {
+    /// Cleanup may explicitly move a non-regular source leaf itself; ancestors are always checked.
+    public func moveItem(at source: SafeRelativePath, to destination: SafeRelativePath, allowingNonRegularSource: Bool = false) throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard let parent = try directory(Array(source.components.dropLast()), create: false) else {
             throw LauncherError.io("Move source is missing")
@@ -45,7 +46,8 @@ public struct ContainedFileSystem: Sendable {
         defer { close(parent) }
         let name = source.components.last!
         guard let info = try entry(name, parent: parent) else { throw LauncherError.io("Move source is missing") }
-        guard info.st_mode & S_IFMT == S_IFDIR || info.st_mode & S_IFMT == S_IFREG else {
+        let type = info.st_mode & S_IFMT
+        guard type == S_IFDIR || type == S_IFREG || allowingNonRegularSource else {
             throw LauncherError.unsafePath(display(source.components))
         }
         guard let target = try directory(Array(destination.components.dropLast()), create: true) else {
@@ -114,7 +116,10 @@ public struct ContainedFileSystem: Sendable {
         guard fstat(fd, &opened) == 0, opened.st_mode & S_IFMT == S_IFREG else {
             throw LauncherError.unsafePath(display(path.components))
         }
-        guard opened.st_size >= 0, opened.st_size <= maxBytes else { throw LauncherError.io("File exceeds read limit") }
+        guard opened.st_size >= 0 else { throw LauncherError.io("Invalid file size") }
+        guard opened.st_size <= maxBytes else {
+            throw LauncherError.fileTooLarge(path: display(path.components), limit: maxBytes)
+        }
         var remaining = Int(opened.st_size)
         var result = Data()
         var buffer = [UInt8](repeating: 0, count: 65_536)

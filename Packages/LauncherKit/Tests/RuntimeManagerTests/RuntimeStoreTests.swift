@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 import LauncherCore
@@ -9,7 +10,7 @@ func storeListsInstalledComponents() throws {
     let directory = try TempDir()
     let paths = AppPaths(root: directory.url)
     let store = RuntimeStore(paths: paths)
-    #expect(try store.installed().components.isEmpty)
+    #expect(try store.installed().isEmpty)
     let wine = try InstalledComponent(kind: .wine, version: "11.0", installedAt: Date(timeIntervalSince1970: 10), source: .download)
     let ninthWine = try InstalledComponent(kind: .wine, version: "9.0", installedAt: Date(timeIntervalSince1970: 1), source: .download)
     let earlierWine = try InstalledComponent(kind: .wine, version: "10.0", installedAt: Date(timeIntervalSince1970: 5), source: .download)
@@ -18,9 +19,9 @@ func storeListsInstalledComponents() throws {
     try writeRuntimeMarker(earlierWine, paths: paths)
     try writeRuntimeMarker(ninthWine, paths: paths)
     try writeRuntimeMarker(dxmt, paths: paths)
-    #expect(try store.installed().components == [dxmt, ninthWine, earlierWine, wine])
+    #expect(try store.installed() == [dxmt, ninthWine, earlierWine, wine])
     try store.remove(dxmt)
-    #expect(try store.installed().components == [ninthWine, earlierWine, wine])
+    #expect(try store.installed() == [ninthWine, earlierWine, wine])
     try store.remove(dxmt)
 }
 
@@ -55,7 +56,7 @@ func runtimeDiscoverySkipsMarkedInstallerStagingDirectories() throws {
         try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
         try JSONEncoder().encode(valid).write(to: staged.appendingPathComponent(".macgacha-component.json"))
     }
-    #expect(try RuntimeStore(paths: paths).installed().components == [valid])
+    #expect(try RuntimeStore(paths: paths).installed() == [valid])
 }
 
 @Test
@@ -69,7 +70,7 @@ func runtimeStoreRefusesRedirectedRootForDeletionAndDiscovery() throws {
     let alias = directory.url.appendingPathComponent("redirected-root")
     try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: outside.url)
     let store = RuntimeStore(paths: AppPaths(root: alias))
-    do { _ = try store.installed().components; Issue.record("A redirected root must not be enumerated") }
+    do { _ = try store.installed(); Issue.record("A redirected root must not be enumerated") }
     catch LauncherError.unsafePath {}
     do { try store.remove(record); Issue.record("A redirected root must not be deleted through") }
     catch LauncherError.unsafePath {}
@@ -89,9 +90,11 @@ func runtimeStoreRefusesAncestorSymlinksBelowRoot() throws {
     let paths = AppPaths(root: directory.url)
     try FileManager.default.createSymbolicLink(at: paths.runtimes, withDestinationURL: outsidePaths.runtimes)
     let store = RuntimeStore(paths: paths)
-    do { _ = try store.installed().components; Issue.record("Discovery must refuse a symlink below the root") }
+    do { _ = try store.installed(); Issue.record("Discovery must refuse a symlink below the root") }
     catch LauncherError.unsafePath {}
     do { try store.remove(record); Issue.record("Removal must refuse a symlink below the root") }
+    catch LauncherError.unsafePath {}
+    do { try store.sweepStaging(); Issue.record("Sweep must refuse a symlink at Runtimes") }
     catch LauncherError.unsafePath {}
     #expect(try Data(contentsOf: control) == original)
 }
@@ -116,9 +119,10 @@ func runtimeStoreDoesNotFollowMarkerSymlinks() throws {
     try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
     let marker = destination.appendingPathComponent(".macgacha-component.json")
     try FileManager.default.createSymbolicLink(at: marker, withDestinationURL: target)
-    let result = try RuntimeStore(paths: paths).installed()
+    let result = try RuntimeStore(paths: paths).scan()
     #expect(result.components.isEmpty)
-    #expect(result.invalid == ["Runtimes/wine/11.0"])
+    #expect(result.invalid.map(\.rawName) == ["11.0"])
+    #expect(result.invalid.allSatisfy { $0.kind == .wine && !$0.reason.isEmpty })
     #expect(try JSONDecoder().decode(InstalledComponent.self, from: Data(contentsOf: target)) == record)
 }
 
@@ -135,10 +139,23 @@ func runtimeStoreReportsInvalidEntriesWithoutHidingValidComponents() throws {
         try FileManager.default.createDirectory(at: version, withIntermediateDirectories: true)
         try contents.write(to: version.appendingPathComponent(".macgacha-component.json"))
     }
-    let result = try RuntimeStore(paths: paths).installed()
+    let result = try RuntimeStore(paths: paths).scan()
     #expect(result.components == [valid])
-    #expect(result.invalid == ["Runtimes/wine/12.0", "Runtimes/wine/13.0", "Runtimes/wine/bad name",
-        "Runtimes/wine/bad\\name", "Runtimes/wine/\u{0301}bad"].sorted())
+    #expect(result.invalid.map(\.rawName).sorted() == ["12.0", "13.0", "bad name", "bad\\name", "\u{0301}bad"].sorted())
+    #expect(result.invalid.allSatisfy { $0.kind == .wine && !$0.reason.isEmpty })
+    let removable = result.invalid.filter { $0.rawName == "12.0" || $0.rawName == "13.0" || $0.rawName == "bad name" }
+    let store = RuntimeStore(paths: paths)
+    for entry in removable { try store.removeInvalid(entry) }
+    #expect(try store.installed() == [valid])
+    for entry in result.invalid where !removable.contains(entry) {
+        #expect(throws: LauncherError.unsafePath(entry.rawName)) { try store.removeInvalid(entry) }
+    }
+    #expect(try store.scan().invalid.count == 2)
+    let repaired = try InstalledComponent(kind: .wine, version: "12.0", installedAt: Date(), source: .download)
+    try writeRuntimeMarker(repaired, paths: paths)
+    let oldEntry = try #require(removable.first { $0.rawName == "12.0" })
+    try store.removeInvalid(oldEntry)
+    #expect(try store.installed() == [valid, repaired])
 }
 
 @Test
@@ -156,13 +173,109 @@ func cancelledRuntimeRemovalNeverLeavesAnInstalledMarker() async throws {
     }
     do { try await task.value; Issue.record("Deletion must observe cancellation") }
     catch LauncherError.cancelled {}
-    #expect(try store.installed().components.isEmpty)
+    #expect(try store.installed().isEmpty)
     let versions = try FileManager.default.contentsOfDirectory(atPath: paths.runtimes.appendingPathComponent("wine").path)
     #expect(versions.count == 1)
     #expect(versions.first?.hasPrefix(".removing-") == true)
     let staged = try #require(versions.first)
     let marker = paths.runtimes.appendingPathComponent("wine/" + staged + "/.macgacha-component.json")
     #expect(try JSONDecoder().decode(InstalledComponent.self, from: Data(contentsOf: marker)) == record)
+    try store.sweepStaging()
+    #expect(try FileManager.default.contentsOfDirectory(atPath: paths.runtimes.appendingPathComponent("wine").path).isEmpty)
+    #expect(try store.installed().isEmpty)
+}
+
+@Test(arguments: ["file", "symlink", "fifo"])
+func invalidKindEntryDoesNotHideOtherKinds(shape: String) throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let paths = AppPaths(root: directory.url)
+    let valid = try InstalledComponent(kind: .dxmt, version: "0.80", installedAt: Date(), source: .download)
+    try writeRuntimeMarker(valid, paths: paths)
+    let control = outside.url.appendingPathComponent("control")
+    let original = Data("preserved".utf8)
+    try original.write(to: control)
+    let invalid = paths.runtimes.appendingPathComponent("wine")
+    if shape == "symlink" { try FileManager.default.createSymbolicLink(at: invalid, withDestinationURL: outside.url) }
+    else if shape == "fifo" { try #require(invalid.path.withCString { mkfifo($0, 0o600) } == 0) }
+    else { try original.write(to: invalid) }
+    let result = try RuntimeStore(paths: paths).scan()
+    #expect(result.components == [valid])
+    let entry = try #require(result.invalid.count == 1 ? result.invalid.first : nil)
+    #expect(entry.kind == nil)
+    #expect(entry.rawName == "wine")
+    #expect(!entry.reason.isEmpty)
+    let store = RuntimeStore(paths: paths)
+    let pending = paths.runtimes.appendingPathComponent("dxmt/.incoming-stale", isDirectory: true)
+    try FileManager.default.createDirectory(at: pending, withIntermediateDirectories: true)
+    try store.sweepStaging()
+    #expect(!FileManager.default.fileExists(atPath: pending.path))
+    try store.removeInvalid(entry)
+    #expect(try store.installed() == [valid])
+    #expect(try store.scan().invalid.isEmpty)
+    #expect(try Data(contentsOf: control) == original)
+}
+
+@Test
+func sweepStagingIsResumableAndLeavesOtherEntriesAlone() async throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let paths = AppPaths(root: directory.url)
+    let fs = try ContainedFileSystem(root: directory.url)
+    let store = RuntimeStore(paths: paths)
+    let valid = try InstalledComponent(kind: .dxmt, version: "1.0", installedAt: Date(), source: .download)
+    try writeRuntimeMarker(valid, paths: paths)
+    let stale = ["Runtimes/wine/.incoming-old", "Runtimes/dxmt/.removing-old", "Runtimes/.removing-kind"]
+    for name in stale { try fs.writeAtomically(Data("partial".utf8), to: SafeRelativePath(name + "/partial")) }
+    try fs.writeAtomically(Data("keep".utf8), to: SafeRelativePath("Runtimes/wine/.other/control"))
+    try fs.writeAtomically(Data("keep".utf8), to: SafeRelativePath("Runtimes/wine/.incoming-file"))
+    try Data("outside".utf8).write(to: outside.url.appendingPathComponent("control"))
+    try FileManager.default.createSymbolicLink(at: paths.runtimes.appendingPathComponent("wine/.incoming-link"), withDestinationURL: outside.url)
+    let cancelled = Task {
+        try store.sweepStaging(deleting: { fs, path in
+            withUnsafeCurrentTask { $0?.cancel() }
+            try fs.removeItem(at: path)
+        })
+    }
+    do { try await cancelled.value; Issue.record("Staging sweep must propagate cancellation") }
+    catch LauncherError.cancelled {}
+    try store.sweepStaging()
+    try store.sweepStaging()
+    for name in stale { #expect(try fs.itemType(at: SafeRelativePath(name)) == nil) }
+    #expect(try store.installed() == [valid])
+    #expect(try fs.readFile(at: SafeRelativePath("Runtimes/wine/.other/control"), maxBytes: 4) == Data("keep".utf8))
+    #expect(try fs.readFile(at: SafeRelativePath("Runtimes/wine/.incoming-file"), maxBytes: 4) == Data("keep".utf8))
+    #expect(try Data(contentsOf: outside.url.appendingPathComponent("control")) == Data("outside".utf8))
+}
+
+@Test
+func runtimeScanPropagatesCancellationWithInvalidKinds() async throws {
+    let directory = try TempDir()
+    let paths = AppPaths(root: directory.url)
+    let valid = try InstalledComponent(kind: .dxmt, version: "1.0", installedAt: Date(), source: .download)
+    try writeRuntimeMarker(valid, paths: paths)
+    try Data("invalid kind".utf8).write(to: paths.runtimes.appendingPathComponent("wine"))
+    let store = RuntimeStore(paths: paths)
+    let cancelled = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        return try store.scan()
+    }
+    do { _ = try await cancelled.value; Issue.record("Scanning must propagate cancellation") }
+    catch LauncherError.cancelled {}
+}
+
+@Test
+func removeInvalidRejectsMultiComponentNamesWithoutTouchingFiles() throws {
+    let directory = try TempDir()
+    let paths = AppPaths(root: directory.url)
+    let store = RuntimeStore(paths: paths)
+    let fs = try ContainedFileSystem(root: directory.url)
+    try fs.writeAtomically(Data("preserved".utf8), to: SafeRelativePath("Runtimes/wine/control"))
+    for rawName in ["../wine", "wine/control", ".", "..", "bad\\name", "/absolute", "nul\0name"] {
+        let entry = InvalidRuntimeEntry(kind: nil, rawName: rawName, reason: "Test invalid entry")
+        #expect(throws: LauncherError.unsafePath(rawName)) { try store.removeInvalid(entry) }
+    }
+    #expect(try fs.readFile(at: SafeRelativePath("Runtimes/wine/control"), maxBytes: 100) == Data("preserved".utf8))
 }
 
 private func writeRuntimeMarker(_ record: InstalledComponent, paths: AppPaths) throws {

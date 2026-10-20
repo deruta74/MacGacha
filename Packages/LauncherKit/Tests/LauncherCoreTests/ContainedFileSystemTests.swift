@@ -16,7 +16,7 @@ func containedFileSystemReadsWritesListsAndRemoves() throws {
     #expect(try fs.itemType(at: file) == .regularFile)
     #expect(try fs.itemType(at: folder) == .directory)
     #expect(try fs.contentsOfDirectory(at: folder) == [file])
-    #expect(throws: LauncherError.io("File exceeds read limit")) { try fs.readFile(at: file, maxBytes: 2) }
+    #expect(throws: LauncherError.fileTooLarge(path: file.resolved(against: directory.url.appendingPathComponent("root")).path, limit: 2)) { try fs.readFile(at: file, maxBytes: 2) }
     #expect(throws: LauncherError.io("Negative read limit")) { try fs.readFile(at: file, maxBytes: -1) }
     try fs.removeItem(at: try SafeRelativePath("Data"))
     #expect(try fs.itemType(at: file) == nil)
@@ -130,6 +130,10 @@ func containedFileSystemMovesWithoutReplacingOrFollowingSymlinks() throws {
         do { try fs.moveItem(at: SafeRelativePath(from), to: SafeRelativePath(to)); Issue.record("Moves must refuse symlinks") }
         catch LauncherError.unsafePath {}
     }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: outside.url.path).isEmpty)
+    try fs.createDirectory(at: SafeRelativePath(".removing-link"))
+    try fs.moveItem(at: SafeRelativePath("link"), to: SafeRelativePath(".removing-link/entry"), allowingNonRegularSource: true)
+    try fs.removeItem(at: SafeRelativePath(".removing-link"))
     #expect(try FileManager.default.contentsOfDirectory(atPath: outside.url.path).isEmpty)
 }
 
