@@ -12,3 +12,7 @@ MacGacha is an unofficial, community project. It is not affiliated with, endorse
 
 - Using third-party launchers may conflict with HoYoverse's Terms of Service. Optional compatibility patches carry a risk of account bans. Use at your own risk.
 - D3DMetal and the Game Porting Toolkit are © Apple Inc. and licensed under Apple's terms. The launcher will ask you to accept those terms before it downloads the component.
+
+## License
+
+MacGacha is released under the [MIT License](LICENSE). Components the launcher downloads at runtime (Wine, DXMT, D3DMetal) and the games themselves are under their own licenses and terms.
