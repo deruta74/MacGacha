@@ -19,17 +19,26 @@ func freshInstall(id: String) async throws {
     #expect(try fs.itemType(at: opDirectory(plan)) == nil)
 }
 
-@Test
-func orphanedCompletedCleanupIsDiscardedBeforeStartingSameID() async throws {
+@Test(arguments: [false, true])
+func orphanedCompletedCleanupIsDiscardedBeforeStartingNewPlan(sameID: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
-    let old = try opPlan("orphan", [("a", "old")]); let next = try opPlan("orphan", [("a", "new")]); let cdn = MockCDN()
+    let old = try opPlan("orphan", [("a", "old")]); let next = try opPlan(sameID ? "orphan" : "next", [("a", "new")]); let cdn = MockCDN()
     let journal = try await opSeed(fs, old, commit: true)
     try await journal.append(.fileCommitted(path: old.files[0].path)); try await journal.append(.operationCompleted)
     try InstallStateMarker.clear(fs: fs, matching: old.id)
-    // Simulates cancellation during recursive completed-staging cleanup.
+    // Simulates cancellation during recursive completed-staging cleanup, with retained data.
+    let retained = try SafeRelativePath(".macgacha-staging/orphan/files/retained")
+    try fs.writeAtomically(Data(repeating: 0x61, count: 2 << 20), to: retained)
     try fs.removeFile(at: opPlanPath(old))
     opServe(cdn, next, ["new"])
-    _ = try await opCollect(opEngine(next, temp.url, cdn).run())
+    _ = try await opCollect(opEngine(next, temp.url, cdn).run(), onEvent: { (event: OperationEvent) throws in
+        if event == .phase(.checkingSpace) {
+            #expect(try fs.size(at: retained) == nil)
+            if !sameID { #expect(try fs.itemType(at: opDirectory(old)) == nil) }
+        }
+    })
+    #expect(try fs.size(at: retained) == nil)
+    if !sameID { #expect(try fs.itemType(at: opDirectory(old)) == nil) }
     #expect(try fs.readFile(at: next.files[0].path, maxBytes: 3) == Data("new".utf8))
     #expect(cdn.requestLog.count == 1)
 }
@@ -376,6 +385,118 @@ func concurrentInstallOperationsShareTheRootLockAndReleaseOnDiscard() async thro
         withExtendedLifetime(iterator) {}
     }
     _ = try await opCollect(operation.run())
+    #expect(cdn.requestLog.count == 1)
+}
+
+@Test
+func laterBatchLocalDependencyIsRejectedBeforeAnyCommit() async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let remote = try opPlan("late-dependency", [("independent", "one"), ("source", "new")])
+    let local = FileTask(path: try SafeRelativePath("consumer"), size: 3, digest: opDigest("old"), extents: [
+        Extent(source: .local(path: remote.files[1].path, offset: 0), fileOffset: 0, length: 3, digest: opDigest("old")),
+    ])
+    let plan = InstallPlan(id: remote.id, objects: remote.objects, files: remote.files + [local])
+    try fs.writeAtomically(Data("untouched".utf8), to: remote.files[0].path)
+    try fs.writeAtomically(Data("old".utf8), to: remote.files[1].path)
+    try fs.writeAtomically(Data("consumer-old".utf8), to: local.path)
+    let cdn = MockCDN(); opServe(cdn, remote, ["one", "new"])
+    await #expect(throws: LauncherError.insufficientSpace(required: (1 << 30) + 15, available: (1 << 30) + 6)) {
+        _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true)).run())
+    }
+    #expect(try fs.readFile(at: remote.files[0].path, maxBytes: 20) == Data("untouched".utf8))
+    #expect(try fs.readFile(at: remote.files[1].path, maxBytes: 20) == Data("old".utf8))
+    #expect(try fs.readFile(at: local.path, maxBytes: 20) == Data("consumer-old".utf8))
+    #expect(try OperationJournal.replay(fs: fs, path: opJournal(plan)).commitStartedBatches.isEmpty)
+    #expect(try InstallStateMarker.load(fs: fs) == nil)
+    #expect(cdn.requestLog.isEmpty)
+}
+
+@Test(arguments: [false, true])
+func stagedFilesCostNothingAndBatchMembershipSurvivesRestart(restart: Bool) async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let large = String(repeating: "large", count: 4_000)
+    let plan = try opPlan("staged-batches", [("large-first", large), ("small-a", "abc"), ("small-b", "def"), ("large-last", large)])
+    let journal = try await opSeed(fs, plan, commit: false)
+    for index in [1, 2] { try await journal.append(.fileUnstaged(path: plan.files[index].path)) }
+    for index in [0, 3] {
+        try fs.writeAtomically(Data(large.utf8), to: opStaged(plan, plan.files[index].path))
+        let object = try #require(plan.objects["staged-batches-\(index)"])
+        try await journal.append(.objectVerified(id: object.id))
+        try fs.writeAtomically(Data(large.utf8), to: SafeRelativePath(".macgacha-staging/\(plan.id)/objects/\(object.partFileName)"))
+        try fs.removeFile(at: SafeRelativePath(".macgacha-staging/\(plan.id)/objects/\(object.partFileName)"))
+    }
+    let first: Set<SafeRelativePath> = [plan.files[0].path, plan.files[1].path, plan.files[3].path]
+    let cdn = MockCDN(); cdn.serve("staged-batches-1", data: Data("abc".utf8)); cdn.serve("staged-batches-2", data: Data("def".utf8))
+    let operation = try opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true))
+    if restart {
+        do {
+            var iterator = operation.run().makeAsyncIterator()
+            var reachedCommit = false
+            while let event = try await iterator.next() {
+                if event == .phase(.committing) { reachedCommit = true; break }
+            }
+            #expect(reachedCommit)
+            #expect(try OperationJournal.replay(fs: fs, path: opJournal(plan)).batchFiles == first)
+            withExtendedLifetime(iterator) {}
+        }
+    }
+    var batches: [Set<SafeRelativePath>] = []
+    _ = try await opCollect(operation.run(), onEvent: { (event: OperationEvent) throws in
+        if event == .phase(.committing) {
+            let replay = try OperationJournal.replay(fs: fs, path: opJournal(plan))
+            #expect(replay.batchFiles == replay.stagedFiles.subtracting(replay.committedFiles))
+            batches.append(replay.batchFiles)
+        }
+    })
+    #expect(batches == [first, [plan.files[2].path]])
+    #expect(cdn.requestLog.map(\.path) == ["staged-batches-1", "staged-batches-2"])
+    #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 20_000) == Data(large.utf8))
+    #expect(try fs.readFile(at: plan.files[3].path, maxBytes: 20_000) == Data(large.utf8))
+    #expect(try fs.readFile(at: plan.files[1].path, maxBytes: 3) == Data("abc".utf8))
+    #expect(try fs.readFile(at: plan.files[2].path, maxBytes: 3) == Data("def".utf8))
+    #expect(try InstallStateMarker.load(fs: fs) == nil)
+}
+
+@Test
+func batchMembershipMismatchThrowsBeforeCommitStarts() async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let plan = try opPlan("membership", [("a", "abc"), ("b", "def")])
+    let cdn = MockCDN(); opServe(cdn, plan, ["abc", "def"])
+    try fs.writeAtomically(Data("old".utf8), to: plan.files[0].path)
+    let operation = try opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true))
+    await #expect(throws: LauncherError.journalCorrupt("Staged batch membership mismatch")) {
+        for try await event in operation.run() {
+            if event == .fileVerified(plan.files[0].path) {
+                // Simulate a programming mistake: a writer records a file outside the selected batch.
+                let journal = try OperationJournal(fs: fs, path: opJournal(plan))
+                try await journal.append(.fileStaged(path: plan.files[1].path))
+            }
+        }
+    }
+    #expect(try OperationJournal.replay(fs: fs, path: opJournal(plan)).commitStartedBatches.isEmpty)
+    #expect(try InstallStateMarker.load(fs: fs) == nil)
+    #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 3) == Data("old".utf8))
+}
+
+@Test
+func fullPartitionAccountsForSharedObjectsNeededByLaterLocalBatch() async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let first = try opPlan("partition-shared", [("independent", "new")])
+    let source = FileTask(path: try SafeRelativePath("source"), size: 3,
+        digest: first.files[0].digest, extents: first.files[0].extents)
+    let consumer = FileTask(path: try SafeRelativePath("consumer"), size: 3, digest: opDigest("old"), extents: [
+        Extent(source: .local(path: source.path, offset: 0), fileOffset: 0, length: 3, digest: opDigest("old")),
+    ])
+    let plan = InstallPlan(id: first.id, objects: first.objects, files: first.files + [source, consumer])
+    try fs.writeAtomically(Data("old".utf8), to: source.path)
+    let cdn = MockCDN(); opServe(cdn, first, ["new"])
+    var batches: [Set<SafeRelativePath>] = []
+    _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true)).run(),
+        onEvent: { (event: OperationEvent) throws in
+            if event == .phase(.committing) { batches.append(try OperationJournal.replay(fs: fs, path: opJournal(plan)).batchFiles) }
+        })
+    #expect(batches == [[first.files[0].path], [source.path, consumer.path]])
+    #expect(try fs.readFile(at: consumer.path, maxBytes: 3) == Data("old".utf8))
     #expect(cdn.requestLog.count == 1)
 }
 
