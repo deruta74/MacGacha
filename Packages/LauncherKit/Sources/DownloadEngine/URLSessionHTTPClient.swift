@@ -43,6 +43,7 @@ public struct URLSessionHTTPClient: HTTPClient {
 
     public func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
+        if let offset, offset < 0 { throw LauncherError.io("Invalid resume offset \(offset)") }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let offset { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }

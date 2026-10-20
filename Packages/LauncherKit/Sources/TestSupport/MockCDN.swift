@@ -37,6 +37,7 @@ public final class MockCDN: HTTPClient, @unchecked Sendable {
     public func get(_ url: URL, byteRangeFrom offset: Int64?) async throws
         -> (HTTPResponseHead, HTTPBody) {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
+        if let offset, offset < 0 { throw LauncherError.io("Invalid resume offset \(offset)") }
         let path = Self.normalized(url.path)
         let (data, fault) = state.withLock { state in
             state.requests.append((path, offset))

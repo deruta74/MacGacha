@@ -42,6 +42,17 @@ func mockServesRangeAndFaults() async throws {
 }
 
 @Test
+func negativeResumeOffsetIsRejected() async throws {
+    let cdn = MockCDN()
+    let url = URL(string: "https://mock.cdn/blob")!
+    do {
+        _ = try await cdn.get(url, byteRangeFrom: -1)
+        Issue.record("A negative resume offset must be rejected")
+    } catch LauncherError.io("Invalid resume offset -1") {}
+    #expect(cdn.requestLog.isEmpty)
+}
+
+@Test
 func mockFaultsAreFIFOAndBodiesAreChunked() async throws {
     let cdn = MockCDN()
     let url = URL(string: "https://mock.cdn/blob")!

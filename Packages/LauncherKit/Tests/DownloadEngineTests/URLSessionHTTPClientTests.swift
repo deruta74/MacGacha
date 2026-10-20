@@ -27,6 +27,17 @@ struct URLSessionHTTPClientTests {
     }
 
     @Test
+    func negativeResumeOffsetIsRejected() async throws {
+        let fixture = HTTPFixture(.response(206, [:], []))
+        defer { fixture.close() }
+        do {
+            _ = try await fixture.client.get(fixture.url, byteRangeFrom: -1)
+            Issue.record("A negative resume offset must be rejected")
+        } catch LauncherError.io("Invalid resume offset -1") {}
+        #expect(fixture.control.request == nil)
+    }
+
+    @Test
     func urlSessionReturnsHTTPStatusesAndRejectsMalformedRanges() async throws {
         let fixture = HTTPFixture(.response(404, ["Content-Range": "bytes 9-2/10"], []))
         defer { fixture.close() }
