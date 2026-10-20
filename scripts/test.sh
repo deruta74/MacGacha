@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+scripts/check-headers.sh
 swift test --package-path Packages/LauncherKit
 scripts/bootstrap.sh
 xcodebuild \
