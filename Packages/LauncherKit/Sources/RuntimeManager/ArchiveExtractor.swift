@@ -109,31 +109,37 @@ public struct ArchiveExtractor: Sendable {
             guard let pointer = archive_entry_pathname_utf8(entry), let path = String(validatingCString: pointer) else {
                 throw LauncherError.unsafePath("Invalid archive entry name")
             }
-            // A PAX UTF-8 path can override a non-ASCII raw USTAR fallback. libarchive
-            // still reports that fallback's ASCII conversion warning, while retaining
-            // the valid UTF-8 PAX path above. Raw non-ASCII USTAR names fail fatally.
+            // PAX may retain valid UTF-8 metadata despite ARCHIVE_WARN. Validate
+            // every applicable accessor instead of depending on localized warnings.
+            var hardlinkTarget: String?
+            if archive_entry_hardlink(entry) != nil {
+                guard let link = archive_entry_hardlink_utf8(entry), let target = String(validatingCString: link) else {
+                    throw LauncherError.unsafePath(path)
+                }
+                hardlinkTarget = target
+            }
+            var symlinkTarget: String?
+            if archive_entry_symlink(entry) != nil {
+                guard let link = archive_entry_symlink_utf8(entry), let target = String(validatingCString: link) else {
+                    throw LauncherError.unsafePath(path)
+                }
+                symlinkTarget = target
+            }
             let pax = [0x30002, 0x30003].contains(archive_format(reader))
-            let warning = archive_error_string(reader).map { String(cString: $0) } ?? ""
-            let overriddenFallback = status == -20 && pax &&
-                (warning == "Pathname can't be converted from ASCII to current locale." ||
-                 warning == "Linkname can't be converted from ASCII to current locale.")
-            guard status == 0 || overriddenFallback else { throw LauncherError.unsafePath("Invalid archive entry name") }
+            guard status == 0 || (status == -20 && pax) else { throw LauncherError.unsafePath("Invalid archive entry name") }
             let size = archive_entry_size(entry)
             guard size >= 0, archive_entry_is_encrypted(entry) == 0 else { throw LauncherError.io("Invalid or encrypted archive entry") }
             let kind: ArchiveEntry.Kind
-            if let link = archive_entry_hardlink_utf8(entry) {
-                guard let target = String(validatingCString: link) else { throw LauncherError.unsafePath(path) }
-                kind = .hardlink(target)
+            if let hardlinkTarget {
+                kind = .hardlink(hardlinkTarget)
             } else {
                 switch archive_entry_filetype(entry) {
                 case 0 where format == .zip: kind = path.utf8.last == 47 ? .directory : .file
                 case S_IFREG: kind = .file
                 case S_IFDIR: kind = .directory
                 case S_IFLNK:
-                    guard let link = archive_entry_symlink_utf8(entry), let target = String(validatingCString: link) else {
-                        throw LauncherError.unsafePath(path)
-                    }
-                    kind = .symlink(target)
+                    guard let symlinkTarget else { throw LauncherError.unsafePath(path) }
+                    kind = .symlink(symlinkTarget)
                 default: throw LauncherError.unsafePath(path)
                 }
             }
@@ -219,8 +225,9 @@ private enum ArchivePolicy {
                 }
                 let targetParts = try SafeRelativePath(literal).components
                 for count in 1..<targetParts.count {
-                    guard let ancestor = byExactPath[targetParts.prefix(count).joined(separator: "/")],
-                        case .directory = ancestor.kind else { throw LauncherError.unsafePath(entry.path) }
+                    if let ancestor = byPath[key(targetParts.prefix(count).joined(separator: "/"))] {
+                        guard case .directory = ancestor else { throw LauncherError.unsafePath(entry.path) }
+                    }
                 }
             default: break
             }

@@ -364,6 +364,67 @@ func rejectsNonliteralOrForwardHardlinks(attack: String) async throws {
 }
 
 @Test
+func extractsHardlinksWithImplicitParentDirectories() async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
+    try archiveTestData([ArchiveTestEntry("bin/wine", body: "wine"),
+        ArchiveTestEntry("bin/wine-preloader", type: .hardlink, link: "bin/wine")], format: .tarGZ).write(to: archive)
+    let target = temp.url.appendingPathComponent("target")
+    try await ArchiveExtractor(runner: SystemProcessRunner()).extract(archive, format: .tarGZ, into: target)
+    #expect(try Data(contentsOf: target.appendingPathComponent("bin/wine")) == Data("wine".utf8))
+    #expect(try Data(contentsOf: target.appendingPathComponent("bin/wine-preloader")) == Data("wine".utf8))
+    let original = try FileManager.default.attributesOfItem(atPath: target.appendingPathComponent("bin/wine").path)
+    let linked = try FileManager.default.attributesOfItem(atPath: target.appendingPathComponent("bin/wine-preloader").path)
+    #expect(original[.systemFileNumber] as? NSNumber == linked[.systemFileNumber] as? NSNumber)
+}
+
+@Test(arguments: ["bin", "BIN"])
+func rejectsHardlinkTargetWithSymlinkAncestor(ancestor: String) async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
+    try archiveTestData([ArchiveTestEntry("payload/", type: .directory),
+        ArchiveTestEntry(ancestor, type: .symlink, link: "payload"),
+        ArchiveTestEntry("bin/wine", body: "wine"),
+        ArchiveTestEntry("hard", type: .hardlink, link: "bin/wine")], format: .tarGZ).write(to: archive)
+    let runner = FakeProcessRunner()
+    do {
+        try await ArchiveExtractor(runner: runner).extract(archive, format: .tarGZ, into: temp.url.appendingPathComponent("target"))
+        Issue.record("Hardlink target with a symlink ancestor accepted")
+    } catch LauncherError.unsafePath { }
+    #expect(runner.invocations.isEmpty)
+}
+
+@Test
+func acceptsPAXWarningWithValidUTF8Metadata() async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
+    // libarchive reports ARCHIVE_WARN for this unsupported sparse format, with a
+    // valid UTF-8 pathname. Warning acceptance must not depend on English wording.
+    try archiveTestData([ArchiveTestEntry("PaxHeader", body: "28 GNU.sparse.major=invalid\n", type: .pax),
+        ArchiveTestEntry("file", body: "ok")], format: .tarGZ).write(to: archive)
+    let runner = FakeProcessRunner()
+    try await ArchiveExtractor(runner: runner).extract(archive, format: .tarGZ, into: temp.url.appendingPathComponent("target"))
+    #expect(runner.invocations.count == 1)
+}
+
+@Test(arguments: [ArchiveTestEntry.Kind.symlink, .hardlink])
+func rejectsPAXWarningWithInvalidUTF8LinkTarget(kind: ArchiveTestEntry.Kind) async throws {
+    let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
+    var bytes = archiveTestData([ArchiveTestEntry("PaxHeader", body: "28 GNU.sparse.major=invalid\n", type: .pax),
+        ArchiveTestEntry("link", type: kind, link: "bad")], format: .tarGZ)
+    // The entry's path is valid ASCII; only its link target is invalid UTF-8.
+    let header = 1024
+    bytes[header + 157] = 0xFF
+    for i in (header + 148)..<(header + 156) { bytes[i] = 32 }
+    let checksum = bytes[header..<(header + 512)].reduce(0) { $0 + Int($1) }
+    bytes.replaceSubrange((header + 148)..<(header + 154), with: Data(String(format: "%06o", checksum).utf8))
+    try bytes.write(to: archive)
+    let runner = FakeProcessRunner()
+    do {
+        try await ArchiveExtractor(runner: runner).extract(archive, format: .tarGZ, into: temp.url.appendingPathComponent("target"))
+        Issue.record("PAX warning with an invalid UTF-8 link target accepted")
+    } catch LauncherError.unsafePath { }
+    #expect(runner.invocations.isEmpty)
+}
+
+@Test
 func hardlinksCountOnlyUniquePayloadBytes() async throws {
     let temp = try TempDir(); let archive = temp.url.appendingPathComponent("fixture")
     var bytes = archiveTestData([ArchiveTestEntry("dir/", type: .directory), ArchiveTestEntry("dir/file", body: "1234"),
