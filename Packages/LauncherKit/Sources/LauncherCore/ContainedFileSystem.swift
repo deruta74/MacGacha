@@ -29,10 +29,41 @@ public struct ContainedFileSystem: Sendable, Hashable {
             .folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
     }
 
+    package func availableBytes(using probe: any DiskSpaceProbe) throws -> Int64 {
+        try probe.availableBytes(at: root)
+    }
+
     /// Creates missing parent directories as well as the requested directory.
     public func createDirectory(at path: SafeRelativePath) throws {
         guard let fd = try directory(path.components, create: true) else { throw LauncherError.io("Cannot create directory") }
         close(fd)
+    }
+
+    /// Atomically renames a regular file, optionally replacing another regular file.
+    /// Both parents are traversed without following symlinks and fsynced after rename.
+    public func rename(from source: SafeRelativePath, to destination: SafeRelativePath) throws {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard let parent = try directory(Array(source.components.dropLast()), create: false) else {
+            throw LauncherError.io("Rename source is missing")
+        }
+        defer { close(parent) }
+        let sourceName = source.components.last!
+        guard let info = try entry(sourceName, parent: parent) else {
+            throw LauncherError.io("Rename source is missing")
+        }
+        guard info.st_mode & S_IFMT == S_IFREG else {
+            throw LauncherError.unsafePath(display(source.components))
+        }
+        guard let target = try directory(Array(destination.components.dropLast()), create: true) else {
+            throw LauncherError.io("Rename destination is missing")
+        }
+        defer { close(target) }
+        let targetName = destination.components.last!
+        try checkRegularDestination(targetName, parent: target, display: display(destination.components))
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard renameat(parent, sourceName, target, targetName) == 0 else { throw accessError(display(destination.components)) }
+        try synchronize(parent)
+        try synchronize(target)
     }
 
     /// The descriptor is borrowed for this call only. Durable synchronization requests
@@ -154,9 +185,10 @@ public struct ContainedFileSystem: Sendable, Hashable {
 
     /// Flushes a regular file to stable storage using Darwin F_FULLFSYNC.
     public func fullSync(at path: SafeRelativePath) throws {
-        let fd = try openRegularFile(at: path, writing: true, create: false)
-        defer { close(fd) }
-        try Self.synchronizeFileDescriptor(fd, durable: true)
+        let opened = try openRegularDescriptors(at: path, writing: true, create: false, appending: false)
+        defer { close(opened.file); close(opened.parent) }
+        try Self.synchronizeFileDescriptor(opened.file, durable: true)
+        try synchronize(opened.parent)
     }
 
     private func withRegularDescriptor<T>(at path: SafeRelativePath, writing: Bool, create: Bool,
@@ -371,29 +403,26 @@ public struct ContainedFileSystem: Sendable, Hashable {
             if errno == ENOENT && !create { return nil }
             throw accessError(root.path)
         }
-        do {
-            for (index, component) in components.enumerated() {
-                guard !Task.isCancelled else { throw LauncherError.cancelled }
-                var info = try entry(component, parent: fd)
-                if info == nil {
-                    if !create { close(fd); return nil }
-                    guard mkdirat(fd, component, 0o700) == 0 || errno == EEXIST else {
-                        throw LauncherError.io("Cannot create contained directory")
-                    }
-                    info = try entry(component, parent: fd)
-                }
-                let location = display(Array(components.prefix(index + 1)))
-                guard let info, info.st_mode & S_IFMT == S_IFDIR else { throw LauncherError.unsafePath(location) }
-                let next = openat(fd, component, Self.directoryFlags)
-                guard next >= 0 else { throw accessError(location) }
-                close(fd)
-                fd = next
+        var transferred = false
+        defer { if !transferred { close(fd) } }
+        for (index, component) in components.enumerated() {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            var info = try entry(component, parent: fd)
+            if info == nil {
+                if !create { return nil }
+                if mkdirat(fd, component, 0o700) == 0 { try synchronize(fd) }
+                else if errno != EEXIST { throw LauncherError.io("Cannot create contained directory") }
+                info = try entry(component, parent: fd)
             }
-            return fd
-        } catch {
+            let location = display(Array(components.prefix(index + 1)))
+            guard let info, info.st_mode & S_IFMT == S_IFDIR else { throw LauncherError.unsafePath(location) }
+            let next = openat(fd, component, Self.directoryFlags)
+            guard next >= 0 else { throw accessError(location) }
             close(fd)
-            throw error
+            fd = next
         }
+        transferred = true
+        return fd
     }
 
     private func entry(_ name: String, parent: Int32) throws -> stat? {

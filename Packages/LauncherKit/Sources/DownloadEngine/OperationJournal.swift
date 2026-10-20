@@ -100,7 +100,7 @@ public struct JournalState: Sendable, Equatable {
 
     public init() {}
 
-    fileprivate mutating func apply(_ record: JournalRecord) {
+    package mutating func apply(_ record: JournalRecord) {
         switch record {
         case .planStored(let id, let digest): planID = id; planDigest = digest
         case .operationStarted: break
@@ -161,6 +161,10 @@ public actor OperationJournal {
             needsRecovery = true
             throw error
         }
+    }
+
+    package func snapshot() throws -> JournalState {
+        try Self.replay(fs: fs, path: path)
     }
 
     /// Replays complete LF-terminated records without modifying the file. Missing is empty;
