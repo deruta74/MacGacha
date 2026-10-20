@@ -173,7 +173,7 @@ public struct ArchiveExtractor: Sendable {
     }
 }
 
-private struct ArchiveEntry: Sendable {
+struct ArchiveEntry: Sendable {
     enum Kind: Sendable {
         case file, directory, symlink(String), hardlink(String)
         var link: String? {
@@ -184,7 +184,7 @@ private struct ArchiveEntry: Sendable {
     let kind: Kind
 }
 
-private enum ArchivePolicy {
+enum ArchivePolicy {
     private static func key(_ value: String) -> String {
         value.precomposedStringWithCanonicalMapping.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
     }

@@ -387,6 +387,45 @@ public struct ContainedFileSystem: Sendable, Hashable {
         return result
     }
 
+    /// Copies one regular file in bounded chunks, retaining executable permission bits.
+    /// Both files are opened through descriptor-relative, no-follow traversal.
+    package func copyRegularFile(at source: SafeRelativePath, to destination: SafeRelativePath,
+        in destinationFS: ContainedFileSystem, maxBytes: Int64) throws -> Int64 {
+        guard maxBytes >= 0 else { throw LauncherError.io("Runtime import size limit exceeded") }
+        let input = try openForReading(at: source)
+        defer { try? input.close() }
+        var info = stat()
+        guard fstat(input.fileDescriptor, &info) == 0 else { throw LauncherError.io("Cannot inspect import file") }
+        guard info.st_size >= 0, info.st_size <= maxBytes else { throw LauncherError.io("Runtime import size limit exceeded") }
+        let output = try destinationFS.openForWriting(at: destination, truncate: true)
+        defer { try? output.close() }
+        var count: Int64 = 0
+        while true {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            let data = try autoreleasepool { try input.read(upToCount: 65_536) ?? Data() }
+            if data.isEmpty { break }
+            guard Int64(data.count) <= maxBytes - count else { throw LauncherError.io("Runtime import size limit exceeded") }
+            try destinationFS.fileOps.writeAll(data, to: output.fileDescriptor)
+            count += Int64(data.count)
+        }
+        guard count == info.st_size else { throw LauncherError.io("Import source changed during copy") }
+        guard fchmod(output.fileDescriptor, info.st_mode & 0o777) == 0 else { throw LauncherError.io("Cannot preserve import permissions") }
+        return count
+    }
+
+    /// The caller validates the relative target against its whole tree before creating links.
+    package func createSymbolicLink(at path: SafeRelativePath, target: String) throws {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard !target.utf8.contains(0), !target.isEmpty, target.utf8.count <= 4096 else { throw LauncherError.unsafePath(path.description) }
+        guard let parent = try directory(Array(path.components.dropLast()), create: true), let name = path.components.last else {
+            throw LauncherError.io("Cannot create import link")
+        }
+        defer { close(parent) }
+        guard try entry(name, parent: parent) == nil else { throw LauncherError.unsafePath(path.description) }
+        guard symlinkat(target, parent, name) == 0 else { throw LauncherError.io("Cannot create import link") }
+        try synchronize(parent)
+    }
+
     /// Flushes regular files and then directories bottom-up, never following links.
     /// Directory sync persists symlink entries; no symlink target is opened or flushed.
     package func synchronizeTree(at path: SafeRelativePath) throws {
