@@ -63,6 +63,81 @@ func journalFilePrimitivesRefuseAncestorAndLeafSymlinksAndHardlinks() throws {
 }
 
 @Test
+func containedFileHandlesSupportResumeTruncateSyncAndRemoval() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let path = try SafeRelativePath("parts/nested/object.part")
+    #expect(try fs.size(at: path) == nil)
+    let first = try fs.openForWriting(at: path, truncate: false)
+    try first.write(contentsOf: Data("abc".utf8))
+    try first.close()
+    let append = try fs.openForWriting(at: path, truncate: false)
+    #expect(try append.seekToEnd() == 3)
+    try append.write(contentsOf: Data("def".utf8))
+    try append.close()
+    try fs.fullSync(at: path)
+    #expect(try fs.size(at: path) == 6)
+    let read = try fs.openForReading(at: path)
+    #expect(try read.readToEnd() == Data("abcdef".utf8))
+    try read.close()
+    let truncated = try fs.openForWriting(at: path, truncate: true)
+    try truncated.close()
+    #expect(try fs.size(at: path) == 0)
+    try fs.removeFile(at: path)
+    #expect(try fs.size(at: path) == nil)
+    try fs.removeFile(at: path)
+    #expect(try fs.itemType(at: try SafeRelativePath("parts/nested")) == .directory)
+}
+
+@Test
+func containedFilePrimitivesRefuseSymlinksAndNonRegularLeaves() throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let control = outside.url.appendingPathComponent("control")
+    try Data("preserved".utf8).write(to: control)
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("link"), withDestinationURL: outside.url)
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("leaf"), withDestinationURL: control)
+    try FileManager.default.createDirectory(at: directory.url.appendingPathComponent("folder"), withIntermediateDirectories: false)
+    for raw in ["link/control", "leaf", "folder"] {
+        let path = try SafeRelativePath(raw)
+        let rejected = raw == "link/control" ? "link" : raw
+        let error = LauncherError.unsafePath(directory.url.appendingPathComponent(rejected).path)
+        #expect(throws: error) { try fs.openForWriting(at: path, truncate: true) }
+        #expect(throws: error) { try fs.openForReading(at: path) }
+        #expect(throws: error) { try fs.size(at: path) }
+        #expect(throws: error) { try fs.fullSync(at: path) }
+        #expect(throws: error) { try fs.removeFile(at: path) }
+        #expect(try Data(contentsOf: control) == Data("preserved".utf8))
+    }
+    let hardlink = directory.url.appendingPathComponent("hardlink")
+    try FileManager.default.linkItem(at: control, to: hardlink)
+    #expect(throws: LauncherError.unsafePath(hardlink.path)) {
+        try fs.openForWriting(at: try SafeRelativePath("hardlink"), truncate: true)
+    }
+    #expect(try Data(contentsOf: control) == Data("preserved".utf8))
+}
+
+@Test
+func journalAppendsAndSeekableHandlesPreserveTheirWriteModes() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let path = try SafeRelativePath("shared/file")
+    try fs.append(Data("abcd".utf8), to: path)
+    let handle = try fs.openForWriting(at: path, truncate: false)
+    defer { try? handle.close() }
+    try handle.seek(toOffset: 1)
+    try handle.write(contentsOf: Data("X".utf8))
+    try handle.close()
+    try fs.append(Data("Y".utf8), to: path, durable: true)
+    try fs.fullSync(at: path)
+    var contents = Data()
+    try fs.readFile(at: path, chunkSize: 2) { contents.append($0) }
+    #expect(contents == Data("aXcdY".utf8))
+    #expect(try fs.size(at: path) == 5)
+}
+
+@Test
 func containedFileSystemReadsWritesListsAndRemoves() throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url.appendingPathComponent("root"))

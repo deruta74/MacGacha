@@ -6,7 +6,7 @@ import Foundation
 /// Operations below a trusted root. Ancestors above the root may be symlinks.
 /// The root itself must be a directory, not a symlink. Traversal is limited to
 /// 128 directories and listing/removal to 100,000 entries per operation.
-public struct ContainedFileSystem: Sendable {
+public struct ContainedFileSystem: Sendable, Hashable {
     public enum ItemType: Sendable, Equatable {
         case regularFile, directory, other
     }
@@ -20,6 +20,13 @@ public struct ContainedFileSystem: Sendable {
             throw LauncherError.unsafePath(root.absoluteString)
         }
         self.root = root
+    }
+
+    /// A conservative in-process reservation key, including the standardized root.
+    /// This folds case even on case-sensitive volumes; it is never used for file access.
+    package func caseFoldedPathKey(for path: SafeRelativePath) -> String {
+        path.resolved(against: root.standardizedFileURL).path
+            .folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
     }
 
     /// Creates missing parent directories as well as the requested directory.
@@ -100,31 +107,105 @@ public struct ContainedFileSystem: Sendable {
         }
     }
 
+    /// Opens a regular file through checked ancestors, creating missing parents and the file.
+    /// Refuses hard-linked files before truncating. With truncate false, existing bytes are preserved;
+    /// callers seek to the desired offset on the returned handle.
+    public func openForWriting(at path: SafeRelativePath, truncate: Bool) throws -> FileHandle {
+        let fd = try openRegularFile(at: path, writing: true, create: true)
+        do {
+            if truncate {
+                guard !Task.isCancelled else { throw LauncherError.cancelled }
+                guard ftruncate(fd, 0) == 0 else { throw LauncherError.io("Cannot truncate contained file") }
+            }
+            return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        } catch {
+            close(fd)
+            throw error
+        }
+    }
+
+    /// Opens an existing regular file without following symlinks at any level below the root.
+    public func openForReading(at path: SafeRelativePath) throws -> FileHandle {
+        let fd = try openRegularFile(at: path, writing: false, create: false)
+        return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    }
+
+    /// Returns nil when missing; non-regular leaves and symlink ancestors are refused.
+    public func size(at path: SafeRelativePath) throws -> Int64? {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else { return nil }
+        defer { close(parent) }
+        guard let info = try entry(path.components.last!, parent: parent) else { return nil }
+        guard info.st_mode & S_IFMT == S_IFREG else { throw LauncherError.unsafePath(display(path.components)) }
+        guard info.st_size >= 0 else { throw LauncherError.io("Invalid file size") }
+        return info.st_size
+    }
+
+    /// Removes only a regular-file leaf. Missing files are ignored; directories and symlinks are refused.
+    public func removeFile(at path: SafeRelativePath) throws {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else { return }
+        defer { close(parent) }
+        let name = path.components.last!
+        guard let info = try entry(name, parent: parent) else { return }
+        guard info.st_mode & S_IFMT == S_IFREG else { throw LauncherError.unsafePath(display(path.components)) }
+        guard unlinkat(parent, name, 0) == 0 || errno == ENOENT else { throw LauncherError.io("Cannot remove contained file") }
+    }
+
+    /// Flushes a regular file to stable storage using Darwin F_FULLFSYNC.
+    public func fullSync(at path: SafeRelativePath) throws {
+        let fd = try openRegularFile(at: path, writing: true, create: false)
+        defer { close(fd) }
+        try Self.synchronizeFileDescriptor(fd, durable: true)
+    }
+
     private func withRegularDescriptor<T>(at path: SafeRelativePath, writing: Bool, create: Bool,
         _ body: (Int32, Int32, stat) throws -> T) throws -> T {
+        let opened = try openRegularDescriptors(at: path, writing: writing, create: create, appending: writing)
+        defer { close(opened.file); close(opened.parent) }
+        return try body(opened.file, opened.parent, opened.info)
+    }
+
+    private func openRegularFile(at path: SafeRelativePath, writing: Bool, create: Bool) throws -> Int32 {
+        let opened = try openRegularDescriptors(at: path, writing: writing, create: create, appending: false)
+        close(opened.parent)
+        return opened.file
+    }
+
+    /// Transfers ownership of both descriptors to the caller after validating the opened file.
+    private func openRegularDescriptors(at path: SafeRelativePath, writing: Bool, create: Bool,
+        appending: Bool) throws -> (file: Int32, parent: Int32, info: stat) {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard let parent = try directory(Array(path.components.dropLast()), create: create) else {
             throw LauncherError.io("File is missing")
         }
-        defer { close(parent) }
-        let name = path.components.last!
-        let location = display(path.components)
-        if let info = try entry(name, parent: parent) {
-            guard info.st_mode & S_IFMT == S_IFREG, !writing || info.st_nlink == 1 else {
-                throw LauncherError.unsafePath(location)
+        do {
+            let name = path.components.last!
+            let location = display(path.components)
+            if let info = try entry(name, parent: parent) {
+                guard info.st_mode & S_IFMT == S_IFREG, !writing || info.st_nlink == 1 else {
+                    throw LauncherError.unsafePath(location)
+                }
             }
+            let flags = (writing ? O_WRONLY : O_RDONLY) | (appending ? O_APPEND : 0) | (create ? O_CREAT : 0)
+                | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
+            let fd = openat(parent, name, flags, 0o600)
+            guard fd >= 0 else { throw accessError(location) }
+            do {
+                var info = stat()
+                guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, !writing || info.st_nlink == 1 else {
+                    throw LauncherError.unsafePath(location)
+                }
+                guard info.st_size >= 0 else { throw LauncherError.io("Invalid file size") }
+                return (fd, parent, info)
+            } catch {
+                close(fd)
+                throw error
+            }
+        } catch {
+            close(parent)
+            throw error
         }
-        let flags = (writing ? O_WRONLY | O_APPEND : O_RDONLY) | (create ? O_CREAT : 0)
-            | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
-        let fd = openat(parent, name, flags, 0o600)
-        guard fd >= 0 else { throw accessError(location) }
-        defer { close(fd) }
-        var info = stat()
-        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, !writing || info.st_nlink == 1 else {
-            throw LauncherError.unsafePath(location)
-        }
-        guard info.st_size >= 0 else { throw LauncherError.io("Invalid file size") }
-        return try body(fd, parent, info)
     }
 
     /// Missing items are ignored. Symlinks inside a removed tree are unlinked.
@@ -385,10 +466,7 @@ public struct ContainedFileSystem: Sendable {
     }
 
     private func synchronize(_ fd: Int32) throws {
-        while fsync(fd) != 0 {
-            guard errno == EINTR else { throw LauncherError.io("Cannot synchronize file") }
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-        }
+        try Self.synchronizeFileDescriptor(fd, durable: false)
     }
 
     private func display(_ components: [String]) -> String {
