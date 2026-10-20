@@ -35,6 +35,78 @@ public struct ContainedFileSystem: Sendable, Hashable {
         close(fd)
     }
 
+    /// The descriptor is borrowed for this call only. Durable synchronization requests
+    /// F_FULLFSYNC rather than fsync. Injection must preserve that synchronization contract.
+    public typealias FileSynchronizer = @Sendable (_ descriptor: Int32, _ durable: Bool) throws -> Void
+
+    public static func synchronizeFileDescriptor(_ descriptor: Int32, durable: Bool) throws {
+        while true {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            let result = durable ? fcntl(descriptor, F_FULLFSYNC) : fsync(descriptor)
+            if result == 0 { return }
+            guard errno == EINTR else { throw LauncherError.io("Cannot synchronize file") }
+        }
+    }
+
+    /// Appends to a regular file (creating missing parents and the file), then synchronizes it.
+    /// Refuses symlinks and hard-linked writable files. A failed write may leave a partial append;
+    /// callers must repair it before writing again. The containing directory is also fsynced.
+    public func append(_ data: Data, to path: SafeRelativePath, durable: Bool = false,
+        synchronize: FileSynchronizer = ContainedFileSystem.synchronizeFileDescriptor) throws {
+        try withRegularDescriptor(at: path, writing: true, create: true) { fd, parent, _ in
+            try data.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                var written = 0
+                while written < bytes.count {
+                    guard !Task.isCancelled else { throw LauncherError.cancelled }
+                    let count = Darwin.write(fd, base.advanced(by: written), min(65_536, bytes.count - written))
+                    if count < 0 && errno == EINTR { continue }
+                    guard count > 0 else { throw LauncherError.io("Cannot append contained file") }
+                    written += count
+                }
+            }
+            try synchronize(fd, durable)
+            try self.synchronize(parent)
+        }
+    }
+
+    /// Shrinks an existing regular file without extending it, then fsyncs it.
+    public func truncateFile(at path: SafeRelativePath, toByteCount count: Int64,
+        synchronize: FileSynchronizer = ContainedFileSystem.synchronizeFileDescriptor) throws {
+        guard count >= 0 else { throw LauncherError.io("Invalid truncation length") }
+        try withRegularDescriptor(at: path, writing: true, create: false) { fd, _, info in
+            guard count <= info.st_size else { throw LauncherError.io("Invalid truncation length") }
+            while true {
+                guard !Task.isCancelled else { throw LauncherError.cancelled }
+                if ftruncate(fd, count) == 0 { break }
+                guard errno == EINTR else { throw LauncherError.io("Cannot truncate contained file") }
+            }
+            try synchronize(fd, false)
+        }
+    }
+
+    /// Streams a snapshot of a regular file's initial size in chunks of at most 1 MiB.
+    /// Does not wait for EOF on a file being appended to. The callback is synchronous.
+    public func readFile(at path: SafeRelativePath, chunkSize: Int = 65_536,
+        consume: (Data) throws -> Void) throws {
+        guard (1...1_048_576).contains(chunkSize) else { throw LauncherError.io("Invalid read chunk size") }
+        try withRegularDescriptor(at: path, writing: false, create: false) { fd, _, info in
+            var remaining = info.st_size
+            var buffer = [UInt8](repeating: 0, count: chunkSize)
+            while remaining > 0 {
+                guard !Task.isCancelled else { throw LauncherError.cancelled }
+                let count = buffer.withUnsafeMutableBytes {
+                    Darwin.read(fd, $0.baseAddress, Int(min(Int64(chunkSize), remaining)))
+                }
+                if count < 0 && errno == EINTR { continue }
+                guard count >= 0 else { throw LauncherError.io("Cannot read contained file") }
+                if count == 0 { break }
+                try consume(Data(buffer.prefix(count)))
+                remaining -= Int64(count)
+            }
+        }
+    }
+
     /// Opens a regular file through checked ancestors, creating missing parents and the file.
     /// Refuses hard-linked files before truncating. With truncate false, existing bytes are preserved;
     /// callers seek to the desired offset on the returned handle.
@@ -84,35 +156,56 @@ public struct ContainedFileSystem: Sendable, Hashable {
     public func fullSync(at path: SafeRelativePath) throws {
         let fd = try openRegularFile(at: path, writing: true, create: false)
         defer { close(fd) }
-        while true {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-            if fcntl(fd, F_FULLFSYNC) == 0 { return }
-            guard errno == EINTR else { throw LauncherError.io("Cannot fully synchronize contained file") }
-        }
+        try Self.synchronizeFileDescriptor(fd, durable: true)
+    }
+
+    private func withRegularDescriptor<T>(at path: SafeRelativePath, writing: Bool, create: Bool,
+        _ body: (Int32, Int32, stat) throws -> T) throws -> T {
+        let opened = try openRegularDescriptors(at: path, writing: writing, create: create, appending: writing)
+        defer { close(opened.file); close(opened.parent) }
+        return try body(opened.file, opened.parent, opened.info)
     }
 
     private func openRegularFile(at path: SafeRelativePath, writing: Bool, create: Bool) throws -> Int32 {
+        let opened = try openRegularDescriptors(at: path, writing: writing, create: create, appending: false)
+        close(opened.parent)
+        return opened.file
+    }
+
+    /// Transfers ownership of both descriptors to the caller after validating the opened file.
+    private func openRegularDescriptors(at path: SafeRelativePath, writing: Bool, create: Bool,
+        appending: Bool) throws -> (file: Int32, parent: Int32, info: stat) {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard let parent = try directory(Array(path.components.dropLast()), create: create) else {
             throw LauncherError.io("File is missing")
         }
-        defer { close(parent) }
-        let name = path.components.last!
-        let location = display(path.components)
-        if let info = try entry(name, parent: parent) {
-            guard info.st_mode & S_IFMT == S_IFREG, !writing || info.st_nlink == 1 else {
-                throw LauncherError.unsafePath(location)
+        do {
+            let name = path.components.last!
+            let location = display(path.components)
+            if let info = try entry(name, parent: parent) {
+                guard info.st_mode & S_IFMT == S_IFREG, !writing || info.st_nlink == 1 else {
+                    throw LauncherError.unsafePath(location)
+                }
             }
+            let flags = (writing ? O_WRONLY : O_RDONLY) | (appending ? O_APPEND : 0) | (create ? O_CREAT : 0)
+                | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
+            let fd = openat(parent, name, flags, 0o600)
+            guard fd >= 0 else { throw accessError(location) }
+            do {
+                var info = stat()
+                guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, !writing || info.st_nlink == 1 else {
+                    throw LauncherError.unsafePath(location)
+                }
+                guard info.st_size >= 0 else { throw LauncherError.io("Invalid file size") }
+                return (fd, parent, info)
+            } catch {
+                close(fd)
+                throw error
+            }
+        } catch {
+            close(parent)
+            throw error
         }
-        let flags = (writing ? O_WRONLY : O_RDONLY) | (create ? O_CREAT : 0) | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
-        let fd = openat(parent, name, flags, 0o600)
-        guard fd >= 0 else { throw accessError(location) }
-        var info = stat()
-        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, !writing || info.st_nlink == 1 else {
-            close(fd)
-            throw LauncherError.unsafePath(location)
-        }
-        return fd
     }
 
     /// Missing items are ignored. Symlinks inside a removed tree are unlinked.
@@ -373,10 +466,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
     }
 
     private func synchronize(_ fd: Int32) throws {
-        while fsync(fd) != 0 {
-            guard errno == EINTR else { throw LauncherError.io("Cannot synchronize file") }
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-        }
+        try Self.synchronizeFileDescriptor(fd, durable: false)
     }
 
     private func display(_ components: [String]) -> String {

@@ -6,6 +6,63 @@ import LauncherCore
 import TestSupport
 
 @Test
+func containedAppendTruncateAndStreamingRead() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let path = try SafeRelativePath("journal/nested/records.jsonl")
+    try fs.append(Data("one\n".utf8), to: path)
+    try fs.append(Data("two\n".utf8), to: path, durable: true)
+    var pieces: [Data] = []
+    try fs.readFile(at: path, chunkSize: 3) { pieces.append($0) }
+    #expect(pieces.allSatisfy { $0.count <= 3 })
+    #expect(pieces.reduce(into: Data(), { $0.append($1) }) == Data("one\ntwo\n".utf8))
+    try fs.truncateFile(at: path, toByteCount: 4)
+    #expect(try fs.readFile(at: path, maxBytes: 10) == Data("one\n".utf8))
+    #expect(throws: LauncherError.io("Invalid truncation length")) { try fs.truncateFile(at: path, toByteCount: 5) }
+    #expect(throws: LauncherError.io("Invalid truncation length")) { try fs.truncateFile(at: path, toByteCount: -1) }
+    #expect(throws: LauncherError.io("Invalid read chunk size")) { try fs.readFile(at: path, chunkSize: 0) { _ in } }
+    #expect(throws: LauncherError.io("Invalid read chunk size")) { try fs.readFile(at: path, chunkSize: Int.max) { _ in } }
+}
+
+@Test
+func streamingReadStopsAtItsInitialFileSize() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let path = try SafeRelativePath("file")
+    try fs.writeAtomically(Data("abcd".utf8), to: path)
+    var read = Data()
+    try fs.readFile(at: path, chunkSize: 2) { piece in
+        read.append(piece)
+        try fs.append(Data("extra".utf8), to: path)
+    }
+    #expect(read == Data("abcd".utf8))
+    #expect(try fs.readFile(at: path, maxBytes: 20) == Data("abcdextraextra".utf8))
+}
+
+@Test
+func journalFilePrimitivesRefuseAncestorAndLeafSymlinksAndHardlinks() throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let control = outside.url.appendingPathComponent("control")
+    try Data("preserved".utf8).write(to: control)
+    try FileManager.default.createDirectory(at: directory.url.appendingPathComponent("safe"), withIntermediateDirectories: false)
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("safe/link"), withDestinationURL: outside.url)
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("leaf"), withDestinationURL: control)
+    try FileManager.default.linkItem(at: control, to: directory.url.appendingPathComponent("hardlink"))
+    for (raw, rejected) in [("safe/link/control", "safe/link"), ("leaf", "leaf"), ("hardlink", "hardlink")] {
+        let path = try SafeRelativePath(raw)
+        let error = LauncherError.unsafePath(directory.url.appendingPathComponent(rejected).path)
+        #expect(throws: error) { try fs.append(Data("new".utf8), to: path) }
+        #expect(throws: error) { try fs.truncateFile(at: path, toByteCount: 0) }
+        if raw != "hardlink" {
+            #expect(throws: error) { try fs.readFile(at: path, chunkSize: 1) { _ in } }
+        }
+        #expect(try Data(contentsOf: control) == Data("preserved".utf8))
+    }
+}
+
+@Test
 func containedFileHandlesSupportResumeTruncateSyncAndRemoval() throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -59,6 +116,25 @@ func containedFilePrimitivesRefuseSymlinksAndNonRegularLeaves() throws {
         try fs.openForWriting(at: try SafeRelativePath("hardlink"), truncate: true)
     }
     #expect(try Data(contentsOf: control) == Data("preserved".utf8))
+}
+
+@Test
+func journalAppendsAndSeekableHandlesPreserveTheirWriteModes() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let path = try SafeRelativePath("shared/file")
+    try fs.append(Data("abcd".utf8), to: path)
+    let handle = try fs.openForWriting(at: path, truncate: false)
+    defer { try? handle.close() }
+    try handle.seek(toOffset: 1)
+    try handle.write(contentsOf: Data("X".utf8))
+    try handle.close()
+    try fs.append(Data("Y".utf8), to: path, durable: true)
+    try fs.fullSync(at: path)
+    var contents = Data()
+    try fs.readFile(at: path, chunkSize: 2) { contents.append($0) }
+    #expect(contents == Data("aXcdY".utf8))
+    #expect(try fs.size(at: path) == 5)
 }
 
 @Test
