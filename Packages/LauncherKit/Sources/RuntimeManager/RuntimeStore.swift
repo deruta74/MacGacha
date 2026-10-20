@@ -55,7 +55,7 @@ public struct RuntimeScan: Sendable, Equatable {
 }
 
 public struct RuntimeStore: Sendable {
-    private let paths: AppPaths
+    let paths: AppPaths
     private static let invalidPathReason = "Invalid runtime path component"
 
     public init(paths: AppPaths) { self.paths = paths }

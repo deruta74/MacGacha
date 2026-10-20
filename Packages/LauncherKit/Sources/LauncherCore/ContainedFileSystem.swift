@@ -291,6 +291,127 @@ public struct ContainedFileSystem: Sendable, Hashable {
         try synchronize(target)
     }
 
+    /// Publishes a directory atomically. Returns true if a prior destination was swapped
+    /// into source (the caller then removes it). Missing destinations use an exclusive rename.
+    /// Both leaves must be directories; symlinks at either leaf or in ancestors are refused.
+    @discardableResult
+    public func publishDirectory(at source: SafeRelativePath, to destination: SafeRelativePath) throws -> Bool {
+        guard caseFoldedPathKey(for: source) != caseFoldedPathKey(for: destination) else { throw LauncherError.unsafePath(source.description) }
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard let parent = try directory(Array(source.components.dropLast()), create: false) else {
+            throw LauncherError.io("Publish parent is missing")
+        }
+        defer { close(parent) }
+        guard let target = try directory(Array(destination.components.dropLast()), create: false) else {
+            throw LauncherError.io("Publish parent is missing")
+        }
+        defer { close(target) }
+        let name = source.components.last!
+        let targetName = destination.components.last!
+        guard let info = try entry(name, parent: parent), info.st_mode & S_IFMT == S_IFDIR else {
+            throw LauncherError.unsafePath(display(source.components))
+        }
+        let existing = try entry(targetName, parent: target)
+        if let existing, existing.st_mode & S_IFMT != S_IFDIR {
+            throw LauncherError.unsafePath(display(destination.components))
+        }
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        if existing != nil {
+            try fileOps.swap(from: name, in: parent, to: targetName, in: target)
+        } else {
+            try fileOps.rename(from: name, in: parent, to: targetName, in: target, exclusive: true)
+        }
+        try synchronize(parent)
+        try synchronize(target)
+        return existing != nil
+    }
+
+    /// Checked pathname for a process boundary. Processes run only after archive validation;
+    /// concurrent hostile ancestor renames are outside the filesystem threat model.
+    package func directoryURL(at path: SafeRelativePath) throws -> URL {
+        guard let fd = try directory(path.components, create: false) else { throw LauncherError.io("Directory is missing") }
+        close(fd)
+        return path.resolved(against: root)
+    }
+
+    package struct TreeEntry: Sendable {
+        package let path: SafeRelativePath
+        package let type: ItemType
+        package let linkTarget: String?
+        package let size: Int64
+    }
+
+    /// Snapshot of an extracted tree, never following a symbolic link. Special files and
+    /// hard links with names outside this tree are refused. Bounded like other tree operations.
+    package func inspectTree(at path: SafeRelativePath) throws -> [TreeEntry] {
+        guard let fd = try directory(path.components, create: false) else { throw LauncherError.io("Directory is missing") }
+        defer { close(fd) }
+        var budget = Self.entryLimit
+        var result: [TreeEntry] = []
+        var hardlinks: [String: (count: Int, expected: Int)] = [:]
+        try walkTree(fd, prefix: [], depth: 0, budget: &budget) { parent, name, components, info in
+            let relative = try SafeRelativePath(components.joined(separator: "/"))
+            let type = info.st_mode & S_IFMT
+            var target: String?
+            if type == S_IFLNK {
+                var bytes = [UInt8](repeating: 0, count: 4097)
+                let count = bytes.withUnsafeMutableBytes { readlinkat(parent, name, $0.baseAddress, $0.count) }
+                guard count > 0, count < bytes.count, let text = String(bytes: bytes.prefix(count), encoding: .utf8) else {
+                    throw LauncherError.unsafePath(relative.description)
+                }
+                target = text
+            } else if type == S_IFREG {
+                let key = "\(info.st_dev):\(info.st_ino)"
+                let old = hardlinks[key]?.count ?? 0
+                hardlinks[key] = (old + 1, Int(info.st_nlink))
+            } else if type != S_IFDIR { throw LauncherError.unsafePath(relative.description) }
+            result.append(TreeEntry(path: relative, type: type == S_IFDIR ? .directory : type == S_IFREG ? .regularFile : .other,
+                linkTarget: target, size: type == S_IFREG ? info.st_size : 0))
+        }
+        guard hardlinks.values.allSatisfy({ $0.count == $0.expected }) else { throw LauncherError.unsafePath(path.description) }
+        return result
+    }
+
+    /// Removes quarantine from every file, directory and symlink without following links.
+    /// Other xattrs are preserved. Missing quarantine is normal; other errors propagate.
+    package func removeQuarantineRecursively(at path: SafeRelativePath) throws {
+        guard let fd = try directory(path.components, create: false) else { throw LauncherError.io("Directory is missing") }
+        defer { close(fd) }
+        func strip(_ descriptor: Int32) throws {
+            guard fremovexattr(descriptor, "com.apple.quarantine", 0) == 0 || errno == ENOATTR else {
+                throw LauncherError.io("Cannot remove runtime quarantine")
+            }
+        }
+        try strip(fd)
+        var budget = Self.entryLimit
+        try walkTree(fd, prefix: [], depth: 0, budget: &budget) { parent, name, _, info in
+            let type = info.st_mode & S_IFMT
+            guard type == S_IFDIR || type == S_IFREG || type == S_IFLNK else { throw LauncherError.unsafePath(name) }
+            let flags = type == S_IFLNK ? O_SYMLINK : O_NOFOLLOW
+            let child = openat(parent, name, O_RDONLY | O_NONBLOCK | O_CLOEXEC | flags)
+            guard child >= 0 else { throw accessError(name) }
+            defer { close(child) }
+            try strip(child)
+        }
+    }
+
+    private func walkTree(_ fd: Int32, prefix: [String], depth: Int, budget: inout Int,
+        visit: (Int32, String, [String], stat) throws -> Void) throws {
+        guard depth < 128 else { throw LauncherError.io("Directory depth exceeds limit") }
+        for name in try names(in: fd, budget: &budget) {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            guard let info = try entry(name, parent: fd) else { throw LauncherError.io("Tree entry disappeared") }
+            let components = prefix + [name]
+            try visit(fd, name, components, info)
+            if info.st_mode & S_IFMT == S_IFDIR {
+                let child = openat(fd, name, Self.directoryFlags)
+                guard child >= 0 else { throw accessError(name) }
+                defer { close(child) }
+                try walkTree(child, prefix: components, depth: depth + 1, budget: &budget, visit: visit)
+            }
+        }
+    }
+
     /// Creates missing parents, then fsyncs a sibling temporary file before atomic replacement.
     public func writeAtomically(_ data: Data, to path: SafeRelativePath) throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }

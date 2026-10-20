@@ -368,3 +368,44 @@ func containedFileSystemReportsInvalidDirectoryEntriesSeparately() throws {
     #expect(throws: LauncherError.unsafePath(invalid)) { try fs.contentsOfDirectory(at: SafeRelativePath("versions")) }
 
 }
+
+@Test
+func containedPublishSwapsNonemptyDirectoriesAndRejectsSymlinkAncestors() throws {
+    let temp = try TempDir(); let outside = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let incoming = try SafeRelativePath("kind/.incoming-test"); let version = try SafeRelativePath("kind/1.0")
+    try fs.writeAtomically(Data("new".utf8), to: SafeRelativePath("kind/.incoming-test/new"))
+    #expect(try fs.publishDirectory(at: incoming, to: version) == false)
+    try fs.writeAtomically(Data("next".utf8), to: SafeRelativePath("kind/.incoming-test/next"))
+    #expect(try fs.publishDirectory(at: incoming, to: version))
+    #expect(try fs.readFile(at: SafeRelativePath("kind/1.0/next"), maxBytes: 4) == Data("next".utf8))
+    #expect(try fs.readFile(at: SafeRelativePath("kind/.incoming-test/new"), maxBytes: 3) == Data("new".utf8))
+    try FileManager.default.createSymbolicLink(at: temp.url.appendingPathComponent("redirect"), withDestinationURL: outside.url)
+    #expect(throws: LauncherError.unsafePath(temp.url.appendingPathComponent("redirect").path)) {
+        try fs.publishDirectory(at: incoming, to: SafeRelativePath("redirect/target"))
+    }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: outside.url.path).isEmpty)
+}
+
+@Test
+func containedPublishSwapFailureLeavesBothTreesIntact() throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url, fileOps: FailedDirectorySwap())
+    try fs.writeAtomically(Data("new".utf8), to: SafeRelativePath("incoming/new"))
+    try fs.writeAtomically(Data("old".utf8), to: SafeRelativePath("version/old"))
+    #expect(throws: LauncherError.io("injected swap failure")) {
+        try fs.publishDirectory(at: SafeRelativePath("incoming"), to: SafeRelativePath("version"))
+    }
+    #expect(try fs.readFile(at: SafeRelativePath("incoming/new"), maxBytes: 3) == Data("new".utf8))
+    #expect(try fs.readFile(at: SafeRelativePath("version/old"), maxBytes: 3) == Data("old".utf8))
+}
+
+private struct FailedDirectorySwap: FileOps {
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(descriptor, bytes: bytes) }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try SystemFileOps().synchronize(descriptor, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
+    func swap(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32) throws {
+        throw LauncherError.io("injected swap failure")
+    }
+}

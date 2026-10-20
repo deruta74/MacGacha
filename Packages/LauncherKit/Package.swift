@@ -15,7 +15,8 @@ let package = Package(
     targets: [
         .target(name: "LauncherCore"),
         .target(name: "DownloadEngine", dependencies: ["LauncherCore"]),
-        .target(name: "RuntimeManager", dependencies: ["LauncherCore", "DownloadEngine"]),
+        .systemLibrary(name: "CArchive"),
+        .target(name: "RuntimeManager", dependencies: ["LauncherCore", "DownloadEngine", "CArchive"]),
         .target(name: "Diagnostics", dependencies: ["LauncherCore"]),
         .target(name: "TestSupport", dependencies: ["LauncherCore", "DownloadEngine"]),
         .executableTarget(name: "CrashHarness", dependencies: ["DownloadEngine", "TestSupport"], path: "Tests/CrashHarness"),
