@@ -5,6 +5,8 @@ import Foundation
 import LauncherCore
 
 public struct ChunkObject: Codable, Sendable, Hashable {
+    /// Opaque CDN IDs may contain separators; bound their UTF-8 storage independently of paths.
+    public static let maximumIDBytes = 4096
     public let id: String
     public let urls: [URL]
     public let transferSize: Int64
@@ -24,6 +26,28 @@ public struct ChunkObject: Codable, Sendable, Hashable {
         self.codec = codec
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, urls, transferSize, transferDigest, decodedSize, decodedDigest, codec
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try c.decode(String.self, forKey: .id)
+        try Self.validateID(id)
+        self.init(id: id,
+            urls: try decodeBoundedArray(URL.self, from: c.superDecoder(forKey: .urls), maximum: InstallPlan.maximumURLsPerObject, kind: "object URLs"),
+            transferSize: try c.decode(Int64.self, forKey: .transferSize),
+            transferDigest: try c.decodeIfPresent(Digest.self, forKey: .transferDigest),
+            decodedSize: try c.decode(Int64.self, forKey: .decodedSize),
+            decodedDigest: try c.decode(Digest.self, forKey: .decodedDigest), codec: try c.decode(ChunkCodec.self, forKey: .codec))
+        try validate()
+    }
+
+    private static func validateID(_ id: String) throws {
+        guard !id.isEmpty else { throw invalidPlan("empty object id") }
+        guard id.utf8.count <= maximumIDBytes else { throw invalidPlan("object id too long") }
+    }
+
     public var partFileName: String {
         var hasher = StreamingHasher(.sha256)
         hasher.update(Data(id.utf8))
@@ -31,7 +55,8 @@ public struct ChunkObject: Codable, Sendable, Hashable {
     }
 
     func validate() throws {
-        guard !id.isEmpty else { throw invalidPlan("empty object id") }
+        try Self.validateID(id)
+        try checkPlanCount(urls.count, maximum: InstallPlan.maximumURLsPerObject, kind: "object URLs")
         guard transferSize > 0, decodedSize > 0 else { throw invalidPlan("object sizes must be positive") }
         if codec == .identity {
             guard transferSize == decodedSize else { throw invalidPlan("identity object sizes differ") }
@@ -77,9 +102,26 @@ public struct FileTask: Codable, Sendable, Hashable {
         self.digest = digest
         self.extents = extents
     }
+
+    private enum CodingKeys: String, CodingKey { case path, size, digest, extents }
+    public init(from decoder: any Decoder) throws {
+        try self.init(from: decoder, maximumExtents: InstallPlan.maximumExtents)
+    }
+
+    fileprivate init(from decoder: any Decoder, maximumExtents: Int) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(path: try c.decode(SafeRelativePath.self, forKey: .path), size: try c.decode(Int64.self, forKey: .size),
+            digest: try c.decode(Digest.self, forKey: .digest),
+            extents: try decodeBoundedArray(Extent.self, from: c.superDecoder(forKey: .extents), maximum: maximumExtents, kind: "extents"))
+    }
 }
 
 public struct InstallPlan: Codable, Sendable {
+    public static let maximumObjects = 1_000_000
+    public static let maximumURLsPerObject = 16
+    public static let maximumFiles = 1_000_000
+    public static let maximumDeletions = 1_000_000
+    public static let maximumExtents = 2_000_000
     public let id: SafeIdentifier
     public let objects: [String: ChunkObject]
     public let files: [FileTask]
@@ -95,16 +137,39 @@ public struct InstallPlan: Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case id, objects, files, deletions }
 
+    private struct ObjectKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(id: try c.decode(SafeIdentifier.self, forKey: .id), objects: try c.decode([String: ChunkObject].self, forKey: .objects),
-            files: try c.decode([FileTask].self, forKey: .files), deletions: try c.decode([SafeRelativePath].self, forKey: .deletions))
+        let id = try c.decode(SafeIdentifier.self, forKey: .id)
+        let objectContainer = try c.nestedContainer(keyedBy: ObjectKey.self, forKey: .objects)
+        let keys = objectContainer.allKeys
+        try checkPlanCount(keys.count, maximum: Self.maximumObjects, kind: "objects")
+        var objects: [String: ChunkObject] = [:]
+        for key in keys { objects[key.stringValue] = try objectContainer.decode(ChunkObject.self, forKey: key) }
+        var fileContainer = try c.nestedUnkeyedContainer(forKey: .files)
+        if let count = fileContainer.count { try checkPlanCount(count, maximum: Self.maximumFiles, kind: "files") }
+        var files: [FileTask] = []
+        var extentCount = 0
+        while !fileContainer.isAtEnd {
+            try checkPlanCount(files.count + 1, maximum: Self.maximumFiles, kind: "files")
+            let file = try FileTask(from: fileContainer.superDecoder(), maximumExtents: Self.maximumExtents - extentCount)
+            extentCount += file.extents.count
+            files.append(file)
+        }
+        self.init(id: id, objects: objects, files: files,
+            deletions: try decodeBoundedArray(SafeRelativePath.self, from: c.superDecoder(forKey: .deletions), maximum: Self.maximumDeletions, kind: "deletions"))
         try validate()
     }
 
     public var planDigest: Digest {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         // This fixed-depth value graph encodes only strings, integers, enums and containers;
         // its synthesized encoders have no failure-producing values or custom callbacks.
         let bytes = try! encoder.encode(self)
@@ -113,10 +178,19 @@ public struct InstallPlan: Codable, Sendable {
         return hasher.finalize()
     }
 
-    public func validate() throws {
+    public func validate(supportedCodecs: Set<ChunkCodec> = ChunkCodec.supportedCodecs) throws {
+        try checkPlanCount(objects.count, maximum: Self.maximumObjects, kind: "objects")
+        try checkPlanCount(files.count, maximum: Self.maximumFiles, kind: "files")
+        try checkPlanCount(deletions.count, maximum: Self.maximumDeletions, kind: "deletions")
+        var extentCount = 0
+        for file in files {
+            try checkPlanCount(file.extents.count, maximum: Self.maximumExtents - extentCount, kind: "extents")
+            extentCount += file.extents.count
+        }
         for (key, object) in objects {
             guard key == object.id else { throw invalidPlan("object dictionary key does not match id") }
             try object.validate()
+            guard supportedCodecs.contains(object.codec) else { throw LauncherError.io("codec unsupported: " + object.codec.rawValue) }
         }
         var destinations = Set<String>()
         var referenced = Set<String>()
@@ -204,3 +278,19 @@ private func caseFold(_ value: String) -> String {
 }
 
 func invalidPlan(_ reason: String) -> LauncherError { .io("invalid plan: " + reason) }
+
+private func checkPlanCount(_ count: Int, maximum: Int, kind: String) throws {
+    guard count <= maximum else { throw invalidPlan("too many " + kind) }
+}
+
+private func decodeBoundedArray<T: Decodable>(_ type: T.Type, from decoder: any Decoder,
+    maximum: Int, kind: String) throws -> [T] {
+    var container = try decoder.unkeyedContainer()
+    if let count = container.count { try checkPlanCount(count, maximum: maximum, kind: kind) }
+    var values: [T] = []
+    while !container.isAtEnd {
+        try checkPlanCount(values.count + 1, maximum: maximum, kind: kind)
+        values.append(try container.decode(T.self))
+    }
+    return values
+}

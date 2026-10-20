@@ -50,7 +50,7 @@ func tornTailIsTruncatedBeforeAppend(tail: Data) async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
     let path = try SafeRelativePath("journal.jsonl")
-    let prefix = try journalLines([.operationStarted, .objectVerified(id: "kept")])
+    let prefix = try journalLines([journalPlanRecord(), .operationStarted, .objectVerified(id: "kept")])
     try fs.writeAtomically(prefix + tail, to: path)
     let replayed = try OperationJournal.replay(fs: fs, path: path)
     #expect(replayed.verifiedObjects == ["kept"])
@@ -71,7 +71,7 @@ func midFileCorruptionThrows() throws {
     let fs = try ContainedFileSystem(root: directory.url)
     let path = try SafeRelativePath("journal.jsonl")
     for corrupt in ["not JSON\n", "{\n", "\n"] {
-        let bytes = try journalLines([.operationStarted]) + Data(corrupt.utf8) + journalLines([.operationCompleted])
+        let bytes = try journalLines([journalPlanRecord(), .operationStarted]) + Data(corrupt.utf8) + journalLines([.operationCompleted])
         try fs.writeAtomically(bytes, to: path)
         try expectJournalCorrupt { _ = try OperationJournal.replay(fs: fs, path: path) }
         try expectJournalCorrupt { _ = try OperationJournal(fs: fs, path: path) }
@@ -87,6 +87,7 @@ func unstagedRemovesStagedFile() async throws {
     let file = try SafeRelativePath("Data/file")
     let other = try SafeRelativePath("Data/other")
     let journal = try OperationJournal(fs: fs, path: path)
+    try await journal.append(journalPlanRecord())
     for record in [JournalRecord.objectVerified(id: "shared"), .fileStaged(path: file), .fileStaged(path: other),
         .fileUnstaged(path: file), .fileUnstaged(path: file)] {
         try await journal.append(record)
@@ -106,7 +107,7 @@ func durableRecordsAlwaysUseFullFsync() async throws {
         syncs.withLock { $0.append(durable) }
         try ContainedFileSystem.synchronizeFileDescriptor(fd, durable: durable)
     })
-    #expect(syncs.withLock { $0 } == [false])
+    #expect(syncs.withLock { $0 } == [true])
     syncs.withLock { $0.removeAll() }
     let file = try SafeRelativePath("Data/file")
     let records: [(JournalRecord, Bool)] = [
@@ -169,6 +170,7 @@ func journalCancellationKeepsExistingRecords() async throws {
     let fs = try ContainedFileSystem(root: directory.url)
     let path = try SafeRelativePath("journal.jsonl")
     let journal = try OperationJournal(fs: fs, path: path)
+    try await journal.append(journalPlanRecord())
     try await journal.append(.operationStarted)
     let before = try fs.readFile(at: path, maxBytes: 1024)
     let task = Task {
@@ -186,10 +188,14 @@ func failedAppendRequiresReopeningBeforeAnotherAppend() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
     let path = try SafeRelativePath("journal.jsonl")
+    let fail = Mutex(false)
     let journal = try OperationJournal(fs: fs, path: path, synchronize: { fd, durable in
-        if durable { throw LauncherError.io("Injected sync failure") }
-        try ContainedFileSystem.synchronizeFileDescriptor(fd, durable: false)
+        if durable && fail.withLock({ $0 }) { throw LauncherError.io("Injected sync failure") }
+        try ContainedFileSystem.synchronizeFileDescriptor(fd, durable: durable)
     })
+    try await journal.append(journalPlanRecord())
+    try await journal.append(.batchStarted(index: 0))
+    fail.withLock { $0 = true }
     await #expect(throws: LauncherError.io("Injected sync failure")) {
         try await journal.append(.commitStarted(batch: 0))
     }
@@ -197,6 +203,8 @@ func failedAppendRequiresReopeningBeforeAnotherAppend() async throws {
         try await journal.append(.operationCompleted)
     }
     let reopened = try OperationJournal(fs: fs, path: path)
+    #expect(reopened.recoveredState.commitStartedBatches == [0])
+    #expect(!reopened.recoveredState.completed)
     try await reopened.append(.operationCompleted)
     #expect(try OperationJournal.replay(fs: fs, path: path).completed)
 }
@@ -206,8 +214,10 @@ func journalStreamsAcrossReadBoundariesAndDiscardsLongTornTail() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
     let path = try SafeRelativePath("journal.jsonl")
-    let id = String(repeating: "é", count: 40_000)
-    let prefix = try journalLines([.operationStarted, .objectVerified(id: id)])
+    let id = String(repeating: "é", count: 2048)
+    var prefix = try journalLines([journalPlanRecord(), .operationStarted])
+    let objectLine = try journalLines([.objectVerified(id: id)])
+    prefix.append(Data(repeating: 32, count: 70_000)); prefix.append(objectLine)
     try fs.writeAtomically(prefix + Data(repeating: 0x78, count: 2 * 1_048_576), to: path)
     let journal = try OperationJournal(fs: fs, path: path)
     try await journal.append(.operationCompleted)
@@ -231,10 +241,14 @@ func invalidOrOversizedRecordsDoNotModifyTheJournal() async throws {
         try await journal.append(.batchStarted(index: -1))
     }
     let oversized = String(repeating: "a", count: 1_048_577)
-    await #expect(throws: LauncherError.journalCorrupt("Journal record exceeds 1048576 bytes")) {
+    await #expect(throws: LauncherError.journalCorrupt("Invalid object id")) {
         try await journal.append(.objectVerified(id: oversized))
     }
+    await #expect(throws: LauncherError.journalCorrupt("Journal record exceeds 1048576 bytes")) {
+        try await journal.append(.fileStaged(path: SafeRelativePath(oversized)))
+    }
     #expect(try fs.readFile(at: path, maxBytes: 1).isEmpty)
+    try await journal.append(journalPlanRecord())
     try await journal.append(.operationCompleted)
     let completeOversized = Data("{\"type\":\"objectVerified\",\"id\":\"\(oversized)\"}\n".utf8)
     try fs.writeAtomically(completeOversized, to: path)
@@ -253,4 +267,8 @@ private func journalLines(_ records: [JournalRecord]) throws -> Data {
 private func expectJournalCorrupt(_ body: () throws -> Void) throws {
     do { try body(); Issue.record("Expected LauncherError.journalCorrupt") }
     catch LauncherError.journalCorrupt(let reason) { #expect(!reason.isEmpty) }
+}
+
+private func journalPlanRecord() throws -> JournalRecord {
+    .planStored(planID: try SafeIdentifier("build-1"), planDigest: try journalDigest())
 }

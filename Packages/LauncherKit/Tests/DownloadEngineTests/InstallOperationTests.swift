@@ -672,3 +672,15 @@ func opCollect(_ stream: AsyncThrowingStream<OperationEvent, any Error>, onEvent
     for try await event in stream { try onEvent(event); events.append(event) }
     return events
 }
+
+@Test
+func installRejectsUnsupportedCodecBeforeAnyRequestOrDiskWrite() throws {
+    let temp = try TempDir(); let cdn = MockCDN()
+    let object = ChunkObject(id: "compressed", urls: [URL(string: "https://cdn.test/compressed")!], transferSize: 2,
+        decodedSize: 3, decodedDigest: opDigest("abc"), codec: .zstd)
+    let file = try stagingFile("new", "abc", [stagingChunk("compressed", "abc")])
+    let plan = try stagingPlan([object], [file])
+    #expect(throws: LauncherError.io("codec unsupported: zstd")) { try opEngine(plan, temp.url, cdn) }
+    #expect(cdn.requestLog.isEmpty)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: temp.url.path).isEmpty)
+}

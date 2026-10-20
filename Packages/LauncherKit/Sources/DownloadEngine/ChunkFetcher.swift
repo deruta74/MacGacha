@@ -26,11 +26,24 @@ public actor ChunkFetcher {
         let key = fs.caseFoldedPathKey(for: part)
         guard activeParts.insert(key).inserted else { throw LauncherError.busy("Chunk part is already being fetched") }
         defer { activeParts.remove(key) }
-        for attempt in 1...retry.maxAttempts {
+        try await Self.performFetch(object, http: http, retry: retry, sleeper: sleeper, fs: fs, part: part, progress: progress)
+    }
+
+    // Only the reservation set lives on the actor. All blocking part I/O, retries and
+    // synchronization run outside its executor, allowing independent parts to progress.
+    @concurrent
+    private static func performFetch(_ object: ChunkObject, http: any HTTPClient, retry: RetryPolicy,
+        sleeper: any Sleeper, fs: ContainedFileSystem, part: SafeRelativePath,
+        progress: @Sendable (Int64) -> Void) async throws {
+        var attempt = 1
+        var mirror = 0
+        var unavailable = Set<Int>()
+        while true {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
-            let url = object.urls[(attempt - 1) % object.urls.count]
+            let selected = mirror
+            let url = object.urls[selected]
             do {
-                try await fetchAttempt(object, from: url, fs: fs, part: part, progress: progress)
+                try await fetchAttempt(object, from: url, http: http, fs: fs, part: part, progress: progress)
                 return
             } catch {
                 if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
@@ -41,12 +54,19 @@ public actor ChunkFetcher {
                 case .sizeMismatch, .digestMismatch: try fs.removeFile(at: part)
                 default: break
                 }
-                guard attempt < retry.maxAttempts, retry.isRetryable(cause) else { throw cause }
-                do { try await sleeper.sleep(for: retry.delay(forAttempt: attempt, retryAfter: failure?.retryAfter)) }
-                catch {
-                    if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
-                    throw error
+                if case .http(let status, _) = cause, status == 404 || status == 410 {
+                    unavailable.insert(selected)
+                    guard unavailable.count < object.urls.count else { throw cause }
+                } else {
+                    guard attempt < retry.maxAttempts, retry.isRetryable(cause) else { throw cause }
+                    do { try await sleeper.sleep(for: retry.delay(forAttempt: attempt, retryAfter: failure?.retryAfter)) }
+                    catch {
+                        if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
+                        throw error
+                    }
+                    attempt += 1
                 }
+                repeat { mirror = (mirror + 1) % object.urls.count } while unavailable.contains(mirror)
             }
         }
     }
@@ -56,7 +76,8 @@ public actor ChunkFetcher {
         let retryAfter: Duration?
     }
 
-    private func fetchAttempt(_ object: ChunkObject, from url: URL, fs: ContainedFileSystem, part: SafeRelativePath,
+    @concurrent
+    private static func fetchAttempt(_ object: ChunkObject, from url: URL, http: any HTTPClient, fs: ContainedFileSystem, part: SafeRelativePath,
         progress: @Sendable (Int64) -> Void) async throws {
         var handle = try fs.openForWriting(at: part, truncate: false)
         defer { try? handle.close() }
@@ -80,6 +101,8 @@ public actor ChunkFetcher {
         case 206:
             guard let range = head.contentRange, range.lowerBound == offset, object.transferSize > 0,
                   range.upperBound == object.transferSize - 1 else {
+                try handle.close()
+                handle = try fs.openForWriting(at: part, truncate: true)
                 throw LauncherError.transport("invalid content range")
             }
             if let total = head.totalLength, total != object.transferSize {
@@ -103,7 +126,8 @@ public actor ChunkFetcher {
         try await verify(object, fs: fs, part: part)
     }
 
-    private func consume(_ body: HTTPBody, object: ChunkObject, handle: FileHandle, fileOps: any FileOps, offset: Int64,
+    @concurrent
+    private static func consume(_ body: HTTPBody, object: ChunkObject, handle: FileHandle, fileOps: any FileOps, offset: Int64,
         progress: @Sendable (Int64) -> Void) async throws {
         var received = offset
         var iterator = body.makeAsyncIterator()
@@ -118,10 +142,12 @@ public actor ChunkFetcher {
             received += Int64(piece.count)
             progress(received)
         }
+        guard received == object.transferSize else { throw LauncherError.transport("truncated body") }
         // Releasing the iterator cancels any remaining body instead of waiting for an unbounded EOF.
     }
 
-    private func verify(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath) async throws {
+    @concurrent
+    private static func verify(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath) async throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         let size = try fs.size(at: part) ?? 0
         guard size == object.transferSize else {

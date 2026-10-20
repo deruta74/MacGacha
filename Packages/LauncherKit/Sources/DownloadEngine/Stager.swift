@@ -146,7 +146,7 @@ private actor StagingSession {
 
     private func record(_ record: JournalRecord) async throws {
         try await journal.append(record)
-        state.apply(record)
+        try state.apply(record)
     }
 
     private func fetchObjects(_ ids: Set<String>) async throws {
@@ -169,7 +169,7 @@ private actor StagingSession {
             }
             while next < min(limit, needed.count) { submit(needed[next]); next += 1 }
             while let object = try await group.next() {
-                state.apply(.objectVerified(id: object.id))
+                try state.apply(.objectVerified(id: object.id))
                 if networkObjects.insert(object.id).inserted {
                     totalNetwork = try SpaceBudget.adding(totalNetwork, object.transferSize)
                 }

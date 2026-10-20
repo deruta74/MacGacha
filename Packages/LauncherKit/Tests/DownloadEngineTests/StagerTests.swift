@@ -341,7 +341,15 @@ func stagingPlan(_ objects: [ChunkObject], _ files: [FileTask]) throws -> Instal
 func journalPath(_ plan: InstallPlan) throws -> SafeRelativePath { try SafeRelativePath(".macgacha-staging/\(plan.id)/journal.jsonl") }
 func stagedPath(_ plan: InstallPlan, _ path: SafeRelativePath) throws -> SafeRelativePath { try SafeRelativePath(".macgacha-staging/\(plan.id)/files/\(path)") }
 func objectPath(_ plan: InstallPlan, _ object: ChunkObject) throws -> SafeRelativePath { try SafeRelativePath(".macgacha-staging/\(plan.id)/objects/\(object.partFileName)") }
-func stagingJournal(_ fs: ContainedFileSystem, _ plan: InstallPlan) throws -> OperationJournal { try OperationJournal(fs: fs, path: journalPath(plan)) }
+func stagingJournal(_ fs: ContainedFileSystem, _ plan: InstallPlan) throws -> OperationJournal {
+    let path = try journalPath(plan)
+    if try fs.itemType(at: path) == nil {
+        var bytes = try JSONEncoder().encode(JournalRecord.planStored(planID: plan.id, planDigest: plan.planDigest))
+        bytes.append(10)
+        try fs.writeAtomically(bytes, to: path)
+    }
+    return try OperationJournal(fs: fs, path: path)
+}
 func stagingFetcher(_ http: any HTTPClient) -> ChunkFetcher { ChunkFetcher(http: http, retry: RetryPolicy(maxAttempts: 2, baseDelay: .zero, maxDelay: .zero), sleeper: InstantSleeper()) }
 func stagingEngine(_ plan: InstallPlan, _ fs: ContainedFileSystem, _ http: any HTTPClient, _ journal: OperationJournal) throws -> Stager {
     try Stager(plan: plan, fs: fs, fetcher: stagingFetcher(http), journal: journal, disk: FixedDiskSpace(bytes: Int64.max))

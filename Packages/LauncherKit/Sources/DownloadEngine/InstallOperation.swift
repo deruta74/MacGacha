@@ -19,7 +19,7 @@ public struct InstallOperation: Sendable {
     public init(plan: InstallPlan, installRoot: URL, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), mode: Mode = .automatic,
         fileOps: any FileOps = SystemFileOps(), crashHooks: CrashHooks = .none) throws {
-        try plan.validate()
+        try plan.validate(supportedCodecs: ChunkCodec.supportedCodecs)
         self.plan = plan; fs = try ContainedFileSystem(root: installRoot, fileOps: fileOps)
         self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks
     }
@@ -93,7 +93,7 @@ private actor CommitSession {
                 staging = iterator
                 if let event { return event }
                 staging = nil
-                try refresh()
+                try await refresh()
                 try await beginCommit()
                 return .phase(.committing)
             case .commit:
@@ -129,15 +129,15 @@ private actor CommitSession {
         return active
     }
 
-    private func refresh() throws {
+    private func refresh() async throws {
         let context = try context()
-        state = try OperationJournal.replay(fs: fs, path: CommitPaths(id: context.plan.id).journal)
+        state = try await context.journal.snapshot()
     }
 
     private func record(_ record: JournalRecord) async throws {
         let context = try context()
         try await context.journal.append(record)
-        state.apply(record)
+        try state.apply(record)
     }
 
     private func selectStoredOrRequested() async throws {
@@ -171,7 +171,7 @@ private actor CommitSession {
             catch { throw LauncherError.journalCorrupt("Invalid stored install plan") }
             guard plan.id == id else { throw LauncherError.journalCorrupt("Stored plan directory mismatch") }
             let journal = try OperationJournal(fs: fs, path: paths.journal, crashHooks: crashHooks)
-            let replay = try OperationJournal.replay(fs: fs, path: paths.journal)
+            let replay = journal.recoveredState
             guard (replay.planID == nil || replay.planID == plan.id),
                   (replay.planDigest == nil || replay.planDigest == plan.planDigest) else {
                 throw LauncherError.journalCorrupt("Stored plan digest mismatch")
@@ -427,7 +427,7 @@ private actor CommitSession {
                 try await record(.fileUnstaged(path: file.path))
                 let stager = try Stager(plan: pendingPlan(), fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, crashHooks: crashHooks)
                 for try await _ in stager.stage(files: [file]) {}
-                try refresh()
+                try await refresh()
                 guard state.stagedFiles.contains(file.path), try fs.size(at: staged) == file.size else {
                     throw LauncherError.journalCorrupt("Restaged file is missing")
                 }
