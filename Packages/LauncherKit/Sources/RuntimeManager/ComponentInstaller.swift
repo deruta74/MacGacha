@@ -10,8 +10,8 @@ public struct ComponentInstaller: Sendable {
 
     private let store: RuntimeStore
     private let consent: ConsentStore
-    private let fetcher: ChunkFetcher
-    private let extractor: ArchiveExtractor
+    private let fetcher: ChunkFetcher?
+    private let extractor: ArchiveExtractor?
     private let disk: any DiskSpaceProbe
     private let fileOps: any FileOps
     private let failurePoint: @Sendable (PublishPoint) throws -> Void
@@ -23,11 +23,19 @@ public struct ComponentInstaller: Sendable {
         self.extractor = extractor; self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
     }
 
+    /// Import-only construction: no HTTP client or archive extractor is created.
+    public init(store: RuntimeStore, consent: ConsentStore, disk: any DiskSpaceProbe = SystemDiskSpaceProbe(),
+        fileOps: any FileOps = SystemFileOps(),
+        failurePoint: @escaping @Sendable (PublishPoint) throws -> Void = { _ in }) {
+        self.store = store; self.consent = consent; self.fetcher = nil; self.extractor = nil
+        self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
+    }
+
     /// Pull-driven: dropping the stream releases the store lock; cancelling its consumer
-    /// cancels HTTP/extraction. The only completed event follows successful publication.
-    /// This download installer does not implement GPTK import or prefix creation.
-    public func install(_ component: RuntimeComponent) -> AsyncThrowingStream<OperationEvent, any Error> {
-        let session = ComponentInstallSession(component: component, store: store, consent: consent,
+    /// cancels HTTP/extraction/copy. The only completed event follows successful publication.
+    /// An import manifest requires a candidate; downloads require no candidate.
+    public func install(_ component: RuntimeComponent, from candidate: GPTKCandidate? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
+        let session = ComponentInstallSession(component: component, candidate: candidate, store: store, consent: consent,
             fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
@@ -36,10 +44,12 @@ public struct ComponentInstaller: Sendable {
 private actor ComponentInstallSession {
     private enum Step { case start, space, download, extract, publish, cleanup, done }
     private let component: RuntimeComponent
+    private let candidate: GPTKCandidate?
+    private var importSource: GPTKImportSource?
     private let store: RuntimeStore
     private let consent: ConsentStore
-    private let fetcher: ChunkFetcher
-    private let extractor: ArchiveExtractor
+    private let fetcher: ChunkFetcher?
+    private let extractor: ArchiveExtractor?
     private let disk: any DiskSpaceProbe
     private let fileOps: any FileOps
     private let failurePoint: @Sendable (ComponentInstaller.PublishPoint) throws -> Void
@@ -52,10 +62,10 @@ private actor ComponentInstallSession {
     private var pulling = false
     private var publicationUncertain = false
 
-    init(component: RuntimeComponent, store: RuntimeStore, consent: ConsentStore, fetcher: ChunkFetcher,
-        extractor: ArchiveExtractor, disk: any DiskSpaceProbe, fileOps: any FileOps,
+    init(component: RuntimeComponent, candidate: GPTKCandidate?, store: RuntimeStore, consent: ConsentStore, fetcher: ChunkFetcher?,
+        extractor: ArchiveExtractor?, disk: any DiskSpaceProbe, fileOps: any FileOps,
         failurePoint: @escaping @Sendable (ComponentInstaller.PublishPoint) throws -> Void) {
-        self.component = component; self.store = store; self.consent = consent; self.fetcher = fetcher
+        self.component = component; self.candidate = candidate; self.store = store; self.consent = consent; self.fetcher = fetcher
         self.extractor = extractor; self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
     }
 
@@ -74,7 +84,12 @@ private actor ComponentInstallSession {
                     !(await consent.isAccepted(kind, version: component.version.rawValue, termsRevision: component.license.termsRevision)) {
                     throw LauncherError.consentRequired(component.id.rawValue)
                 }
-                guard component.sourceMode == .download else { throw LauncherError.io("GPTK import requires the GPTK importer") }
+                switch component.sourceMode {
+                case .download:
+                    guard candidate == nil, fetcher != nil, extractor != nil else { throw LauncherError.io("Download requires HTTP and archive extraction") }
+                case .importFromGPTK:
+                    guard component.kind == .d3dmetal, candidate != nil else { throw LauncherError.io("GPTK import requires a D3DMetal candidate") }
+                }
                 let fs = try ContainedFileSystem(root: store.paths.root, fileOps: fileOps)
                 let runtimes = try RuntimeJSONFile.relativePath(store.paths.runtimes, root: store.paths.root)
                 try fs.createDirectory(at: runtimes)
@@ -91,6 +106,16 @@ private actor ComponentInstallSession {
                 return .phase(.checkingSpace)
             case .space:
                 let fs = try filesystem()
+                if component.sourceMode == .importFromGPTK {
+                    guard let candidate else { throw LauncherError.io("Missing GPTK candidate") }
+                    let source = try GPTKImportSource(candidate: candidate,
+                        maxBytes: min(GPTKImporter.importByteLimit, component.installedSize ?? GPTKImporter.importByteLimit))
+                    let available = try disk.availableBytes(at: store.paths.runtimes)
+                    guard available >= source.size else { throw LauncherError.insufficientSpace(required: source.size, available: available) }
+                    importSource = source; step = .extract
+                    return .phase(.staging)
+                }
+                guard let fetcher else { throw LauncherError.io("Missing archive fetcher") }
                 guard let size = component.size, size > 0, let installedSize = component.installedSize,
                     let digest = component.sha256, let url = component.url else { throw LauncherError.io("Invalid download component") }
                 let (required, overflow) = size.addingReportingOverflow(installedSize)
@@ -137,35 +162,30 @@ private actor ComponentInstallSession {
                 }
             case .extract:
                 let fs = try filesystem()
-                guard let downloads, let format = component.archive, let installedSize = component.installedSize else {
-                    throw LauncherError.io("Missing runtime archive")
-                }
                 let runtimes = try RuntimeJSONFile.relativePath(store.paths.runtimes, root: store.paths.root)
                 let incoming = try SafeRelativePath("\(runtimes)/\(component.kind.rawValue)/.incoming-\(UUID().uuidString)")
                 self.incoming = incoming
-                let archive = try SafeRelativePath("\(downloads)/archive")
-                try await extractor.extract(archive: archive, archiveFS: fs, archiveURL: archive.resolved(against: store.paths.root),
-                    format: format, fs: fs, target: incoming, expandedLimit: installedSize)
-                try fs.removeQuarantineRecursively(at: incoming)
-                try fs.synchronizeTree(at: incoming)
-                let marker = try InstalledComponent(kind: component.kind, version: component.version.rawValue,
-                    installedAt: Date(), source: .download)
-                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-                let markerPath = try SafeRelativePath("\(incoming)/.macgacha-component.json")
-                try fs.writeAtomically(encoder.encode(marker), to: markerPath)
-                try fs.fullSync(at: markerPath)
+                if component.sourceMode == .importFromGPTK {
+                    guard let importSource else { throw LauncherError.io("Missing GPTK source") }
+                    try importSource.copy(into: incoming, fs: fs)
+                    self.importSource = nil
+                } else {
+                    guard let downloads, let format = component.archive, let installedSize = component.installedSize, let extractor else {
+                        throw LauncherError.io("Missing runtime archive")
+                    }
+                    let archive = try SafeRelativePath("\(downloads)/archive")
+                    try await extractor.extract(archive: archive, archiveFS: fs, archiveURL: archive.resolved(against: store.paths.root),
+                        format: format, fs: fs, target: incoming, expandedLimit: installedSize)
+                }
+                try RuntimePublication.prepare(component, fs: fs, incoming: incoming)
                 step = .publish
                 return .phase(.committing)
             case .publish:
                 let fs = try filesystem()
                 guard let incoming else { throw LauncherError.io("Missing incoming runtime") }
-                guard !Task.isCancelled else { throw LauncherError.cancelled }
-                try failurePoint(.beforePublish)
                 let destination = try RuntimeJSONFile.relativePath(store.installURL(for: component), root: store.paths.root)
-                publicationUncertain = true
-                try fs.publishDirectory(at: incoming, to: destination)
-                publicationUncertain = false
-                try failurePoint(.afterPublish)
+                try RuntimePublication.publish(fs: fs, incoming: incoming, destination: destination,
+                    uncertain: &publicationUncertain, failurePoint: failurePoint)
                 step = .cleanup
                 return .phase(.cleaningUp)
             case .cleanup:
@@ -177,7 +197,7 @@ private actor ComponentInstallSession {
             case .done: return nil
             }
         } catch {
-            download = nil
+            download = nil; importSource = nil
             if let fs {
                 // If publish/rollback failed, incoming might still be the old version.
                 // Preserve it for recovery rather than deleting an uncertain tree here.
