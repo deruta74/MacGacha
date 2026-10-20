@@ -13,8 +13,7 @@ struct CrashRecoveryTests {
         let fixtures = try TempDir(); let root = try TempDir()
         let fixtureURL = fixtures.url, rootURL = root.url
         let plan = try crashFixture(fixtureURL, root: rootURL)
-        let executable = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(".build/debug/CrashHarness")
+        let executable = try crashHarnessURL(in: Bundle(for: CrashTestBundleToken.self).bundleURL)
         let result = try await withThrowingTaskGroup(of: ProcessResult.self) { group in
             group.addTask {
                 try await SystemProcessRunner().run(executable,
@@ -65,6 +64,46 @@ struct CrashRecoveryTests {
         // A second run must also be safe after completed cleanup.
         try await finishFixture(plan, fixtures: fixtures.url, root: root.url)
         try assertFixture(plan, root: root.url)
+    }
+}
+
+private final class CrashTestBundleToken: NSObject {}
+
+/// Resolve only beside this test image, so release and custom scratch builds cannot
+/// accidentally execute a different configuration's harness. Build order may put the
+/// harness timestamp before the bundle's, so timestamps are not a freshness signal.
+func crashHarnessURL(in testBundle: URL) throws -> URL {
+    guard testBundle.pathExtension == "xctest" else {
+        throw LauncherError.io("Cannot locate current .xctest bundle: \(testBundle.path)")
+    }
+    let harness = testBundle.deletingLastPathComponent().appendingPathComponent("CrashHarness")
+    let files = FileManager.default
+    guard files.isExecutableFile(atPath: harness.path),
+          let attributes = try? files.attributesOfItem(atPath: harness.path),
+          attributes[.type] as? FileAttributeType == .typeRegular else {
+        throw LauncherError.io("CrashHarness is missing or not executable beside test bundle: \(harness.path)")
+    }
+    return harness
+}
+
+@Test(arguments: ["current", "missing", "older"])
+func crashHarnessLookupUsesCurrentProductsRegardlessOfTimestamp(scenario: String) throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let bundle = temp.url.appendingPathComponent("custom-scratch/Release/CurrentTests.xctest")
+    let harness = bundle.deletingLastPathComponent().appendingPathComponent("CrashHarness")
+    try fs.createDirectory(at: SafeRelativePath("custom-scratch/Release/CurrentTests.xctest"))
+    if scenario != "missing" {
+        try fs.writeAtomically(Data("fixture executable".utf8), to: SafeRelativePath("custom-scratch/Release/CrashHarness"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755,
+            .modificationDate: Date(timeIntervalSince1970: scenario == "older" ? 99 : 101)], ofItemAtPath: harness.path)
+    }
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 100)], ofItemAtPath: bundle.path)
+    if scenario == "missing" {
+        #expect(throws: LauncherError.io("CrashHarness is missing or not executable beside test bundle: \(harness.path)")) {
+            _ = try crashHarnessURL(in: bundle)
+        }
+    } else {
+        #expect(try crashHarnessURL(in: bundle) == harness)
     }
 }
 

@@ -58,13 +58,41 @@ struct FaultInjectionTests {
         #expect(try fs.contentsOfDirectory(at: SafeRelativePath("dir")) == [path])
     }
 
+    @Test
+    func partialJournalAppendRequiresReopenThenInstallResumes() async throws {
+        let fixtures = try TempDir(); let root = try TempDir()
+        let plan = try crashFixture(fixtures.url, root: root.url)
+        let ops = InjectedFileOps(.journalWrite)
+        let fs = try ContainedFileSystem(root: root.url, fileOps: ops)
+        let journal = try await opSeed(fs, plan, commit: true)
+        let object = try ContainedFileSystem(root: fixtures.url).readFile(at: SafeRelativePath("crash-0"), maxBytes: 160_000)
+        try fs.writeAtomically(object, to: opStaged(plan, plan.files[0].path))
+        try fs.writeAtomically(object + object, to: opStaged(plan, plan.files[1].path))
+        try fs.rename(from: opStaged(plan, plan.files[0].path), to: plan.files[0].path)
+        let before = try fs.readFile(at: opJournal(plan), maxBytes: 65_536)
+        await #expect(throws: ops.failure) { try await journal.append(.fileCommitted(path: plan.files[0].path)) }
+        #expect(ops.injected)
+        let torn = try fs.readFile(at: opJournal(plan), maxBytes: 65_536)
+        #expect(torn.starts(with: before) && torn.count > before.count)
+        #expect(torn.last != 0x0a)
+        #expect(try OperationJournal.replay(fs: fs, path: opJournal(plan)).committedFiles.isEmpty)
+        await #expect(throws: LauncherError.journalCorrupt("Reopen journal after failed append")) {
+            try await journal.append(.fileCommitted(path: plan.files[0].path))
+        }
+        #expect(try fs.readFile(at: opJournal(plan), maxBytes: 65_536) == torn)
+        // InstallOperation reopens the journal, truncates the torn tail and recovers
+        // the rename-to-journal gap by verifying the destination's size and digest.
+        try await finishFixture(plan, fixtures: fixtures.url, root: root.url)
+        try assertFixture(plan, root: root.url)
+    }
+
 }
 
 final class InjectedFileOps: FileOps {
     enum Fault: String, CaseIterable, Sendable {
-        case noSpaceWrite, noSpaceTransferWrite, shortWrite, sync, renameEXDEV, unlink, deleteUnlink, renameSync
+        case noSpaceWrite, noSpaceTransferWrite, shortWrite, sync, renameEXDEV, unlink, deleteUnlink, renameSync, journalWrite
     }
-    private struct State { var injected = false; var renamed = false }
+    private struct State { var injected = false; var renamed = false; var journalWritePending = false }
     private let state = Mutex(State())
     let fault: Fault
     let atomic: Bool
@@ -88,6 +116,24 @@ final class InjectedFileOps: FileOps {
     }
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
         let location = path(descriptor)
+        if fault == .journalWrite, location.hasSuffix("/journal.jsonl") {
+            let action = state.withLock { state -> Int in
+                if state.journalWritePending {
+                    state.journalWritePending = false
+                    return 2
+                }
+                if !state.injected, bytes.count > 1,
+                   String(decoding: bytes, as: UTF8.self).contains("\"type\":\"fileCommitted\"") {
+                    state.injected = true; state.journalWritePending = true
+                    return 1
+                }
+                return 0
+            }
+            if action == 1 {
+                return try SystemFileOps().write(descriptor, bytes: UnsafeRawBufferPointer(rebasing: bytes[..<(bytes.count / 2)]))
+            }
+            if action == 2 { throw failure }
+        }
         let staged = atomic ? location.contains("/.macgacha-write-") : location.contains("/files/")
         if take(staged && fault == .noSpaceWrite) { throw failure }
         if take(fault == .noSpaceTransferWrite && location.hasSuffix(".part")) { throw failure }
