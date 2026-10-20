@@ -66,7 +66,10 @@ func bundleSkipsLogRotatedAwayBeforeOpen() async throws {
         if file.lastPathComponent == "rotating.log" {
             removed.withLock { $0 = unlink(file.path) == 0 }
         }
-        return open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        let fd = open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        let openError = errno
+        errno = EACCES // The caller must use the captured errno, not thread-local state after return.
+        return (fd, openError)
     })
     try await bundle.export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(),
         runtimes: [:], failureStage: nil)
@@ -147,32 +150,97 @@ func bundleRejectsAlreadyCancelledExportBeforeRunningProcess() async throws {
 }
 
 @Test
-func bundleRejectsOversizedLogsBeforeRunningArchiver() async throws {
+func bundleTruncatesOversizedLogsAtALineBoundary() async throws {
     let root = try diagnosticTempDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
-    let file = root.appendingPathComponent("oversized.log")
+    let logs = root.appendingPathComponent("logs")
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    let file = logs.appendingPathComponent("oversized.log")
     try Data().write(to: file)
     let handle = try FileHandle(forWritingTo: file)
     try handle.truncate(atOffset: 11 << 20)
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data("discard-partial-line\nlast complete line token=planted-secret\n".utf8))
     try handle.close()
-    let ran = Mutex(false)
-    let runner = DiagnosticTestRunner { _ in
-        ran.withLock { $0 = true }
+    // Non-logs must not consume the 100-log allowance.
+    for index in 0..<101 { try Data("ignored".utf8).write(to: logs.appendingPathComponent("other\(index).txt")) }
+    let runner = DiagnosticTestRunner { arguments in
+        let staging = URL(fileURLWithPath: arguments[3])
+        let copied = try String(contentsOf: staging.appendingPathComponent("logs/oversized.log"), encoding: .utf8)
+        #expect(copied == "last complete line token=<redacted>\n")
+        let skipped = try String(contentsOf: staging.appendingPathComponent("skipped.txt"), encoding: .utf8)
+        #expect(skipped.contains("oversized.log"))
+        #expect(skipped.contains("truncated"))
+        #expect(skipped.contains("other0.txt"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: staging.appendingPathComponent("logs").path) == ["oversized.log"])
+        #expect(try String(contentsOf: staging.appendingPathComponent("failure.txt"), encoding: .utf8) == "none\n")
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
         return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
+    try await DiagnosticBundle(logDirectory: logs, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
+        systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+    #expect(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0 > 10 << 20)
+}
+
+@Test
+func bundlePreservesLauncherErrorsAndRedactsForeignErrors() async throws {
+    struct ForeignError: Error, CustomStringConvertible {
+        var description: String { "failed: game_token=foreign-private" }
+    }
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    for expected in [LauncherError.insufficientSpace(required: 100, available: 1),
+        .io("already structured"), .processFailed(executable: "tool", exitCode: 2, stderrTail: "already structured")] {
+        let runner = DiagnosticTestRunner { _ in throw expected }
+        await #expect(throws: expected) {
+            try await DiagnosticBundle(logDirectory: root.appendingPathComponent("missing"), runner: runner)
+                .export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+        }
+    }
+    let runner = DiagnosticTestRunner { _ in throw ForeignError() }
     do {
-        try await DiagnosticBundle(logDirectory: root, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
-            systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
-        Issue.record("An oversized log must fail before compression")
-    } catch LauncherError.io {}
-    #expect(!ran.withLock { $0 })
-    #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("bundle.zip").path))
+        try await DiagnosticBundle(logDirectory: root.appendingPathComponent("missing"), runner: runner)
+            .export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+        Issue.record("Foreign error must throw")
+    } catch LauncherError.io(let message) {
+        #expect(!message.contains("foreign-private"))
+        #expect(message.contains("<redacted>"))
+    }
+}
+
+@Test
+func realEventLogRoundTripsThroughBundleWithoutSecrets() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logs = root.appendingPathComponent("logs")
+    let planted = "roundtrip-private-credential"
+    let log = EventLog(directory: logs, maxFileBytes: 1024, keepFiles: 3)
+    for index in 0..<8 {
+        await log.log(.error, "test", "LoginResponse(game_token: \"\(planted)\", id: \(index))",
+            metadata: ["ltmid_v2": planted, "header": "x-rpc-combo_token: \(planted) other-private"])
+    }
+    let zip = root.appendingPathComponent("bundle.zip")
+    try await DiagnosticBundle(logDirectory: logs, runner: SystemProcessRunner()).export(to: zip,
+        systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+    let extracted = root.appendingPathComponent("extracted")
+    let result = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/ditto"),
+        arguments: ["-x", "-k", zip.path, extracted.path], environment: [:], currentDirectory: nil)
+    #expect(result.exitCode == 0)
+    for file in try diagnosticRegularFiles(under: extracted) {
+        let text = String(decoding: try Data(contentsOf: file), as: UTF8.self)
+        #expect(!text.contains(planted))
+        #expect(!text.contains("other-private"))
+    }
+    #expect(try String(contentsOf: extracted.appendingPathComponent("failure.txt"), encoding: .utf8) == "none\n")
+    let outputLogs = try FileManager.default.contentsOfDirectory(atPath: extracted.appendingPathComponent("logs").path)
+    #expect(!outputLogs.isEmpty)
 }
 
 @Test
 func systemInfoAndFailureStageAreCodable() throws {
     let info = SystemInfo.current(appVersion: "1.0-test")
-    #expect(!info.macOSVersion.isEmpty)
+    let version = ProcessInfo.processInfo.operatingSystemVersion
+    #expect(info.macOSVersion == "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)")
     #expect(!info.macOSBuild.isEmpty)
     #expect(!info.hardwareModel.isEmpty)
     #expect(!info.chip.isEmpty)
@@ -181,6 +249,52 @@ func systemInfoAndFailureStageAreCodable() throws {
     _ = try JSONDecoder().decode(SystemInfo.self, from: JSONEncoder().encode(info))
     #expect(try JSONDecoder().decode(FailureStage.self, from: JSONEncoder().encode(FailureStage.download)) == .download)
     #expect(throws: (any Error).self) { try JSONDecoder().decode(FailureStage.self, from: Data("\"arbitrary free text\"".utf8)) }
+}
+
+@Test
+func bundleStopsAtTotalLogBudgetAndReportsSkippedLogs() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logs = root.appendingPathComponent("logs")
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    var data = Data(repeating: 120, count: (10 << 20) - 1)
+    data.append(10)
+    for index in 0..<6 { try data.write(to: logs.appendingPathComponent("budget\(index).log")) }
+    let runner = DiagnosticTestRunner { arguments in
+        let staging = URL(fileURLWithPath: arguments[3])
+        let stagedLogs = staging.appendingPathComponent("logs")
+        let names = try FileManager.default.contentsOfDirectory(atPath: stagedLogs.path).sorted()
+        #expect(names == ["budget0.log", "budget1.log", "budget2.log", "budget3.log", "budget4.log"])
+        var size = 0
+        for name in names { size += try Data(contentsOf: stagedLogs.appendingPathComponent(name)).count }
+        #expect(size == 50 << 20)
+        let skipped = try String(contentsOf: staging.appendingPathComponent("skipped.txt"), encoding: .utf8)
+        #expect(skipped.contains("budget5.log"))
+        #expect(skipped.contains("budget"))
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    try await DiagnosticBundle(logDirectory: logs, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
+        systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+}
+
+@Test
+func bundleSkipsLogsAfterFileCountLimitWithoutFailing() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logs = root.appendingPathComponent("logs")
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    for index in 0..<101 { try Data("line\n".utf8).write(to: logs.appendingPathComponent(String(format: "%03d.log", index))) }
+    let runner = DiagnosticTestRunner { arguments in
+        let staging = URL(fileURLWithPath: arguments[3])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: staging.appendingPathComponent("logs").path).count == 100)
+        let skipped = try String(contentsOf: staging.appendingPathComponent("skipped.txt"), encoding: .utf8)
+        #expect(skipped.contains("100.log"))
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    try await DiagnosticBundle(logDirectory: logs, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
+        systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
 }
 
 private struct DiagnosticTestRunner: ProcessRunner {

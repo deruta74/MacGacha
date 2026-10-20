@@ -1,15 +1,15 @@
 import Foundation
 
 public enum Redactor {
-    private static let keys = "token|authkey|auth_key|stoken|ltoken|cookie_token|password|session|ticket|authorization|cookie|set-cookie|uid|account_id|accountid|user_id|userid|session_id|access_token|refresh_token"
-    // These expressions are constant, never constructed from log contents.
-    private static let headers = try! NSRegularExpression(
-        pattern: #"(?im)(\b(?:authorization|cookie|set-cookie)[\t ]*:[\t ]*)[^\r\n]*"#)
-    private static let jsonKeys = try! NSRegularExpression(
-        pattern: #"(?i)"(?:"# + keys + #")"\s*:\s*"#)
+    private static let sensitiveFragments = ["token", "ticket", "password", "passwd", "secret", "session",
+        "cookie", "authkey", "auth_key", "authorization", "stoken", "ltoken", "ltuid", "ltmid", "account_mid", "account_id"]
+    private static let legacyKeys: Set<String> = ["uid", "accountid", "user_id", "userid"]
+    // Match keys once, then apply the same sensitivity predicate to every representation.
+    private static let jsonKeys = try! NSRegularExpression(pattern: #""((?:\\.|[^"\\])*)"\s*:\s*"#)
     private static let assignments = try! NSRegularExpression(
-        pattern: #"(?i)\b(?:"# + keys + #")[\t ]*=[\t ]*"#)
-    private static let sensitiveKeys: Set<String> = Set(keys.split(separator: "|").map { normalized(String($0)) })
+        pattern: #"(?i)(?<![a-z0-9_-])([a-z0-9_-]+)[\t ]*(?:=|%3d)[\t ]*"#)
+    private static let colonValues = try! NSRegularExpression(
+        pattern: #"(?i)(?<![a-z0-9_-])([a-z0-9_-]+)[\t ]*:[\t ]*"#)
 
     public static func redact(_ s: String) -> String {
         redact(s, depth: 0)
@@ -41,26 +41,39 @@ public enum Redactor {
 
     public static func redact(metadata: [String: String]) -> [String: String] {
         var result: [String: String] = [:]
-        for (key, value) in metadata {
-            result[redactText(key)] = isSensitive(key) ? "<redacted>" : redact(value)
+        for key in metadata.keys.sorted() {
+            let safeKey = uniqueKey(redactText(key), in: result)
+            result[safeKey] = isSensitive(key) ? "<redacted>" : redact(metadata[key] ?? "")
         }
         return result
     }
 
     private static func normalized(_ key: String) -> String {
-        key.lowercased().filter { $0.isLetter || $0.isNumber }
+        key.lowercased().replacingOccurrences(of: "-", with: "_")
     }
 
     private static func isSensitive(_ key: String) -> Bool {
-        sensitiveKeys.contains(normalized(key))
+        let key = normalized(key)
+        return legacyKeys.contains(key) || sensitiveFragments.contains { key.contains($0) }
+    }
+
+    static func uniqueKey<Value>(_ key: String, in dictionary: [String: Value]) -> String {
+        var candidate = key
+        var suffix = 2
+        while dictionary[candidate] != nil {
+            candidate = "\(key)#\(suffix)"
+            suffix += 1
+        }
+        return candidate
     }
 
     private static func redactJSON(_ object: Any, depth: Int) -> Any {
         guard depth < 32 else { return "<redacted>" }
         if let dictionary = object as? [String: Any] {
             var result: [String: Any] = [:]
-            for (key, value) in dictionary {
-                result[redactText(key)] = isSensitive(key) ? "<redacted>" : redactJSON(value, depth: depth + 1)
+            for key in dictionary.keys.sorted() {
+                let safeKey = uniqueKey(redactText(key), in: result)
+                result[safeKey] = isSensitive(key) ? "<redacted>" : redactJSON(dictionary[key]!, depth: depth + 1)
             }
             return result
         }
@@ -70,22 +83,34 @@ public enum Redactor {
     }
 
     private static func redactText(_ s: String) -> String {
-        var result = headers.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s),
-            withTemplate: "$1<redacted>")
-        result = replaceValues(in: result, matching: jsonKeys, json: true)
-        return replaceValues(in: result, matching: assignments, json: false)
+        let result = replaceValues(in: s, matching: jsonKeys, json: true)
+        let assignmentsRedacted = replaceValues(in: result, matching: assignments, json: false)
+        return replaceValues(in: assignmentsRedacted, matching: colonValues, json: false, colon: true)
     }
 
-    private static func replaceValues(in text: String, matching expression: NSRegularExpression, json: Bool) -> String {
+    private static func replaceValues(in text: String, matching expression: NSRegularExpression,
+        json: Bool, colon: Bool = false) -> String {
         let bytes = Array(text.utf8)
         var result: [UInt8] = []
         var copied = 0
         for match in expression.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-            guard let range = Range(match.range, in: text) else { continue }
+            guard let range = Range(match.range, in: text), let keyRange = Range(match.range(at: 1), in: text) else { continue }
+            let rawKey = String(text[keyRange])
+            let key = json ? (try? JSONDecoder().decode(String.self, from: Data(("\"" + rawKey + "\"").utf8))) ?? rawKey : rawKey
+            guard isSensitive(key) else { continue }
             let prefixStart = text.utf8.distance(from: text.utf8.startIndex, to: range.lowerBound)
             guard prefixStart >= copied else { continue }
             let start = text.utf8.distance(from: text.utf8.startIndex, to: range.upperBound)
-            let end = valueEnd(in: bytes, start: start, json: json)
+            let preceding = colon ? bytes[..<prefixStart].last(where: { $0 != 9 && $0 != 32 }) : nil
+            let headerLine = colon && (preceding == nil || preceding == 10 || preceding == 13)
+            let normalizedKey = normalized(key)
+            let wholeLine = !json && (headerLine || ["authorization", "cookie", "set_cookie"].contains(normalizedKey))
+            let end: Int
+            if wholeLine {
+                end = bytes[start...].firstIndex { $0 == 10 || $0 == 13 } ?? bytes.count
+            } else {
+                end = valueEnd(in: bytes, start: start, json: json)
+            }
             guard end > start else { continue }
             result.append(contentsOf: bytes[copied..<start])
             result.append(contentsOf: (json ? "\"<redacted>\"" : "<redacted>").utf8)
@@ -108,7 +133,7 @@ public enum Redactor {
         while end < bytes.count {
             let byte = bytes[end]
             if byte == 9 || byte == 10 || byte == 13 || byte == 32 || byte == 38 || byte == 59 { break }
-            if json && (byte == 44 || byte == 125 || byte == 93) { break }
+            if byte == 44 || byte == 125 || byte == 93 || (!json && byte == 41) { break }
             end += 1 // Quotes in the middle of an unquoted token are part of that token.
         }
         return end

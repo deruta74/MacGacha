@@ -41,19 +41,19 @@ public actor EventLog {
         let budget = min(maxFileBytes, 5 << 20)
         var boundedMetadata: [String: String] = [:]
         var remaining = budget / 2
-        for key in metadata.keys.prefix(128).sorted() where remaining > 0 {
+        for key in metadata.keys.sorted().prefix(128) where remaining > 0 {
             // Match the original key before truncation can turn "password" into "pass".
-            let entry = Redactor.redact(metadata: [key: metadata[key] ?? ""])
+            let entry = Redactor.redact(metadata: [key: cappedInput(metadata[key] ?? "")])
             if let (safeKey, value) = entry.first {
-                let boundedKey = prefix(safeKey, bytes: min(remaining, 1024))
+                let boundedKey = Redactor.uniqueKey(prefix(safeKey, bytes: min(remaining, 1024)), in: boundedMetadata)
                 let boundedValue = prefix(value, bytes: min(remaining, 4096))
                 boundedMetadata[boundedKey] = boundedValue
                 remaining -= min(remaining, boundedKey.utf8.count + boundedValue.utf8.count)
             }
         }
         var record = Record(ts: ISO8601DateFormatter().string(from: Date()), level: level,
-            category: prefix(Redactor.redact(category), bytes: min(budget, 1024)),
-            message: prefix(Redactor.redact(message), bytes: budget), metadata: boundedMetadata)
+            category: prefix(Redactor.redact(cappedInput(category)), bytes: min(budget, 1024)),
+            message: prefix(Redactor.redact(cappedInput(message)), bytes: budget), metadata: boundedMetadata)
         guard var data = try? encoder.encode(record) else { return }
         if data.count >= budget {
             record.metadata = [:]
@@ -133,6 +133,11 @@ public actor EventLog {
         var info = stat()
         if lstat(file.path, &info) == 0 { return info.st_mode & S_IFMT != S_IFREG }
         return errno != ENOENT
+    }
+
+    private func cappedInput(_ string: String) -> String {
+        let count = string.utf8.count
+        return count > 1 << 20 ? "<omitted \(count) bytes>" : string
     }
 
     private func prefix(_ string: String, bytes: Int) -> String {

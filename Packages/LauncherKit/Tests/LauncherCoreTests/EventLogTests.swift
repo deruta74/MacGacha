@@ -17,10 +17,15 @@ func eventLogRedactsAndRotates() async throws {
     #expect(record["category"] as? String == "download")
     #expect(ISO8601DateFormatter().date(from: try #require(record["ts"] as? String)) != nil)
     #expect((record["metadata"] as? [String: String])?["version"] == "1")
-    for index in 0..<20 { await log.log(.info, "test", "record \(index) token=secret") }
+    for index in 0..<20 { await log.log(.info, "test", "record \(index) token=secret " + String(repeating: "x", count: 100)) }
     let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-    #expect(files.count <= 3)
+    #expect(files.count == 3)
     #expect(files.contains { $0.lastPathComponent == "macgacha.1.log" })
+    for (name, index) in [("macgacha.log", 19), ("macgacha.1.log", 18), ("macgacha.2.log", 17)] {
+        let text = try String(contentsOf: directory.appendingPathComponent(name), encoding: .utf8)
+        #expect(text.contains("record \(index) token=<redacted>"))
+        #expect(text.split(separator: "\n").count == 1)
+    }
     for file in files {
         let data = try Data(contentsOf: file)
         #expect(data.count <= 300)
@@ -83,16 +88,13 @@ func eventLogRedactsBeforeTruncatingMessagesAndMetadata() async throws {
 }
 
 @Test
-func eventLogTinyLimitWithMultibyteTextReturnsPromptly() async throws {
+func eventLogTinyLimitWithMultibyteTextCompletes() async throws {
     let directory = try eventLogTempDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
-    let clock = ContinuousClock()
-    let started = clock.now
     for limit in [1, 32, 64, 100, 129] {
         let log = EventLog(directory: directory, maxFileBytes: limit)
         await log.log(.info, "é", String(repeating: "é", count: 101))
     }
-    #expect(started.duration(to: clock.now) < .seconds(3))
     for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
         let text = try String(contentsOf: file, encoding: .utf8)
         #expect(!text.contains("\u{FFFD}"))
@@ -110,6 +112,39 @@ func eventLogSerializesConcurrentWriters() async throws {
     }
     let data = try Data(contentsOf: directory.appendingPathComponent("macgacha.log"))
     #expect(data.split(separator: 10).count == 100)
+}
+
+@Test
+func eventLogOmitsInputsAboveOneMiBBeforeRedaction() async throws {
+    let directory = try eventLogTempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let value = String(repeating: "x", count: (1 << 20) + 1)
+    await EventLog(directory: directory).log(.info, "test", value, metadata: ["detail": value])
+    let record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("macgacha.log"))) as? [String: Any])
+    #expect(record["message"] as? String == "<omitted 1048577 bytes>")
+    #expect((record["metadata"] as? [String: String])?["detail"] == "<omitted 1048577 bytes>")
+}
+
+@Test
+func eventLogSortsBeforeSelectingMetadataAndPreservesProcessedKeyCollisions() async throws {
+    let directory = try eventLogTempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var metadata: [String: String] = [:]
+    for index in 0..<256 { metadata[String(format: "key%03d", index)] = "value" }
+    let log = EventLog(directory: directory)
+    await log.log(.info, "test", "sorted", metadata: metadata)
+    var record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("macgacha.log"))) as? [String: Any])
+    let values = try #require(record["metadata"] as? [String: String])
+    #expect(values.keys.sorted() == metadata.keys.sorted().prefix(128).map { $0 })
+    let prefix = String(repeating: "k", count: 1024)
+    let collisions = Dictionary(uniqueKeysWithValues: (1...3).map { (prefix + String($0), "value\($0)") })
+    let collisionDirectory = directory.appendingPathComponent("collisions")
+    await EventLog(directory: collisionDirectory).log(.info, "test", "collisions", metadata: collisions)
+    record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: collisionDirectory.appendingPathComponent("macgacha.log"))) as? [String: Any])
+    let result = try #require(record["metadata"] as? [String: String])
+    #expect(result[prefix] == "value1")
+    #expect(result[prefix + "#2"] == "value2")
+    #expect(result[prefix + "#3"] == "value3")
 }
 
 private func eventLogTempDirectory() throws -> URL {

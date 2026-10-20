@@ -73,3 +73,42 @@ func redactsNestedJSONAndFreeTextErrors() throws {
     #expect(object["lang"] as? String == "en")
     #expect(Redactor.redact(Redactor.redact(input)) == output)
 }
+
+@Test(arguments: ["ltoken_v2", "cookie_token_v2", "stoken_v2", "ltuid_v2", "ltmid_v2",
+    "account_mid_v2", "game_token", "combo_token", "login_ticket", "e_hk4e_token",
+    "app-passwd-v2", "client_secret", "account_id_v2", "rpc-auth-key-v2", "session_v2"])
+func redactsSensitiveKeySubstringsEverywhere(key: String) throws {
+    #expect(Redactor.redact(metadata: [key: "planted-secret"])[key] == "<redacted>")
+    #expect(Redactor.redact("{\"\(key)\":\"planted-secret\"}") == "{\"\(key)\":\"<redacted>\"}")
+    #expect(Redactor.redact("failed: {\"\(key)\":\"planted-secret\"}") == "failed: {\"\(key)\":\"<redacted>\"}")
+    #expect(Redactor.redact("\(key)=planted-secret&lang=en") == "\(key)=<redacted>&lang=en")
+}
+
+@Test
+func redactsColonAssignmentsAndWholeHeaderLines() {
+    #expect(Redactor.redact(#"LoginResponse(token: "abc", id: 1)"#) == "LoginResponse(token: <redacted>, id: 1)")
+    #expect(Redactor.redact("LoginResponse(game_token: abc, id: 1)") == "LoginResponse(game_token: <redacted>, id: 1)")
+    #expect(Redactor.redact("x-rpc-combo_token: abc extra credentials; private\r\nlang: en")
+        == "x-rpc-combo_token: <redacted>\r\nlang: en")
+}
+
+@Test(arguments: ["Authorization", "Cookie", "Set-Cookie"])
+func redactsEqualsHeaderValuesThroughEndOfLine(key: String) {
+    #expect(Redactor.redact("\(key)=Bearer abc; extra private\nnext") == "\(key)=<redacted>\nnext")
+}
+
+@Test(arguments: ["%3D", "%3d"])
+func redactsPercentEncodedAssignments(separator: String) {
+    let url = "https://example.test/?redirect=https%3A%2F%2Fexample.test%2F%3Fauthkey\(separator)abc%26lang%3Den"
+    #expect(!Redactor.redact(url).contains("abc"))
+    #expect(Redactor.redact(url).contains("authkey\(separator)<redacted>"))
+}
+
+@Test
+func metadataRedactionPreservesCollidingKeys() {
+    let result = Redactor.redact(metadata: ["token=one": "first", "token=two": "second", "token=three": "third"])
+    #expect(result.count == 3)
+    for key in ["token=<redacted>", "token=<redacted>#2", "token=<redacted>#3"] {
+        #expect(result[key] == "<redacted>")
+    }
+}

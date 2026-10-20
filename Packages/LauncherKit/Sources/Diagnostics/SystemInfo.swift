@@ -20,7 +20,8 @@ public struct SystemInfo: Codable, Sendable {
     }
 
     public static func current(appVersion: String) -> SystemInfo {
-        SystemInfo(macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return SystemInfo(macOSVersion: "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)",
             macOSBuild: sysctlString("kern.osversion"), hardwareModel: sysctlString("hw.model"),
             chip: sysctlString("machdep.cpu.brand_string"), memoryBytes: ProcessInfo.processInfo.physicalMemory,
             appVersion: appVersion)

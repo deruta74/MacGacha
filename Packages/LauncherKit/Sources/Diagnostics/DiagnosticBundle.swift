@@ -2,22 +2,20 @@ import Darwin
 import Foundation
 import LauncherCore
 
-public enum FailureStage: String, Codable, Sendable {
-    case download, verify, stage, commit, cleanup, runtimeInstall, gptkImport, prefixCreation, launch
-}
-
 public struct DiagnosticBundle: Sendable {
     private let logDirectory: URL
     private let runner: any ProcessRunner
-    private let openLog: @Sendable (URL) -> Int32
+    private let openLog: @Sendable (URL) -> (fd: Int32, error: Int32)
 
     public init(logDirectory: URL, runner: any ProcessRunner) {
         self.init(logDirectory: logDirectory, runner: runner, openLog: {
-            open($0.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+            let fd = open($0.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+            let openError = errno
+            return (fd, openError)
         })
     }
 
-    init(logDirectory: URL, runner: any ProcessRunner, openLog: @escaping @Sendable (URL) -> Int32) {
+    init(logDirectory: URL, runner: any ProcessRunner, openLog: @escaping @Sendable (URL) -> (fd: Int32, error: Int32)) {
         self.logDirectory = logDirectory
         self.runner = runner
         self.openLog = openLog
@@ -55,13 +53,11 @@ public struct DiagnosticBundle: Sendable {
             }
             // A sibling archive makes publication atomic and preserves any previous export on failure.
             guard rename(archive.path, zipURL.path) == 0 else { throw LauncherError.io("Cannot publish diagnostic archive") }
+        } catch let error as LauncherError {
+            throw error
         } catch {
-            if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled {
+            if Task.isCancelled || error is CancellationError {
                 throw LauncherError.cancelled
-            }
-            if case LauncherError.processFailed(let executable, let exitCode, let stderr) = error {
-                throw LauncherError.processFailed(executable: Redactor.redact(executable), exitCode: exitCode,
-                    stderrTail: Redactor.redact(stderr))
             }
             throw LauncherError.io(Redactor.redact(String(describing: error)))
         }
@@ -75,34 +71,55 @@ public struct DiagnosticBundle: Sendable {
         let fm = FileManager.default
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
         guard fm.fileExists(atPath: logDirectory.path) else { return }
-        guard let files = fm.enumerator(at: logDirectory, includingPropertiesForKeys: nil,
-            options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {
-            throw LauncherError.io("Cannot enumerate diagnostic logs")
-        }
+        let files = try fm.contentsOfDirectory(at: logDirectory, includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]).sorted { $0.lastPathComponent < $1.lastPathComponent }
         var count = 0
-        var totalBytes: Int64 = 0
-        for case let file as URL in files {
+        var totalBytes = 0
+        var skipped: [String] = []
+        let fileLimit = 10 << 20
+        let totalLimit = 50 << 20
+        for file in files {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
-            count += 1
-            guard count <= 100 else { throw LauncherError.io("Too many diagnostic log entries") }
-            guard file.pathExtension == "log" else { continue }
-            let fd = openLog(file)
+            let name = file.lastPathComponent
+            guard file.pathExtension == "log" else {
+                skipped.append("skipped (not a log): \(name)")
+                continue
+            }
+            guard count < 100, totalBytes < totalLimit else {
+                skipped.append("skipped (export budget): \(name)")
+                continue
+            }
+            let (fd, openError) = openLog(file)
             guard fd >= 0 else {
                 // Rotation may remove a discovered file before it is opened; never follow symlinks.
-                if errno == ENOENT || errno == ELOOP { continue }
+                if openError == ENOENT || openError == ELOOP {
+                    skipped.append("skipped (missing or symlink): \(name)")
+                    continue
+                }
                 throw LauncherError.io("Cannot open diagnostic log")
             }
             let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
             defer { try? handle.close() }
             var info = stat()
             guard fstat(fd, &info) == 0 else { throw LauncherError.io("Cannot inspect diagnostic log") }
-            guard info.st_mode & S_IFMT == S_IFREG else { continue }
-            // Snapshot limits also bound growing logs: 10 MiB per file, 50 MiB per export.
-            guard info.st_size >= 0, info.st_size <= 10 << 20, totalBytes <= (50 << 20) - info.st_size else {
-                throw LauncherError.io("Diagnostic logs exceed export size limit")
+            guard info.st_mode & S_IFMT == S_IFREG, info.st_size >= 0 else {
+                skipped.append("skipped (not a regular file): \(name)")
+                continue
             }
-            totalBytes += info.st_size
-            var remaining = Int(info.st_size)
+            count += 1
+            // Bound the snapshot even if the active log grows while exporting.
+            let allowance = min(fileLimit, totalLimit - totalBytes)
+            let length = Int(min(info.st_size, Int64(allowance)))
+            let offset = UInt64(info.st_size) - UInt64(length)
+            var truncated = offset > 0
+            var startsAtBoundary = true
+            if offset > 0 {
+                try handle.seek(toOffset: offset - 1)
+                startsAtBoundary = try handle.read(upToCount: 1)?.first == 10
+            } else {
+                try handle.seek(toOffset: 0)
+            }
+            var remaining = length
             var data = Data()
             while remaining > 0 {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -111,8 +128,25 @@ public struct DiagnosticBundle: Sendable {
                 data.append(piece)
                 remaining -= piece.count
             }
-            let text = String(decoding: data, as: UTF8.self)
-            try write(Redactor.redactLog(text), to: destination.appendingPathComponent(file.lastPathComponent))
+            if !startsAtBoundary {
+                if let newline = data.firstIndex(of: 10) { data = Data(data[data.index(after: newline)...]) }
+                else { data.removeAll() }
+            }
+            var output = Data(Redactor.redactLog(String(decoding: data, as: UTF8.self)).utf8)
+            if output.count > allowance {
+                // Redaction can expand tiny secrets. Keep only complete lines within the byte budget.
+                let prefix = output.prefix(allowance)
+                if let newline = prefix.lastIndex(of: 10) { output = Data(prefix[...newline]) }
+                else { output.removeAll() }
+                truncated = true
+            }
+            if truncated { skipped.append("truncated (export budget): \(name)") }
+            totalBytes += output.count
+            try output.write(to: destination.appendingPathComponent(name), options: .atomic)
+        }
+        if !skipped.isEmpty {
+            try write(Redactor.redactLog(skipped.joined(separator: "\n") + "\n"),
+                to: destination.deletingLastPathComponent().appendingPathComponent("skipped.txt"))
         }
     }
 }
