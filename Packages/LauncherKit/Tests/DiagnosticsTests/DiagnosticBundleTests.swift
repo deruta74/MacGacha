@@ -410,6 +410,7 @@ func bundleRedactsAllLauncherErrorPayloads() async throws {
             .http(status: 401, url: URL(string: "https://example.test/?token=%3Credacted%3E&lang=en")!)),
         (.transport("token=error-private"), .transport("token=<redacted>")),
         (.io("token=error-private"), .io("token=<redacted>")),
+        (.fileTooLarge(path: "token=error-private", limit: 1024), .fileTooLarge(path: "token=<redacted>", limit: 1024)),
         (.consentRequired("token=error-private"), .consentRequired("token=<redacted>")),
         (.processFailed(executable: "token=error-private", exitCode: 2, stderrTail: "token=error-private"),
             .processFailed(executable: "token=<redacted>", exitCode: 2, stderrTail: "token=<redacted>")),
