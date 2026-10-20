@@ -25,11 +25,20 @@ public struct GPTKImporter: Sendable {
     private let searchRoots: [URL]
     private let maxDepth: Int
     private let maxEntries: Int
+    private let readDirectoryEntry: @Sendable (UnsafeMutablePointer<DIR>) -> UnsafeMutablePointer<dirent>?
     private static let directoryFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
 
     public init(searchRoots: [URL] = [URL(fileURLWithPath: "/Volumes")], maxDepth: Int = 5,
         maxEntries: Int = GPTKImporter.searchEntryLimit) {
+        self.init(searchRoots: searchRoots, maxDepth: maxDepth, maxEntries: maxEntries,
+            readDirectoryEntry: { readdir($0) })
+    }
+
+    // Package tests can count actual reads without time-sensitive assertions.
+    init(searchRoots: [URL], maxDepth: Int, maxEntries: Int,
+        readDirectoryEntry: @escaping @Sendable (UnsafeMutablePointer<DIR>) -> UnsafeMutablePointer<dirent>?) {
         self.searchRoots = searchRoots; self.maxDepth = maxDepth; self.maxEntries = maxEntries
+        self.readDirectoryEntry = readDirectoryEntry
     }
 
     /// Best-effort discovery: unreadable/missing directories and symlinks are skipped.
@@ -41,30 +50,21 @@ public struct GPTKImporter: Sendable {
         var remaining = maxEntries
         var candidates: [GPTKCandidate] = []
         var seen: Set<String> = []
-        func visit(_ fd: Int32, url: URL, searchRoot: URL, depth: Int) throws {
+        func visit(_ fd: Int32, url: URL, searchRoot: URL, depth: Int, remaining: inout Int) throws {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             if url.lastPathComponent == "D3DMetal.framework", seen.insert(url.path).inserted {
                 candidates.append(GPTKCandidate(root: url.deletingLastPathComponent(), d3dmetalFramework: url,
-                    version: try nearestVersion(framework: url, searchRoot: searchRoot, remaining: &remaining)))
+                    version: try nearestVersion(framework: url, descriptor: fd, searchRoot: searchRoot, remaining: &remaining)))
             }
             guard depth < maxDepth, remaining > 0 else { return }
-            let duplicate = dup(fd)
-            guard duplicate >= 0 else { return }
-            guard let stream = fdopendir(duplicate) else { close(duplicate); return }
-            defer { closedir(stream) }
-            while remaining > 0 {
-                guard !Task.isCancelled else { throw LauncherError.cancelled }
-                guard let item = readdir(stream) else { break } // Unreadable directories are best-effort.
-                let raw = withUnsafeBytes(of: item.pointee.d_name) { Array($0.prefix { $0 != 0 }) }
-                if raw == [46] || raw == [46, 46] { continue }
-                remaining -= 1
-                guard let name = String(bytes: raw, encoding: .utf8) else { continue }
+            try forEachDirectoryEntry(fd, remaining: &remaining) { name, remaining in
                 var info = stat()
-                guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0, info.st_mode & S_IFMT == S_IFDIR else { continue }
+                guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0, info.st_mode & S_IFMT == S_IFDIR else { return }
                 let child = openat(fd, name, Self.directoryFlags)
-                guard child >= 0 else { continue }
+                guard child >= 0 else { return }
                 defer { close(child) }
-                try visit(child, url: url.appendingPathComponent(name, isDirectory: true), searchRoot: searchRoot, depth: depth + 1)
+                try visit(child, url: url.appendingPathComponent(name, isDirectory: true), searchRoot: searchRoot,
+                    depth: depth + 1, remaining: &remaining)
             }
         }
         for root in searchRoots {
@@ -76,9 +76,29 @@ public struct GPTKImporter: Sendable {
             let fd = open(url.path, Self.directoryFlags)
             guard fd >= 0 else { continue }
             defer { close(fd) }
-            try visit(fd, url: url, searchRoot: url, depth: 0)
+            try visit(fd, url: url, searchRoot: url, depth: 0, remaining: &remaining)
         }
         return candidates.sorted { $0.d3dmetalFramework.path < $1.d3dmetalFramework.path }
+    }
+
+    /// Charges each raw entry before decoding, inspecting or retaining it. The same
+    /// budget is passed through recursive discovery and framework version lookup.
+    private func forEachDirectoryEntry(_ fd: Int32, remaining: inout Int,
+        visit: (String, inout Int) throws -> Void) throws {
+        guard remaining > 0 else { return }
+        let duplicate = dup(fd)
+        guard duplicate >= 0 else { return }
+        guard let stream = fdopendir(duplicate) else { close(duplicate); return }
+        defer { closedir(stream) }
+        while remaining > 0 {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            guard let item = readDirectoryEntry(stream) else { break } // Unreadable directories are best-effort.
+            let raw = withUnsafeBytes(of: item.pointee.d_name) { Array($0.prefix { $0 != 0 }) }
+            if raw == [46] || raw == [46, 46] { continue }
+            remaining -= 1
+            guard let name = String(bytes: raw, encoding: .utf8) else { continue }
+            try visit(name, &remaining)
+        }
     }
 
     /// Uses the manifest's current terms revision; a version alone cannot authorize consent.
@@ -92,7 +112,7 @@ public struct GPTKImporter: Sendable {
         return installed
     }
 
-    private func nearestVersion(framework: URL, searchRoot: URL, remaining: inout Int) throws -> String? {
+    private func nearestVersion(framework: URL, descriptor: Int32, searchRoot: URL, remaining: inout Int) throws -> String? {
         let fs = try ContainedFileSystem(root: searchRoot)
         func readVersion(_ url: URL) throws -> String? {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -112,19 +132,27 @@ public struct GPTKImporter: Sendable {
         // Real frameworks often keep Resources behind Versions/Current symlinks.
         // Inspect actual version directories instead of following those aliases.
         let versionsURL = framework.appendingPathComponent("Versions")
-        let versionsPath = try RuntimeJSONFile.relativePath(versionsURL, root: searchRoot)
-        do {
-            let versions = try fs.contentsOfDirectory(at: versionsPath).sorted { $0.description < $1.description }
-            for versionPath in versions {
-                guard remaining > 0 else { break }
-                remaining -= 1
-                guard try fs.itemType(at: versionPath, allowingLeafSymlink: true) == .directory else { continue }
-                for name in ["Info.plist", "Resources/Info.plist"] {
-                    if let version = try readVersion(versionPath.resolved(against: searchRoot).appendingPathComponent(name)) { return version }
-                }
+        if remaining > 0 {
+            let versionsFD = openat(descriptor, "Versions", Self.directoryFlags)
+            if versionsFD >= 0 {
+                defer { close(versionsFD) }
+                do {
+                    var versions: [String] = []
+                    try forEachDirectoryEntry(versionsFD, remaining: &remaining) { name, _ in versions.append(name) }
+                    // Only the bounded set already read and charged is sorted/inspected.
+                    for name in versions.sorted() {
+                        var info = stat()
+                        guard fstatat(versionsFD, name, &info, AT_SYMLINK_NOFOLLOW) == 0,
+                            info.st_mode & S_IFMT == S_IFDIR else { continue }
+                        let versionURL = versionsURL.appendingPathComponent(name, isDirectory: true)
+                        for plist in ["Info.plist", "Resources/Info.plist"] {
+                            if let version = try readVersion(versionURL.appendingPathComponent(plist)) { return version }
+                        }
+                    }
+                } catch LauncherError.cancelled { throw LauncherError.cancelled }
+                  catch { }
             }
-        } catch LauncherError.cancelled { throw LauncherError.cancelled }
-          catch { }
+        }
         var current = framework
         while current.path != searchRoot.path {
             current.deleteLastPathComponent()

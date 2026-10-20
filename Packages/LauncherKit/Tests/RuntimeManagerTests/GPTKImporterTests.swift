@@ -2,10 +2,11 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Darwin
 import Foundation
+import Synchronization
 import Testing
 import LauncherCore
 import DownloadEngine
-import RuntimeManager
+@testable import RuntimeManager
 import TestSupport
 
 @Test
@@ -41,6 +42,29 @@ func gptkLocateBoundsHugeTreesAndToleratesMissingRoots() throws {
     #expect(try GPTKImporter(searchRoots: roots, maxEntries: 8).locate().isEmpty)
     #expect(try GPTKImporter(searchRoots: roots).locate() == [candidate])
     #expect(GPTKImporter.searchEntryLimit == 100_000)
+}
+
+@Test(arguments: [2, 8])
+func gptkVersionEnumerationHonorsSharedBudget(budget: Int) throws {
+    let temp = try TempDir()
+    let candidate = try gptkFixture(in: temp.url.appendingPathComponent("external"))
+    try FileManager.default.removeItem(at: candidate.d3dmetalFramework.appendingPathComponent("Info.plist"))
+    let versions = candidate.d3dmetalFramework.appendingPathComponent("Versions")
+    try FileManager.default.createDirectory(at: versions, withIntermediateDirectories: true)
+    for index in 0..<256 { try Data().write(to: versions.appendingPathComponent("entry-\(index)")) }
+    let entriesRead = Mutex(0)
+    let importer = GPTKImporter(searchRoots: [candidate.d3dmetalFramework], maxDepth: 0, maxEntries: budget,
+        readDirectoryEntry: { stream in
+            guard let item = readdir(stream) else { return nil }
+            let raw = withUnsafeBytes(of: item.pointee.d_name) { Array($0.prefix { $0 != 0 }) }
+            if raw != [46] && raw != [46, 46] { entriesRead.withLock { $0 += 1 } }
+            return item
+        })
+    let result = try importer.locate()
+    #expect(result.count == 1 && result.first?.version == nil)
+    // The search root consumes one slot; Versions must stop after the remaining slots.
+    // Count actual readdir results rather than only the entries retained after listing.
+    #expect(entriesRead.withLock { $0 } == budget - 1)
 }
 
 @Test
