@@ -129,3 +129,94 @@ func processRunnerReportsLaunchFailure() async throws {
         // Launch failures must also release the pending pipe readers.
     }
 }
+
+@Test
+func sigtermIgnoringChildIsKilledOnCancel() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let parentFile = directory.appendingPathComponent("parent.pid")
+    let descendantFile = directory.appendingPathComponent("descendant.pid")
+    let runner = SystemProcessRunner(
+        terminationGracePeriod: .milliseconds(100),
+        pipeDrainGracePeriod: .milliseconds(100)
+    )
+    let task = Task {
+        try await runner.run(
+            URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "trap '' TERM; printf '%s' \"$$\" > \"$PARENT_PID_FILE\"; sleep 30 & child=$!; printf '%s' \"$child\" > \"$DESCENDANT_PID_FILE\"; wait \"$child\""],
+            environment: ["PARENT_PID_FILE": parentFile.path, "DESCENDANT_PID_FILE": descendantFile.path],
+            currentDirectory: nil
+        )
+    }
+    defer { task.cancel() }
+    let parent = try await readChildPID(from: parentFile)
+    let descendant = try await readChildPID(from: descendantFile)
+    defer {
+        kill(descendant, SIGKILL)
+        kill(parent, SIGKILL)
+    }
+    let watchdog = Task {
+        try await Task.sleep(for: .milliseconds(5_500))
+        kill(descendant, SIGKILL)
+        kill(parent, SIGKILL)
+    }
+    defer { watchdog.cancel() }
+    try await Task.sleep(for: .milliseconds(200))
+    let clock = ContinuousClock()
+    let cancelledAt = clock.now
+    task.cancel()
+    await #expect(throws: LauncherError.cancelled) { try await task.value }
+    #expect(cancelledAt.duration(to: clock.now) < .seconds(5))
+    let status = kill(parent, 0)
+    let error = errno
+    #expect(status == -1)
+    #expect(error == ESRCH)
+}
+
+@Test
+func descendantHoldingPipesDoesNotBlock() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let pidFile = directory.appendingPathComponent("descendant.pid")
+    let runner = SystemProcessRunner(
+        terminationGracePeriod: .milliseconds(100),
+        pipeDrainGracePeriod: .milliseconds(100)
+    )
+    let clock = ContinuousClock()
+    let startedAt = clock.now
+    let task = Task {
+        try await runner.run(
+            URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "(sleep 30 & printf '%s' \"$!\" > \"$DESCENDANT_PID_FILE\"); echo done"],
+            environment: ["DESCENDANT_PID_FILE": pidFile.path],
+            currentDirectory: nil
+        )
+    }
+    defer { task.cancel() }
+    let descendant = try await readChildPID(from: pidFile)
+    defer { kill(descendant, SIGKILL) }
+    let watchdog = Task {
+        try await Task.sleep(for: .milliseconds(5_500))
+        kill(descendant, SIGKILL)
+    }
+    defer { watchdog.cancel() }
+    let result = try await task.value
+    #expect(startedAt.duration(to: clock.now) < .seconds(5))
+    #expect(result.exitCode == 0)
+    #expect(result.stdout == Data("done\n".utf8))
+    #expect(result.stderr.isEmpty)
+}
+
+private func readChildPID(from file: URL) async throws -> Int32 {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(5))
+    while clock.now < deadline {
+        if let text = try? String(contentsOf: file, encoding: .utf8), let pid = Int32(text), pid > 0 {
+            return pid
+        }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    throw LauncherError.io("Child did not publish its PID")
+}
