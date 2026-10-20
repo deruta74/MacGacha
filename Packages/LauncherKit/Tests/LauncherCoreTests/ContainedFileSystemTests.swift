@@ -143,6 +143,25 @@ func containedFilePrimitivesRefuseSymlinksAndNonRegularLeaves() throws {
 }
 
 @Test
+func journalAppendsAndSeekableHandlesPreserveTheirWriteModes() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let path = try SafeRelativePath("shared/file")
+    try fs.append(Data("abcd".utf8), to: path)
+    let handle = try fs.openForWriting(at: path, truncate: false)
+    defer { try? handle.close() }
+    try handle.seek(toOffset: 1)
+    try handle.write(contentsOf: Data("X".utf8))
+    try handle.close()
+    try fs.append(Data("Y".utf8), to: path, durable: true)
+    try fs.fullSync(at: path)
+    var contents = Data()
+    try fs.readFile(at: path, chunkSize: 2) { contents.append($0) }
+    #expect(contents == Data("aXcdY".utf8))
+    #expect(try fs.size(at: path) == 5)
+}
+
+@Test
 func containedFileSystemReadsWritesListsAndRemoves() throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url.appendingPathComponent("root"))
