@@ -19,7 +19,7 @@ let package = Package(
         .testTarget(name: "LauncherCoreTests", dependencies: ["LauncherCore", "TestSupport"]),
         .testTarget(name: "DownloadEngineTests", dependencies: ["DownloadEngine", "TestSupport"]),
         .testTarget(name: "RuntimeManagerTests", dependencies: ["RuntimeManager", "TestSupport"]),
-        .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "TestSupport"]),
+        .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "LauncherCore"]),
     ],
     swiftLanguageModes: [.v6]
 )
