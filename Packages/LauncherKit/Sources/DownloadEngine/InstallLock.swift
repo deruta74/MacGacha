@@ -4,8 +4,9 @@ import Darwin
 import Foundation
 import LauncherCore
 
-/// Hold one shared install-root lock path for the operation's lifetime. Closing the
-/// descriptor releases the lock; the lock file is retained so its inode stays stable.
+/// Hold one shared install-root lock path for the operation's lifetime. Explicitly
+/// unlock before closing: a concurrent spawn can temporarily retain the open-file
+/// description even with CLOEXEC. Retain the lock file so its inode stays stable.
 public final class InstallLock: Sendable {
     private let handle: FileHandle
 
@@ -22,5 +23,12 @@ public final class InstallLock: Sendable {
         handle = opened
     }
 
-    deinit { try? handle.close() }
+    deinit {
+        // flock belongs to the shared open-file description, not just this descriptor.
+        // Closing alone can leave it held until a concurrent posix_spawn reaches exec.
+        while flock(handle.fileDescriptor, LOCK_UN) != 0 {
+            if errno != EINTR { break }
+        }
+        try? handle.close()
+    }
 }
