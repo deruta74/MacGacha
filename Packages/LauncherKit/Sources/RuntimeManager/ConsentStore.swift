@@ -33,10 +33,13 @@ public struct ConsentRecord: Codable, Sendable, Equatable {
 
 public actor ConsentStore {
     private let url: URL
+    private let root: URL
     private let clock: @Sendable () -> Date
 
-    public init(url: URL, clock: @escaping @Sendable () -> Date = Date.init) {
+    /// The file must be below an explicit trusted root; ancestors below it cannot be symlinks.
+    public init(url: URL, root: URL, clock: @escaping @Sendable () -> Date = Date.init) {
         self.url = url
+        self.root = root
         self.clock = clock
     }
 
@@ -52,17 +55,17 @@ public actor ConsentStore {
         var records = try load()
         records.removeAll { $0.kind == kind }
         records.append(record)
-        try RuntimeJSONFile.write(records, to: url, limit: 65_536)
+        try RuntimeJSONFile.write(records, to: url, root: root, limit: 65_536)
     }
 
     public func revoke(_ kind: ConsentKind) throws {
         var records = try load()
         records.removeAll { $0.kind == kind }
-        try RuntimeJSONFile.write(records, to: url, limit: 65_536)
+        try RuntimeJSONFile.write(records, to: url, root: root, limit: 65_536)
     }
 
     private func load() throws -> [ConsentRecord] {
-        guard let data = try RuntimeJSONFile.read(url, limit: 65_536) else { return [] }
+        guard let data = try RuntimeJSONFile.read(url, root: root, limit: 65_536) else { return [] }
         let records = try JSONDecoder().decode([ConsentRecord].self, from: data)
         guard records.count <= 64, Set(records.map { $0.kind.rawValue }).count == records.count else {
             throw LauncherError.io("Duplicate or excessive consent records")

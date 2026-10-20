@@ -59,6 +59,9 @@ public struct RuntimeComponent: Codable, Sendable, Identifiable {
     public init(id: SafeIdentifier, kind: ComponentKind, version: SafeIdentifier, sourceMode: SourceMode,
         url: URL? = nil, size: Int64? = nil, installedSize: Int64? = nil, sha256: Digest? = nil,
         archive: ArchiveFormat? = nil, license: ComponentLicense, consent: ConsentKind? = nil) throws {
+        guard id.rawValue == "\(kind.rawValue)-\(version.rawValue)" else {
+            throw LauncherError.io("Runtime component ID must be <kind>-<version>")
+        }
         if let url { try validateRuntimeURL(url) }
         guard size.map({ $0 >= 0 }) ?? true, installedSize.map({ $0 >= 0 }) ?? true else {
             throw LauncherError.io("Runtime sizes must be nonnegative")
@@ -110,6 +113,8 @@ public struct RuntimeManifest: Codable, Sendable {
         guard schemaVersion == 1 else { throw LauncherError.io("Unsupported runtime manifest schema") }
         guard components.count <= 256 else { throw LauncherError.io("Too many runtime components") }
         guard Set(components.map(\.id)).count == components.count else { throw LauncherError.io("Duplicate runtime component ID") }
+        let destinations = components.map { $0.kind.rawValue + "/" + $0.version.rawValue.lowercased() }
+        guard Set(destinations).count == components.count else { throw LauncherError.io("Colliding runtime install destinations") }
         self.schemaVersion = schemaVersion
         self.components = components
     }

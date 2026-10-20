@@ -43,6 +43,58 @@ func runtimeStoreUsesSafeLayoutAndRefusesSymlinks() throws {
 }
 
 @Test
+func runtimeDiscoverySkipsMarkedInstallerStagingDirectories() throws {
+    let directory = try TempDir()
+    let paths = AppPaths(root: directory.url)
+    let valid = try InstalledComponent(kind: .wine, version: "11.0", installedAt: Date(), source: .download)
+    try writeRuntimeMarker(valid, paths: paths)
+    for name in [".incoming-\(UUID().uuidString)", ".hidden"] {
+        let staged = paths.runtimes.appendingPathComponent("wine/\(name)", isDirectory: true)
+        try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
+        try JSONEncoder().encode(valid).write(to: staged.appendingPathComponent(".macgacha-component.json"))
+    }
+    #expect(try RuntimeStore(paths: paths).installed() == [valid])
+}
+
+@Test
+func runtimeStoreRefusesRedirectedRootForDeletionAndDiscovery() throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let record = try InstalledComponent(kind: .wine, version: "11.0", installedAt: Date(), source: .download)
+    try writeRuntimeMarker(record, paths: AppPaths(root: outside.url))
+    let control = outside.url.appendingPathComponent("Runtimes/wine/11.0/.macgacha-component.json")
+    let original = try Data(contentsOf: control)
+    let alias = directory.url.appendingPathComponent("redirected-root")
+    try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: outside.url)
+    let store = RuntimeStore(paths: AppPaths(root: alias))
+    do { _ = try store.installed(); Issue.record("A redirected root must not be enumerated") }
+    catch LauncherError.unsafePath {}
+    do { try store.remove(record); Issue.record("A redirected root must not be deleted through") }
+    catch LauncherError.unsafePath {}
+    #expect(FileManager.default.fileExists(atPath: control.path))
+    if FileManager.default.fileExists(atPath: control.path) { #expect(try Data(contentsOf: control) == original) }
+}
+
+@Test
+func runtimeStoreRefusesAncestorSymlinksBelowRoot() throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let record = try InstalledComponent(kind: .wine, version: "11.0", installedAt: Date(), source: .download)
+    let outsidePaths = AppPaths(root: outside.url)
+    try writeRuntimeMarker(record, paths: outsidePaths)
+    let control = outsidePaths.runtimes.appendingPathComponent("wine/11.0/.macgacha-component.json")
+    let original = try Data(contentsOf: control)
+    let paths = AppPaths(root: directory.url)
+    try FileManager.default.createSymbolicLink(at: paths.runtimes, withDestinationURL: outsidePaths.runtimes)
+    let store = RuntimeStore(paths: paths)
+    do { _ = try store.installed(); Issue.record("Discovery must refuse a symlink below the root") }
+    catch LauncherError.unsafePath {}
+    do { try store.remove(record); Issue.record("Removal must refuse a symlink below the root") }
+    catch LauncherError.unsafePath {}
+    #expect(try Data(contentsOf: control) == original)
+}
+
+@Test
 func installedComponentDecodingKeepsPathInvariants() throws {
     let invalid: [String: Any] = ["kind": "wine", "version": "../escape", "installedAt": 0, "source": "download"]
     let data = try JSONSerialization.data(withJSONObject: invalid)

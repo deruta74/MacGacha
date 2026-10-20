@@ -78,6 +78,23 @@ func manifestAcceptsImportWithoutDownloadFields() throws {
 }
 
 @Test
+func manifestRequiresKindVersionIDAndUniqueCaseInsensitiveDestinations() throws {
+    let mismatch = try manifestFixtureData { $0[0]["id"] = "wrong-11.0" }
+    #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: mismatch) }
+    for version in ["11.0", "Release", "release"] {
+        let collision = try manifestFixtureData {
+            $0[0]["version"] = version == "11.0" ? "11.0" : "Release"
+            $0[0]["id"] = "wine-\($0[0]["version"]!)"
+            var duplicate = $0[0]
+            duplicate["version"] = version
+            duplicate["id"] = "wine-\(version)"
+            $0.append(duplicate)
+        }
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: collision) }
+    }
+}
+
+@Test
 func manifestFileLoaderRejectsNonFileURLs() throws {
     let directory = try TempDir()
     let file = directory.url.appendingPathComponent("manifest.json")

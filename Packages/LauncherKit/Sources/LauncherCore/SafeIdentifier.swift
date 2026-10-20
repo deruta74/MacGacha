@@ -6,7 +6,7 @@ public struct SafeIdentifier: Hashable, Codable, Sendable, CustomStringConvertib
 
     public init(_ raw: String) throws {
         let bytes = raw.utf8
-        guard (1...128).contains(bytes.count), raw != ".", raw != "..",
+        guard (1...128).contains(bytes.count), bytes.first != 0x2e,
               bytes.allSatisfy({ (65...90).contains($0) || (97...122).contains($0)
                   || (48...57).contains($0) || $0 == 46 || $0 == 95 || $0 == 45 }) else {
             throw LauncherError.unsafePath(raw)

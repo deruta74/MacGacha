@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import LauncherCore
 
@@ -37,28 +36,21 @@ public struct RuntimeStore: Sendable {
     }
 
     public func installed() throws -> [InstalledComponent] {
-        guard try RuntimeJSONFile.directoryExists(paths.runtimes) else { return [] }
+        let fs = try ContainedFileSystem(root: paths.root)
+        guard try fs.itemType(at: SafeRelativePath("Runtimes")) != nil else { return [] }
         var result: [InstalledComponent] = []
         for kind in ComponentKind.allCases {
-            let root = paths.runtimes.appendingPathComponent(kind.rawValue, isDirectory: true)
-            guard try RuntimeJSONFile.directoryExists(root) else { continue }
-            guard let entries = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
-                options: [.skipsSubdirectoryDescendants]) else { throw LauncherError.io("Cannot enumerate installed runtimes") }
-            var count = 0
-            for case let versionURL as URL in entries {
-                count += 1
-                guard count <= 1024 else { throw LauncherError.io("Too many runtime directory entries") }
-                let version = versionURL.lastPathComponent
-                guard (try? SafeIdentifier(version)) != nil else { continue }
-                var info = stat()
-                guard lstat(versionURL.path, &info) == 0 else {
-                    if errno == ENOENT { continue }
-                    throw LauncherError.io("Cannot inspect installed runtime")
-                }
-                guard info.st_mode & S_IFMT != S_IFLNK else { throw LauncherError.unsafePath(versionURL.path) }
-                guard info.st_mode & S_IFMT == S_IFDIR else { continue }
-                let marker = versionURL.appendingPathComponent(".macgacha-component.json")
-                guard let data = try RuntimeJSONFile.read(marker, limit: 65_536) else { continue }
+            let kindPath = try SafeRelativePath("Runtimes/\(kind.rawValue)")
+            guard try fs.itemType(at: kindPath) != nil else { continue }
+            let entries = try fs.contentsOfDirectory(at: kindPath)
+            guard entries.count <= 1024 else { throw LauncherError.io("Too many runtime directory entries") }
+            for versionPath in entries {
+                // Installer staging and other hidden directories are never installed versions.
+                let version = versionPath.components.last!
+                guard !version.hasPrefix("."), (try? SafeIdentifier(version)) != nil else { continue }
+                guard try fs.itemType(at: versionPath) == .directory else { continue }
+                let marker = try SafeRelativePath(versionPath.description + "/.macgacha-component.json")
+                guard let data = try RuntimeJSONFile.read(marker, in: fs, limit: 65_536) else { continue }
                 let record = try JSONDecoder().decode(InstalledComponent.self, from: data)
                 guard record.kind == kind, record.version == version else { throw LauncherError.io("Runtime marker does not match its directory") }
                 result.append(record)
@@ -68,10 +60,10 @@ public struct RuntimeStore: Sendable {
     }
 
     public func remove(_ c: InstalledComponent) throws {
-        let kind = paths.runtimes.appendingPathComponent(c.kind.rawValue, isDirectory: true)
-        let version = kind.appendingPathComponent(c.version, isDirectory: true)
-        guard try RuntimeJSONFile.directoryExists(paths.runtimes),
-              try RuntimeJSONFile.directoryExists(kind), try RuntimeJSONFile.directoryExists(version) else { return }
-        try FileManager.default.removeItem(at: version)
+        let fs = try ContainedFileSystem(root: paths.root)
+        let version = try SafeRelativePath("Runtimes/\(c.kind.rawValue)/\(c.version)")
+        guard let type = try fs.itemType(at: version) else { return }
+        guard type == .directory else { throw LauncherError.io("Runtime path is not a directory") }
+        try fs.removeItem(at: version)
     }
 }

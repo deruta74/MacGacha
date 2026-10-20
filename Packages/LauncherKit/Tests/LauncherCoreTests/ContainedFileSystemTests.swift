@@ -1,0 +1,111 @@
+import Foundation
+import Testing
+import LauncherCore
+import TestSupport
+
+@Test
+func containedFileSystemReadsWritesListsAndRemoves() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url.appendingPathComponent("root"))
+    let folder = try SafeRelativePath("Data/nested")
+    let file = try SafeRelativePath("Data/nested/file with spaces-日.bin")
+    try fs.createDirectory(at: folder)
+    try fs.writeAtomically(Data("old".utf8), to: file)
+    try fs.writeAtomically(Data("new".utf8), to: file)
+    #expect(try fs.readFile(at: file, maxBytes: 3) == Data("new".utf8))
+    #expect(try fs.itemType(at: file) == .regularFile)
+    #expect(try fs.itemType(at: folder) == .directory)
+    #expect(try fs.contentsOfDirectory(at: folder) == [file])
+    #expect(throws: (any Error).self) { try fs.readFile(at: file, maxBytes: 2) }
+    #expect(throws: (any Error).self) { try fs.readFile(at: file, maxBytes: -1) }
+    try fs.removeItem(at: try SafeRelativePath("Data"))
+    #expect(try fs.itemType(at: file) == nil)
+    try fs.removeItem(at: try SafeRelativePath("Data"))
+}
+
+@Test
+func containedFileSystemRejectsDeepAncestorSymlinks() throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let control = outside.url.appendingPathComponent("nested/deeper/control")
+    try FileManager.default.createDirectory(at: control.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("preserved".utf8).write(to: control)
+    try FileManager.default.createDirectory(at: directory.url.appendingPathComponent("safe"), withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("safe/link"), withDestinationURL: outside.url)
+    let fs = try ContainedFileSystem(root: directory.url)
+    let file = try SafeRelativePath("safe/link/nested/deeper/control")
+    let folder = try SafeRelativePath("safe/link/nested/deeper")
+    let operations: [() throws -> Void] = [
+        { try fs.removeItem(at: file) }, { try fs.writeAtomically(Data("changed".utf8), to: file) },
+        { _ = try fs.contentsOfDirectory(at: folder) }, { _ = try fs.readFile(at: file, maxBytes: 100) },
+        { _ = try fs.itemType(at: file) }, { try fs.createDirectory(at: try SafeRelativePath("safe/link/new/directory")) },
+    ]
+    for operation in operations {
+        do { try operation(); Issue.record("A symlink below the trusted root must be refused") }
+        catch LauncherError.unsafePath {}
+        #expect(try Data(contentsOf: control) == Data("preserved".utf8))
+    }
+    #expect(!FileManager.default.fileExists(atPath: outside.url.appendingPathComponent("new").path))
+}
+
+@Test
+func containedFileSystemUnlinksSymlinksInsideRemovedTree() throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let control = outside.url.appendingPathComponent("control")
+    try Data("preserved".utf8).write(to: control)
+    let fs = try ContainedFileSystem(root: directory.url)
+    try fs.createDirectory(at: try SafeRelativePath("tree/nested"))
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("tree/nested/link"), withDestinationURL: outside.url)
+    try fs.removeItem(at: try SafeRelativePath("tree"))
+    #expect(try fs.itemType(at: try SafeRelativePath("tree")) == nil)
+    #expect(try Data(contentsOf: control) == Data("preserved".utf8))
+}
+
+@Test
+func containedFileSystemRejectsNonDirectoryAncestorsAndTrustsAboveRoot() throws {
+    let directory = try TempDir()
+    let real = directory.url.appendingPathComponent("real", isDirectory: true)
+    try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+    let alias = directory.url.appendingPathComponent("alias", isDirectory: true)
+    try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: real)
+    let fs = try ContainedFileSystem(root: alias.appendingPathComponent("root"))
+    try fs.writeAtomically(Data("file".utf8), to: try SafeRelativePath("plain"))
+    do {
+        try fs.writeAtomically(Data(), to: try SafeRelativePath("plain/child"))
+        Issue.record("A regular file cannot be an ancestor")
+    } catch LauncherError.unsafePath {}
+    #expect(try fs.readFile(at: try SafeRelativePath("plain"), maxBytes: 4) == Data("file".utf8))
+}
+
+@Test
+func containedFileSystemRefusesLeafSymlinksAndPreservesAtomicWritesOnCancellation() async throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let control = outside.url.appendingPathComponent("control")
+    let original = Data("preserved".utf8)
+    try original.write(to: control)
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("link"), withDestinationURL: control)
+    let link = try SafeRelativePath("link")
+    let operations: [() throws -> Void] = [
+        { try fs.removeItem(at: link) }, { try fs.writeAtomically(Data(), to: link) },
+        { _ = try fs.readFile(at: link, maxBytes: 100) }, { _ = try fs.itemType(at: link) },
+        { try fs.createDirectory(at: link) }, { _ = try fs.contentsOfDirectory(at: link) },
+    ]
+    for operation in operations {
+        do { try operation(); Issue.record("Leaf symlinks must be refused") }
+        catch LauncherError.unsafePath {}
+    }
+    #expect(try Data(contentsOf: control) == original)
+    let path = try SafeRelativePath("Data/control")
+    try fs.writeAtomically(original, to: path)
+    let task = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        try fs.writeAtomically(Data("changed".utf8), to: path)
+    }
+    do { try await task.value; Issue.record("Cancelled writes must throw") }
+    catch LauncherError.cancelled {}
+    #expect(try fs.readFile(at: path, maxBytes: 100) == original)
+    #expect(try fs.contentsOfDirectory(at: SafeRelativePath("Data")) == [path])
+}
