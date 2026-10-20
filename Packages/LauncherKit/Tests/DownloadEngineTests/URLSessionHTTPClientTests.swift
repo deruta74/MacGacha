@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// See LICENSE and NOTICE. Original project: https://github.com/deruta74/MacGacha
+
 import Foundation
 import Synchronization
 import Testing
@@ -189,10 +192,12 @@ struct URLSessionHTTPClientTests {
 
     @Test
     func urlSessionSlowConsumerHasLosslessBoundedBuffering() async throws {
-        let pieceSize = 65_536
-        let highWaterMark = 4 * pieceSize
-        let lowWaterMark = pieceSize
-        let pieces = (0..<64).map { Data(repeating: UInt8($0), count: pieceSize) }
+        // Do not divide the high-water mark evenly: the producer must deliver
+        // strictly more than it before native task suspension can pause delivery.
+        let pieceSize = 48 * 1024
+        let highWaterMark = 256 * 1024
+        let lowWaterMark = 64 * 1024
+        let pieces = (0..<96).map { Data(repeating: UInt8($0), count: pieceSize) }
         var expected = Data()
         for piece in pieces { expected.append(piece) }
         let metrics = HTTPBufferMetrics()
@@ -201,6 +206,14 @@ struct URLSessionHTTPClientTests {
         defer { fixture.close() }
         let (head, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
         #expect(head.status == 200)
+        // Hold the consumer until enough data has been delivered and URLSession
+        // has processed it. Starting reads earlier can bypass backpressure entirely.
+        try await waitForHTTPCondition(timeout: .seconds(10)) {
+            fixture.control.deliveredBytes > highWaterMark
+        }
+        try await waitForHTTPCondition(timeout: .seconds(10)) {
+            metrics.snapshot.suspensions > 0
+        }
         var received = Data()
         var largestPiece = 0
         for try await piece in body {
@@ -464,6 +477,7 @@ private final class HTTPStubControl: Sendable {
     struct State {
         var started = false
         var stopped = false
+        var deliveredBytes = 0
         var request: URLRequest?
         var loader: HTTPStubProtocol?
         var stopReason: StopReason?
@@ -471,6 +485,7 @@ private final class HTTPStubControl: Sendable {
     let state = Mutex(State())
     var started: Bool { state.withLock { $0.started } }
     var stopped: Bool { state.withLock { $0.stopped } }
+    var deliveredBytes: Int { state.withLock { $0.deliveredBytes } }
     var stopReason: StopReason? { state.withLock { $0.stopReason } }
     var request: URLRequest? { state.withLock { $0.request } }
 
@@ -514,6 +529,7 @@ private final class HTTPStubProtocol: URLProtocol, @unchecked Sendable {
                     }
                     guard !control.stopped else { return }
                     client?.urlProtocol(self, didLoad: chunk)
+                    control.state.withLock { $0.deliveredBytes += chunk.count }
                     Thread.sleep(forTimeInterval: 0.001)
                 }
                 if !control.stopped { client?.urlProtocolDidFinishLoading(self) }
