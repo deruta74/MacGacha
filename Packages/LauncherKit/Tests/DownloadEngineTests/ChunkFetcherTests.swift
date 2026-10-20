@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 
+import Darwin
+import Dispatch
 import Foundation
 import Synchronization
 import Testing
@@ -91,19 +93,72 @@ func mirrorFallback() async throws {
     #expect(try Data(contentsOf: part) == bytes)
 }
 
-@Test
-func noRetryOn404() async throws {
-    let directory = try TempDir()
-    let fs = try ContainedFileSystem(root: directory.url)
-    let cdn = MockCDN()
-    let object = fetchObject(fetchBlob(), paths: ["missing", "mirror"])
-    cdn.serve("mirror", data: fetchBlob())
+@Test(arguments: [404, 410])
+func missingMirrorFallsBackWithoutDelay(status: Int) async throws {
+    let directory = try TempDir(); let fs = try ContainedFileSystem(root: directory.url)
+    let cdn = MockCDN(); let bytes = fetchBlob()
+    let object = fetchObject(bytes, paths: ["missing", "mirror"])
+    cdn.enqueueFault("missing", .status(status)); cdn.serve("mirror", data: bytes)
     let sleeper = InstantSleeper()
-    await #expect(throws: LauncherError.http(status: 404, url: object.urls[0])) {
-        try await testFetcher(cdn, sleeper: sleeper).fetch(object, fs: fs, part: try SafeRelativePath("object.part"), progress: { _ in })
-    }
-    #expect(cdn.requestLog.count == 1)
+    try await testFetcher(cdn, sleeper: sleeper, attempts: 1).fetch(object, fs: fs, part: SafeRelativePath("object.part"), progress: { _ in })
+    #expect(cdn.requestLog.map(\.path) == ["missing", "mirror"])
     #expect(sleeper.delays.isEmpty)
+    #expect(try fs.readFile(at: SafeRelativePath("object.part"), maxBytes: bytes.count) == bytes)
+}
+
+@Test
+func allMissingMirrorsFailWithoutDelay() async throws {
+    let directory = try TempDir(); let fs = try ContainedFileSystem(root: directory.url)
+    let cdn = MockCDN(); let object = fetchObject(fetchBlob(), paths: ["missing", "mirror"])
+    let sleeper = InstantSleeper()
+    await #expect(throws: LauncherError.http(status: 404, url: object.urls[1])) {
+        try await testFetcher(cdn, sleeper: sleeper).fetch(object, fs: fs, part: SafeRelativePath("object.part"), progress: { _ in })
+    }
+    #expect(cdn.requestLog.map(\.path) == ["missing", "mirror"])
+    #expect(sleeper.delays.isEmpty)
+}
+
+@Test
+func cleanTruncatedBodyResumesFromWrittenBytes() async throws {
+    let directory = try TempDir(); let fs = try ContainedFileSystem(root: directory.url)
+    let client = RecoveringFetchClient(malformedRange: false)
+    try await testFetcher(client).fetch(fetchObject(Data("abcdef".utf8)), fs: fs, part: SafeRelativePath("part"), progress: { _ in })
+    #expect(client.ranges.withLock { $0 } == [nil, 3])
+    #expect(try fs.readFile(at: SafeRelativePath("part"), maxBytes: 6) == Data("abcdef".utf8))
+}
+
+@Test
+func malformedContentRangeRestartsWithoutRange() async throws {
+    let directory = try TempDir(); let fs = try ContainedFileSystem(root: directory.url)
+    try fs.writeAtomically(Data("abc".utf8), to: SafeRelativePath("part"))
+    let client = RecoveringFetchClient(malformedRange: true)
+    try await testFetcher(client).fetch(fetchObject(Data("abcdef".utf8)), fs: fs, part: SafeRelativePath("part"), progress: { _ in })
+    #expect(client.ranges.withLock { $0 } == [3, nil])
+    #expect(try fs.readFile(at: SafeRelativePath("part"), maxBytes: 6) == Data("abcdef".utf8))
+}
+
+@Test
+func blockedChunkFullSyncDoesNotSerializeOtherFetches() async throws {
+    let directory = try TempDir(); let blocker = FetchBlockingSync()
+    let blockedFS = try ContainedFileSystem(root: directory.url, fileOps: blocker)
+    let otherFS = try ContainedFileSystem(root: directory.url)
+    let cdn = MockCDN(); let bytes = Data("abc".utf8); cdn.serve("object", data: bytes)
+    let fetcher = testFetcher(cdn); let finished = Mutex(false)
+    let first = Task { try await fetcher.fetch(fetchObject(bytes), fs: blockedFS, part: SafeRelativePath("first"), progress: { _ in }) }
+    defer { blocker.release.signal(); first.cancel() }
+    let clock = ContinuousClock(); let deadline = clock.now.advanced(by: .seconds(3))
+    while !blocker.entered.withLock({ $0 }) && clock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+    try #require(blocker.entered.withLock { $0 })
+    let second = Task {
+        try await fetcher.fetch(fetchObject(bytes), fs: otherFS, part: SafeRelativePath("second"), progress: { _ in })
+        finished.withLock { $0 = true }
+    }
+    defer { second.cancel() }
+    let otherDeadline = clock.now.advanced(by: .seconds(2))
+    while !finished.withLock({ $0 }) && clock.now < otherDeadline { try await Task.sleep(for: .milliseconds(1)) }
+    #expect(finished.withLock { $0 })
+    blocker.release.signal()
+    try await first.value; try await second.value
 }
 
 @Test
@@ -160,7 +215,7 @@ func fetchRejectsMalformedRangeAndOverlongBody() async throws {
     await #expect(throws: LauncherError.transport("invalid content range")) {
         try await testFetcher(client, attempts: 1).fetch(fetchObject(Data("abcdef".utf8)), fs: fs, part: try SafeRelativePath(part.lastPathComponent), progress: { _ in })
     }
-    #expect(try Data(contentsOf: part) == Data("abc".utf8))
+    #expect(try Data(contentsOf: part).isEmpty)
     try FileManager.default.removeItem(at: part)
     let overlong = FixedFetchClient(head: HTTPResponseHead(status: 200), state: FetchTestBodyState(pieces: [Data("abcdef".utf8)]))
     await #expect(throws: LauncherError.sizeMismatch(path: "object", expected: 3, actual: 6)) {
@@ -396,4 +451,43 @@ private final class FetchTestBodyState: Sendable {
         if data == nil && stall { try await Task.sleep(for: .seconds(30)) }
         return data
     }
+}
+
+private final class RecoveringFetchClient: HTTPClient {
+    let ranges = Mutex([Int64?]())
+    let malformedRange: Bool
+    init(malformedRange: Bool) { self.malformedRange = malformedRange }
+    func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
+        let first = ranges.withLock { value in value.append(offset); return value.count == 1 }
+        let head: HTTPResponseHead
+        let data: Data
+        if first {
+            head = malformedRange ? HTTPResponseHead(status: 206, contentRange: 0...2, totalLength: 6) : HTTPResponseHead(status: 200)
+            data = Data("abc".utf8)
+        } else if let offset, offset == 3 {
+            head = HTTPResponseHead(status: 206, contentLength: 3, contentRange: 3...5, totalLength: 6)
+            data = Data("def".utf8)
+        } else {
+            head = HTTPResponseHead(status: 200, contentLength: 6)
+            data = Data("abcdef".utf8)
+        }
+        let state = FetchTestBodyState(pieces: [data])
+        return (head, HTTPBody(next: { try await state.next() }, onCancel: { state.cancel() }))
+    }
+}
+private final class FetchBlockingSync: FileOps {
+    let entered = Mutex(false)
+    let release = DispatchSemaphore(value: 0)
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(descriptor, bytes: bytes) }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws {
+        if durable {
+            entered.withLock { $0 = true }
+            guard release.wait(timeout: .now() + 8) == .success else { throw LauncherError.io("sync gate timed out") }
+        }
+        try SystemFileOps().synchronize(descriptor, durable: durable)
+    }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
 }

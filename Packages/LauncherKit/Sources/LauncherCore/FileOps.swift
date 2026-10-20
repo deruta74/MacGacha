@@ -17,8 +17,8 @@ public struct SystemFileOps: FileOps {
     public init() {}
 
     public func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        // writeAll owns cancellation policy; a journal record must finish once writing starts.
         while true {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
             let result = Darwin.write(descriptor, bytes.baseAddress, bytes.count)
             if result >= 0 { return result }
             guard errno == EINTR else { throw LauncherError.io("Cannot write file (errno \(errno))") }
@@ -46,15 +46,17 @@ public struct SystemFileOps: FileOps {
 
 extension FileOps {
     /// Bounded writes; retry short writes without dropping bytes and refuse non-progressing doubles.
-    public func writeAll(_ data: Data, to descriptor: Int32) throws {
+    public func writeAll(_ data: Data, to descriptor: Int32, checkingCancellation: Bool = true,
+        didWrite: (Int) -> Void = { _ in }) throws {
         try data.withUnsafeBytes { bytes in
             var offset = 0
             while offset < bytes.count {
-                guard !Task.isCancelled else { throw LauncherError.cancelled }
+                guard !checkingCancellation || !Task.isCancelled else { throw LauncherError.cancelled }
                 let end = offset + min(65_536, bytes.count - offset)
                 let count = try write(descriptor, bytes: UnsafeRawBufferPointer(rebasing: bytes[offset..<end]))
                 guard count > 0, count <= end - offset else { throw LauncherError.io("Invalid write progress") }
                 offset += count
+                didWrite(count)
             }
         }
     }

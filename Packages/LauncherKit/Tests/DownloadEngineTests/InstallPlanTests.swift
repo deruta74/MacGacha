@@ -3,6 +3,7 @@
 
 import Foundation
 import Testing
+import TestSupport
 import LauncherCore
 @testable import DownloadEngine
 
@@ -23,9 +24,11 @@ func planRejectsNegativeSourceAndDestinationOffsets(offset: Int64) throws {
 @Test
 func planRejectsGapOverlapAndShortCoverage() throws {
     let object = planObject()
-    for (size, offsets) in [(Int64(4), [Int64(1)]), (6, [0, 2]), (4, [0])] {
+    for (size, offsets, reason) in [(Int64(4), [Int64(1)], "extent gap, overlap or invalid length"),
+        (6, [0, 2], "extent gap, overlap or invalid length"), (4, [0], "short file coverage")] {
         let extents = offsets.map { Extent(source: .chunk(id: "object"), fileOffset: $0, length: 3, digest: object.decodedDigest) }
-        try rejectsInvalidPlan(makePlan(objects: ["object": object], files: [planFile(size: size, extents: extents)]))
+        let plan = try makePlan(objects: ["object": object], files: [planFile(size: size, extents: extents)])
+        #expect(throws: LauncherError.io("invalid plan: " + reason)) { try plan.validate() }
     }
 }
 
@@ -33,7 +36,8 @@ func planRejectsGapOverlapAndShortCoverage() throws {
 func planRejectsMissingOrMismatchedObject() throws {
     let object = planObject()
     let extent = planExtent()
-    try rejectsInvalidPlan(makePlan(objects: [:], files: [planFile(extents: [extent])]))
+    let missing = try makePlan(objects: [:], files: [planFile(extents: [extent])])
+    #expect(throws: LauncherError.io("invalid plan: missing object")) { try missing.validate() }
     try rejectsInvalidPlan(makePlan(objects: ["wrong-key": object], files: [planFile(extents: [extent])]))
     let mismatch = Extent(source: .chunk(id: "object"), fileOffset: 0, length: 2, digest: object.decodedDigest)
     try rejectsInvalidPlan(makePlan(objects: ["object": object], files: [planFile(size: 2, extents: [mismatch])]))
@@ -83,8 +87,8 @@ func planRejectsDeletionAncestorsDescendantsAndDuplicates() throws {
 
 @Test
 func planRejectsOrphanObject() throws {
-    try rejectsInvalidPlan(makePlan(objects: ["object": planObject(), "orphan": planObject(id: "orphan")],
-        files: [planFile(extents: [planExtent()])]))
+    let plan = try makePlan(objects: ["object": planObject(), "orphan": planObject(id: "orphan")], files: [planFile(extents: [planExtent()])])
+    #expect(throws: LauncherError.io("invalid plan: orphan object")) { try plan.validate() }
 }
 
 @Test
@@ -99,7 +103,7 @@ func planDigestIsStableAcrossKeyOrder() throws {
     let b = try makePlan(objects: reverse, files: files)
     #expect(a.planDigest == b.planDigest)
     let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     let encoded = try encoder.encode(a)
     #expect(encoded == (try encoder.encode(b)))
     #expect(a.planDigest == planDigest(encoded, algorithm: .sha256))
@@ -255,4 +259,95 @@ private func planDigest(_ bytes: Data, algorithm: DigestAlgorithm = .md5) -> Dig
     var hasher = StreamingHasher(algorithm)
     hasher.update(bytes)
     return hasher.finalize()
+}
+
+@Test
+func planDigestHasGoldenBytesAndHex() throws {
+    let plan = try makePlan(objects: ["object": planObject()], files: [planFile(path: "Data/file.bin", extents: [planExtent()])])
+    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    let golden = #"{"deletions":[],"files":[{"digest":{"algorithm":"md5","hex":"900150983cd24fb0d6963f7d28e17f72"},"extents":[{"digest":{"algorithm":"md5","hex":"900150983cd24fb0d6963f7d28e17f72"},"fileOffset":0,"length":3,"source":{"chunk":{"id":"object"}}}],"path":"Data/file.bin","size":3}],"id":"build-1","objects":{"object":{"codec":"identity","decodedDigest":{"algorithm":"md5","hex":"900150983cd24fb0d6963f7d28e17f72"},"decodedSize":3,"id":"object","transferDigest":{"algorithm":"md5","hex":"900150983cd24fb0d6963f7d28e17f72"},"transferSize":3,"urls":["https://cdn.test/object"]}}}"#
+    #expect(try encoder.encode(plan) == Data(golden.utf8))
+    #expect(plan.planDigest.hex == "a8dea626787b5f9f03e44dc4e91ff29d50076ee079816be64f1bcf42d600ade0")
+}
+
+@Test
+func plansRejectUnsupportedCodecsBeforeFetch() throws {
+    let reference = planObject()
+    let object = ChunkObject(id: "object", urls: reference.urls, transferSize: 3, decodedSize: 3,
+        decodedDigest: reference.decodedDigest, codec: .zstd)
+    let plan = try makePlan(objects: ["object": object], files: [planFile(extents: [planExtent()])])
+    #expect(throws: LauncherError.io("codec unsupported: zstd")) { try plan.validate() }
+    try plan.validate(supportedCodecs: [.identity, .zstd])
+    #expect(throws: LauncherError.io("codec unsupported: identity")) {
+        try makePlan(objects: ["object": reference], files: [planFile(extents: [planExtent()])]).validate(supportedCodecs: [])
+    }
+}
+
+@Test
+func planCapsBoundCollectionsAndOpaqueIDs() throws {
+    let object = planObject()
+    let manyURLs = ChunkObject(id: "object", urls: Array(repeating: object.urls[0], count: 17), transferSize: 3,
+        decodedSize: 3, decodedDigest: object.decodedDigest)
+    let urlsPlan = try makePlan(objects: ["object": manyURLs], files: [planFile(extents: [planExtent()])])
+    #expect(throws: LauncherError.io("invalid plan: too many object URLs")) { try urlsPlan.validate() }
+    for id in ["", String(repeating: "é", count: 2049)] {
+        let invalid = planObject(id: id)
+        let plan = try makePlan(objects: [id: invalid], files: [planFile(extents: [planExtent(id: id)])])
+        #expect(throws: LauncherError.io(id.isEmpty ? "invalid plan: empty object id" : "invalid plan: object id too long")) { try plan.validate() }
+    }
+    do {
+        let files = Array(repeating: try planFile(size: 0, extents: []), count: 1_000_001)
+        let plan = try makePlan(objects: [:], files: files)
+        #expect(throws: LauncherError.io("invalid plan: too many files")) { try plan.validate() }
+    }
+    do {
+        let paths = Array(repeating: try SafeRelativePath("old"), count: 1_000_001)
+        let plan = try makePlan(objects: [:], files: [], deletions: paths)
+        #expect(throws: LauncherError.io("invalid plan: too many deletions")) { try plan.validate() }
+    }
+    do {
+        let extents = Array(repeating: planExtent(), count: 1_000_001)
+        let plan = try makePlan(objects: ["object": object], files: [planFile(path: "a", extents: extents), planFile(path: "b", extents: extents)])
+        #expect(throws: LauncherError.io("invalid plan: too many extents")) { try plan.validate() }
+    }
+    // Null values prove the cap is enforced before constructing a million ChunkObjects.
+    let objects = (0...1_000_000).map { "\"o\($0)\":null" }.joined(separator: ",")
+    let bytes = Data("{\"id\":\"build\",\"objects\":{\(objects)},\"files\":[],\"deletions\":[]}".utf8)
+    #expect(throws: LauncherError.io("invalid plan: too many objects")) { try JSONDecoder().decode(InstallPlan.self, from: bytes) }
+}
+
+@Test
+func localSourceCanBeDeletedAfterStagingWithoutFallback() async throws {
+    let temp = try TestSupport.TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let old = try SafeRelativePath("old")
+    try fs.writeAtomically(Data("abc".utf8), to: old)
+    let extent = Extent(source: .local(path: old, offset: 0), fileOffset: 0, length: 3, digest: planObject().decodedDigest)
+    let plan = try makePlan(objects: [:], files: [planFile(extents: [extent])], deletions: [old])
+    try plan.validate()
+    let cdn = TestSupport.MockCDN()
+    let operation = try InstallOperation(plan: plan, installRoot: temp.url,
+        fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(), sleeper: TestSupport.InstantSleeper()),
+        disk: TestSupport.FixedDiskSpace(bytes: Int64.max))
+    for try await _ in operation.run() {}
+    #expect(cdn.requestLog.isEmpty)
+    #expect(try fs.itemType(at: old) == nil)
+    #expect(try fs.readFile(at: SafeRelativePath("file.bin"), maxBytes: 3) == Data("abc".utf8))
+}
+
+@Test
+func planDecodingBoundsArraysBeforeDecodingElements() throws {
+    for key in ["files", "deletions"] {
+        let nulls = String(repeating: "null,", count: 1_000_000) + "null"
+        let bytes = Data(("{\"id\":\"build\",\"objects\":{},\"files\":[],\"deletions\":[]}")
+            .replacingOccurrences(of: "\"\(key)\":[]", with: "\"\(key)\":[\(nulls)]").utf8)
+        #expect(throws: LauncherError.io("invalid plan: too many " + key)) { try JSONDecoder().decode(InstallPlan.self, from: bytes) }
+    }
+    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    let object = String(decoding: try encoder.encode(planObject()), as: UTF8.self)
+    let first = String(decoding: try encoder.encode(planFile(path: "a", extents: [planExtent()])), as: UTF8.self)
+    let nulls = String(repeating: "null,", count: 1_999_999) + "null"
+    let second = String(decoding: try encoder.encode(planFile(path: "b", extents: [])), as: UTF8.self)
+        .replacingOccurrences(of: "\"extents\":[]", with: "\"extents\":[\(nulls)]")
+    let bytes = Data("{\"id\":\"build\",\"objects\":{\"object\":\(object)},\"files\":[\(first),\(second)],\"deletions\":[]}".utf8)
+    #expect(throws: LauncherError.io("invalid plan: too many extents")) { try JSONDecoder().decode(InstallPlan.self, from: bytes) }
 }

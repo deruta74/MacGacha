@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 
+import Dispatch
 import Foundation
 import LauncherCore
 
@@ -17,6 +18,23 @@ public enum JournalRecord: Codable, Sendable, Equatable {
     case operationCompleted
 
     private enum CodingKeys: String, CodingKey { case type, planID, planDigest, id, path, index, batch }
+    private struct AnyKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    private var allowedKeys: Set<String> {
+        switch self {
+        case .planStored: ["type", "planID", "planDigest"]
+        case .objectVerified: ["type", "id"]
+        case .fileStaged, .fileUnstaged, .fileCommitted, .fileDeleted: ["type", "path"]
+        case .batchStarted: ["type", "index"]
+        case .commitStarted: ["type", "batch"]
+        case .operationStarted, .operationCompleted: ["type"]
+        }
+    }
 
     public init(from decoder: any Decoder) throws {
         do {
@@ -36,6 +54,8 @@ public enum JournalRecord: Codable, Sendable, Equatable {
             case "operationCompleted": self = .operationCompleted
             default: throw LauncherError.journalCorrupt("Unknown journal record type")
             }
+            let keys = try decoder.container(keyedBy: AnyKey.self).allKeys.map(\.stringValue)
+            guard Set(keys) == allowedKeys else { throw LauncherError.journalCorrupt("Unexpected journal record keys") }
             try validate()
         } catch LauncherError.journalCorrupt(let reason) {
             throw LauncherError.journalCorrupt(reason)
@@ -82,6 +102,10 @@ public enum JournalRecord: Codable, Sendable, Equatable {
         switch self {
         case .batchStarted(let index), .commitStarted(let index):
             guard index >= 0 else { throw LauncherError.journalCorrupt("Negative batch index") }
+        case .objectVerified(let id):
+            guard !id.isEmpty, id.utf8.count <= ChunkObject.maximumIDBytes else {
+                throw LauncherError.journalCorrupt("Invalid object id")
+            }
         default: break
         }
     }
@@ -102,7 +126,20 @@ public struct JournalState: Sendable, Equatable {
 
     public init() {}
 
-    package mutating func apply(_ record: JournalRecord) {
+    fileprivate func validateTransition(_ record: JournalRecord) throws {
+        guard !completed else { throw LauncherError.journalCorrupt("Record after operationCompleted") }
+        if case .planStored(let id, let digest) = record {
+            guard planID == nil || (planID == id && planDigest == digest) else {
+                throw LauncherError.journalCorrupt("Conflicting planStored")
+            }
+        } else if planID == nil { throw LauncherError.journalCorrupt("Record before planStored") }
+        if case .commitStarted(let batch) = record, currentBatch != batch {
+            throw LauncherError.journalCorrupt("commitStarted without batchStarted")
+        }
+    }
+
+    package mutating func apply(_ record: JournalRecord) throws {
+        try validateTransition(record)
         switch record {
         case .planStored(let id, let digest): planID = id; planDigest = digest
         case .operationStarted: break
@@ -113,10 +150,6 @@ public struct JournalState: Sendable, Equatable {
             currentBatch = index
             batchFiles = stagedFiles.subtracting(committedFiles)
         case .commitStarted(let batch):
-            if currentBatch != batch {
-                currentBatch = batch
-                batchFiles = stagedFiles.subtracting(committedFiles)
-            }
             commitStartedBatches.insert(batch)
         case .fileCommitted(let path): committedFiles.insert(path)
         case .fileDeleted(let path): deletedFiles.insert(path)
@@ -127,10 +160,19 @@ public struct JournalState: Sendable, Equatable {
 
 /// A single-writer JSON Lines journal. Callers hold the install-root lock (Task 6)
 /// for its lifetime; separate instances do not coordinate writes to the same path.
+/// Expected size is linear in plan objects/files/deletions plus staging retries: roughly
+/// one object record, two file records and one record per deletion, with batch boundaries.
+/// Large plans can produce hundreds of MiB. Replay streams records; no compaction yet.
+/// Completed journals are removed with staging. Retry history has no fixed total cap.
 public actor OperationJournal {
     /// A complete encoded record may occupy at most 1 MiB, excluding its newline.
     /// Replay streams the file; a torn tail of any size is discarded without buffering it all.
     public static let maximumRecordBytes = 1_048_576
+
+    nonisolated let ioQueue = DispatchSerialQueue(label: "org.macgacha.operation-journal")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+    public nonisolated let recoveredState: JournalState
+    private var currentState: JournalState
 
     private let fs: ContainedFileSystem
     private let path: SafeRelativePath
@@ -145,15 +187,22 @@ public actor OperationJournal {
         self.synchronize = synchronize
         self.crashHooks = crashHooks
         if try fs.itemType(at: path) == nil {
-            try fs.append(Data(), to: path, synchronize: synchronize)
+            try fs.append(Data(), to: path, durable: true, synchronize: synchronize)
+            recoveredState = JournalState()
         } else {
             let result = try Self.scan(fs: fs, path: path)
             try fs.truncateFile(at: path, toByteCount: result.validBytes, synchronize: synchronize)
+            // A prior creation may have synced the file but failed its directory sync.
+            try fs.synchronizeParentDirectory(of: path)
+            recoveredState = result.state
         }
+        currentState = recoveredState
     }
 
     /// Batch/commit boundaries and completion always use F_FULLFSYNC; other records use fsync.
-    /// After a failed append, reopen to repair any partial line.
+    /// Once writing starts cancellation is deferred until the record has been synchronized.
+    /// If append throws after writing any bytes, the record is possibly written: reopen
+    /// and use recoveredState as the source of truth before proceeding.
     public func append(_ record: JournalRecord) throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard !needsRecovery else { throw LauncherError.journalCorrupt("Reopen journal after failed append") }
@@ -161,33 +210,38 @@ public actor OperationJournal {
         encoder.outputFormatting = [.sortedKeys]
         var bytes = try encoder.encode(record)
         guard bytes.count <= Self.maximumRecordBytes else { throw Self.oversizedRecord() }
+        try currentState.validateTransition(record)
         bytes.append(0x0a)
         let durable = switch record {
         case .batchStarted, .commitStarted, .operationCompleted: true
         default: false
         }
+        var written = 0
         do {
             // Only explicit harness injection splits a fileCommitted line at the rename gap.
             if case .fileCommitted = record, crashHooks.enabled(.midJournalWrite) {
                 let split = bytes.count / 2
-                try fs.append(Data(bytes.prefix(split)), to: path, synchronize: synchronize)
+                try fs.append(Data(bytes.prefix(split)), to: path, synchronize: synchronize, didWrite: { written += $0 })
                 crashHooks.reach(.midJournalWrite)
-                try fs.append(Data(bytes.dropFirst(split)), to: path, durable: durable, synchronize: synchronize)
+                try fs.append(Data(bytes.dropFirst(split)), to: path, durable: durable, synchronize: synchronize, didWrite: { written += $0 })
             } else {
-                try fs.append(bytes, to: path, durable: durable, synchronize: synchronize)
+                try fs.append(bytes, to: path, durable: durable, synchronize: synchronize, didWrite: { written += $0 })
             }
         } catch {
-            needsRecovery = true
+            needsRecovery = written > 0
             throw error
         }
+        try currentState.apply(record)
     }
 
     package func snapshot() throws -> JournalState {
-        try Self.replay(fs: fs, path: path)
+        guard !needsRecovery else { throw LauncherError.journalCorrupt("Reopen journal after failed append") }
+        return try Self.replay(fs: fs, path: path)
     }
 
     /// Replays complete LF-terminated records without modifying the file. Missing is empty;
-    /// an unterminated trailing record is ignored, but every terminated line must be valid.
+    /// unterminated, oversized or undecodable final lines are ignored when only NUL/LF
+    /// padding follows. Valid decoded records must always obey state-transition ordering.
     public static func replay(fs: ContainedFileSystem, path: SafeRelativePath) throws -> JournalState {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard try fs.itemType(at: path) != nil else { return JournalState() }
@@ -198,20 +252,35 @@ public actor OperationJournal {
         var state = JournalState()
         var pending = Data()
         var oversized = false
+        var damagedTail = false
         var position: Int64 = 0
         var validBytes: Int64 = 0
         let decoder = JSONDecoder()
         try fs.readFile(at: path, chunkSize: 65_536) { chunk in
+            if damagedTail {
+                guard chunk.allSatisfy({ $0 == 0 || $0 == 0x0a }) else { throw LauncherError.journalCorrupt("Invalid mid-file journal record") }
+                return
+            }
             var start = chunk.startIndex
             while let newline = chunk[start...].firstIndex(of: 0x0a) {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 let fragment = chunk[start..<newline]
-                guard !oversized, fragment.count <= maximumRecordBytes - pending.count else { throw oversizedRecord() }
-                pending.append(fragment)
-                let record: JournalRecord
-                do { record = try decoder.decode(JournalRecord.self, from: pending) }
-                catch { throw LauncherError.journalCorrupt("Invalid complete journal record") }
-                state.apply(record)
+                var record: JournalRecord?
+                if !oversized, fragment.count <= maximumRecordBytes - pending.count {
+                    pending.append(fragment)
+                    // Every decode/schema failure is a candidate torn final line. Keep
+                    // state.apply outside this catch: valid records in the wrong order
+                    // are corruption even at EOF.
+                    record = try? decoder.decode(JournalRecord.self, from: pending)
+                }
+                guard let record else {
+                    guard chunk[chunk.index(after: newline)...].allSatisfy({ $0 == 0 || $0 == 0x0a }) else {
+                        throw LauncherError.journalCorrupt("Invalid complete journal record")
+                    }
+                    damagedTail = true
+                    return
+                }
+                try state.apply(record)
                 position += Int64(fragment.count) + 1
                 validBytes = position
                 pending.removeAll(keepingCapacity: true)

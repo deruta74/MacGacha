@@ -78,24 +78,35 @@ public struct ContainedFileSystem: Sendable, Hashable {
 
     public static func synchronizeFileDescriptor(_ descriptor: Int32, durable: Bool) throws {
         while true {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
             let result = durable ? fcntl(descriptor, F_FULLFSYNC) : fsync(descriptor)
             if result == 0 { return }
             guard errno == EINTR else { throw LauncherError.io("Cannot synchronize file") }
         }
     }
 
-    /// Appends to a regular file (creating missing parents and the file), then synchronizes it.
-    /// Refuses symlinks and hard-linked writable files. A failed write may leave a partial append;
-    /// callers must repair it before writing again. The containing directory is also fsynced.
+    /// Checks cancellation before opening, then finishes the record and syncs after open.
+    /// In particular, cancellation during creation cannot skip the new file's durability.
+    /// A thrown error means the record is possibly written. didWrite reports successful syscall
+    /// bytes so single writers can distinguish pre-write failures from uncertain on-disk state.
+    /// The parent is synced only when the file is created; creation always uses F_FULLFSYNC.
     public func append(_ data: Data, to path: SafeRelativePath, durable: Bool = false,
-        synchronize: FileSynchronizer? = nil) throws {
-        try withRegularDescriptor(at: path, writing: true, create: true) { fd, parent, _ in
-            try fileOps.writeAll(data, to: fd)
-            if let synchronize { try synchronize(fd, durable) }
-            else { try fileOps.synchronize(fd, durable: durable) }
-            try self.synchronize(parent)
+        synchronize: FileSynchronizer? = nil, didWrite: (Int) -> Void = { _ in }) throws {
+        let opened = try openRegularDescriptors(at: path, writing: true, create: true, appending: true)
+        defer { close(opened.file); close(opened.parent) }
+        try fileOps.writeAll(data, to: opened.file, checkingCancellation: false, didWrite: didWrite)
+        let fullSync = durable || opened.created
+        if let synchronize { try synchronize(opened.file, fullSync) }
+        else { try fileOps.synchronize(opened.file, durable: fullSync) }
+        if opened.created { try self.synchronize(opened.parent) }
+    }
+
+    /// Heals a directory entry left by an earlier failed file-creation sync.
+    package func synchronizeParentDirectory(of path: SafeRelativePath) throws {
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else {
+            throw LauncherError.io("File parent is missing")
         }
+        defer { close(parent) }
+        try synchronize(parent)
     }
 
     /// Shrinks an existing regular file without extending it, then fsyncs it.
@@ -205,7 +216,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
 
     /// Transfers ownership of both descriptors to the caller after validating the opened file.
     private func openRegularDescriptors(at path: SafeRelativePath, writing: Bool, create: Bool,
-        appending: Bool) throws -> (file: Int32, parent: Int32, info: stat) {
+        appending: Bool) throws -> (file: Int32, parent: Int32, info: stat, created: Bool) {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard let parent = try directory(Array(path.components.dropLast()), create: create) else {
             throw LauncherError.io("File is missing")
@@ -213,7 +224,8 @@ public struct ContainedFileSystem: Sendable, Hashable {
         do {
             let name = path.components.last!
             let location = display(path.components)
-            if let info = try entry(name, parent: parent) {
+            let existing = try entry(name, parent: parent)
+            if let info = existing {
                 guard info.st_mode & S_IFMT == S_IFREG, !writing || info.st_nlink == 1 else {
                     throw LauncherError.unsafePath(location)
                 }
@@ -228,7 +240,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
                     throw LauncherError.unsafePath(location)
                 }
                 guard info.st_size >= 0 else { throw LauncherError.io("Invalid file size") }
-                return (fd, parent, info)
+                return (fd, parent, info, existing == nil)
             } catch {
                 close(fd)
                 throw error

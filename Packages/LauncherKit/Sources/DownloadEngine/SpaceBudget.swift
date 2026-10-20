@@ -13,7 +13,8 @@ public enum SpaceBudget {
 
     /// Returns the same transfer set used for the byte totals, without re-reading local ranges.
     package static func estimate(plan: InstallPlan, state: JournalState, fs: ContainedFileSystem) throws -> (disk: Int64, network: Int64, objects: Set<String>) {
-        try plan.validate()
+        // Budgeting uses byte sizes independently of decoder availability; installation preflights codecs.
+        try plan.validate(supportedCodecs: Set(ChunkCodec.allCases))
         let remaining = try remainingFiles(plan: plan, state: state, fs: fs)
         let objects = try networkObjectIDs(files: remaining, plan: plan, state: state, fs: fs)
         let network = try transferBytes(objects: objects, plan: plan)
@@ -22,7 +23,8 @@ public enum SpaceBudget {
     }
 
     public static func requiredLargestFile(plan: InstallPlan, state: JournalState, fs: ContainedFileSystem) throws -> Int64 {
-        try plan.validate()
+        // Budgeting uses byte sizes independently of decoder availability; installation preflights codecs.
+        try plan.validate(supportedCodecs: Set(ChunkCodec.allCases))
         var largest: Int64 = 0
         for file in try remainingFiles(plan: plan, state: state, fs: fs) {
             let objects = try networkObjectIDs(files: [file], plan: plan, state: state, fs: fs)

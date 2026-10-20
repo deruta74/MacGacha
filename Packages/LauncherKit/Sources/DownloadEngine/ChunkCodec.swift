@@ -5,8 +5,12 @@ import Darwin
 import Foundation
 import LauncherCore
 
-public enum ChunkCodec: String, Codable, Sendable {
+public enum ChunkCodec: String, Codable, Sendable, CaseIterable {
     case identity, zstd
+
+    public static var supportedCodecs: Set<ChunkCodec> {
+        Set(allCases.filter { (try? $0.decoder()) != nil })
+    }
 
     public func decoder(fileOps: any FileOps = SystemFileOps()) throws -> any ChunkDecoder {
         switch self {
