@@ -134,7 +134,10 @@ private final class ProcessPipeReader: Sendable {
 
     func close(after gracePeriod: Duration) {
         queue.asyncAfter(deadline: dispatchDeadline(after: gracePeriod)) { [weak self] in
-            self?.stop()
+            guard let self else { return }
+            drain(untilEmpty: true)
+            // Descendant output produced after this final drain is intentionally discarded.
+            stop()
         }
     }
 
@@ -157,10 +160,12 @@ private final class ProcessPipeReader: Sendable {
         }
     }
 
-    private func drain() {
+    private func drain(untilEmpty: Bool = false) {
         guard !state.withLock({ $0.stopping }) else { return }
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        for _ in 0..<16 {
+        var remainingReads = 16
+        while untilEmpty || remainingReads > 0 {
+            if !untilEmpty { remainingReads -= 1 }
             let count = buffer.withUnsafeMutableBytes {
                 Darwin.read(handle.fileDescriptor, $0.baseAddress, $0.count)
             }

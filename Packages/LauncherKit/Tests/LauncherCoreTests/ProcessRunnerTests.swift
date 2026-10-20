@@ -209,6 +209,21 @@ func descendantHoldingPipesDoesNotBlock() async throws {
     #expect(result.stderr.isEmpty)
 }
 
+@Test
+func bufferedOutputIsNotLostWithZeroGrace() async throws {
+    let runner = SystemProcessRunner(pipeDrainGracePeriod: .zero)
+    for iteration in 0..<20 {
+        let result = try await runner.run(
+            URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "head -c 1048576 /dev/zero | tr '\\0' 'a'"],
+            environment: [:],
+            currentDirectory: nil
+        )
+        #expect(result.stdout.count == 1_048_576, "Iteration \(iteration)")
+        #expect(result.exitCode == 0, "Iteration \(iteration)")
+    }
+}
+
 private func readChildPID(from file: URL) async throws -> Int32 {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: .seconds(5))
