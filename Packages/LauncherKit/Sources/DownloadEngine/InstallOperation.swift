@@ -248,6 +248,7 @@ private actor CommitSession {
 
     private func chooseBatch() async throws -> OperationEvent {
         let plan = try context().plan
+        try await invalidateStaleStagedFiles(plan)
         let pending = try pendingPlan()
         if pending.files.isEmpty {
             if state.commitStartedBatches.isEmpty, plan.deletions.contains(where: { !state.deletedFiles.contains($0) }) {
@@ -275,6 +276,10 @@ private actor CommitSession {
                 }
             }
         }
+        let next = plannedBatches[0]
+        let need = try SpaceBudget.required(plan: projection(pending, files: next), state: state, fs: fs).disk
+        let free = try fs.availableBytes(using: disk)
+        guard need <= free else { throw LauncherError.insufficientSpace(required: need, available: free) }
         batch = plannedBatches.removeFirst()
         if let started = state.currentBatch, !state.commitStartedBatches.contains(started) {
             batchIndex = started
@@ -290,15 +295,19 @@ private actor CommitSession {
         return .phase(.staging)
     }
 
-    private func partitionAll(_ pending: InstallPlan, required: Int64, available: Int64) throws -> [[FileTask]] {
-        let paths = CommitPaths(id: pending.id)
-        var staged = Set<SafeRelativePath>()
-        for file in pending.files {
+    private func invalidateStaleStagedFiles(_ plan: InstallPlan) async throws {
+        let paths = CommitPaths(id: plan.id)
+        for file in plan.files where state.stagedFiles.contains(file.path) && !state.committedFiles.contains(file.path) {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
-            if state.stagedFiles.contains(file.path), try fs.size(at: paths.staged(file.path)) == file.size {
-                staged.insert(file.path)
+            if try fs.size(at: paths.staged(file.path)) != file.size {
+                try await record(.fileUnstaged(path: file.path))
             }
         }
+    }
+
+    private func partitionAll(_ pending: InstallPlan, required: Int64, available: Int64) throws -> [[FileTask]] {
+        let paths = CommitPaths(id: pending.id)
+        let staged = state.stagedFiles.subtracting(state.committedFiles)
         var transferCosts: [String: Int64] = [:]
         for object in pending.objects.values {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -307,36 +316,52 @@ private actor CommitSession {
         }
         var remaining = pending.files
         var result: [[FileTask]] = []
-        var overwritten = Set<String>()
         while !remaining.isEmpty {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let candidate = try partitionPrefix(remaining, staged: staged, transferCosts: transferCosts,
                 required: required, available: available)
-            for file in candidate where !staged.contains(file.path) {
-                for extent in file.extents {
-                    guard !Task.isCancelled else { throw LauncherError.cancelled }
-                    switch extent.source {
-                    case .chunk(let id): transferCosts[id] = 0
-                    case .local(let source, _):
-                        let replaced = overwritten.contains(folded(source))
-                        guard !replaced || extent.fallbackChunkID != nil else {
-                            // A prior batch would destroy the only recoverable source.
-                            throw LauncherError.insufficientSpace(required: required, available: available)
-                        }
-                        // Fallbacks are conditional, so reserve their transfer bytes even if
-                        // an earlier local extent might fetch them. Only direct chunks above
-                        // are guaranteed to have been fetched and retained for later batches.
-                    }
-                }
-            }
-            // Objects fetched above stay available while remaining files reference them.
-            // A staged file needs neither its old local source nor its reclaimed object parts.
-            overwritten.formUnion(candidate.map { folded($0.path) })
             let selected = Set(candidate.map(\.path))
             remaining.removeAll { selected.contains($0.path) }
             result.append(candidate)
         }
+        try validateBatchDependencies(result, staged: staged, required: required, available: available)
+        // Do not project future allocation/reclamation. Reserve every cross-batch object
+        // in addition to the largest batch, then recheck the live need before each batch.
+        var largest: Int64 = 0
+        var seen = Set<String>(), shared = Set<String>()
+        for batch in result {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            let files = batch.filter { !staged.contains($0.path) }
+            let ids = Set(files.flatMap { references($0) })
+            var need = try files.reduce(Int64(0)) { try sum($0, $1.size) }
+            for id in ids { need = try sum(need, transferCosts[id] ?? 0) }
+            largest = max(largest, need)
+            shared.formUnion(seen.intersection(ids)); seen.formUnion(ids)
+        }
+        var preflight = try sum(largest, SpaceBudget.margin)
+        for id in shared {
+            guard let object = pending.objects[id] else { throw LauncherError.io("Missing plan object") }
+            preflight = try sum(preflight, object.transferSize)
+        }
+        guard preflight <= available else { throw LauncherError.insufficientSpace(required: preflight, available: available) }
         return result
+    }
+
+    private func validateBatchDependencies(_ batches: [[FileTask]], staged: Set<SafeRelativePath>,
+        required: Int64, available: Int64) throws {
+        var overwritten = Set<String>()
+        for batch in batches {
+            for file in batch where !staged.contains(file.path) {
+                for extent in file.extents {
+                    guard !Task.isCancelled else { throw LauncherError.cancelled }
+                    if case .local(let source, _) = extent.source, extent.fallbackChunkID == nil,
+                       overwritten.contains(folded(source)) {
+                        throw LauncherError.insufficientSpace(required: required, available: available)
+                    }
+                }
+            }
+            overwritten.formUnion(batch.map { folded($0.path) })
+        }
     }
 
     private func partitionPrefix(_ files: [FileTask], staged: Set<SafeRelativePath>, transferCosts: [String: Int64],
@@ -440,7 +465,11 @@ private actor CommitSession {
         if marker == nil || marker?.planID == plan.id {
             try InstallStateMarker.clear(fs: fs, matching: plan.id)
         }
-        try fs.removeItem(at: CommitPaths(id: plan.id).directory)
+        let paths = CommitPaths(id: plan.id)
+        // Retire the plan durably before recursive cleanup can remove its completion journal.
+        // If interrupted, discovery treats the remaining directory as disposable orphan data.
+        try fs.removeFile(at: paths.plan)
+        try fs.removeItem(at: paths.directory)
     }
 
     private func references(_ file: FileTask) -> Set<String> {

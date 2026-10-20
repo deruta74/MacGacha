@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Darwin
 import Foundation
 import Testing
 import LauncherCore
@@ -256,12 +257,13 @@ func batchedModeUsesFallbackForOverwrittenLocalSource() async throws {
 @Test
 func sharedObjectIsNotDownloadedAgainAcrossCommittedBatches() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
-    let a = try opPlan("shared", [("a", "abc")])
-    let b = FileTask(path: try SafeRelativePath("b"), size: 3, digest: a.files[0].digest, extents: a.files[0].extents)
-    let plan = InstallPlan(id: a.id, objects: a.objects, files: a.files + [b]); let cdn = MockCDN(); opServe(cdn, a, ["abc"])
-    _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true)).run())
-    #expect(cdn.requestLog.count == 1)
-    #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("abc".utf8))
+    let plan = try retainedSpacePlan(); let cdn = MockCDN(); serveRetainedSpacePlan(cdn, plan)
+    var batches = 0
+    _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 13, mode: .batched(approved: true)).run(),
+        onEvent: { event in if event == .phase(.committing) { batches += 1 } })
+    #expect(batches == 4)
+    #expect(cdn.requestLog.count == 3)
+    #expect(try fs.readFile(at: plan.files[2].path, maxBytes: 3) == Data("abc".utf8))
 }
 
 @Test
@@ -479,7 +481,7 @@ func batchMembershipMismatchThrowsBeforeCommitStarts() async throws {
 }
 
 @Test
-func fullPartitionAccountsForSharedObjectsNeededByLaterLocalBatch() async throws {
+func conservativePartitionRejectsUnsafeSharedLocalBoundary() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let first = try opPlan("partition-shared", [("independent", "new")])
     let source = FileTask(path: try SafeRelativePath("source"), size: 3,
@@ -490,14 +492,140 @@ func fullPartitionAccountsForSharedObjectsNeededByLaterLocalBatch() async throws
     let plan = InstallPlan(id: first.id, objects: first.objects, files: first.files + [source, consumer])
     try fs.writeAtomically(Data("old".utf8), to: source.path)
     let cdn = MockCDN(); opServe(cdn, first, ["new"])
-    var batches: [Set<SafeRelativePath>] = []
+    await #expect(throws: LauncherError.insufficientSpace(required: (1 << 30) + 12, available: (1 << 30) + 6)) {
+        _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true)).run())
+    }
+    #expect(try fs.readFile(at: source.path, maxBytes: 3) == Data("old".utf8))
+    #expect(try fs.size(at: consumer.path) == nil)
+    #expect(cdn.requestLog.isEmpty)
+}
+
+@Test
+func sharedBatchPartsRequireConservativeSpaceReserveBeforeCommit() async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let plan = try retainedSpacePlan(); let cdn = MockCDN(); serveRetainedSpacePlan(cdn, plan)
+    await #expect(throws: LauncherError.insufficientSpace(required: (1 << 30) + 13, available: (1 << 30) + 12)) {
+        _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 12, mode: .batched(approved: true)).run())
+    }
+    #expect(cdn.requestLog.isEmpty)
+    #expect(try OperationJournal.replay(fs: fs, path: opJournal(plan)).commitStartedBatches.isEmpty)
+    #expect(try InstallStateMarker.load(fs: fs) == nil)
+    #expect(try fs.size(at: plan.files[0].path) == nil)
+}
+
+@Test
+func retainedPartsAndInstalledGrowthCauseResumableExactShortfall() async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let plan = try retainedSpacePlan(); let cdn = MockCDN(); serveRetainedSpacePlan(cdn, plan)
+    let operation = try InstallOperation(plan: plan, installRoot: temp.url,
+        fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()),
+        disk: RetainedPartsDisk(plan: plan), mode: .batched(approved: true))
+    var stagingEvents = 0
+    await #expect(throws: LauncherError.insufficientSpace(required: (1 << 30) + 10, available: (1 << 30) + 7)) {
+        _ = try await opCollect(operation.run(), onEvent: { event in
+            if event == .phase(.staging) { stagingEvents += 1 }
+        })
+    }
+    #expect(stagingEvents == 1)
+    let state = try OperationJournal.replay(fs: fs, path: opJournal(plan))
+    #expect(state.committedFiles == [plan.files[0].path])
+    #expect(!state.completed)
+    #expect(try InstallStateMarker.load(fs: fs)?.planID == plan.id)
+    #expect(throws: LauncherError.busy("install is updating")) { try InstallStateMarker.requireIdle(fs: fs) }
+    #expect(cdn.requestLog.map(\.path) == ["retained-0"])
+    #expect(try fs.size(at: plan.files[1].path) == nil)
+    _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 40, mode: .batched(approved: true)).run())
+    for (file, body) in zip(plan.files, ["abc", "12345", "abc", "67890"]) {
+        #expect(try fs.readFile(at: file.path, maxBytes: 5) == Data(body.utf8))
+    }
+    #expect(cdn.requestLog.count == 3)
+    #expect(try InstallStateMarker.load(fs: fs) == nil)
+    #expect(try fs.itemType(at: opDirectory(plan)) == nil)
+}
+
+@Test(arguments: [false, true])
+func staleStagedRecordsAreInvalidatedBeforePartitioning(wrongSize: Bool) async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let plan = try opPlan("stale-before-partition", [("a", "abc"), ("b", "def")])
+    let journal = try await opSeed(fs, plan, commit: false)
+    try await journal.append(.fileUnstaged(path: plan.files[0].path))
+    if wrongSize { try fs.writeAtomically(Data("x".utf8), to: opStaged(plan, plan.files[1].path)) }
+    let cdn = MockCDN(); opServe(cdn, plan, ["abc", "def"])
+    var checked = false
     _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true)).run(),
         onEvent: { (event: OperationEvent) throws in
-            if event == .phase(.committing) { batches.append(try OperationJournal.replay(fs: fs, path: opJournal(plan)).batchFiles) }
+            if event == .phase(.staging), !checked {
+                checked = true
+                #expect(try OperationJournal.replay(fs: fs, path: opJournal(plan)).stagedFiles.isEmpty)
+            }
         })
-    #expect(batches == [[first.files[0].path], [source.path, consumer.path]])
-    #expect(try fs.readFile(at: consumer.path, maxBytes: 3) == Data("old".utf8))
+    #expect(checked)
+    #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 3) == Data("abc".utf8))
+    #expect(try fs.readFile(at: plan.files[1].path, maxBytes: 3) == Data("def".utf8))
+}
+
+@Test
+func interruptedCleanupRetiresPlanBeforeJournalCanDisappear() async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let remote = try opPlan("cleanup-local", [("source", "new")])
+    let copied = FileTask(path: try SafeRelativePath("copied"), size: 3, digest: opDigest("old"), extents: [
+        Extent(source: .local(path: remote.files[0].path, offset: 0), fileOffset: 0, length: 3, digest: opDigest("old")),
+    ])
+    let plan = InstallPlan(id: remote.id, objects: remote.objects, files: remote.files + [copied])
+    try fs.writeAtomically(Data("old".utf8), to: remote.files[0].path)
+    let cdn = MockCDN(); opServe(cdn, remote, ["new"])
+    var fixtureDirectory: Int32 = -1
+    var fixtureFiles = 0
+    defer {
+        if fixtureDirectory >= 0 {
+            for index in 0..<fixtureFiles { _ = Darwin.unlinkat(fixtureDirectory, "retained-\(index)", 0) }
+            Darwin.close(fixtureDirectory)
+        }
+    }
+    await #expect(throws: LauncherError.io("Directory entry limit exceeded")) {
+        for try await event in try opEngine(plan, temp.url, cdn).run() {
+            if event == .phase(.cleaningUp) {
+                // Exceed the bounded directory snapshot so cleanup fails before unlinking
+                // any child, independently of readdir order. Empty files avoid large data.
+                fixtureDirectory = Darwin.open(try opDirectory(plan).resolved(against: temp.url).path, O_RDONLY | O_DIRECTORY)
+                try #require(fixtureDirectory >= 0)
+                for index in 0..<100_001 {
+                    let fd = Darwin.openat(fixtureDirectory, "retained-\(index)", O_WRONLY | O_CREAT | O_EXCL, 0o600)
+                    try #require(fd >= 0); Darwin.close(fd); fixtureFiles += 1
+                }
+            }
+        }
+    }
+    #expect(try InstallStateMarker.load(fs: fs) == nil)
+    #expect(try fs.itemType(at: opPlanPath(plan)) == nil)
+    // Simulate a crash after recursive cleanup has removed the journal too.
+    try fs.removeFile(at: opJournal(plan))
+    for index in 0..<fixtureFiles { #expect(Darwin.unlinkat(fixtureDirectory, "retained-\(index)", 0) == 0) }
+    fixtureFiles = 0
+    let next = InstallPlan(id: try SafeIdentifier("after-cleanup"), objects: [:], files: [])
+    _ = try await opCollect(opEngine(next, temp.url, cdn).run())
+    #expect(try fs.itemType(at: opDirectory(plan)) == nil)
+    #expect(try fs.readFile(at: remote.files[0].path, maxBytes: 3) == Data("new".utf8))
+    #expect(try fs.readFile(at: copied.path, maxBytes: 3) == Data("old".utf8))
     #expect(cdn.requestLog.count == 1)
+}
+
+func retainedSpacePlan() throws -> InstallPlan {
+    let base = try opPlan("retained", [("a", "abc"), ("b", "12345"), ("d", "67890")])
+    let shared = FileTask(path: try SafeRelativePath("c"), size: 3, digest: base.files[0].digest, extents: base.files[0].extents)
+    return InstallPlan(id: base.id, objects: base.objects, files: [base.files[0], base.files[1], shared, base.files[2]])
+}
+func serveRetainedSpacePlan(_ cdn: MockCDN, _ plan: InstallPlan) { opServe(cdn, plan, ["abc", "12345", "67890"]) }
+struct RetainedPartsDisk: DiskSpaceProbe {
+    let plan: InstallPlan
+    func availableBytes(at url: URL) throws -> Int64 {
+        let fs = try ContainedFileSystem(root: url)
+        let object = plan.objects["retained-0"]!
+        let retained = try fs.size(at: SafeRelativePath(".macgacha-staging/\(plan.id)/objects/\(object.partFileName)")) ?? 0
+        let state = try OperationJournal.replay(fs: fs, path: opJournal(plan))
+        let installed = try state.committedFiles.contains(plan.files[0].path) ? fs.size(at: plan.files[0].path) ?? 0 : 0
+        return (1 << 30) + 13 - retained - installed
+    }
 }
 
 func opDigest(_ text: String) -> Digest { var h = StreamingHasher(.md5); h.update(Data(text.utf8)); return h.finalize() }
