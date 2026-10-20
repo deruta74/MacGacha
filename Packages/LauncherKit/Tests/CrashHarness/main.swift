@@ -18,7 +18,7 @@ struct CrashHarness {
             let root = URL(fileURLWithPath: args[2], isDirectory: true)
             let fs = try ContainedFileSystem(root: fixtures)
             let plan = try JSONDecoder().decode(InstallPlan.self,
-                from: fs.readFile(at: SafeRelativePath("plan.json"), maxBytes: 64 << 20))
+                from: fs.readFile(at: SafeRelativePath("plan.json"), maxBytes: InstallPlan.maximumEncodedBytes))
             let operation = try InstallOperation(plan: plan, installRoot: root,
                 fetcher: ChunkFetcher(http: FileBackedHTTPClient(root: fixtures),
                     retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()),

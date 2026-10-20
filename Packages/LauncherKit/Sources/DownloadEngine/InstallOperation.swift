@@ -64,7 +64,7 @@ private actor CommitSession {
     private var step = Step.start
     private var pendingError: LauncherError?
     private var pulling = false
-    private static let planLimit = 64 << 20
+    private static let planLimit = InstallPlan.maximumEncodedBytes
 
     init(requested: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe, mode: InstallOperation.Mode, crashHooks: CrashHooks) {
@@ -169,7 +169,10 @@ private actor CommitSession {
             let plan: InstallPlan
             do { plan = try JSONDecoder().decode(InstallPlan.self, from: bytes) }
             catch { throw LauncherError.journalCorrupt("Invalid stored install plan") }
+            // Structural corruption belongs to recovery; missing decoders keep their
+            // actionable codec error, before any stored plan can fetch or commit.
             guard plan.id == id else { throw LauncherError.journalCorrupt("Stored plan directory mismatch") }
+            try plan.validate()
             let journal = try OperationJournal(fs: fs, path: paths.journal, crashHooks: crashHooks)
             let replay = journal.recoveredState
             guard (replay.planID == nil || replay.planID == plan.id),
@@ -197,6 +200,8 @@ private actor CommitSession {
             active = selected; state = selected.state
             try validateDeletions(selected.plan)
             if state.planID == nil {
+                // plan.json is persisted first; a crash or repaired first line can leave
+                // its journal empty. Restore plan identity before any later records.
                 try await record(.planStored(planID: selected.plan.id, planDigest: selected.plan.planDigest))
                 try await record(.operationStarted)
             }

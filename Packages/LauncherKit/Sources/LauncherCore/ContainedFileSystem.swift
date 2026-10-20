@@ -84,7 +84,8 @@ public struct ContainedFileSystem: Sendable, Hashable {
         }
     }
 
-    /// Appends a record, checking cancellation before writing, then finishing writes and syncs.
+    /// Checks cancellation before opening, then finishes the record and syncs after open.
+    /// In particular, cancellation during creation cannot skip the new file's durability.
     /// A thrown error means the record is possibly written. didWrite reports successful syscall
     /// bytes so single writers can distinguish pre-write failures from uncertain on-disk state.
     /// The parent is synced only when the file is created; creation always uses F_FULLFSYNC.
@@ -92,12 +93,20 @@ public struct ContainedFileSystem: Sendable, Hashable {
         synchronize: FileSynchronizer? = nil, didWrite: (Int) -> Void = { _ in }) throws {
         let opened = try openRegularDescriptors(at: path, writing: true, create: true, appending: true)
         defer { close(opened.file); close(opened.parent) }
-        guard !Task.isCancelled else { throw LauncherError.cancelled }
         try fileOps.writeAll(data, to: opened.file, checkingCancellation: false, didWrite: didWrite)
         let fullSync = durable || opened.created
         if let synchronize { try synchronize(opened.file, fullSync) }
         else { try fileOps.synchronize(opened.file, durable: fullSync) }
         if opened.created { try self.synchronize(opened.parent) }
+    }
+
+    /// Heals a directory entry left by an earlier failed file-creation sync.
+    package func synchronizeParentDirectory(of path: SafeRelativePath) throws {
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else {
+            throw LauncherError.io("File parent is missing")
+        }
+        defer { close(parent) }
+        try synchronize(parent)
     }
 
     /// Shrinks an existing regular file without extending it, then fsyncs it.

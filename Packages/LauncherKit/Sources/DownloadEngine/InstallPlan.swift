@@ -117,6 +117,8 @@ public struct FileTask: Codable, Sendable, Hashable {
 }
 
 public struct InstallPlan: Codable, Sendable {
+    /// Disk readers must apply this bound before materializing JSON for decoding.
+    public static let maximumEncodedBytes = 64 << 20
     public static let maximumObjects = 1_000_000
     public static let maximumURLsPerObject = 16
     public static let maximumFiles = 1_000_000
@@ -127,7 +129,8 @@ public struct InstallPlan: Codable, Sendable {
     public let files: [FileTask]
     public let deletions: [SafeRelativePath]
 
-    /// Call validate() before using a programmatically constructed plan. Decoding validates automatically.
+    /// Decoding validates structure independently of codec availability. Call validate()
+    /// before executing either a decoded or a programmatically constructed plan.
     public init(id: SafeIdentifier, objects: [String: ChunkObject], files: [FileTask], deletions: [SafeRelativePath] = []) {
         self.id = id
         self.objects = objects
@@ -164,7 +167,7 @@ public struct InstallPlan: Codable, Sendable {
         }
         self.init(id: id, objects: objects, files: files,
             deletions: try decodeBoundedArray(SafeRelativePath.self, from: c.superDecoder(forKey: .deletions), maximum: Self.maximumDeletions, kind: "deletions"))
-        try validate()
+        try validate(supportedCodecs: Set(ChunkCodec.allCases))
     }
 
     public var planDigest: Digest {

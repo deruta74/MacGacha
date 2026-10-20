@@ -100,13 +100,11 @@ public actor ChunkFetcher {
             }
         case 206:
             guard let range = head.contentRange, range.lowerBound == offset, object.transferSize > 0,
-                  range.upperBound == object.transferSize - 1 else {
+                  range.upperBound == object.transferSize - 1,
+                  head.totalLength == nil || head.totalLength == object.transferSize else {
                 try handle.close()
                 handle = try fs.openForWriting(at: part, truncate: true)
                 throw LauncherError.transport("invalid content range")
-            }
-            if let total = head.totalLength, total != object.transferSize {
-                throw LauncherError.sizeMismatch(path: object.id, expected: object.transferSize, actual: total)
             }
             if let length = head.contentLength, length != object.transferSize - offset {
                 throw LauncherError.sizeMismatch(path: object.id, expected: object.transferSize - offset, actual: length)

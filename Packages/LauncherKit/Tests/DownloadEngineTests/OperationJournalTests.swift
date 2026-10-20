@@ -136,7 +136,9 @@ func unknownRecordThrows() throws {
     let fs = try ContainedFileSystem(root: directory.url)
     let path = try SafeRelativePath("journal.jsonl")
     let bytes = Data("{\"type\":\"futureRecord\"}\n".utf8)
-    try fs.writeAtomically(bytes, to: path)
+    // Unknown schema is rejected directly and in the middle of a journal. A final
+    // undecodable line is now recoverable under the torn-tail contract.
+    try fs.writeAtomically(journalLines([journalPlanRecord()]) + bytes + journalLines([.operationCompleted]), to: path)
     try expectJournalCorrupt { _ = try OperationJournal.replay(fs: fs, path: path) }
     try expectJournalCorrupt { _ = try OperationJournal(fs: fs, path: path) }
     try expectJournalCorrupt { _ = try JSONDecoder().decode(JournalRecord.self, from: bytes) }
@@ -252,8 +254,9 @@ func invalidOrOversizedRecordsDoNotModifyTheJournal() async throws {
     try await journal.append(.operationCompleted)
     let completeOversized = Data("{\"type\":\"objectVerified\",\"id\":\"\(oversized)\"}\n".utf8)
     try fs.writeAtomically(completeOversized, to: path)
-    try expectJournalCorrupt { _ = try OperationJournal.replay(fs: fs, path: path) }
-    try expectJournalCorrupt { _ = try OperationJournal(fs: fs, path: path) }
+    #expect(try OperationJournal.replay(fs: fs, path: path) == JournalState())
+    _ = try OperationJournal(fs: fs, path: path)
+    #expect(try fs.size(at: path) == 0)
 }
 
 private func journalLines(_ records: [JournalRecord]) throws -> Data {

@@ -192,6 +192,8 @@ public actor OperationJournal {
         } else {
             let result = try Self.scan(fs: fs, path: path)
             try fs.truncateFile(at: path, toByteCount: result.validBytes, synchronize: synchronize)
+            // A prior creation may have synced the file but failed its directory sync.
+            try fs.synchronizeParentDirectory(of: path)
             recoveredState = result.state
         }
         currentState = recoveredState
@@ -238,8 +240,8 @@ public actor OperationJournal {
     }
 
     /// Replays complete LF-terminated records without modifying the file. Missing is empty;
-    /// unterminated or syntactically torn final records are ignored. Semantic errors and
-    /// invalid lines followed by nonzero bytes remain corruption.
+    /// unterminated, oversized or undecodable final lines are ignored when only NUL/LF
+    /// padding follows. Valid decoded records must always obey state-transition ordering.
     public static func replay(fs: ContainedFileSystem, path: SafeRelativePath) throws -> JournalState {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard try fs.itemType(at: path) != nil else { return JournalState() }
@@ -256,20 +258,23 @@ public actor OperationJournal {
         let decoder = JSONDecoder()
         try fs.readFile(at: path, chunkSize: 65_536) { chunk in
             if damagedTail {
-                guard chunk.allSatisfy({ $0 == 0 }) else { throw LauncherError.journalCorrupt("Invalid mid-file journal record") }
+                guard chunk.allSatisfy({ $0 == 0 || $0 == 0x0a }) else { throw LauncherError.journalCorrupt("Invalid mid-file journal record") }
                 return
             }
             var start = chunk.startIndex
             while let newline = chunk[start...].firstIndex(of: 0x0a) {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 let fragment = chunk[start..<newline]
-                guard !oversized, fragment.count <= maximumRecordBytes - pending.count else { throw oversizedRecord() }
-                pending.append(fragment)
-                let record: JournalRecord
-                do { record = try decoder.decode(JournalRecord.self, from: pending) }
-                catch let error as LauncherError { throw error }
-                catch {
-                    guard chunk[chunk.index(after: newline)...].allSatisfy({ $0 == 0 }) else {
+                var record: JournalRecord?
+                if !oversized, fragment.count <= maximumRecordBytes - pending.count {
+                    pending.append(fragment)
+                    // Every decode/schema failure is a candidate torn final line. Keep
+                    // state.apply outside this catch: valid records in the wrong order
+                    // are corruption even at EOF.
+                    record = try? decoder.decode(JournalRecord.self, from: pending)
+                }
+                guard let record else {
+                    guard chunk[chunk.index(after: newline)...].allSatisfy({ $0 == 0 || $0 == 0x0a }) else {
                         throw LauncherError.journalCorrupt("Invalid complete journal record")
                     }
                     damagedTail = true
