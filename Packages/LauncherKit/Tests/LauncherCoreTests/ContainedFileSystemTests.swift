@@ -6,6 +6,87 @@ import LauncherCore
 import TestSupport
 
 @Test
+func containedRenameReplacesOnlyRegularFileDestinations() throws {
+    let temp = try TempDir(); let outside = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let source = try SafeRelativePath("stage/source")
+    let target = try SafeRelativePath("Data/target")
+    try fs.writeAtomically(Data("new".utf8), to: source)
+    try fs.writeAtomically(Data("old".utf8), to: target)
+    try fs.rename(from: source, to: target)
+    #expect(try fs.size(at: source) == nil)
+    #expect(try fs.readFile(at: target, maxBytes: 3) == Data("new".utf8))
+    try fs.writeAtomically(Data("kept".utf8), to: source)
+    try fs.createDirectory(at: try SafeRelativePath("directory"))
+    #expect(throws: LauncherError.unsafePath(temp.url.appendingPathComponent("directory").path)) {
+        try fs.rename(from: source, to: SafeRelativePath("directory"))
+    }
+    let control = outside.url.appendingPathComponent("control")
+    try Data("outside".utf8).write(to: control)
+    try FileManager.default.createSymbolicLink(at: temp.url.appendingPathComponent("link"), withDestinationURL: outside.url)
+    #expect(throws: LauncherError.unsafePath(temp.url.appendingPathComponent("link").path)) {
+        try fs.rename(from: source, to: SafeRelativePath("link/control"))
+    }
+    #expect(try Data(contentsOf: control) == Data("outside".utf8))
+}
+
+@Test
+func containedAppendTruncateAndStreamingRead() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let path = try SafeRelativePath("journal/nested/records.jsonl")
+    try fs.append(Data("one\n".utf8), to: path)
+    try fs.append(Data("two\n".utf8), to: path, durable: true)
+    var pieces: [Data] = []
+    try fs.readFile(at: path, chunkSize: 3) { pieces.append($0) }
+    #expect(pieces.allSatisfy { $0.count <= 3 })
+    #expect(pieces.reduce(into: Data(), { $0.append($1) }) == Data("one\ntwo\n".utf8))
+    try fs.truncateFile(at: path, toByteCount: 4)
+    #expect(try fs.readFile(at: path, maxBytes: 10) == Data("one\n".utf8))
+    #expect(throws: LauncherError.io("Invalid truncation length")) { try fs.truncateFile(at: path, toByteCount: 5) }
+    #expect(throws: LauncherError.io("Invalid truncation length")) { try fs.truncateFile(at: path, toByteCount: -1) }
+    #expect(throws: LauncherError.io("Invalid read chunk size")) { try fs.readFile(at: path, chunkSize: 0) { _ in } }
+    #expect(throws: LauncherError.io("Invalid read chunk size")) { try fs.readFile(at: path, chunkSize: Int.max) { _ in } }
+}
+
+@Test
+func streamingReadStopsAtItsInitialFileSize() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let path = try SafeRelativePath("file")
+    try fs.writeAtomically(Data("abcd".utf8), to: path)
+    var read = Data()
+    try fs.readFile(at: path, chunkSize: 2) { piece in
+        read.append(piece)
+        try fs.append(Data("extra".utf8), to: path)
+    }
+    #expect(read == Data("abcd".utf8))
+    #expect(try fs.readFile(at: path, maxBytes: 20) == Data("abcdextraextra".utf8))
+}
+
+@Test
+func journalFilePrimitivesRefuseAncestorAndLeafSymlinksAndHardlinks() throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    let control = outside.url.appendingPathComponent("control")
+    try Data("preserved".utf8).write(to: control)
+    try FileManager.default.createDirectory(at: directory.url.appendingPathComponent("safe"), withIntermediateDirectories: false)
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("safe/link"), withDestinationURL: outside.url)
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("leaf"), withDestinationURL: control)
+    try FileManager.default.linkItem(at: control, to: directory.url.appendingPathComponent("hardlink"))
+    for (raw, rejected) in [("safe/link/control", "safe/link"), ("leaf", "leaf"), ("hardlink", "hardlink")] {
+        let path = try SafeRelativePath(raw)
+        let error = LauncherError.unsafePath(directory.url.appendingPathComponent(rejected).path)
+        #expect(throws: error) { try fs.append(Data("new".utf8), to: path) }
+        #expect(throws: error) { try fs.truncateFile(at: path, toByteCount: 0) }
+        if raw != "hardlink" {
+            #expect(throws: error) { try fs.readFile(at: path, chunkSize: 1) { _ in } }
+        }
+        #expect(try Data(contentsOf: control) == Data("preserved".utf8))
+    }
+}
+
+@Test
 func containedFileHandlesSupportResumeTruncateSyncAndRemoval() throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
