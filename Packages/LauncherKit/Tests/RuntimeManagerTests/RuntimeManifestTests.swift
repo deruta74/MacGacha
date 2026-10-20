@@ -24,13 +24,13 @@ func loadsBundledShapeManifest() throws {
 @Test
 func rejectsDownloadWithoutHash() throws {
     let data = try manifestFixtureData { $0[0].removeValue(forKey: "sha256") }
-    #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
+    #expect(throws: LauncherError.io("Download runtime is missing URL, sizes, SHA-256 or archive format")) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
 }
 
 @Test
 func rejectsNonRedistributableWithoutConsent() throws {
     let data = try manifestFixtureData { $0[2].removeValue(forKey: "consent") }
-    #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
+    #expect(throws: LauncherError.consentRequired("d3dmetal")) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
 }
 
 @Test
@@ -39,29 +39,70 @@ func rejectsUnknownSchemaVersion() throws {
     let url = directory.url.appendingPathComponent("manifest.json")
     let object: [String: Any] = ["schemaVersion": 2, "components": []]
     try JSONSerialization.data(withJSONObject: object).write(to: url)
-    #expect(throws: (any Error).self) { try RuntimeManifest.load(from: url) }
-    #expect(throws: (any Error).self) { try RuntimeManifest(schemaVersion: 2, components: []) }
+    #expect(throws: LauncherError.io("Unsupported runtime manifest schema")) { try RuntimeManifest.load(from: url) }
+    #expect(throws: LauncherError.io("Unsupported runtime manifest schema")) { try RuntimeManifest(schemaVersion: 2, components: []) }
 }
 
 @Test(arguments: ["url", "size", "installedSize", "sha256", "archive"])
 func manifestDownloadRequiresEveryField(field: String) throws {
     let data = try manifestFixtureData { $0[0].removeValue(forKey: field) }
-    #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
+    #expect(throws: LauncherError.io("Download runtime is missing URL, sizes, SHA-256 or archive format")) {
+        try JSONDecoder().decode(RuntimeManifest.self, from: data)
+    }
+}
+
+@Test(arguments: ["download", "import"])
+func d3dmetalRequiresAppleConsentRegardlessOfRedistributability(mode: String) throws {
+    let data = try manifestFixtureData {
+        $0[2]["sourceMode"] = mode
+        if mode == "import" {
+            for key in ["url", "size", "installedSize", "sha256", "archive"] { $0[2].removeValue(forKey: key) }
+        }
+        $0[2].removeValue(forKey: "consent")
+        var license = $0[2]["license"] as! [String: Any]
+        license["redistributable"] = true
+        $0[2]["license"] = license
+    }
+    #expect(throws: LauncherError.consentRequired("d3dmetal")) {
+        try JSONDecoder().decode(RuntimeManifest.self, from: data)
+    }
+    let nonApple = try manifestFixtureData {
+        var license = $0[0]["license"] as! [String: Any]
+        license["redistributable"] = false
+        $0[0]["license"] = license
+    }
+    #expect(throws: LauncherError.consentRequired("wine")) {
+        try JSONDecoder().decode(RuntimeManifest.self, from: nonApple)
+    }
 }
 
 @Test
 func manifestRejectsUnsafeIdentifiersAndInvalidSizes() throws {
-    let changes: [(inout [String: Any]) -> Void] = [
-        { $0["id"] = "../wine" }, { $0["version"] = "../escape" },
-        { $0["size"] = -1 }, { $0["installedSize"] = -1 },
-        { $0["sha256"] = ["algorithm": "md5", "hex": String(repeating: "a", count: 32)] },
-        { $0["url"] = "relative/path" },
-        { $0["license"] = ["name": "License", "url": "https://example.test/license", "redistributable": true] },
-    ]
-    for change in changes {
-        let data = try manifestFixtureData { change(&$0[0]) }
-        #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
+    for version in ["../escape", ".preview"] {
+        let data = try manifestFixtureData {
+            $0[0]["version"] = version
+            $0[0]["id"] = "wine-\(version)"
+        }
+        let unsafe = version == ".preview" ? version : "wine-\(version)"
+        #expect(throws: LauncherError.unsafePath(unsafe)) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
     }
+    let badID = try manifestFixtureData { $0[0]["id"] = "../wine" }
+    #expect(throws: LauncherError.unsafePath("../wine")) { try JSONDecoder().decode(RuntimeManifest.self, from: badID) }
+    let changes: [((inout [String: Any]) -> Void, LauncherError)] = [
+        ({ $0["size"] = -1 }, .io("Runtime sizes must be nonnegative")),
+        ({ $0["installedSize"] = -1 }, .io("Runtime sizes must be nonnegative")),
+        ({ $0["sha256"] = ["algorithm": "md5", "hex": String(repeating: "a", count: 32)] }, .io("Runtime digest must use SHA-256")),
+        ({ $0["url"] = "relative/path" }, .io("Runtime URLs must be absolute HTTP(S) URLs without credentials")),
+    ]
+    for (change, error) in changes {
+        let data = try manifestFixtureData { change(&$0[0]) }
+        #expect(throws: error) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
+    }
+    let legacy = try manifestFixtureData {
+        $0[0]["license"] = ["name": "License", "url": "https://example.test/license", "redistributable": true]
+    }
+    do { _ = try JSONDecoder().decode(RuntimeManifest.self, from: legacy); Issue.record("Missing termsRevision must fail") }
+    catch DecodingError.keyNotFound(let key, _) { #expect(key.stringValue == "termsRevision") }
 }
 
 @Test
@@ -80,7 +121,7 @@ func manifestAcceptsImportWithoutDownloadFields() throws {
 @Test
 func manifestRequiresKindVersionIDAndUniqueCaseInsensitiveDestinations() throws {
     let mismatch = try manifestFixtureData { $0[0]["id"] = "wrong-11.0" }
-    #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: mismatch) }
+    #expect(throws: LauncherError.io("Runtime component ID must be <kind>-<version>")) { try JSONDecoder().decode(RuntimeManifest.self, from: mismatch) }
     for version in ["11.0", "Release", "release"] {
         let collision = try manifestFixtureData {
             $0[0]["version"] = version == "11.0" ? "11.0" : "Release"
@@ -90,7 +131,7 @@ func manifestRequiresKindVersionIDAndUniqueCaseInsensitiveDestinations() throws 
             duplicate["id"] = "wine-\(version)"
             $0.append(duplicate)
         }
-        #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: collision) }
+        #expect(throws: LauncherError.io(version == "release" ? "Colliding runtime install destinations" : "Duplicate runtime component ID")) { try JSONDecoder().decode(RuntimeManifest.self, from: collision) }
     }
 }
 
@@ -104,20 +145,20 @@ func manifestFileLoaderRejectsNonFileURLs() throws {
     remote.host = "example.test"
     remote.path = file.path
     let url = try #require(remote.url)
-    #expect(throws: (any Error).self) { try RuntimeManifest.load(from: url) }
+    #expect(throws: LauncherError.unsafePath(url.deletingLastPathComponent().absoluteString)) { try RuntimeManifest.load(from: url) }
 }
 
 @Test
 func manifestRejectsDuplicatesAndOversizedFiles() throws {
     let data = try manifestFixtureData { $0.append($0[0]) }
-    #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
+    #expect(throws: LauncherError.io("Duplicate runtime component ID")) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
     let directory = try TempDir()
     let file = directory.url.appendingPathComponent("huge.json")
     try Data().write(to: file)
     let handle = try FileHandle(forWritingTo: file)
     try handle.truncate(atOffset: 2 << 20)
     try handle.close()
-    #expect(throws: (any Error).self) { try RuntimeManifest.load(from: file) }
+    #expect(throws: LauncherError.io("File exceeds read limit")) { try RuntimeManifest.load(from: file) }
 }
 
 private func manifestFixtureData(_ modify: (inout [[String: Any]]) -> Void = { _ in }) throws -> Data {

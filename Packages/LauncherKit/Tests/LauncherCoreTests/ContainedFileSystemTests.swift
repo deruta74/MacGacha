@@ -16,8 +16,8 @@ func containedFileSystemReadsWritesListsAndRemoves() throws {
     #expect(try fs.itemType(at: file) == .regularFile)
     #expect(try fs.itemType(at: folder) == .directory)
     #expect(try fs.contentsOfDirectory(at: folder) == [file])
-    #expect(throws: (any Error).self) { try fs.readFile(at: file, maxBytes: 2) }
-    #expect(throws: (any Error).self) { try fs.readFile(at: file, maxBytes: -1) }
+    #expect(throws: LauncherError.io("File exceeds read limit")) { try fs.readFile(at: file, maxBytes: 2) }
+    #expect(throws: LauncherError.io("Negative read limit")) { try fs.readFile(at: file, maxBytes: -1) }
     try fs.removeItem(at: try SafeRelativePath("Data"))
     #expect(try fs.itemType(at: file) == nil)
     try fs.removeItem(at: try SafeRelativePath("Data"))
@@ -108,4 +108,41 @@ func containedFileSystemRefusesLeafSymlinksAndPreservesAtomicWritesOnCancellatio
     catch LauncherError.cancelled {}
     #expect(try fs.readFile(at: path, maxBytes: 100) == original)
     #expect(try fs.contentsOfDirectory(at: SafeRelativePath("Data")) == [path])
+}
+
+@Test
+func containedFileSystemMovesWithoutReplacingOrFollowingSymlinks() throws {
+    let directory = try TempDir()
+    let outside = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    try fs.writeAtomically(Data("preserved".utf8), to: SafeRelativePath("source/nested/control"))
+    try fs.moveItem(at: SafeRelativePath("source"), to: SafeRelativePath(".removing-test"))
+    #expect(try fs.itemType(at: SafeRelativePath("source")) == nil)
+    #expect(try fs.readFile(at: SafeRelativePath(".removing-test/nested/control"), maxBytes: 100) == Data("preserved".utf8))
+    try fs.writeAtomically(Data("existing".utf8), to: SafeRelativePath("existing"))
+    #expect(throws: LauncherError.io("Move destination already exists")) {
+        try fs.moveItem(at: SafeRelativePath(".removing-test/nested/control"), to: SafeRelativePath("existing"))
+    }
+    #expect(try fs.readFile(at: SafeRelativePath("existing"), maxBytes: 100) == Data("existing".utf8))
+    #expect(try fs.readFile(at: SafeRelativePath(".removing-test/nested/control"), maxBytes: 100) == Data("preserved".utf8))
+    try FileManager.default.createSymbolicLink(at: directory.url.appendingPathComponent("link"), withDestinationURL: outside.url)
+    for (from, to) in [("link/nested/file", "moved"), ("existing", "link/nested/file"), ("existing", "link"), ("link", "moved")] {
+        do { try fs.moveItem(at: SafeRelativePath(from), to: SafeRelativePath(to)); Issue.record("Moves must refuse symlinks") }
+        catch LauncherError.unsafePath {}
+    }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: outside.url.path).isEmpty)
+}
+
+@Test
+func containedFileSystemReportsInvalidDirectoryEntriesSeparately() throws {
+    let directory = try TempDir()
+    let fs = try ContainedFileSystem(root: directory.url)
+    try fs.createDirectory(at: SafeRelativePath("versions/valid"))
+    let invalid = "versions/bad\\name"
+    try FileManager.default.createDirectory(at: directory.url.appendingPathComponent(invalid), withIntermediateDirectories: true)
+    let result = try fs.contentsOfDirectoryReportingInvalid(at: SafeRelativePath("versions"))
+    #expect(result.paths == [try SafeRelativePath("versions/valid")])
+    #expect(result.invalid == [invalid])
+    #expect(throws: LauncherError.unsafePath(invalid)) { try fs.contentsOfDirectory(at: SafeRelativePath("versions")) }
+
 }

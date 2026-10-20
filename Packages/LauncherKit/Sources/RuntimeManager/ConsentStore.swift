@@ -52,24 +52,47 @@ public actor ConsentStore {
     public func accept(_ kind: ConsentKind, version: String, termsRevision: String) throws {
         let record = try ConsentRecord(kind: kind, componentVersion: version, noticeDigest: AppleNotice.bodyDigest,
             termsRevision: termsRevision, acceptedAt: clock())
-        var records = try load()
+        var records = try loadForMutation()
         records.removeAll { $0.kind == kind }
         records.append(record)
         try RuntimeJSONFile.write(records, to: url, root: root, limit: 65_536)
     }
 
     public func revoke(_ kind: ConsentKind) throws {
-        var records = try load()
+        var records = try loadForMutation()
         records.removeAll { $0.kind == kind }
         try RuntimeJSONFile.write(records, to: url, root: root, limit: 65_536)
     }
 
-    private func load() throws -> [ConsentRecord] {
-        guard let data = try RuntimeJSONFile.read(url, root: root, limit: 65_536) else { return [] }
-        let records = try JSONDecoder().decode([ConsentRecord].self, from: data)
-        guard records.count <= 64, Set(records.map { $0.kind.rawValue }).count == records.count else {
-            throw LauncherError.io("Duplicate or excessive consent records")
+    private enum Corruption: Error { case invalidRecords }
+
+    private func loadForMutation() throws -> [ConsentRecord] {
+        do { return try load() }
+        catch Corruption.invalidRecords {
+            let fs = try ContainedFileSystem(root: root)
+            let path = try RuntimeJSONFile.relativePath(url, root: root)
+            // The UUID prevents collisions when multiple recoveries share a timestamp.
+            let timestamp = String(format: "%.0f", clock().timeIntervalSince1970 * 1000)
+            let backup = try SafeRelativePath(path.description + ".corrupt-" + timestamp + "-" + UUID().uuidString)
+            try fs.moveItem(at: path, to: backup)
+            return []
         }
-        return records
+    }
+
+    private func load() throws -> [ConsentRecord] {
+        let data: Data?
+        do { data = try RuntimeJSONFile.read(url, root: root, limit: 65_536) }
+        catch LauncherError.io("File exceeds read limit") { throw Corruption.invalidRecords }
+        guard let data else { return [] }
+        do {
+            let records = try JSONDecoder().decode([ConsentRecord].self, from: data)
+            guard records.count <= 64, Set(records.map { $0.kind.rawValue }).count == records.count else {
+                throw Corruption.invalidRecords
+            }
+            return records
+        } catch {
+            // Path, permission and cancellation failures above are never treated as corrupt JSON.
+            throw Corruption.invalidRecords
+        }
     }
 }

@@ -35,6 +35,37 @@ public struct ContainedFileSystem: Sendable {
             insideTree: false, depth: 0, budget: &budget)
     }
 
+    /// Atomically moves a regular file or directory without replacing the destination.
+    /// Creates missing destination parents and fsyncs both parents after the rename.
+    public func moveItem(at source: SafeRelativePath, to destination: SafeRelativePath) throws {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard let parent = try directory(Array(source.components.dropLast()), create: false) else {
+            throw LauncherError.io("Move source is missing")
+        }
+        defer { close(parent) }
+        let name = source.components.last!
+        guard let info = try entry(name, parent: parent) else { throw LauncherError.io("Move source is missing") }
+        guard info.st_mode & S_IFMT == S_IFDIR || info.st_mode & S_IFMT == S_IFREG else {
+            throw LauncherError.unsafePath(display(source.components))
+        }
+        guard let target = try directory(Array(destination.components.dropLast()), create: true) else {
+            throw LauncherError.io("Cannot open move destination")
+        }
+        defer { close(target) }
+        let targetName = destination.components.last!
+        if let existing = try entry(targetName, parent: target) {
+            if existing.st_mode & S_IFMT == S_IFLNK { throw LauncherError.unsafePath(display(destination.components)) }
+            throw LauncherError.io("Move destination already exists")
+        }
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard renameatx_np(parent, name, target, targetName, UInt32(RENAME_EXCL)) == 0 else {
+            if errno == EEXIST { throw LauncherError.io("Move destination already exists") }
+            throw accessError(display(destination.components))
+        }
+        try synchronize(parent)
+        try synchronize(target)
+    }
+
     /// Creates missing parents, then fsyncs a sibling temporary file before atomic replacement.
     public func writeAtomically(_ data: Data, to path: SafeRelativePath) throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -101,10 +132,29 @@ public struct ContainedFileSystem: Sendable {
 
     /// Returns immediate children as paths relative to this filesystem's root.
     public func contentsOfDirectory(at path: SafeRelativePath) throws -> [SafeRelativePath] {
+        let result = try contentsOfDirectoryReportingInvalid(at: path)
+        if let invalid = result.invalid.first { throw LauncherError.unsafePath(invalid) }
+        return result.paths
+    }
+
+    /// Lists valid paths and reports invalid names separately, without accessing those names.
+    /// Invalid UTF-8 names use replacement characters in the report only.
+    public func contentsOfDirectoryReportingInvalid(at path: SafeRelativePath) throws -> (paths: [SafeRelativePath], invalid: [String]) {
         guard let fd = try directory(path.components, create: false) else { throw LauncherError.io("Directory is missing") }
         defer { close(fd) }
         var budget = Self.entryLimit
-        return try names(in: fd, budget: &budget).sorted().map { try SafeRelativePath(path.description + "/" + $0) }
+        var paths: [SafeRelativePath] = []
+        var invalid: [String] = []
+        for bytes in try rawNames(in: fd, budget: &budget).sorted(by: { $0.lexicographicallyPrecedes($1) }) {
+            let displayName = path.description + "/" + String(decoding: bytes, as: UTF8.self)
+            guard let name = String(bytes: bytes, encoding: .utf8),
+                  let child = try? SafeRelativePath(path.description + "/" + name) else {
+                invalid.append(displayName)
+                continue
+            }
+            paths.append(child)
+        }
+        return (paths, invalid)
     }
 
     /// Returns nil for a missing item; refuses symlinks, including a symlink at the leaf.
@@ -192,6 +242,15 @@ public struct ContainedFileSystem: Sendable {
     }
 
     private func names(in fd: Int32, budget: inout Int) throws -> [String] {
+        try rawNames(in: fd, budget: &budget).map {
+            guard let name = String(bytes: $0, encoding: .utf8) else {
+                throw LauncherError.unsafePath("Invalid UTF-8 directory entry")
+            }
+            return name
+        }
+    }
+
+    private func rawNames(in fd: Int32, budget: inout Int) throws -> [[UInt8]] {
         let duplicate = dup(fd)
         guard duplicate >= 0 else { throw LauncherError.io("Cannot duplicate directory descriptor") }
         guard let stream = fdopendir(duplicate) else {
@@ -199,7 +258,7 @@ public struct ContainedFileSystem: Sendable {
             throw LauncherError.io("Cannot open directory stream")
         }
         defer { closedir(stream) }
-        var result: [String] = []
+        var result: [[UInt8]] = []
         while true {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             errno = 0
@@ -207,10 +266,8 @@ public struct ContainedFileSystem: Sendable {
                 if errno != 0 { throw LauncherError.io("Cannot list directory") }
                 break
             }
-            guard let name = withUnsafeBytes(of: item.pointee.d_name, { String(bytes: $0.prefix { $0 != 0 }, encoding: .utf8) }) else {
-                throw LauncherError.unsafePath("Invalid UTF-8 directory entry")
-            }
-            if name == "." || name == ".." { continue }
+            let name = withUnsafeBytes(of: item.pointee.d_name) { Array($0.prefix { $0 != 0 }) }
+            if name == [0x2e] || name == [0x2e, 0x2e] { continue }
             guard budget > 0 else { throw LauncherError.io("Directory entry limit exceeded") }
             budget -= 1
             result.append(name)

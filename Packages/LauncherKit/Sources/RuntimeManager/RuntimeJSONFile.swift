@@ -26,7 +26,7 @@ enum RuntimeJSONFile {
         try fs.writeAtomically(data, to: relativePath(url, root: root))
     }
 
-    private static func relativePath(_ url: URL, root: URL) throws -> SafeRelativePath {
+    static func relativePath(_ url: URL, root: URL) throws -> SafeRelativePath {
         guard url.isFileURL, root.isFileURL else { throw LauncherError.io("Runtime JSON requires file URLs") }
         let base = root.path.split(separator: "/")
         let destination = url.path.split(separator: "/")

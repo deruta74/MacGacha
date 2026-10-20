@@ -74,6 +74,9 @@ public struct RuntimeComponent: Codable, Sendable, Identifiable {
                 throw LauncherError.io("Download runtime is missing URL, sizes, SHA-256 or archive format")
             }
         }
+        guard kind != .d3dmetal || consent == .appleGPTK else {
+            throw LauncherError.consentRequired(kind.rawValue)
+        }
         guard license.redistributable || consent != nil else {
             throw LauncherError.consentRequired(kind.rawValue)
         }
