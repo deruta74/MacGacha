@@ -152,11 +152,13 @@ public struct InstallPlan: Codable, Sendable {
             guard covered == file.size else { throw invalidPlan("short file coverage") }
         }
         // Test component prefixes rather than string prefixes (Data and Data2 are distinct).
+        var destinationAncestors = Set<String>()
         for file in files {
             var ancestor = ""
             for component in file.path.components.dropLast() {
                 if !ancestor.isEmpty { ancestor += "/" }
                 ancestor += component
+                destinationAncestors.insert(caseFold(ancestor))
                 if destinations.contains(caseFold(ancestor)) {
                     throw invalidPlan("file path is an ancestor of another destination")
                 }
@@ -168,6 +170,13 @@ public struct InstallPlan: Codable, Sendable {
             let key = pathKey(path)
             guard deleted.insert(key).inserted else { throw invalidPlan("duplicate deletion path") }
             guard !destinations.contains(key) else { throw invalidPlan("path both installed and deleted") }
+            guard !destinationAncestors.contains(key) else { throw invalidPlan("deletion overlaps installed path") }
+            var ancestor = ""
+            for component in path.components.dropLast() {
+                if !ancestor.isEmpty { ancestor += "/" }
+                ancestor += component
+                guard !destinations.contains(caseFold(ancestor)) else { throw invalidPlan("deletion overlaps installed path") }
+            }
         }
         guard referenced == Set(objects.keys) else { throw invalidPlan("orphan object") }
     }
@@ -180,7 +189,7 @@ public struct InstallPlan: Codable, Sendable {
 }
 
 private func validateManifestPath(_ path: SafeRelativePath) throws {
-    let first = path.components[0].lowercased()
+    let first = caseFold(path.components[0])
     guard first != ".macgacha-staging", first != ".macgacha-state.json" else {
         throw LauncherError.unsafePath(path.description)
     }

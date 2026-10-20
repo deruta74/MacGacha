@@ -66,6 +66,22 @@ func planRejectsCaseInsensitiveDuplicates() throws {
 }
 
 @Test
+func planRejectsDeletionAncestorsDescendantsAndDuplicates() throws {
+    let file = try planFile(path: "Data/file.bin", extents: [planExtent()])
+    for deletion in ["data", "DATA/FILE.BIN/child"] {
+        let plan = try makePlan(objects: ["object": planObject()], files: [file], deletions: [SafeRelativePath(deletion)])
+        #expect(throws: LauncherError.io("invalid plan: deletion overlaps installed path")) { try plan.validate() }
+        #expect(throws: LauncherError.io("invalid plan: deletion overlaps installed path")) {
+            try JSONDecoder().decode(InstallPlan.self, from: JSONEncoder().encode(plan))
+        }
+    }
+    for deletions in [["old", "old"], ["old", "OLD"], ["Straße/é", "STRASSE/e\u{301}"]] {
+        let plan = try makePlan(objects: [:], files: [], deletions: deletions.map { try SafeRelativePath($0) })
+        #expect(throws: LauncherError.io("invalid plan: duplicate deletion path")) { try plan.validate() }
+    }
+}
+
+@Test
 func planRejectsOrphanObject() throws {
     try rejectsInvalidPlan(makePlan(objects: ["object": planObject(), "orphan": planObject(id: "orphan")],
         files: [planFile(extents: [planExtent()])]))
@@ -179,7 +195,7 @@ func sharedObjectAcrossTwoFilesValidates() throws {
 
 @Test
 func planRejectsReservedPathsAndInvalidCounters() throws {
-    for name in [".macgacha-staging/a", ".MACGACHA-STATE.JSON"] {
+    for name in [".macgacha-staging/a", ".MACGACHA-STATE.JSON", ".macgacha-ſtaging/a", ".macgacha-ſtate.json"] {
         let file = try planFile(path: name, extents: [planExtent()])
         let plan = try makePlan(objects: ["object": planObject()], files: [file])
         #expect(throws: LauncherError.unsafePath(name)) { try plan.validate() }

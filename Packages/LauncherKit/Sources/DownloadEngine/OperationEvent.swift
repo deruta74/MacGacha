@@ -11,4 +11,5 @@ public enum OperationEvent: Sendable, Equatable {
     case progress(downloaded: Int64, totalNetwork: Int64, staged: Int64, totalStaged: Int64)
     case fileVerified(SafeRelativePath)
     case failed(LauncherError)
+    case needsBatchApproval(required: Int64, available: Int64)
 }
