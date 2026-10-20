@@ -11,6 +11,7 @@ public enum LauncherError: Error, Sendable, Equatable {
     case http(status: Int, url: URL)
     case transport(String)
     case io(String)
+    case busy(String)
     case fileTooLarge(path: String, limit: Int)
     case consentRequired(String)
     case processFailed(executable: String, exitCode: Int32, stderrTail: String)
