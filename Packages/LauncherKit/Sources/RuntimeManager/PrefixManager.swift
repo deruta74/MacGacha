@@ -24,6 +24,7 @@ public struct PrefixManager: Sendable {
     /// Concurrent calls wait cancellably for the same prefix's file lock and recheck its
     /// marker. system.reg alone never establishes readiness. Wine's SHA-256 identifies
     /// the requested binary version even when an executable is replaced at the same path.
+    /// Ready prefixes upgrade in place when Wine changes; only incomplete prefixes reset.
     @concurrent
     public func createPrefix(game: String, backend: ComponentKind, wineBinary: URL) async throws -> URL {
         do {
@@ -45,19 +46,25 @@ public struct PrefixManager: Sendable {
             let existing = try readMarker(fs: fs, path: marker, backend: backend)
             let binary = wineBinary.standardizedFileURL
             let identity = try await binaryIdentity(binary, fs: fs)
-            if let existing, existing.schemaVersion == PrefixMarker.schema,
-               existing.wineBinaryPath == binary.path, existing.wineBinaryIdentity == identity,
-               existing.createdAt.timeIntervalSince1970.isFinite {
+            if let existing, existing.wineBinaryPath == binary.path, existing.wineBinaryIdentity == identity {
                 return url
             }
 
-            // Wine writes by path, so an incomplete prefix must not retain links that
-            // could redirect initialization outside it. Contained removal unlinks links
-            // themselves; the sibling lock survives replacement of the entire prefix.
-            try fs.removeItem(at: prefix)
-            try fs.createDirectory(at: prefix)
-            try fs.synchronizeTree(at: prefix)
-            let result = try await runner.run(wineBinary, arguments: ["wineboot", "--init"],
+            let arguments: [String]
+            if existing != nil {
+                // Keep user data and the old marker throughout an upgrade. A failed
+                // wineboot must not discard readiness for the previously used runtime.
+                arguments = ["wineboot", "-u"]
+            } else {
+                // Wine writes by path, so an incomplete prefix must not retain links
+                // that could redirect initialization outside it. Contained removal
+                // unlinks links themselves; the sibling lock survives the reset.
+                try fs.removeItem(at: prefix)
+                try fs.createDirectory(at: prefix)
+                try fs.synchronizeTree(at: prefix)
+                arguments = ["wineboot", "--init"]
+            }
+            let result = try await runner.run(wineBinary, arguments: arguments,
                 environment: ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": "winemenubuilder.exe=d"],
                 currentDirectory: nil)
             guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -66,7 +73,7 @@ public struct PrefixManager: Sendable {
                     stderrTail: String(decoding: result.stderr.suffix(4096), as: UTF8.self))
             }
             let readiness = PrefixMarker(schemaVersion: PrefixMarker.schema, backend: backend.rawValue,
-                wineBinaryPath: binary.path, wineBinaryIdentity: identity, createdAt: Date())
+                wineBinaryPath: binary.path, wineBinaryIdentity: identity, createdAt: existing?.createdAt ?? Date())
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             encoder.dateEncodingStrategy = .iso8601
@@ -105,14 +112,17 @@ public struct PrefixManager: Sendable {
         guard try fs.itemType(at: path, allowingLeafSymlink: true) == .regularFile else { return nil }
         let data: Data
         do { data = try fs.readFile(at: path, maxBytes: Self.markerLimit) }
-        catch LauncherError.fileTooLarge { return nil }
+        catch LauncherError.cancelled { throw LauncherError.cancelled }
+        catch { return nil }
         let decoder = JSONDecoder()
         // Honor a different backend even if the rest of its marker is incomplete.
         if let header = try? decoder.decode(BackendHeader.self, from: data), header.backend != backend.rawValue {
             throw LauncherError.io("Prefix backend mismatch")
         }
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(PrefixMarker.self, from: data)
+        guard let marker = try? decoder.decode(PrefixMarker.self, from: data),
+              marker.schemaVersion == PrefixMarker.schema, marker.createdAt.timeIntervalSince1970.isFinite else { return nil }
+        return marker
     }
 
     private func binaryIdentity(_ binary: URL, fs: ContainedFileSystem) async throws -> Digest {
