@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct DiagnosticsView: View {
     @Environment(AppModel.self) private var model
     @State private var exporting = false
+    @State private var bundle: DiagnosticZip?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -49,7 +50,12 @@ struct DiagnosticsView: View {
                     ProgressView().controlSize(.small)
                 }
                 Button("Export Diagnostic Bundle…", systemImage: "square.and.arrow.up") {
-                    exporting = true
+                    // Build the complete bundle first; the save panel only ever gets a finished file.
+                    Task {
+                        guard let file = try? await model.makeDiagnosticBundle() else { return }
+                        bundle = DiagnosticZip(url: file)
+                        exporting = true
+                    }
                 }
                 .disabled(model.isExporting)
                 .help("Save a zip with system details and redacted logs to share in a bug report")
@@ -57,15 +63,22 @@ struct DiagnosticsView: View {
         }
         .fileExporter(
             isPresented: $exporting,
-            item: DiagnosticExport { [model] in try await model.makeDiagnosticBundle() },
-            contentTypes: [.zip],
+            document: bundle,
+            contentType: .zip,
             defaultFilename: Self.defaultFilename()
-        ) { _ in }
+        ) { _ in
+            // Saved or cancelled, the temporary copy is no longer needed.
+            if let file = bundle?.url {
+                Task { await TemporaryDiagnosticBundle.discard(file) }
+            }
+            bundle = nil
+        }
         .task { await model.refreshLogs() }
     }
 
     static func defaultFilename(now: Date = .now) -> String {
-        "MacGacha-Diagnostics-\(now.formatted(.iso8601.year().month().day()))"
+        // The user's local date, not UTC, so a late-evening export isn't named for tomorrow or yesterday.
+        "MacGacha-Diagnostics-\(now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day()))"
     }
 }
 
@@ -141,20 +154,18 @@ private struct LogRow: View {
     }
 }
 
-/// Builds the bundle into a temporary file when the user confirms the save panel, so the
-/// destination only ever receives a complete zip, never an empty or partial one.
-private struct DiagnosticExport: Transferable {
-    let make: @Sendable () async throws -> URL
+/// A finished diagnostic zip on disk, handed to the save panel as-is.
+struct DiagnosticZip: FileDocument {
+    static let readableContentTypes: [UTType] = [.zip]
+    let url: URL
 
-    static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(exportedContentType: .zip) { export in
-            SentTransferredFile(try await export.make())
-        }
+    init(url: URL) { self.url = url }
+
+    init(configuration: ReadConfiguration) throws {
+        throw CocoaError(.fileReadUnsupportedScheme)
     }
-}
 
-#Preview {
-    DiagnosticsView()
-        .environment(AppModel.preview())
-        .frame(width: 720, height: 420)
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        try FileWrapper(url: url, options: .immediate)
+    }
 }
