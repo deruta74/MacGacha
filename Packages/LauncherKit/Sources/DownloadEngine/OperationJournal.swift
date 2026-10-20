@@ -97,6 +97,8 @@ public struct JournalState: Sendable, Equatable {
     public private(set) var deletedFiles: Set<SafeRelativePath> = []
     public private(set) var commitStartedBatches: Set<Int> = []
     public private(set) var completed = false
+    // Replay-derived membership survives fileUnstaged after commitStarted. No new wire record.
+    package private(set) var batchFiles: Set<SafeRelativePath> = []
 
     public init() {}
 
@@ -107,8 +109,15 @@ public struct JournalState: Sendable, Equatable {
         case .objectVerified(let id): verifiedObjects.insert(id)
         case .fileStaged(let path): stagedFiles.insert(path)
         case .fileUnstaged(let path): stagedFiles.remove(path)
-        case .batchStarted(let index): currentBatch = index
-        case .commitStarted(let batch): commitStartedBatches.insert(batch)
+        case .batchStarted(let index):
+            currentBatch = index
+            batchFiles = stagedFiles.subtracting(committedFiles)
+        case .commitStarted(let batch):
+            if currentBatch != batch {
+                currentBatch = batch
+                batchFiles = stagedFiles.subtracting(committedFiles)
+            }
+            commitStartedBatches.insert(batch)
         case .fileCommitted(let path): committedFiles.insert(path)
         case .fileDeleted(let path): deletedFiles.insert(path)
         case .operationCompleted: completed = true

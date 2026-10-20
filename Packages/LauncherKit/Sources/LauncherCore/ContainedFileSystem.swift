@@ -178,9 +178,10 @@ public struct ContainedFileSystem: Sendable, Hashable {
         guard let parent = try directory(Array(path.components.dropLast()), create: false) else { return }
         defer { close(parent) }
         let name = path.components.last!
-        guard let info = try entry(name, parent: parent) else { return }
+        guard let info = try entry(name, parent: parent) else { try synchronize(parent); return }
         guard info.st_mode & S_IFMT == S_IFREG else { throw LauncherError.unsafePath(display(path.components)) }
         guard unlinkat(parent, name, 0) == 0 || errno == ENOENT else { throw LauncherError.io("Cannot remove contained file") }
+        try synchronize(parent)
     }
 
     /// Flushes a regular file to stable storage using Darwin F_FULLFSYNC.
@@ -247,6 +248,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
         var budget = Self.entryLimit
         try removeEntry(path.components.last!, parent: parent, display: display(path.components),
             insideTree: false, depth: 0, budget: &budget)
+        try synchronize(parent)
     }
 
     /// Atomically moves a regular file or directory without replacing the destination.
