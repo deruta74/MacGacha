@@ -1,0 +1,37 @@
+name: MacGacha
+options:
+  deploymentTarget:
+    macOS: "27.0"
+packages:
+  LauncherKit:
+    path: Packages/LauncherKit
+targets:
+  MacGacha:
+    type: application
+    platform: macOS
+    deploymentTarget: "27.0"
+    sources:
+      - path: App
+    dependencies:
+      - package: LauncherKit
+        product: LauncherCore
+      - package: LauncherKit
+        product: DownloadEngine
+      - package: LauncherKit
+        product: RuntimeManager
+      - package: LauncherKit
+        product: Diagnostics
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.deruta.macgacha
+        ARCHS: arm64
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_ENTITLEMENTS: App/MacGacha.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: MacGacha
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.games
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
