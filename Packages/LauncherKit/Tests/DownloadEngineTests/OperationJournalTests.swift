@@ -97,7 +97,7 @@ func unstagedRemovesStagedFile() async throws {
 }
 
 @Test
-func durableAppendUsesFullFsync() async throws {
+func durableRecordsAlwaysUseFullFsync() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
     let path = try SafeRelativePath("journal.jsonl")
@@ -108,12 +108,24 @@ func durableAppendUsesFullFsync() async throws {
     })
     #expect(syncs.withLock { $0 } == [false])
     syncs.withLock { $0.removeAll() }
-    try await journal.append(.operationStarted)
-    try await journal.append(.batchStarted(index: 0), durable: true)
-    try await journal.append(.commitStarted(batch: 0), durable: true)
-    try await journal.append(.fileStaged(path: SafeRelativePath("Data/file")))
-    try await journal.append(.operationCompleted, durable: true)
-    #expect(syncs.withLock { $0 } == [false, true, true, false, true])
+    let file = try SafeRelativePath("Data/file")
+    let records: [(JournalRecord, Bool)] = [
+        (.planStored(planID: try SafeIdentifier("build-1"), planDigest: try journalDigest()), false),
+        (.operationStarted, false),
+        (.objectVerified(id: "object-1"), false),
+        (.fileStaged(path: file), false),
+        (.fileUnstaged(path: file), false),
+        (.batchStarted(index: 0), true),
+        (.commitStarted(batch: 0), true),
+        (.fileCommitted(path: file), false),
+        (.fileDeleted(path: file), false),
+        (.operationCompleted, true),
+    ]
+    for (record, durable) in records {
+        syncs.withLock { $0.removeAll() }
+        try await journal.append(record)
+        #expect(syncs.withLock { $0 } == [durable], "Unexpected durability for \(record)")
+    }
     #expect(try OperationJournal.replay(fs: fs, path: path).completed)
 }
 
@@ -161,7 +173,7 @@ func journalCancellationKeepsExistingRecords() async throws {
     let before = try fs.readFile(at: path, maxBytes: 1024)
     let task = Task {
         withUnsafeCurrentTask { $0?.cancel() }
-        try await journal.append(.operationCompleted, durable: true)
+        try await journal.append(.operationCompleted)
     }
     await #expect(throws: LauncherError.cancelled) { try await task.value }
     #expect(try fs.readFile(at: path, maxBytes: 1024) == before)
@@ -179,7 +191,7 @@ func failedAppendRequiresReopeningBeforeAnotherAppend() async throws {
         try ContainedFileSystem.synchronizeFileDescriptor(fd, durable: false)
     })
     await #expect(throws: LauncherError.io("Injected sync failure")) {
-        try await journal.append(.commitStarted(batch: 0), durable: true)
+        try await journal.append(.commitStarted(batch: 0))
     }
     await #expect(throws: LauncherError.journalCorrupt("Reopen journal after failed append")) {
         try await journal.append(.operationCompleted)

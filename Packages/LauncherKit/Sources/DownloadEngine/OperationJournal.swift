@@ -141,9 +141,9 @@ public actor OperationJournal {
         }
     }
 
-    /// Each append is fsynced. Commit/batch boundaries and completion use durable: true
-    /// to request F_FULLFSYNC. After a failed append, reopen to repair any partial line.
-    public func append(_ record: JournalRecord, durable: Bool = false) throws {
+    /// Batch/commit boundaries and completion always use F_FULLFSYNC; other records use fsync.
+    /// After a failed append, reopen to repair any partial line.
+    public func append(_ record: JournalRecord) throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard !needsRecovery else { throw LauncherError.journalCorrupt("Reopen journal after failed append") }
         let encoder = JSONEncoder()
@@ -151,6 +151,10 @@ public actor OperationJournal {
         var bytes = try encoder.encode(record)
         guard bytes.count <= Self.maximumRecordBytes else { throw Self.oversizedRecord() }
         bytes.append(0x0a)
+        let durable = switch record {
+        case .batchStarted, .commitStarted, .operationCompleted: true
+        default: false
+        }
         do {
             try fs.append(bytes, to: path, durable: durable, synchronize: synchronize)
         } catch {
