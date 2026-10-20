@@ -303,6 +303,33 @@ func kindInspectionFailureCannotAuthorizeRemoval() throws {
     if FileManager.default.fileExists(atPath: marker.path) { #expect(try Data(contentsOf: marker) == original) }
 }
 
+@Test
+func unknownRuntimeKindsAreReportOnlyAndNeverSwept() throws {
+    let directory = try TempDir()
+    let paths = AppPaths(root: directory.url)
+    let fs = try ContainedFileSystem(root: directory.url)
+    let store = RuntimeStore(paths: paths)
+    let valid = try InstalledComponent(kind: .wine, version: "11.0", installedAt: Date(), source: .download)
+    try writeRuntimeMarker(valid, paths: paths)
+    let controls = ["Runtimes/unknown-dir/.incoming-test/control", "Runtimes/unknown-dir/.removing-test/control",
+        "Runtimes/unknown-file", "Runtimes/.hidden-kind/control"]
+    let original = Data("preserved".utf8)
+    for path in controls { try fs.writeAtomically(original, to: SafeRelativePath(path)) }
+    try fs.createDirectory(at: SafeRelativePath("Runtimes/wine/.incoming-stale"))
+    let result = try store.scan()
+    #expect(result.components == [valid])
+    #expect(result.invalid.map(\.rawName) == ["unknown-dir", "unknown-file"])
+    #expect(result.invalid.allSatisfy { $0.kind == nil && !$0.removable && $0.reason == "Unknown runtime kind" })
+    for entry in result.invalid {
+        #expect(throws: LauncherError.io("Runtime entry is report-only")) { try store.removeInvalid(entry) }
+    }
+    try store.sweepStaging()
+    #expect(try fs.itemType(at: SafeRelativePath("Runtimes/wine/.incoming-stale")) == nil)
+    for path in controls { #expect(try fs.readFile(at: SafeRelativePath(path), maxBytes: 100) == original) }
+    #expect(try store.installed() == [valid])
+    #expect(try store.scan().invalid == result.invalid)
+}
+
 private func writeRuntimeMarker(_ record: InstalledComponent, paths: AppPaths) throws {
     let destination = paths.runtimes.appendingPathComponent(record.kind.rawValue, isDirectory: true)
         .appendingPathComponent(record.version, isDirectory: true)

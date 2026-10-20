@@ -72,9 +72,22 @@ public struct RuntimeStore: Sendable {
         guard let runtimes = try runtimesPath(in: fs) else { return RuntimeScan(components: [], invalid: []) }
         var result: [InstalledComponent] = []
         var invalid: [InvalidRuntimeEntry] = []
-        for kind in ComponentKind.allCases {
+        let kinds = try fs.contentsOfDirectoryReportingInvalid(at: runtimes)
+        let kindPrefixBytes = (runtimes.description + "/").utf8.count
+        for rawPath in kinds.invalid {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
-            let kindPath = try SafeRelativePath(runtimes.description + "/" + kind.rawValue)
+            let rawName = String(decoding: rawPath.utf8.dropFirst(kindPrefixBytes), as: UTF8.self)
+            guard rawName.utf8.first != 0x2e else { continue }
+            invalid.append(InvalidRuntimeEntry(kind: nil, rawName: rawName, reason: Self.invalidPathReason))
+        }
+        for kindPath in kinds.paths {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            let rawName = kindPath.components.last!
+            guard rawName.utf8.first != 0x2e else { continue }
+            guard let kind = ComponentKind(rawValue: rawName) else {
+                invalid.append(InvalidRuntimeEntry(kind: nil, rawName: rawName, reason: "Unknown runtime kind"))
+                continue
+            }
             do {
                 guard let type = try fs.itemType(at: kindPath, allowingLeafSymlink: true) else { continue }
                 guard type == .directory else {

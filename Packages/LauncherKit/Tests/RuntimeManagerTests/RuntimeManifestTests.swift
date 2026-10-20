@@ -105,6 +105,34 @@ func manifestRejectsUnsafeIdentifiersAndInvalidSizes() throws {
     catch DecodingError.keyNotFound(let key, _) { #expect(key.stringValue == "termsRevision") }
 }
 
+@Test(arguments: [ComponentKind.wine, .dxmt], [false, true])
+func appleConsentIsRejectedForNonAppleComponents(kind: ComponentKind, redistributable: Bool) throws {
+    let data = try manifestFixtureData {
+        let index = kind == .wine ? 0 : 1
+        $0[index]["consent"] = "appleGPTK"
+        var license = $0[index]["license"] as! [String: Any]
+        license["redistributable"] = redistributable
+        $0[index]["license"] = license
+    }
+    #expect(throws: LauncherError.consentRequired(kind.rawValue)) {
+        try JSONDecoder().decode(RuntimeManifest.self, from: data)
+    }
+}
+
+@Test(arguments: [ComponentKind.wine, .dxmt])
+func nonRedistributableNonAppleComponentsHaveNoValidConsent(kind: ComponentKind) throws {
+    let data = try manifestFixtureData {
+        let index = kind == .wine ? 0 : 1
+        $0[index].removeValue(forKey: "consent")
+        var license = $0[index]["license"] as! [String: Any]
+        license["redistributable"] = false
+        $0[index]["license"] = license
+    }
+    #expect(throws: LauncherError.consentRequired(kind.rawValue)) {
+        try JSONDecoder().decode(RuntimeManifest.self, from: data)
+    }
+}
+
 @Test
 func manifestAcceptsImportWithoutDownloadFields() throws {
     let data = try manifestFixtureData {

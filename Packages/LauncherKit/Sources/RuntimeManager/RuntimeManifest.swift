@@ -77,6 +77,9 @@ public struct RuntimeComponent: Codable, Sendable, Identifiable {
         guard kind != .d3dmetal || consent == .appleGPTK else {
             throw LauncherError.consentRequired(kind.rawValue)
         }
+        guard consent == nil || kind == .d3dmetal else {
+            throw LauncherError.consentRequired(kind.rawValue)
+        }
         guard license.redistributable || consent != nil else {
             throw LauncherError.consentRequired(kind.rawValue)
         }
