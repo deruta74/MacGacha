@@ -34,9 +34,9 @@ public struct PrefixManager: Sendable {
                 throw LauncherError.unsafePath(wineBinary.path)
             }
             let fs = try ContainedFileSystem(root: paths.root)
-            try fs.createDirectory(at: prefix)
             let lock = try await acquireLock(fs: fs, prefix: prefix)
             defer { withExtendedLifetime(lock) {} }
+            try fs.createDirectory(at: prefix)
             // Validate every Prefixes ancestor immediately before crossing the process boundary.
             _ = try fs.directoryURL(at: prefix)
             let url = try prefixURL(game: game, backend: backend)
@@ -51,9 +51,12 @@ public struct PrefixManager: Sendable {
                 return url
             }
 
-            // An obsolete marker cannot certify a prefix modified by a failed new wineboot.
-            try fs.removeFile(at: marker)
-            try fs.removeFile(at: pending)
+            // Wine writes by path, so an incomplete prefix must not retain links that
+            // could redirect initialization outside it. Contained removal unlinks links
+            // themselves; the sibling lock survives replacement of the entire prefix.
+            try fs.removeItem(at: prefix)
+            try fs.createDirectory(at: prefix)
+            try fs.synchronizeTree(at: prefix)
             let result = try await runner.run(wineBinary, arguments: ["wineboot", "--init"],
                 environment: ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": "winemenubuilder.exe=d"],
                 currentDirectory: nil)
@@ -88,7 +91,7 @@ public struct PrefixManager: Sendable {
     }
 
     private func acquireLock(fs: ContainedFileSystem, prefix: SafeRelativePath) async throws -> InstallLock {
-        let path = try SafeRelativePath("\(prefix)/.macgacha-prefix.lock")
+        let path = try SafeRelativePath("Prefixes/.macgacha-prefix-\(prefix.components.last!).lock")
         while true {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             do { return try InstallLock(fs: fs, path: path) }
@@ -99,8 +102,7 @@ public struct PrefixManager: Sendable {
     }
 
     private func readMarker(fs: ContainedFileSystem, path: SafeRelativePath, backend: ComponentKind) throws -> PrefixMarker? {
-        guard let type = try fs.itemType(at: path) else { return nil }
-        guard type == .regularFile else { throw LauncherError.unsafePath(path.description) }
+        guard try fs.itemType(at: path, allowingLeafSymlink: true) == .regularFile else { return nil }
         let data: Data
         do { data = try fs.readFile(at: path, maxBytes: Self.markerLimit) }
         catch LauncherError.fileTooLarge { return nil }

@@ -77,6 +77,79 @@ func halfCreatedPrefixWithoutValidMarkerIsReinitialized(markerBytes: Data?) asyn
     #expect(try prefixTestJSON(fs, marker)["schemaVersion"] as? Int == 1)
 }
 
+@Test(arguments: ["missing", "malformed", "symlink", "directory"])
+func incompletePrefixSymlinksAreRemovedBeforeWineboot(markerShape: String) async throws {
+    let temp = try TempDir(); let outside = try TempDir(); let paths = AppPaths(root: temp.url)
+    let fs = try ContainedFileSystem(root: paths.root); let wine = try prefixTestWine(paths)
+    let prefix = try SafeRelativePath("Prefixes/unsafe-dxmt")
+    let url = prefix.resolved(against: paths.root)
+    let windows = outside.url.appendingPathComponent("windows", isDirectory: true)
+    let outsideSystem = windows.appendingPathComponent("system.ini")
+    let outsideRegistry = outside.url.appendingPathComponent("user.reg")
+    try FileManager.default.createDirectory(at: windows, withIntermediateDirectories: false)
+    let originalSystem = Data("outside system settings".utf8)
+    let originalRegistry = Data("outside registry".utf8)
+    try originalSystem.write(to: outsideSystem); try originalRegistry.write(to: outsideRegistry)
+    try fs.createDirectory(at: SafeRelativePath("Prefixes/unsafe-dxmt/drive_c"))
+    try FileManager.default.createSymbolicLink(at: url.appendingPathComponent("drive_c/windows"), withDestinationURL: windows)
+    try FileManager.default.createSymbolicLink(at: url.appendingPathComponent("user.reg"), withDestinationURL: outsideRegistry)
+    let marker = try prefixTestMarker("unsafe", .dxmt)
+    switch markerShape {
+    case "malformed": try fs.writeAtomically(Data("{}".utf8), to: marker)
+    case "symlink": try FileManager.default.createSymbolicLink(at: marker.resolved(against: paths.root), withDestinationURL: outsideRegistry)
+    case "directory": try fs.createDirectory(at: marker)
+    default: break
+    }
+    let targets = [outside.url, windows, outsideSystem, outsideRegistry]
+    for target in targets {
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 946_684_800)], ofItemAtPath: target.path)
+    }
+    let mtimes = try targets.map(prefixTestModificationDate)
+    let runner = FakeProcessRunner { _ async throws in
+        #expect(try fs.contentsOfDirectory(at: prefix).isEmpty)
+        // Simulate Wine's ordinary path-based writes, which would follow stale links.
+        try FileManager.default.createDirectory(at: url.appendingPathComponent("drive_c/windows"), withIntermediateDirectories: true)
+        try Data("new system settings".utf8).write(to: url.appendingPathComponent("drive_c/windows/system.ini"))
+        try Data("new registry".utf8).write(to: url.appendingPathComponent("user.reg"))
+        return prefixTestSuccess()
+    }
+    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "unsafe", backend: .dxmt, wineBinary: wine)
+    #expect(runner.invocations.count == 1)
+    #expect(try Data(contentsOf: outsideSystem) == originalSystem)
+    #expect(try Data(contentsOf: outsideRegistry) == originalRegistry)
+    #expect(try targets.map(prefixTestModificationDate) == mtimes)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: windows.path) == ["system.ini"])
+    #expect(try fs.itemType(at: SafeRelativePath("Prefixes/unsafe-dxmt/drive_c/windows")) == .directory)
+    #expect(try fs.itemType(at: SafeRelativePath("Prefixes/unsafe-dxmt/user.reg")) == .regularFile)
+    #expect(try prefixTestJSON(fs, marker)["schemaVersion"] as? Int == 1)
+}
+
+@Test
+func readyPrefixKeepsItsFilesAndWineLinksUntouched() async throws {
+    let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
+    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner)
+    let url = try await manager.createPrefix(game: "ready", backend: .dxmt, wineBinary: wine)
+    let marker = try prefixTestMarker("ready", .dxmt)
+    try fs.writeAtomically(Data("saved game".utf8), to: SafeRelativePath("Prefixes/ready-dxmt/drive_c/game/save.dat"))
+    try fs.writeAtomically(Data("user registry".utf8), to: SafeRelativePath("Prefixes/ready-dxmt/user.reg"))
+    try fs.createDirectory(at: SafeRelativePath("Prefixes/ready-dxmt/dosdevices"))
+    let wineLink = url.appendingPathComponent("dosdevices/c:")
+    try FileManager.default.createSymbolicLink(atPath: wineLink.path, withDestinationPath: "../drive_c")
+    let markerBytes = try fs.readFile(at: marker, maxBytes: 16_384)
+    let preserved = [url, marker.resolved(against: paths.root), url.appendingPathComponent("drive_c/game/save.dat"), url.appendingPathComponent("user.reg")]
+    for path in preserved {
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 946_684_800)], ofItemAtPath: path.path)
+    }
+    let mtimes = try preserved.map(prefixTestModificationDate)
+    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "ready", backend: .dxmt, wineBinary: wine)
+    #expect(runner.invocations.count == 1)
+    #expect(try fs.readFile(at: marker, maxBytes: 16_384) == markerBytes)
+    #expect(try fs.readFile(at: SafeRelativePath("Prefixes/ready-dxmt/drive_c/game/save.dat"), maxBytes: 64) == Data("saved game".utf8))
+    #expect(try fs.readFile(at: SafeRelativePath("Prefixes/ready-dxmt/user.reg"), maxBytes: 64) == Data("user registry".utf8))
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: wineLink.path) == "../drive_c")
+    #expect(try preserved.map(prefixTestModificationDate) == mtimes)
+}
+
 @Test
 func prefixCancellationPropagatesAndReleasesLock() async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
@@ -205,6 +278,9 @@ private func prefixTestJSON(_ fs: ContainedFileSystem, _ path: SafeRelativePath)
     try #require(JSONSerialization.jsonObject(with: fs.readFile(at: path, maxBytes: 16_384)) as? [String: Any])
 }
 private func prefixTestSuccess() -> ProcessResult { ProcessResult(exitCode: 0, stdout: Data(), stderr: Data()) }
+private func prefixTestModificationDate(_ url: URL) throws -> Date {
+    try #require(FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date)
+}
 private func prefixTestWait(_ condition: @Sendable () -> Bool) async throws {
     let clock = ContinuousClock(); let deadline = clock.now.advanced(by: .seconds(5))
     while !condition(), clock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
