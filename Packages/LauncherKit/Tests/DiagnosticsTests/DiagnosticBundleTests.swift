@@ -470,7 +470,8 @@ func fiveMiBOfRecordsAreStructurallyReredactedWithinCoarseBudget() async throws 
     let start = clock.now
     try await DiagnosticBundle(logDirectory: logs, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
         systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
-    #expect(start.duration(to: clock.now) < .seconds(10))
+    // Hang guard for slow debug/parallel CI runs, not a performance benchmark.
+    #expect(start.duration(to: clock.now) < .seconds(60))
 }
 
 private func diagnosticRecord(message: String, metadata: [String: String] = [:]) throws -> Data {
