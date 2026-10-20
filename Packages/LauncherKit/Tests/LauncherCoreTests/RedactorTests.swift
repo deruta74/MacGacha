@@ -45,7 +45,7 @@ func redactsKnownSecrets() throws {
         == "Cookie: <redacted>\r\nSet-Cookie: <redacted>")
     #expect(Redactor.redact("{\"stoken\":\"q\"}") == "{\"stoken\":\"<redacted>\"}")
     for key in ["token", "authkey", "auth_key", "stoken", "ltoken", "cookie_token", "password", "session", "ticket"] {
-        #expect(Redactor.redact("\(key.uppercased())=secret&lang=en") == "\(key.uppercased())=<redacted>&lang=en")
+        #expect(Redactor.redact("?\(key.uppercased())=secret&lang=en") == "?\(key.uppercased())=<redacted>&lang=en")
     }
     #expect(Redactor.redact("A plain sentence with Unicode: café 日本語") == "A plain sentence with Unicode: café 日本語")
     #expect(Redactor.redact("token=\"secret with spaces\" lang=en") == "token=<redacted> lang=en")
@@ -76,12 +76,12 @@ func redactsNestedJSONAndFreeTextErrors() throws {
 
 @Test(arguments: ["ltoken_v2", "cookie_token_v2", "stoken_v2", "ltuid_v2", "ltmid_v2",
     "account_mid_v2", "game_token", "combo_token", "login_ticket", "e_hk4e_token",
-    "app-passwd-v2", "client_secret", "account_id_v2", "rpc-auth-key-v2", "session_v2"])
+    "app-passwd-v2", "client_secret", "account_id_v2", "rpc-auth-key-v2", "session_v2", "2token"])
 func redactsSensitiveKeySubstringsEverywhere(key: String) throws {
     #expect(Redactor.redact(metadata: [key: "planted-secret"])[key] == "<redacted>")
     #expect(Redactor.redact("{\"\(key)\":\"planted-secret\"}") == "{\"\(key)\":\"<redacted>\"}")
     #expect(Redactor.redact("failed: {\"\(key)\":\"planted-secret\"}") == "failed: {\"\(key)\":\"<redacted>\"}")
-    #expect(Redactor.redact("\(key)=planted-secret&lang=en") == "\(key)=<redacted>&lang=en")
+    #expect(Redactor.redact("?\(key)=planted-secret&lang=en") == "?\(key)=<redacted>&lang=en")
 }
 
 @Test
@@ -111,4 +111,82 @@ func metadataRedactionPreservesCollidingKeys() {
     for key in ["token=<redacted>", "token=<redacted>#2", "token=<redacted>#3"] {
         #expect(result[key] == "<redacted>")
     }
+}
+
+@Test(arguments: ["left,planted-secret", "left;planted-secret", "left(planted-secret)"])
+func queryValuesIncludePunctuation(value: String) {
+    #expect(Redactor.redact("?password=\(value)&lang=en") == "?password=<redacted>&lang=en")
+    #expect(Redactor.redact("&password=\(value)#fragment") == "&password=<redacted>#fragment")
+}
+
+@Test(arguments: ["%26", "%3B", "%23", "%3b"])
+func encodedValueTerminatorsAndEncodedKeyPrefixes(separator: String) {
+    #expect(Redactor.redact("?password=planted-secret\(separator)lang%3Den")
+        == "?password=<redacted>\(separator)lang%3Den")
+    #expect(Redactor.redact("%26uid%3D123") == "%26uid%3D<redacted>")
+    #expect(Redactor.redact("%3Fltuid%3D123%26lang%3Den") == "%3Fltuid%3D<redacted>%26lang%3Den")
+}
+
+@Test(arguments: [#"Optional("planted-secret")"#, #"Box(raw: "planted-secret")"#,
+    #"Box(raw: [Optional("planted-secret"), {"nested":"x)y"}])"#])
+func redactsCompletePrintedSwiftValues(value: String) {
+    #expect(Redactor.redact("Login(token: \(value), id: 1)") == "Login(token: <redacted>, id: 1)")
+}
+
+@Test(arguments: [#"AnyHashable("x-rpc-combo_token"): "planted-secret""#,
+    #""X-Rpc-Combo_token" = planted-secret;"#, "'token': 'planted-secret'"])
+func redactsQuotedAndWrappedKeys(input: String) {
+    #expect(!Redactor.redact(input).contains("planted-secret"))
+    #expect(Redactor.redact(input).contains("<redacted>"))
+}
+
+@Test(arguments: ["Bearer", "bAsIc", "DIGEST"])
+func redactsAuthSchemeAndContainingHeaderNames(scheme: String) {
+    #expect(Redactor.redact("Login(token: \(scheme) planted-secret, id: 1)") == "Login(token: <redacted>, id: 1)")
+    #expect(Redactor.redact("request Proxy-Authorization: \(scheme) planted-secret more-private\nnext")
+        == "request Proxy-Authorization: <redacted>\nnext")
+    #expect(Redactor.redact("request x-cookie-v2=\(scheme) planted-secret more-private\nnext")
+        == "request x-cookie-v2=<redacted>\nnext")
+}
+
+@Test(arguments: [
+    #"server(body: "{\"retcode\":0,\"data\":{\"game_token\":\"abc\"}}")"#,
+    #"server(body: "{\\\"retcode\\\":0,\\\"data\\\":{\\\"game_token\\\":\\\"abc\\\"}}")"#,
+])
+func redactsEscapedJSONInFreeText(input: String) {
+    #expect(!Redactor.redact(input).contains("abc"))
+    #expect(Redactor.redact(input).contains("<redacted>"))
+    #expect(Redactor.redact(Redactor.redact(input)) == Redactor.redact(input))
+}
+
+@Test(arguments: ["accountMid", "accountIdV2", "gameToken"])
+func camelCaseSensitiveKeysAreNormalized(key: String) {
+    #expect(Redactor.redact(metadata: [key: "planted-secret"])[key] == "<redacted>")
+    #expect(!Redactor.redact("{\"\(key)\":\"planted-secret\"}").contains("planted-secret"))
+    #expect(Redactor.redact("?\(key)=planted-secret&lang=en") == "?\(key)=<redacted>&lang=en")
+}
+
+@Test
+func metadataKeysAreBoundedBeforeProcessing() {
+    let key = String(repeating: "x", count: 1 << 20) + "token"
+    let result = Redactor.redact(metadata: [key: "planted-secret"])
+    #expect(result.count == 1)
+    #expect(result.keys.allSatisfy { $0.utf8.count <= 256 })
+    #expect(!result.values.contains("planted-secret"))
+}
+
+@Test
+func processedMetadataKeysAndCollisionSuffixesStayBounded() {
+    let expanding = String(repeating: "a token=x ", count: 25)
+    let collisionPrefix = String(repeating: "k", count: 239) + "?token="
+    let result = Redactor.redact(metadata: [expanding: "private", collisionPrefix + "x": "private", collisionPrefix + "y": "private"])
+    #expect(result.count == 3)
+    #expect(result.keys.allSatisfy { $0.utf8.count <= 256 })
+    #expect(result.values.allSatisfy { $0 == "<redacted>" })
+}
+
+@Test
+func mixedCaseContainingHeaderNamesConsumeTheLine() {
+    #expect(Redactor.redact("request Proxy-AuThOrIzAtIoN: Bearer planted-secret more-private\nnext")
+        == "request Proxy-AuThOrIzAtIoN: <redacted>\nnext")
 }

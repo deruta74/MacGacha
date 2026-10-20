@@ -136,15 +136,17 @@ func eventLogSortsBeforeSelectingMetadataAndPreservesProcessedKeyCollisions() as
     var record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("macgacha.log"))) as? [String: Any])
     let values = try #require(record["metadata"] as? [String: String])
     #expect(values.keys.sorted() == metadata.keys.sorted().prefix(128).map { $0 })
-    let prefix = String(repeating: "k", count: 1024)
+    let prefix = String(repeating: "k", count: 256)
     let collisions = Dictionary(uniqueKeysWithValues: (1...3).map { (prefix + String($0), "value\($0)") })
     let collisionDirectory = directory.appendingPathComponent("collisions")
     await EventLog(directory: collisionDirectory).log(.info, "test", "collisions", metadata: collisions)
     record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: collisionDirectory.appendingPathComponent("macgacha.log"))) as? [String: Any])
     let result = try #require(record["metadata"] as? [String: String])
-    #expect(result[prefix] == "value1")
-    #expect(result[prefix + "#2"] == "value2")
-    #expect(result[prefix + "#3"] == "value3")
+    #expect(result.count == 3)
+    #expect(result.keys.allSatisfy { $0.utf8.count <= 256 })
+    #expect(result["<omitted 257 byte key>"] == "<redacted>")
+    #expect(result["<omitted 257 byte key>#2"] == "<redacted>")
+    #expect(result["<omitted 257 byte key>#3"] == "<redacted>")
 }
 
 private func eventLogTempDirectory() throws -> URL {

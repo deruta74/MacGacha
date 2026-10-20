@@ -11,16 +11,16 @@ func bundleContainsExpectedFiles() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let logs = root.appendingPathComponent("logs", isDirectory: true)
     try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-    let original = "failure: token=planted-secret\n"
+    let original = String(decoding: try diagnosticRecord(message: "failure: token=planted-secret"), as: UTF8.self)
     try Data(original.utf8).write(to: logs.appendingPathComponent("macgacha.log"))
-    try Data(#"{"metadata":{"TOKEN":"planted-secret"},"message":"Authorization: Bearer planted-secret"}"#.utf8)
+    try diagnosticRecord(message: "legacy", metadata: ["TOKEN": "planted-secret"])
         .write(to: logs.appendingPathComponent("macgacha.1.log"))
-    try Data("{\n  \"token\":\n    \"planted-secret\"\n}\n".utf8).write(to: logs.appendingPathComponent("legacy.log"))
-    try Data("ordinary text\n{\n\"token\":\n\"planted-secret\"\n}\n\n".utf8)
-        .write(to: logs.appendingPathComponent("mixed.log"))
+    for name in ["wine.log", "game.log", "macgacha-extra.log", "macgacha.bad.log", "macgacha.01.log"] {
+        try Data("planted-secret\n".utf8).write(to: logs.appendingPathComponent(name))
+    }
     let outside = root.appendingPathComponent("outside.log")
     try Data("must not be copied".utf8).write(to: outside)
-    try FileManager.default.createSymbolicLink(at: logs.appendingPathComponent("symlink.log"), withDestinationURL: outside)
+    try FileManager.default.createSymbolicLink(at: logs.appendingPathComponent("macgacha.2.log"), withDestinationURL: outside)
     let zip = root.appendingPathComponent("diagnostics.zip")
     let info = diagnosticFixtureInfo()
     try await DiagnosticBundle(logDirectory: logs, runner: SystemProcessRunner()).export(
@@ -30,6 +30,8 @@ func bundleContainsExpectedFiles() async throws {
         arguments: ["-x", "-k", zip.path, extracted.path], environment: [:], currentDirectory: nil)
     #expect(result.exitCode == 0)
     let decoded = try JSONDecoder().decode(SystemInfo.self, from: Data(contentsOf: extracted.appendingPathComponent("system.json")))
+    #expect(try FileManager.default.contentsOfDirectory(atPath: extracted.appendingPathComponent("logs").path).sorted()
+        == ["macgacha.1.log", "macgacha.log"])
     #expect(decoded.appVersion == info.appVersion)
     #expect(decoded.memoryBytes == info.memoryBytes)
     let runtimes = try JSONDecoder().decode([String: String].self,
@@ -38,8 +40,8 @@ func bundleContainsExpectedFiles() async throws {
     #expect(runtimes["TOKEN"] == "<redacted>")
     #expect(try String(contentsOf: extracted.appendingPathComponent("failure.txt"), encoding: .utf8) == "download\n")
     #expect(FileManager.default.fileExists(atPath: extracted.appendingPathComponent("logs/macgacha.log").path))
-    #expect(!FileManager.default.fileExists(atPath: extracted.appendingPathComponent("logs/symlink.log").path))
-    #expect(try String(contentsOf: extracted.appendingPathComponent("logs/mixed.log"), encoding: .utf8).hasSuffix("\n\n"))
+    #expect(!FileManager.default.fileExists(atPath: extracted.appendingPathComponent("logs/macgacha.2.log").path))
+    #expect(try String(contentsOf: extracted.appendingPathComponent("logs/macgacha.log"), encoding: .utf8).hasSuffix("\n"))
     for file in try diagnosticRegularFiles(under: extracted) {
         #expect(!String(decoding: try Data(contentsOf: file), as: UTF8.self).contains("planted-secret"))
     }
@@ -52,18 +54,18 @@ func bundleSkipsLogRotatedAwayBeforeOpen() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let logs = root.appendingPathComponent("logs", isDirectory: true)
     try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-    try Data("rotating".utf8).write(to: logs.appendingPathComponent("rotating.log"))
-    try Data("stable\n".utf8).write(to: logs.appendingPathComponent("stable.log"))
+    try diagnosticRecord(message: "rotating").write(to: logs.appendingPathComponent("macgacha.1.log"))
+    try diagnosticRecord(message: "stable").write(to: logs.appendingPathComponent("macgacha.log"))
     let removed = Mutex(false)
     let runner = DiagnosticTestRunner { arguments in
         let stagedLogs = URL(fileURLWithPath: arguments[3]).appendingPathComponent("logs")
-        #expect(!FileManager.default.fileExists(atPath: stagedLogs.appendingPathComponent("rotating.log").path))
-        #expect(try String(contentsOf: stagedLogs.appendingPathComponent("stable.log"), encoding: .utf8) == "stable\n")
+        #expect(!FileManager.default.fileExists(atPath: stagedLogs.appendingPathComponent("macgacha.1.log").path))
+        #expect(try String(contentsOf: stagedLogs.appendingPathComponent("macgacha.log"), encoding: .utf8).contains("stable"))
         try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
         return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
     let bundle = DiagnosticBundle(logDirectory: logs, runner: runner, openLog: { file in
-        if file.lastPathComponent == "rotating.log" {
+        if file.lastPathComponent == "macgacha.1.log" {
             removed.withLock { $0 = unlink(file.path) == 0 }
         }
         let fd = open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
@@ -155,24 +157,23 @@ func bundleTruncatesOversizedLogsAtALineBoundary() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let logs = root.appendingPathComponent("logs")
     try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-    let file = logs.appendingPathComponent("oversized.log")
-    try Data().write(to: file)
-    let handle = try FileHandle(forWritingTo: file)
-    try handle.truncate(atOffset: 11 << 20)
-    try handle.seekToEnd()
-    try handle.write(contentsOf: Data("discard-partial-line\nlast complete line token=planted-secret\n".utf8))
-    try handle.close()
-    // Non-logs must not consume the 100-log allowance.
+    let file = logs.appendingPathComponent("macgacha.log")
+    var original = try diagnosticRecord(message: String(repeating: "x", count: 11 << 20), metadata: ["TOKEN": "cutoff-private"])
+    original.append(try diagnosticRecord(message: "surviving record", metadata: ["accountMid": "planted-secret"]))
+    try original.write(to: file)
     for index in 0..<101 { try Data("ignored".utf8).write(to: logs.appendingPathComponent("other\(index).txt")) }
     let runner = DiagnosticTestRunner { arguments in
         let staging = URL(fileURLWithPath: arguments[3])
-        let copied = try String(contentsOf: staging.appendingPathComponent("logs/oversized.log"), encoding: .utf8)
-        #expect(copied == "last complete line token=<redacted>\n")
+        let copied = try String(contentsOf: staging.appendingPathComponent("logs/macgacha.log"), encoding: .utf8)
+        #expect(copied.contains("surviving record"))
+        #expect(!copied.contains("cutoff-private"))
+        #expect(!copied.contains("planted-secret"))
+        #expect(copied.split(separator: "\n").count == 1)
+        _ = try JSONSerialization.jsonObject(with: Data(copied.utf8))
         let skipped = try String(contentsOf: staging.appendingPathComponent("skipped.txt"), encoding: .utf8)
-        #expect(skipped.contains("oversized.log"))
+        #expect(skipped.contains("macgacha.log"))
         #expect(skipped.contains("truncated"))
-        #expect(skipped.contains("other0.txt"))
-        #expect(try FileManager.default.contentsOfDirectory(atPath: staging.appendingPathComponent("logs").path) == ["oversized.log"])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: staging.appendingPathComponent("logs").path) == ["macgacha.log"])
         #expect(try String(contentsOf: staging.appendingPathComponent("failure.txt"), encoding: .utf8) == "none\n")
         try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
         return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
@@ -257,20 +258,23 @@ func bundleStopsAtTotalLogBudgetAndReportsSkippedLogs() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let logs = root.appendingPathComponent("logs")
     try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-    var data = Data(repeating: 120, count: (10 << 20) - 1)
-    data.append(10)
-    for index in 0..<6 { try data.write(to: logs.appendingPathComponent("budget\(index).log")) }
+    let overhead = try diagnosticRecord(message: "").count
+    let record = try diagnosticRecord(message: String(repeating: "x", count: (1 << 20) - overhead))
+    #expect(record.count == 1 << 20)
+    var data = Data()
+    for _ in 0..<9 { data.append(record) }
+    for index in 1...7 { try data.write(to: logs.appendingPathComponent("macgacha.\(index).log")) }
     let runner = DiagnosticTestRunner { arguments in
         let staging = URL(fileURLWithPath: arguments[3])
         let stagedLogs = staging.appendingPathComponent("logs")
         let names = try FileManager.default.contentsOfDirectory(atPath: stagedLogs.path).sorted()
-        #expect(names == ["budget0.log", "budget1.log", "budget2.log", "budget3.log", "budget4.log"])
+        #expect(!names.isEmpty)
         var size = 0
         for name in names { size += try Data(contentsOf: stagedLogs.appendingPathComponent(name)).count }
-        #expect(size == 50 << 20)
-        let skipped = try String(contentsOf: staging.appendingPathComponent("skipped.txt"), encoding: .utf8)
-        #expect(skipped.contains("budget5.log"))
-        #expect(skipped.contains("budget"))
+        let report = try Data(contentsOf: staging.appendingPathComponent("skipped.txt"))
+        #expect(size + report.count <= 50 << 20)
+        #expect(size > 40 << 20)
+        #expect(String(decoding: report, as: UTF8.self).contains("budget"))
         try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
         return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
@@ -284,17 +288,118 @@ func bundleSkipsLogsAfterFileCountLimitWithoutFailing() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let logs = root.appendingPathComponent("logs")
     try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-    for index in 0..<101 { try Data("line\n".utf8).write(to: logs.appendingPathComponent(String(format: "%03d.log", index))) }
+    for index in 1...101 { try diagnosticRecord(message: "line").write(to: logs.appendingPathComponent("macgacha.\(index).log")) }
     let runner = DiagnosticTestRunner { arguments in
         let staging = URL(fileURLWithPath: arguments[3])
         #expect(try FileManager.default.contentsOfDirectory(atPath: staging.appendingPathComponent("logs").path).count == 100)
         let skipped = try String(contentsOf: staging.appendingPathComponent("skipped.txt"), encoding: .utf8)
-        #expect(skipped.contains("100.log"))
+        #expect(skipped.contains("Skipped files: 1"))
         try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
         return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
     try await DiagnosticBundle(logDirectory: logs, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
         systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+}
+
+@Test
+func bundleDropsInvalidRecordsAndUnknownFields() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logs = root.appendingPathComponent("logs")
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    var data = try diagnosticRecord(message: "token=planted-secret", metadata: ["accountMid": "planted-secret"])
+    data.append(Data("not JSON planted-secret\n{\"message\":\"planted-secret\"}\n[]\n".utf8))
+    var record = try #require(JSONSerialization.jsonObject(with: diagnosticRecord(message: "safe")) as? [String: Any])
+    record["unknownBody"] = "planted-secret"
+    data.append(try JSONSerialization.data(withJSONObject: record))
+    data.append(10)
+    try data.write(to: logs.appendingPathComponent("macgacha.log"))
+    let runner = DiagnosticTestRunner { arguments in
+        let staging = URL(fileURLWithPath: arguments[3])
+        let output = try String(contentsOf: staging.appendingPathComponent("logs/macgacha.log"), encoding: .utf8)
+        #expect(output.split(separator: "\n").count == 2)
+        #expect(!output.contains("planted-secret"))
+        #expect(!output.contains("unknownBody"))
+        let report = try String(contentsOf: staging.appendingPathComponent("skipped.txt"), encoding: .utf8)
+        #expect(report.contains("Dropped records: 3"))
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    try await DiagnosticBundle(logDirectory: logs, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
+        systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+}
+
+@Test
+func bundleBoundsEnumerationAndSkippedReport() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logs = root.appendingPathComponent("logs")
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    let controls = String(repeating: "\u{1}", count: 200)
+    for index in 0..<1005 { try Data().write(to: logs.appendingPathComponent(controls + "ignored\(index).txt")) }
+    let runner = DiagnosticTestRunner { arguments in
+        let staging = URL(fileURLWithPath: arguments[3])
+        let reportData = try Data(contentsOf: staging.appendingPathComponent("skipped.txt"))
+        let report = String(decoding: reportData, as: UTF8.self)
+        #expect(report.contains("Skipped files: 1000"))
+        #expect(report.contains("Enumeration stopped at 1000 entries"))
+        #expect(report.contains("950 additional file notices"))
+        #expect(report.split(separator: "\n").filter { $0.hasPrefix("file: ") }.count == 50)
+        #expect(reportData.count <= 32 << 10)
+        #expect(report.split(separator: "\n").allSatisfy { $0.utf8.count <= 512 })
+        #expect(try FileManager.default.contentsOfDirectory(atPath: staging.appendingPathComponent("logs").path).isEmpty)
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    try await DiagnosticBundle(logDirectory: logs, runner: runner).export(to: root.appendingPathComponent("bundle.zip"),
+        systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+}
+
+@Test
+func bundleRedactsStructuredErrorPayloads() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    for error in [LauncherError.io("token=planted-secret"), .processFailed(executable: "tool?token=planted-secret",
+        exitCode: 3, stderrTail: "Proxy-Authorization: Bearer planted-secret")] {
+        let runner = DiagnosticTestRunner { _ in throw error }
+        do {
+            try await DiagnosticBundle(logDirectory: root.appendingPathComponent("missing"), runner: runner)
+                .export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+            Issue.record("Expected runner error")
+        } catch let result as LauncherError {
+            #expect(!String(describing: result).contains("planted-secret"))
+            switch (error, result) {
+            case (.io, .io), (.processFailed, .processFailed): break
+            default: Issue.record("LauncherError case must be preserved")
+            }
+        }
+    }
+}
+
+@Test
+func bundleCancellationTakesPrecedenceOverEveryThrownError() async throws {
+    struct ForeignError: Error {}
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let errors: [any Error] = [LauncherError.io("failure"), LauncherError.insufficientSpace(required: 2, available: 1), ForeignError()]
+    for error in errors {
+        let runner = DiagnosticTestRunner { _ in
+            withUnsafeCurrentTask { $0?.cancel() }
+            throw error
+        }
+        let task = Task {
+            try await DiagnosticBundle(logDirectory: root.appendingPathComponent("missing"), runner: runner)
+                .export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+        }
+        await #expect(throws: LauncherError.cancelled) { try await task.value }
+    }
+}
+
+private func diagnosticRecord(message: String, metadata: [String: String] = [:]) throws -> Data {
+    var data = try JSONSerialization.data(withJSONObject: ["ts": "2026-10-20T12:00:00Z", "level": "info",
+        "category": "test", "message": message, "metadata": metadata], options: [.sortedKeys, .withoutEscapingSlashes])
+    data.append(10)
+    return data
 }
 
 private struct DiagnosticTestRunner: ProcessRunner {

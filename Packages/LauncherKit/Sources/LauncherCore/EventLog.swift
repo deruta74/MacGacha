@@ -2,6 +2,9 @@ import Darwin
 import Foundation
 import os
 
+/// Writes structured launcher events. Never log raw HTTP bodies, headers, cookies, or full URLs
+/// with query strings. Log status codes, hosts, sizes, and LauncherError cases instead;
+/// redaction is best-effort defense in depth, not permission to log sensitive inputs.
 public actor EventLog {
     public enum Level: String, Codable, Sendable {
         case debug, info, notice, warning, error, fault
@@ -17,12 +20,13 @@ public actor EventLog {
         }
     }
 
-    private struct Record: Encodable {
-        let ts: String
-        let level: Level
-        var category: String
-        var message: String
-        var metadata: [String: String]
+    /// The JSONL schema shared with diagnostic export. Unknown fields are never re-encoded.
+    public struct Record: Codable, Sendable {
+        public let ts: String
+        public let level: Level
+        public var category: String
+        public var message: String
+        public var metadata: [String: String]
     }
 
     private let directory: URL
@@ -45,7 +49,7 @@ public actor EventLog {
             // Match the original key before truncation can turn "password" into "pass".
             let entry = Redactor.redact(metadata: [key: cappedInput(metadata[key] ?? "")])
             if let (safeKey, value) = entry.first {
-                let boundedKey = Redactor.uniqueKey(prefix(safeKey, bytes: min(remaining, 1024)), in: boundedMetadata)
+                let boundedKey = Redactor.uniqueKey(prefix(safeKey, bytes: min(remaining, 256)), in: boundedMetadata, maxBytes: 256)
                 let boundedValue = prefix(value, bytes: min(remaining, 4096))
                 boundedMetadata[boundedKey] = boundedValue
                 remaining -= min(remaining, boundedKey.utf8.count + boundedValue.utf8.count)
