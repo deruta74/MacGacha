@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "RuntimeManager", targets: ["RuntimeManager"]),
         .library(name: "Diagnostics", targets: ["Diagnostics"]),
         .library(name: "HoYoPlayAPI", targets: ["HoYoPlayAPI"]),
+        .library(name: "Sophon", targets: ["Sophon"]),
     ],
     targets: [
         .target(name: "LauncherCore"),
@@ -25,6 +26,7 @@ let package = Package(
         .target(name: "RuntimeManager", dependencies: ["LauncherCore", "DownloadEngine", "CArchive"]),
         .target(name: "Diagnostics", dependencies: ["LauncherCore"]),
         .target(name: "HoYoPlayAPI", dependencies: ["LauncherCore", "DownloadEngine"]),
+        .target(name: "Sophon", dependencies: ["LauncherCore", "DownloadEngine"]),
         .target(name: "TestSupport", dependencies: ["LauncherCore", "DownloadEngine"]),
         .executableTarget(name: "CrashHarness", dependencies: ["DownloadEngine", "TestSupport"], path: "Tests/CrashHarness"),
         .testTarget(name: "LauncherCoreTests", dependencies: ["LauncherCore", "TestSupport"]),
@@ -33,6 +35,7 @@ let package = Package(
         .testTarget(name: "RuntimeManagerTests", dependencies: ["RuntimeManager", "TestSupport"]),
         .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "LauncherCore"]),
         .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"]),
+        .testTarget(name: "SophonTests", dependencies: ["Sophon", "TestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )
