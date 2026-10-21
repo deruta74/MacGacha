@@ -11,6 +11,7 @@ func appPathsLayout() throws {
     defer { try? FileManager.default.removeItem(at: root) }
     #expect(paths.root == root)
     #expect(paths.runtimes.path == root.appendingPathComponent("Runtimes").path)
+    #expect(paths.games.path == root.appendingPathComponent("Games").path)
     #expect(paths.prefixes.path == root.appendingPathComponent("Prefixes").path)
     #expect(paths.logs.path == root.appendingPathComponent("Logs").path)
     #expect(paths.consent.path == root.appendingPathComponent("consent.json").path)

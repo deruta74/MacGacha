@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "Diagnostics", targets: ["Diagnostics"]),
         .library(name: "HoYoPlayAPI", targets: ["HoYoPlayAPI"]),
         .library(name: "Sophon", targets: ["Sophon"]),
+        .library(name: "GameLibrary", targets: ["GameLibrary"]),
     ],
     targets: [
         .target(name: "LauncherCore"),
@@ -27,6 +28,7 @@ let package = Package(
         .target(name: "Diagnostics", dependencies: ["LauncherCore"]),
         .target(name: "HoYoPlayAPI", dependencies: ["LauncherCore", "DownloadEngine"]),
         .target(name: "Sophon", dependencies: ["LauncherCore", "DownloadEngine"]),
+        .target(name: "GameLibrary", dependencies: ["LauncherCore", "DownloadEngine", "Sophon"]),
         .target(name: "TestSupport", dependencies: ["LauncherCore", "DownloadEngine"]),
         .executableTarget(name: "CrashHarness", dependencies: ["DownloadEngine", "TestSupport"], path: "Tests/CrashHarness"),
         .testTarget(name: "LauncherCoreTests", dependencies: ["LauncherCore", "TestSupport"]),
@@ -36,6 +38,7 @@ let package = Package(
         .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "LauncherCore"]),
         .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"]),
         .testTarget(name: "SophonTests", dependencies: ["Sophon", "TestSupport"]),
+        .testTarget(name: "GameLibraryTests", dependencies: ["GameLibrary", "TestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )

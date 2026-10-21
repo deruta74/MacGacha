@@ -45,6 +45,44 @@ public struct ContainedFileSystem: Sendable, Hashable {
         close(fd)
     }
 
+    /// Persists creation of this trusted root and any missing ancestors. Ancestors
+    /// above the root may be symlinks; the root leaf itself must be a directory.
+    /// Also syncs an existing leaf's parent, healing an earlier failed creation sync.
+    package func createRootDurably() throws {
+        let fd = try durableRootDirectory(root, remainingDepth: 128, trustedAncestor: false)
+        close(fd)
+    }
+
+    private func durableRootDirectory(_ path: URL, remainingDepth: Int, trustedAncestor: Bool) throws -> Int32 {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard remainingDepth > 0 else { throw LauncherError.io("Directory depth exceeds limit") }
+        let flags = trustedAncestor ? Self.directoryFlags & ~O_NOFOLLOW : Self.directoryFlags
+        let fd = open(path.path, flags)
+        if fd >= 0 {
+            do {
+                if path.path != "/" {
+                    let parent = open(path.deletingLastPathComponent().path, Self.directoryFlags & ~O_NOFOLLOW)
+                    guard parent >= 0 else { throw accessError(path.path) }
+                    defer { close(parent) }
+                    try synchronize(parent)
+                }
+                return fd
+            } catch { close(fd); throw error }
+        }
+        guard errno == ENOENT, path.path != "/" else { throw accessError(path.path) }
+        let parent = try durableRootDirectory(path.deletingLastPathComponent(), remainingDepth: remainingDepth - 1, trustedAncestor: true)
+        defer { close(parent) }
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        if mkdirat(parent, path.lastPathComponent, 0o700) != 0, errno != EEXIST {
+            throw LauncherError.io("Cannot create store directory")
+        }
+        // Sync even if another caller created the directory, before reporting success.
+        try synchronize(parent)
+        let child = openat(parent, path.lastPathComponent, Self.directoryFlags)
+        guard child >= 0 else { throw accessError(path.path) }
+        return child
+    }
+
     /// Atomically renames a regular file, optionally replacing another regular file.
     /// Both parents are traversed without following symlinks and fsynced after rename.
     public func rename(from source: SafeRelativePath, to destination: SafeRelativePath) throws {
