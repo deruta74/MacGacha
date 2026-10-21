@@ -12,16 +12,22 @@ public struct ContainedFileSystem: Sendable, Hashable {
     }
 
     private let root: URL
+    private var pinnedRoot: RootDescriptor?
+    private let expectedRootIdentity: FileSystemIdentity?
+    private let identityProvider: any FileSystemIdentityProvider
     package let fileOps: any FileOps
     private static let directoryFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
     private static let entryLimit = 100_000
 
-    public init(root: URL, fileOps: any FileOps = SystemFileOps()) throws {
+    public init(root: URL, fileOps: any FileOps = SystemFileOps(), expectedRootIdentity: FileSystemIdentity? = nil,
+        identityProvider: any FileSystemIdentityProvider = SystemFileSystemIdentityProvider()) throws {
         guard root.isFileURL, !root.path.isEmpty, !root.path.utf8.contains(0) else {
             throw LauncherError.unsafePath(root.absoluteString)
         }
         self.root = root
         self.fileOps = fileOps
+        self.expectedRootIdentity = expectedRootIdentity
+        self.identityProvider = identityProvider
     }
 
     // Filesystem identity is its trusted root; fault policy does not change path identity.
@@ -45,6 +51,58 @@ public struct ContainedFileSystem: Sendable, Hashable {
         close(fd)
     }
 
+    package func contentsOfRootDirectory() throws -> [SafeRelativePath] {
+        guard let fd = try directory([], create: false) else { return [] }
+        defer { close(fd) }
+        var budget = Self.entryLimit
+        return try names(in: fd, budget: &budget).map { try SafeRelativePath($0) }
+    }
+
+    /// Removes directories only. Foreign files, symlinks and special entries are
+    /// left untouched, and symlinks are never traversed.
+    package func pruneEmptyDirectories() throws {
+        guard let fd = try directory([], create: false) else { return }
+        defer { close(fd) }
+        var budget = Self.entryLimit
+        _ = try pruneEmpty(fd, depth: 0, budget: &budget)
+    }
+
+    private func pruneEmpty(_ fd: Int32, depth: Int, budget: inout Int) throws -> Bool {
+        guard depth <= 128 else { throw LauncherError.io("Directory depth exceeds limit") }
+        var empty = true
+        for name in try names(in: fd, budget: &budget) {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            guard let info = try entry(name, parent: fd) else { continue }
+            if info.st_mode & S_IFMT == S_IFDIR {
+                let child = openat(fd, name, Self.directoryFlags)
+                guard child >= 0 else { throw accessError(name) }
+                let childEmpty: Bool
+                do { childEmpty = try pruneEmpty(child, depth: depth + 1, budget: &budget); close(child) }
+                catch { close(child); throw error }
+                if childEmpty {
+                    try fileOps.unlink(name, in: fd, isDirectory: true)
+                    try synchronize(fd)
+                } else { empty = false }
+            } else { empty = false }
+        }
+        return empty
+    }
+
+    package func removeEmptyDirectory(at path: SafeRelativePath) throws {
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else { return }
+        defer { close(parent) }
+        let name = path.components.last!
+        guard let info = try entry(name, parent: parent) else { return }
+        guard info.st_mode & S_IFMT == S_IFDIR else { throw LauncherError.unsafePath(path.description) }
+        let child = openat(parent, name, Self.directoryFlags)
+        guard child >= 0 else { throw accessError(path.description) }
+        defer { close(child) }
+        var budget = Self.entryLimit
+        guard try names(in: child, budget: &budget).isEmpty else { return }
+        try fileOps.unlink(name, in: parent, isDirectory: true)
+        try synchronize(parent)
+    }
+
     /// Persists creation of this trusted root and any missing ancestors. Ancestors
     /// above the root may be symlinks; the root leaf itself must be a directory.
     /// Also syncs an existing leaf's parent, healing an earlier failed creation sync.
@@ -55,12 +113,55 @@ public struct ContainedFileSystem: Sendable, Hashable {
 
     /// Process-local reservations use the actual directory identity, including
     /// when trusted ancestors reach it through symlink or firmlink aliases.
-    package func rootIdentity() throws -> String {
+    package func rootIdentity() throws -> FileSystemIdentity {
         guard let fd = try directory([], create: false) else { throw LauncherError.io("Directory is missing") }
         defer { close(fd) }
-        var info = stat()
-        guard fstat(fd, &info) == 0 else { throw LauncherError.io("Cannot inspect contained root") }
-        return "\(info.st_dev):\(info.st_ino)"
+        return try identityProvider.identity(of: fd)
+    }
+
+    /// Retains the checked root. Subsequent operations duplicate this descriptor
+    /// instead of reopening a pathname that may now name an unrelated directory.
+    package func pinRoot() throws -> Self {
+        guard let pinned = try pinRootIfPresent() else { throw LauncherError.io("Directory is missing") }
+        return pinned
+    }
+
+    package func pinRootIfPresent() throws -> Self? {
+        guard let fd = try directory([], create: false) else { return nil }
+        var pinned = self
+        pinned.pinnedRoot = RootDescriptor(fd)
+        return pinned
+    }
+
+    /// Removes the pinned tree and unlinks its leaf only while it still names
+    /// that directory. An exchanged pathname never redirects recursive deletion.
+    package func removePinnedRoot(onlyIfEmpty: Bool) throws {
+        guard let pinnedRoot else { throw LauncherError.io("Root is not pinned") }
+        let parent = open(root.deletingLastPathComponent().path, Self.directoryFlags & ~O_NOFOLLOW)
+        guard parent >= 0 else { throw accessError("install location") }
+        defer { close(parent) }
+        func requireIdentity() throws {
+            var expected = stat()
+            guard fstat(pinnedRoot.fd, &expected) == 0,
+                let actual = try entry(root.lastPathComponent, parent: parent),
+                actual.st_mode & S_IFMT == S_IFDIR,
+                actual.st_dev == expected.st_dev, actual.st_ino == expected.st_ino else {
+                throw LauncherError.io("install folder was replaced")
+            }
+        }
+        try requireIdentity()
+        guard let target = try directory([], create: false) else { throw LauncherError.io("Directory is missing") }
+        defer { close(target) }
+        var budget = Self.entryLimit
+        let children = try names(in: target, budget: &budget)
+        if onlyIfEmpty && !children.isEmpty { return }
+        for child in children {
+            try removeEntry(child, parent: target, display: child, insideTree: true, depth: 0, budget: &budget)
+        }
+        try synchronize(target)
+        try requireIdentity()
+        try fileOps.unlink(root.lastPathComponent, in: parent, isDirectory: true)
+        try synchronize(parent)
     }
 
     private func durableRootDirectory(_ path: URL, remainingDepth: Int, trustedAncestor: Bool) throws -> Int32 {
@@ -70,6 +171,10 @@ public struct ContainedFileSystem: Sendable, Hashable {
         let fd = open(path.path, flags)
         if fd >= 0 {
             do {
+                if !trustedAncestor, let expectedRootIdentity,
+                    try identityProvider.identity(of: fd) != expectedRootIdentity {
+                    throw LauncherError.io("install folder was replaced")
+                }
                 if path.path != "/" {
                     let parent = open(path.deletingLastPathComponent().path, Self.directoryFlags & ~O_NOFOLLOW)
                     guard parent >= 0 else { throw accessError(path.path) }
@@ -78,6 +183,10 @@ public struct ContainedFileSystem: Sendable, Hashable {
                 }
                 return fd
             } catch { close(fd); throw error }
+        }
+        if !trustedAncestor, expectedRootIdentity != nil,
+            errno == ENOENT || errno == ENOTDIR || errno == ELOOP {
+            throw LauncherError.io("install folder was replaced")
         }
         guard errno == ENOENT, path.path != "/" else { throw accessError(path.path) }
         let parent = try durableRootDirectory(path.deletingLastPathComponent(), remainingDepth: remainingDepth - 1, trustedAncestor: true)
@@ -649,17 +758,23 @@ public struct ContainedFileSystem: Sendable, Hashable {
 
     private func directory(_ components: [String], create: Bool) throws -> Int32? {
         guard components.count <= 128 else { throw LauncherError.io("Directory depth exceeds limit") }
-        var fd = open(root.path, Self.directoryFlags)
-        if fd < 0 && errno == ENOENT && create {
+        var fd = pinnedRoot.map { openat($0.fd, ".", Self.directoryFlags) } ?? open(root.path, Self.directoryFlags)
+        if expectedRootIdentity == nil && pinnedRoot == nil && fd < 0 && errno == ENOENT && create {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             fd = open(root.path, Self.directoryFlags)
         }
         guard fd >= 0 else {
+            if expectedRootIdentity != nil && (errno == ENOENT || errno == ENOTDIR || errno == ELOOP) {
+                throw LauncherError.io("install folder was replaced")
+            }
             if errno == ENOENT && !create { return nil }
             throw accessError(root.path)
         }
         var transferred = false
         defer { if !transferred { close(fd) } }
+        if let expectedRootIdentity, try identityProvider.identity(of: fd) != expectedRootIdentity {
+            throw LauncherError.io("install folder was replaced")
+        }
         for (index, component) in components.enumerated() {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             var info = try entry(component, parent: fd)
@@ -760,4 +875,11 @@ public struct ContainedFileSystem: Sendable, Hashable {
     private func accessError(_ path: String) -> LauncherError {
         errno == ELOOP || errno == ENOTDIR ? .unsafePath(path) : .io("Cannot access contained path")
     }
+}
+
+/// Immutable descriptor ownership shared by copies of a pinned filesystem.
+private final class RootDescriptor: Sendable {
+    let fd: Int32
+    init(_ fd: Int32) { self.fd = fd }
+    deinit { close(fd) }
 }

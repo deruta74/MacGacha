@@ -56,7 +56,9 @@ struct CrashRecoveryTests {
             #expect(state.deletedFiles == Set(plan.deletions))
             #expect(try InstallStateMarker.load(fs: fs) != nil)
         case .afterOperationCompleted, .duringCompletionReceiptWrite, .afterCompletionReceipt, .afterEngineCleanup, .afterGamePlanSaved,
-            .afterGamePendingSaved, .afterGameRecordSaved, .afterGamePlanDeleted, .afterReceiptAcknowledged:
+            .afterGamePendingSaved, .afterGameRecordSaved, .afterGamePlanDeleted, .afterReceiptAcknowledged,
+            .afterGameFolderRemoved, .beforeGameRecordDeleted, .afterUninstallPlanDeleted, .afterUninstallManifestCacheDeleted,
+            .afterUninstallBranchDeleted, .afterUninstallManagedPathsDeleted, .afterUninstallCleanupDeleted, .afterUninstallRecordDeleted:
             Issue.record("Receipt/bridge crash points have separate recovery scenarios")
         }
         if state.commitStartedBatches.isEmpty {

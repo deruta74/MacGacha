@@ -49,18 +49,26 @@ public struct GameRecord: Codable, Sendable, Equatable {
     public var installed: InstalledBuild?
     public var pending: PendingOperation?
     public var uninstalling: Bool
+    /// Required identity of the directory claimed for this record.
+    public var installIdentity: FileSystemIdentity
+    public var uninstallFilesRemoved: Bool
     public init(installPath: URL, ownership: FolderOwnership, executable: SafeRelativePath,
-        installed: InstalledBuild? = nil, pending: PendingOperation? = nil, uninstalling: Bool = false) {
+        installed: InstalledBuild? = nil, pending: PendingOperation? = nil, uninstalling: Bool = false, installIdentity: FileSystemIdentity, uninstallFilesRemoved: Bool = false) {
         self.installPath = installPath; self.ownership = ownership; self.executable = executable
         self.installed = installed; self.pending = pending; self.uninstalling = uninstalling
+        self.installIdentity = installIdentity
+        self.uninstallFilesRemoved = uninstallFilesRemoved
     }
-    private enum CodingKeys: String, CodingKey { case installPath, ownership, executable, installed, pending, uninstalling }
+    private enum CodingKeys: String, CodingKey { case installPath, ownership, executable, installed, pending, uninstalling, installIdentity, uninstallFilesRemoved }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(installPath: try c.decode(URL.self, forKey: .installPath), ownership: try c.decode(FolderOwnership.self, forKey: .ownership),
             executable: try c.decode(SafeRelativePath.self, forKey: .executable), installed: try c.decodeIfPresent(InstalledBuild.self, forKey: .installed),
-            pending: try c.decodeIfPresent(PendingOperation.self, forKey: .pending), uninstalling: try c.decode(Bool.self, forKey: .uninstalling))
+            pending: try c.decodeIfPresent(PendingOperation.self, forKey: .pending), uninstalling: try c.decode(Bool.self, forKey: .uninstalling),
+            installIdentity: try c.decode(FileSystemIdentity.self, forKey: .installIdentity),
+            uninstallFilesRemoved: try c.decodeIfPresent(Bool.self, forKey: .uninstallFilesRemoved) ?? false)
         guard localFileURL(installPath) else { throw LauncherError.io("invalid game record") }
+        guard !uninstallFilesRemoved || uninstalling else { throw LauncherError.io("invalid game record") }
     }
 }
 

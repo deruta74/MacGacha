@@ -470,7 +470,7 @@ private func samplePending() -> PendingOperation {
     PendingOperation(kind: .update, planID: try! SafeIdentifier("pending"), planDigest: try! samplePlan().planDigest, target: sampleBuild())
 }
 private func sampleRecord(at url: URL = URL(fileURLWithPath: "/Games/Test")) -> GameRecord {
-    GameRecord(installPath: url, ownership: .created, executable: try! SafeRelativePath("Test.exe"), installed: sampleBuild())
+    GameRecord(installPath: url, ownership: .created, executable: try! SafeRelativePath("Test.exe"), installed: sampleBuild(), installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: 1))
 }
 private func samplePlan() throws -> InstallPlan {
     InstallPlan(id: try SafeIdentifier("pending"), objects: [:], files: [FileTask(path: try SafeRelativePath("empty"), size: 0, digest: recordDigest(""), extents: [])])

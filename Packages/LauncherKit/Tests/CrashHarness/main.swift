@@ -6,6 +6,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 import GameLibrary
+import Sophon
 
 @main
 struct CrashHarness {
@@ -19,6 +20,17 @@ struct CrashHarness {
             let root = URL(fileURLWithPath: args[2], isDirectory: true)
             let fileOps: any FileOps = point == .duringCompletionReceiptWrite ? ReceiptWriteCrashOps() : SystemFileOps()
             let fs = try ContainedFileSystem(root: fixtures)
+            if args.count == 6, args[5] == "uninstall" {
+                let storeURL = URL(fileURLWithPath: args[4])
+                let store = GameRecordStore(directory: storeURL)
+                let http = try FileBackedHTTPClient(root: fixtures)
+                let runner = OperationRunner(store: store, fetcher: ChunkFetcher(http: http,
+                    retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: FixedDiskSpace(bytes: Int64.max), log: nil)
+                let library = GameLibrary(paths: AppPaths(root: storeURL.deletingLastPathComponent()), api: DeliveryAPI(http: http),
+                    runner: runner, store: store, disk: FixedDiskSpace(bytes: Int64.max), log: nil,
+                    crashHooks: CrashHooks(at: point, action: { _exit(137) }))
+                try await library.uninstall(GameDefinition.all[0]); _exit(1)
+            }
             let plan = try JSONDecoder().decode(InstallPlan.self,
                 from: fs.readFile(at: SafeRelativePath("plan.json"), maxBytes: InstallPlan.maximumEncodedBytes))
             if args.count == 6 {
@@ -30,7 +42,7 @@ struct CrashHarness {
                 let runner = OperationRunner(store: GameRecordStore(directory: URL(fileURLWithPath: args[4])),
                     fetcher: ChunkFetcher(http: try FileBackedHTTPClient(root: fixtures), retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()),
                     disk: FixedDiskSpace(bytes: Int64.max), log: nil, crashHooks: CrashHooks(at: point, action: { _exit(137) }), fileOps: fileOps)
-                for try await _ in await runner.start("genshin", record: record, plan: plan, kind: kind, target: target, approved: true) {}
+                for try await _ in await runner.start("genshin", record: record, plan: plan, kind: kind, target: target, approved: true, managedPaths: Set(plan.files.map(\.path))) {}
                 _exit(1)
             }
             let operation = try InstallOperation(plan: plan, installRoot: root,
