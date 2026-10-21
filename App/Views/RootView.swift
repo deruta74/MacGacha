@@ -13,6 +13,7 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @SceneStorage("selectedGame") private var selectedID = LauncherGame.all[0].id
     @State private var panel: Panel?
+    @State private var gameSheet: GameSheet?
     /// On by default like HoYoPlay; Reduce Motion starts with still images instead.
     @AppStorage("animatedBackgrounds") private var animatedSetting = true
     @AppStorage("animatedBackgroundsChosen") private var animatedChosen = false
@@ -41,7 +42,9 @@ struct RootView: View {
                     .padding(.top, 40) // below the window's traffic lights
                     .padding(.bottom, 12)
                     .frame(maxHeight: .infinity)
-                GameFooter(game: game, art: model.gameArt[game.id], panel: $panel, animated: animated)
+                GameFooter(game: game, art: model.gameArt[game.id], panel: $panel, gameSheet: $gameSheet, animated: animated)
+                    // A fresh footer per game, so a confirmation opened for one game can't act on another.
+                    .id(game.id)
                     .padding(24)
             }
         }
@@ -51,8 +54,16 @@ struct RootView: View {
         .sheet(item: $panel) { panel in
             PanelSheet(panel: panel)
         }
+        .sheet(item: $gameSheet) { sheet in
+            switch sheet {
+            case .install(let id):
+                InstallSheet(game: Self.game(id), installRoot: model.installRoot)
+            case .voices(let id):
+                VoicePacksSheet(game: Self.game(id))
+            }
+        }
         // While a panel is open, its sheet presents the consent and import flow instead.
-        .modifier(RuntimeFlowSheets(active: panel == nil))
+        .modifier(RuntimeFlowSheets(active: panel == nil && gameSheet == nil))
         .alert("Something went wrong", isPresented: errorBinding, presenting: model.lastError) { _ in
             Button("OK", role: .cancel) { model.dismissError() }
         } message: { message in
@@ -65,7 +76,7 @@ struct RootView: View {
     }
 
     #if DEBUG
-    /// Debug builds only: `-MacGachaDebugGame starrail -MacGachaDebugPanel runtimes`
+    /// Debug builds only: `-MacGachaDebugGame starrail -MacGachaDebugPanel runtimes` (or `-MacGachaDebugSheet install`)
     /// opens a state directly, for screenshots without clicking through the UI.
     private func applyDebugLaunchArguments() {
         let defaults = UserDefaults.standard
@@ -75,8 +86,17 @@ struct RootView: View {
         if let name = defaults.string(forKey: "MacGachaDebugPanel") {
             panel = Panel(rawValue: name)
         }
+        switch defaults.string(forKey: "MacGachaDebugSheet") {
+        case "install": gameSheet = .install(selectedID)
+        case "voices": gameSheet = .voices(selectedID)
+        default: break
+        }
     }
     #endif
+
+    private static func game(_ id: String) -> LauncherGame {
+        LauncherGame.all.first { $0.id == id } ?? LauncherGame.all[0]
+    }
 
     private var errorBinding: Binding<Bool> {
         Binding(get: { model.lastError != nil }, set: { if !$0 { model.dismissError() } })

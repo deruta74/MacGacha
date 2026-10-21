@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import AppKit
 import Foundation
+import Observation
 import Synchronization
 import Testing
 import LauncherCore
@@ -21,7 +22,7 @@ struct AppModelGamesTests {
         fake.emit(.phase(.staging))
         fake.emit(.progress(downloaded: 25, totalNetwork: 100, staged: 0, totalStaged: 100))
         try await gamesEventually {
-            model.games["genshin"]?.activity == .working(.staging, fraction: 0.25, bytesPerSecond: nil)
+            model.games["genshin"]?.activity == .working(.staging, fraction: 0.25, bytesPerSecond: nil, downloaded: 25, total: 100)
         }
         fake.setStatus(.installed(tag: "1.0"), for: "genshin")
         fake.emit(.phase(.completed)); fake.emit(.phase(.completed)); fake.finish()
@@ -177,16 +178,87 @@ struct AppModelGamesTests {
         #expect(model.games["genshin"] == GameState(status: .notInstalled))
     }
 
-    @Test func estimateForwardsSelectionAndReportsErrors() async throws {
+    @Test func estimateForwardsSelectionAndThrowsWithoutAlerting() async throws {
         let (model, fake, _) = try gameFixture()
-        let estimate = await model.estimate("genshin", voices: ["ja-jp"], at: gameLocation)
+        let estimate = try await model.estimate("genshin", voices: ["ja-jp"], at: gameLocation)
         #expect(estimate == GameEstimate(download: 50, diskWhole: 200, diskMinimum: 100, available: 150))
         #expect(model.games["genshin"]?.activity == nil)
         #expect(fake.estimateCalls.last == GameCall(action: "estimate", id: "genshin", voices: ["ja-jp"]))
         fake.estimateError = .unsafePath("/other-user/private?password=secret")
-        #expect(await model.estimate("genshin", voices: [], at: gameLocation) == nil)
-        #expect(model.lastError == LauncherError.unsafePath("").userMessage)
-        #expect(model.lastError?.contains("secret") == false)
+        await #expect(throws: LauncherError.unsafePath("/other-user/private?password=secret")) {
+            _ = try await model.estimate("genshin", voices: [], at: gameLocation)
+        }
+        #expect(model.lastError == nil)
+    }
+
+    @Test func overlappingEstimatesAreIndependentAndDoNotReserveGame() async throws {
+        let english = GameReadGate(), japanese = GameReadGate()
+        let fake = FakeGameServices(estimateReads: [["en-us"]: english, ["ja-jp"]: japanese])
+        let (model, _, _) = try gameFixture(fake: fake)
+        defer { english.release(); japanese.release() }
+        let first = Task { try await model.estimate("genshin", voices: ["en-us"], at: gameLocation) }
+        let second = Task { try await model.estimate("genshin", voices: ["ja-jp"], at: gameLocation) }
+        defer { first.cancel(); second.cancel() }
+        try await gamesEventually { english.entered && japanese.entered }
+        #expect(!model.isGameOperationRunning)
+        #expect(model.games["genshin"]?.activity == nil && model.lastError == nil)
+        japanese.release()
+        let secondValue = try await second.value
+        #expect(secondValue == GameEstimate(download: 50, diskWhole: 200, diskMinimum: 100, available: 150))
+        english.release()
+        let firstValue = try await first.value
+        #expect(firstValue == secondValue)
+        #expect(fake.startCount == 1)
+    }
+
+    @Test func estimateReturnsDuringAnotherGamesOperation() async throws {
+        let (model, fake, _) = try gameFixture(); defer { fake.finish() }
+        model.installGame("starrail", voices: [], at: gameLocation, approved: true)
+        try await gamesEventually { fake.calls.count == 1 }
+        let value = try await model.estimate("genshin", voices: ["en-us"], at: gameLocation)
+        #expect(value == GameEstimate(download: 50, diskWhole: 200, diskMinimum: 100, available: 150))
+        #expect(model.isGameOperationRunning && model.lastError == nil)
+        #expect(model.games["starrail"]?.activity == .resolving)
+        #expect(model.games["genshin"]?.activity == nil)
+    }
+
+    @Test func gameOperationRunningIsObservableUntilReservationReleased() async throws {
+        let snapshot = GameReadGate(), fake = FakeGameServices(snapshotRead: snapshot)
+        let (model, _, _) = try gameFixture(fake: fake)
+        defer { snapshot.release(); fake.finish() }
+        let started = Mutex(false), finished = Mutex(false)
+        withObservationTracking { #expect(!model.isGameOperationRunning) }
+            onChange: { started.withLock { $0 = true } }
+        model.installGame("genshin", voices: [], at: gameLocation, approved: true)
+        #expect(model.isGameOperationRunning && started.withLock { $0 })
+        try await gamesEventually { fake.calls.count == 1 }
+        fake.emit(.phase(.completed)); fake.finish()
+        try await gamesEventually { snapshot.entered }
+        withObservationTracking { #expect(model.isGameOperationRunning) }
+            onChange: { finished.withLock { $0 = true } }
+        snapshot.release()
+        try await gamesEventually { !model.isGameOperationRunning }
+        #expect(finished.withLock { $0 })
+    }
+
+    @Test func progressBytesAreKnownOnlyWhileDownloadingInStaging() async throws {
+        let (model, fake, clock) = try gameFixture(); defer { fake.finish() }
+        model.installGame("genshin", voices: [], at: gameLocation, approved: true)
+        try await gamesEventually { fake.calls.count == 1 }
+        fake.emit(.phase(.staging)); fake.progress(250)
+        try await gamesEventually {
+            model.games["genshin"]?.activity == .working(.staging, fraction: 0.25, bytesPerSecond: nil, downloaded: 250, total: 1000)
+        }
+        clock.advance(.seconds(1))
+        fake.emit(.progress(downloaded: 0, totalNetwork: 0, staged: 500, totalStaged: 1000))
+        try await gamesEventually {
+            model.games["genshin"]?.activity == .working(.staging, fraction: 0.5, bytesPerSecond: nil, downloaded: nil, total: nil)
+        }
+        clock.advance(.seconds(1))
+        fake.emit(.phase(.verifying)); fake.progress(750)
+        try await gamesEventually {
+            model.games["genshin"]?.activity == .working(.verifying, fraction: 0.75, bytesPerSecond: nil, downloaded: nil, total: nil)
+        }
     }
 
     @Test func droppingModelCancelsActiveGameStream() async throws {
@@ -285,8 +357,10 @@ private struct GameCall: Sendable, Equatable {
 private final class FakeGameServices: GameServices, Sendable {
     private let approvalTerminalRead: GameReadGate?
     private let snapshotRead: GameReadGate?
-    init(approvalTerminalRead: GameReadGate? = nil, snapshotRead: GameReadGate? = nil) {
+    private let estimateReads: [Set<String>: GameReadGate]
+    init(approvalTerminalRead: GameReadGate? = nil, snapshotRead: GameReadGate? = nil, estimateReads: [Set<String>: GameReadGate] = [:]) {
         self.approvalTerminalRead = approvalTerminalRead; self.snapshotRead = snapshotRead
+        self.estimateReads = estimateReads
     }
     private struct State: Sendable {
         var statuses: [String: GameStatus] = [:]
@@ -320,6 +394,7 @@ private final class FakeGameServices: GameServices, Sendable {
     func setStatus(_ status: GameStatus, for id: String) { state.withLock { $0.statuses[id] = status } }
     func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate {
         let error = state.withLock { $0.estimates.append(GameCall(action: "estimate", id: id, voices: voices)); return $0.estimateError }
+        await estimateReads[voices]?.wait()
         if let error { throw error }
         return GameEstimate(download: 50, diskWhole: 200, diskMinimum: 100, available: 150)
     }

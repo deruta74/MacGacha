@@ -11,7 +11,7 @@ struct GameState: Sendable, Equatable {
 
 enum GameActivity: Sendable, Equatable {
     case resolving
-    case working(OperationPhase, fraction: Double?, bytesPerSecond: Int64?)
+    case working(OperationPhase, fraction: Double?, bytesPerSecond: Int64?, downloaded: Int64? = nil, total: Int64? = nil)
     case needsApproval(required: Int64, available: Int64)
 }
 

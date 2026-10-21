@@ -38,6 +38,7 @@ final class AppModel {
 
     private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
     private(set) var gameRecords: [String: GameRecord] = [:]
+    var isGameOperationRunning: Bool { gameOperation != nil }
     private(set) var gameArt: [String: GameArt]
     private(set) var rows: [RuntimeRow] = []
     private(set) var consentRequest: ConsentRequest?
@@ -57,7 +58,7 @@ final class AppModel {
     @ObservationIgnored var gameTask: Task<Void, Never>?
     @ObservationIgnored var gameStartupTask: Task<Void, Never>?
     @ObservationIgnored var gameActivationTask: Task<Void, Never>?
-    @ObservationIgnored var gameOperation: GameOperationToken?
+    var gameOperation: GameOperationToken?
     @ObservationIgnored var gameProgress = GameProgress()
     @ObservationIgnored var gameLastRefresh: ContinuousClock.Instant?
     @ObservationIgnored var gameRefreshInFlight = false
