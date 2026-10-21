@@ -8,6 +8,7 @@ package enum LocalRange {
     static func matches(path: SafeRelativePath, offset: Int64, length: Int64, digest: Digest, fs: ContainedFileSystem) throws -> Bool {
         guard offset >= 0, length >= 0,
             let size = try fs.size(at: path), offset <= size, length <= size - offset else { return false }
+        OperationWork.record(.localRangeHash)
         let input = try fs.openForReading(at: path)
         defer { try? input.close() }
         try input.seek(toOffset: UInt64(offset))

@@ -589,35 +589,56 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     #expect(try fs.size(at: objectPath(plan, object)) == nil)
 }
 
-@Test func operationStagesOneThousandBatchesWithinScaleBudget() async throws {
+@Test func operationStagesOneThousandBatchesWithLinearWork() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
-    let local = String(repeating: "L", count: 65_536), source = try SafeRelativePath("source")
+    let local = String(repeating: "L", count: 1024), remote = String(repeating: "N", count: 1024)
+    let source = try SafeRelativePath("source"), fallback = stagingObject("scale-local", local)
     try fs.writeAtomically(Data(local.utf8), to: source)
-    var files: [FileTask] = [], objects: [ChunkObject] = []
+    var files: [FileTask] = [], objects: [ChunkObject] = [fallback]
     for index in 0..<1000 {
-        let object = stagingObject("scale-\(index)", "N")
-        let file = try stagingFile("file-\(index)", local + "N", [
-            Extent(source: .local(path: source, offset: 0), fileOffset: 0, length: 65_536, digest: opDigest(local)),
-            Extent(source: .chunk(id: object.id), fileOffset: 65_536, length: 1, digest: object.decodedDigest),
+        let object = stagingObject("scale-\(index)", remote)
+        let file = try stagingFile("file-\(index)", local + remote, [
+            Extent(source: .local(path: source, offset: 0), fileOffset: 0, length: 1024,
+                digest: fallback.decodedDigest, fallbackChunkID: fallback.id),
+            Extent(source: .chunk(id: object.id), fileOffset: 1024, length: 1024, digest: object.decodedDigest),
         ])
-        files.append(file); objects.append(object); cdn.serve(object.id, data: Data("N".utf8))
-        try fs.writeAtomically(Data(repeating: 0x4f, count: 65_537), to: file.path)
+        files.append(file); objects.append(object); cdn.serve(object.id, data: Data(remote.utf8))
+        try fs.writeAtomically(Data(repeating: 0x4f, count: 2048), to: file.path)
     }
     let plan = try stagingPlan(objects, files), clock = ContinuousClock(), start = clock.now
-    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn),
-        disk: FixedDiskSpace(bytes: SpaceBudget.margin + 65_537_001), mode: .batched(approved: true), fileOps: ScaleFileOps())
-    let events = try await withThrowingTaskGroup(of: [OperationEvent].self) { group in
-        group.addTask { try await opCollect(engine.run()) }
-        group.addTask { try await Task.sleep(for: .seconds(25)); throw LauncherError.io("Execution scale deadline") }
-        defer { group.cancelAll() }
-        return try #require(await group.next())
+    let work = EngineWorkCounter()
+    let events = try await OperationWork.$observer.withValue({ work.record($0) }) {
+        let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn),
+            disk: FixedDiskSpace(bytes: SpaceBudget.margin + 2_050_048), mode: .batched(approved: true), fileOps: ScaleFileOps())
+        var events: [OperationEvent] = [], batches = 0
+        for try await event in engine.run() {
+            events.append(event)
+            if event == .phase(.staging) {
+                batches += 1
+                // Fail early if operation-wide setup regresses to per-batch
+                // work, without running the entire quadratic mutant first.
+                if batches == 2 { try #require(work.snapshot[.referrerIndexBuild] == 1) }
+            }
+        }
+        return events
     }
     let elapsed = start.duration(to: clock.now)
-    print("InstallOperation scale: 1000 batches, 1000 reusable 64-KiB ranges, \(elapsed)")
-    #expect(elapsed < .seconds(25))
+    print("InstallOperation scale: 1000 batches, 1000 reusable ranges with fallbacks, \(elapsed); work: \(work.snapshot)")
+    // Constant operation-wide setup and linear local checks, independent of
+    // runner speed. The fallback makes repeated prediction actually rehash data.
+    #expect(work.snapshot[.referrerIndexBuild] == 1)
+    #expect((work.snapshot[.planValidation] ?? 0) <= 5)
+    #expect(work.snapshot[.predictionFile] == files.count)
+    #expect((work.snapshot[.localRangeHash] ?? 0) <= 5 * files.count)
     #expect(events.filter { $0 == .phase(.staging) }.count == 1000 && events.last == .phase(.completed))
     #expect(cdn.requestLog.count == 1000)
-    for file in files { #expect(try fs.size(at: file.path) == 65_537) }
+    for file in files { #expect(try fs.size(at: file.path) == 2048) }
+}
+
+final class EngineWorkCounter: Sendable {
+    private let counts = Mutex<[OperationWork: Int]>([:])
+    func record(_ work: OperationWork) { counts.withLock { $0[work, default: 0] += 1 } }
+    var snapshot: [OperationWork: Int] { counts.withLock { $0 } }
 }
 
 /// Keep the execution-scale test about indexes and range reads, not storage latency.

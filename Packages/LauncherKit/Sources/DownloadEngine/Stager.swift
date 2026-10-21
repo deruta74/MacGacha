@@ -102,6 +102,7 @@ private actor StagingSession {
         journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks) {
         self.plan = plan; self.files = files; self.fs = fs; self.fetcher = fetcher; self.journal = journal
         self.disk = disk; self.limit = limit; self.lease = lease; self.crashHooks = crashHooks; layout = StagingLayout(id: plan.id)
+        OperationWork.record(.referrerIndexBuild)
         var refs: [String: Set<SafeRelativePath>] = [:]
         for file in plan.files { for id in SpaceBudget.references(file) { refs[id, default: []].insert(file.path) } }
         referrers = refs
@@ -209,6 +210,7 @@ private actor StagingSession {
         var predicted = downloadedObjects
         let done = state.stagedFiles.union(state.committedFiles)
         for file in plan.files where !done.contains(file.path) {
+            OperationWork.record(.predictionFile)
             for extent in file.extents {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 switch extent.source {
@@ -434,6 +436,7 @@ private actor StagingSession {
     private func copyLocal(_ path: SafeRelativePath, offset: Int64, extent: Extent, output: FileHandle) throws -> Bool {
         guard offset >= 0, extent.length >= 0, extent.fileOffset >= 0,
             let size = try fs.size(at: path), offset <= size, extent.length <= size - offset else { return false }
+        OperationWork.record(.localRangeHash)
         let input = try fs.openForReading(at: path)
         defer { try? input.close() }
         try input.seek(toOffset: UInt64(offset)); try output.seek(toOffset: UInt64(extent.fileOffset))
