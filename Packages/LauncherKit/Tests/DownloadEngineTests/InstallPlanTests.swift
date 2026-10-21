@@ -276,7 +276,8 @@ func plansRejectUnsupportedCodecsBeforeFetch() throws {
     let object = ChunkObject(id: "object", urls: reference.urls, transferSize: 3, decodedSize: 3,
         decodedDigest: reference.decodedDigest, codec: .zstd)
     let plan = try makePlan(objects: ["object": object], files: [planFile(extents: [planExtent()])])
-    #expect(throws: LauncherError.io("codec unsupported: zstd")) { try plan.validate() }
+    try plan.validate()
+    #expect(throws: LauncherError.io("codec unsupported: zstd")) { try plan.validate(supportedCodecs: [.identity]) }
     try plan.validate(supportedCodecs: [.identity, .zstd])
     #expect(throws: LauncherError.io("codec unsupported: identity")) {
         try makePlan(objects: ["object": reference], files: [planFile(extents: [planExtent()])]).validate(supportedCodecs: [])

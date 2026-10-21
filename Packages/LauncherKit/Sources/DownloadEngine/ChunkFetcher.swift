@@ -21,12 +21,21 @@ public actor ChunkFetcher {
     /// Concurrent requests for case variants of the same absolute part path throw .busy.
     public func fetch(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath,
         progress: @Sendable (Int64) -> Void) async throws {
+        _ = try await fetch(object, fs: fs, part: part, startingMirror: 0, progress: progress)
+    }
+
+    /// The stager can retry decoded corruption at the mirror after the one actually used,
+    /// including when transfer-level retries already advanced through earlier mirrors.
+    package func fetch(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath,
+        startingMirror: Int, progress: @Sendable (Int64) -> Void) async throws -> Int {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         try object.validate()
+        guard object.urls.indices.contains(startingMirror) else { throw LauncherError.io("Invalid chunk mirror index") }
         let key = fs.caseFoldedPathKey(for: part)
         guard activeParts.insert(key).inserted else { throw LauncherError.busy("Chunk part is already being fetched") }
         defer { activeParts.remove(key) }
-        try await Self.performFetch(object, http: http, retry: retry, sleeper: sleeper, fs: fs, part: part, progress: progress)
+        return try await Self.performFetch(object, http: http, retry: retry, sleeper: sleeper,
+            fs: fs, part: part, startingMirror: startingMirror, progress: progress)
     }
 
     // Only the reservation set lives on the actor. All blocking part I/O, retries and
@@ -34,9 +43,9 @@ public actor ChunkFetcher {
     @concurrent
     private static func performFetch(_ object: ChunkObject, http: any HTTPClient, retry: RetryPolicy,
         sleeper: any Sleeper, fs: ContainedFileSystem, part: SafeRelativePath,
-        progress: @Sendable (Int64) -> Void) async throws {
+        startingMirror: Int, progress: @Sendable (Int64) -> Void) async throws -> Int {
         var attempt = 1
-        var mirror = 0
+        var mirror = startingMirror
         var unavailable = Set<Int>()
         while true {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -44,7 +53,7 @@ public actor ChunkFetcher {
             let url = object.urls[selected]
             do {
                 try await fetchAttempt(object, from: url, http: http, fs: fs, part: part, progress: progress)
-                return
+                return selected
             } catch {
                 if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
                 let failure = error as? StatusFailure

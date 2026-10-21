@@ -94,25 +94,26 @@ func journalReopenHealsFailedCreationParentSync() throws {
 }
 
 @Test
-func unsupportedCodecPlanDecodesStructurallyThenFailsPreflight() throws {
+func zstdPlanRoundTripsAndSupportsPreflight() throws {
     let plan = try followupCompressedPlan()
     let decoded = try JSONDecoder().decode(InstallPlan.self, from: JSONEncoder().encode(plan))
     #expect(decoded.planDigest == plan.planDigest)
     try decoded.validate(supportedCodecs: Set(ChunkCodec.allCases))
-    #expect(throws: LauncherError.io("codec unsupported: zstd")) { try decoded.validate() }
+    try decoded.validate()
+    #expect(throws: LauncherError.io("codec unsupported: zstd")) { try decoded.validate(supportedCodecs: [.identity]) }
 }
 
 @Test(arguments: [false, true])
-func storedUnsupportedCodecSurfacesCodecError(commit: Bool) async throws {
+func storedZstdPlanCompletesBeforeRequestedPlanOnlyAfterCommitStarted(commit: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let stored = try followupCompressedPlan(); let requested = try opPlan("requested", [("new", "abc")])
     _ = try await opSeed(fs, stored, commit: commit)
     let cdn = MockCDN()
-    await #expect(throws: LauncherError.io("codec unsupported: zstd")) {
-        _ = try await opCollect(opEngine(requested, temp.url, cdn).run())
-    }
-    #expect(cdn.requestLog.isEmpty)
-    #expect(try fs.itemType(at: requested.files[0].path) == nil)
+    cdn.serve("object", data: try zstdVector("good")); cdn.serve("requested-0", data: Data("abc".utf8))
+    let events = try await opCollect(opEngine(requested, temp.url, cdn).run())
+    #expect(events.filter { $0 == .phase(.completed) }.count == 1)
+    #expect(cdn.requestLog.map(\.path) == (commit ? ["object", "requested-0"] : ["requested-0"]))
+    #expect(try fs.readFile(at: requested.files[0].path, maxBytes: 3) == Data("abc".utf8))
 }
 
 @Test(arguments: [1, 2])
@@ -139,9 +140,9 @@ func oversizedStoredPlanFailsBeforeJSONDecoding() async throws {
     let plan = try opPlan("oversized", [("new", "abc")]); let path = try opPlanPath(plan)
     let handle = try fs.openForWriting(at: path, truncate: true)
     try handle.write(contentsOf: Data("not JSON".utf8))
-    try handle.truncate(atOffset: UInt64((64 << 20) + 1)); try handle.close()
+    try handle.truncate(atOffset: UInt64(InstallPlan.maximumEncodedBytes + 1)); try handle.close()
     let cdn = MockCDN()
-    await #expect(throws: LauncherError.fileTooLarge(path: path.resolved(against: temp.url).path, limit: 64 << 20)) {
+    await #expect(throws: LauncherError.fileTooLarge(path: path.resolved(against: temp.url).path, limit: InstallPlan.maximumEncodedBytes)) {
         _ = try await opCollect(opEngine(plan, temp.url, cdn).run())
     }
     #expect(cdn.requestLog.isEmpty)
@@ -161,9 +162,8 @@ private func followupExpectCorrupt(_ body: () throws -> Void) throws {
     catch LauncherError.journalCorrupt(let reason) { #expect(!reason.isEmpty) }
 }
 private func followupCompressedPlan() throws -> InstallPlan {
-    let object = ChunkObject(id: "compressed", urls: [URL(string: "https://cdn.test/compressed")!], transferSize: 2,
-        decodedSize: 3, decodedDigest: opDigest("abc"), codec: .zstd)
-    return try stagingPlan([object], [stagingFile("new", "abc", [stagingChunk("compressed", "abc")])])
+    let object = compressedObject(try zstdVector("good"))
+    return try stagingPlan([object], [compressedFile(object, path: "new")])
 }
 private final class WrongTotalClient: HTTPClient {
     let ranges = Mutex([Int64?]())

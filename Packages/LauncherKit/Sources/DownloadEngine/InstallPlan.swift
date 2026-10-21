@@ -118,7 +118,7 @@ public struct FileTask: Codable, Sendable, Hashable {
 
 public struct InstallPlan: Codable, Sendable {
     /// Disk readers must apply this bound before materializing JSON for decoding.
-    public static let maximumEncodedBytes = 64 << 20
+    public static let maximumEncodedBytes = 256 << 20
     public static let maximumObjects = 1_000_000
     public static let maximumURLsPerObject = 16
     public static let maximumFiles = 1_000_000

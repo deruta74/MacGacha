@@ -73,6 +73,7 @@ private actor StagingSession {
     private var totalNetwork: Int64 = 0
     private var networkObjects = Set<String>()
     private var downloadedObjects = Set<String>()
+    private var objectMirrors: [String: Int] = [:]
     private var staged: Int64 = 0
     private var totalStaged: Int64 = 0
 
@@ -157,18 +158,23 @@ private actor StagingSession {
             needed.append(object)
         }
         let fs = fs, fetcher = fetcher, journal = journal, layout = layout, crashHooks = crashHooks
-        try await withThrowingTaskGroup(of: ChunkObject.self) { group in
+        // Capture only this fetch set: copying the growing full-plan mirror map on
+        // every file would force quadratic copy-on-write work at game scale.
+        let mirrors = Dictionary(uniqueKeysWithValues: needed.map { ($0.id, objectMirrors[$0.id] ?? 0) })
+        try await withThrowingTaskGroup(of: (ChunkObject, Int).self) { group in
             var next = 0
             func submit(_ object: ChunkObject) {
                 group.addTask {
-                    try await fetcher.fetch(object, fs: fs, part: layout.object(object), progress: { _ in })
+                    let mirror = try await fetcher.fetch(object, fs: fs, part: layout.object(object),
+                        startingMirror: mirrors[object.id] ?? 0, progress: { _ in })
                     try await journal.append(.objectVerified(id: object.id))
                     crashHooks.reach(.afterObjectVerified)
-                    return object
+                    return (object, mirror)
                 }
             }
             while next < min(limit, needed.count) { submit(needed[next]); next += 1 }
-            while let object = try await group.next() {
+            while let (object, mirror) = try await group.next() {
+                objectMirrors[object.id] = mirror
                 try state.apply(.objectVerified(id: object.id))
                 if networkObjects.insert(object.id).inserted {
                     totalNetwork = try SpaceBudget.adding(totalNetwork, object.transferSize)
@@ -181,10 +187,13 @@ private actor StagingSession {
         }
     }
 
-    private struct BadObject: Error { let id: String; let cause: LauncherError }
+    private struct BadObject: Error { let id: String; let cause: any Error }
 
     private func stageFile(_ file: FileTask) async throws {
-        for attempt in 0..<2 {
+        var objectFailures: [String: Int] = [:]
+        var wholeFileFailures = 0
+        let wholeFileAttemptLimit = 2
+        while true {
             do {
                 let direct = Set(file.extents.compactMap { extent -> String? in
                     if case .chunk(let id) = extent.source { return id }; return nil
@@ -205,19 +214,33 @@ private actor StagingSession {
                 return
             } catch {
                 if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
-                let failure: LauncherError
-                if let bad = error as? BadObject {
-                    if let object = plan.objects[bad.id] { try fs.removeFile(at: layout.object(object)) }
-                    failure = bad.cause
-                } else if let error = error as? LauncherError { failure = error }
-                else { throw LauncherError.io("Cannot stage file") }
-                switch failure {
-                case .digestMismatch, .sizeMismatch:
+                let bad = error as? BadObject
+                let failure = bad?.cause ?? error
+                guard failure is CorruptObjectError || failure is LauncherError else {
+                    throw LauncherError.io("Cannot stage file")
+                }
+                let corrupt: Bool
+                if failure is CorruptObjectError { corrupt = true }
+                else if let failure = failure as? LauncherError {
+                    switch failure { case .digestMismatch, .sizeMismatch: corrupt = true; default: corrupt = false }
+                } else { corrupt = false }
+                if corrupt {
+                    let canRetry: Bool
+                    if let bad, let object = plan.objects[bad.id] {
+                        try fs.removeFile(at: layout.object(object))
+                        // Each object gets a bounded mirror cycle, including a
+                        // resumed part whose original transfer mirror is unknown.
+                        objectFailures[bad.id, default: 0] += 1
+                        canRetry = objectFailures[bad.id, default: 0] < object.urls.count + 1
+                        objectMirrors[bad.id] = ((objectMirrors[bad.id] ?? 0) + 1) % object.urls.count
+                    } else {
+                        wholeFileFailures += 1
+                        canRetry = wholeFileFailures < wholeFileAttemptLimit
+                    }
                     try fs.removeFile(at: layout.file(file.path))
                     try await record(.fileUnstaged(path: file.path))
-                    if attempt == 1 { throw failure }
-                default: throw failure
-                }
+                    if !canRetry { throw failure }
+                } else { throw failure }
             }
         }
     }
@@ -260,6 +283,8 @@ private actor StagingSession {
             guard extentActual == extent.digest else {
                 throw LauncherError.digestMismatch(path: id, expected: extent.digest.hex, actual: extentActual.hex)
             }
+        } catch let error as CorruptObjectError {
+            throw BadObject(id: id, cause: error)
         } catch let error as LauncherError {
             switch error {
             case .sizeMismatch, .digestMismatch: throw BadObject(id: id, cause: error)
