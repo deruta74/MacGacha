@@ -6,6 +6,7 @@ import LauncherCore
 import DownloadEngine
 import RuntimeManager
 import HoYoPlayAPI
+import GameLibrary
 
 @MainActor @Observable
 final class AppModel {
@@ -35,6 +36,8 @@ final class AppModel {
         let needsConsent: Bool
     }
 
+    private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
+    private(set) var gameRecords: [String: GameRecord] = [:]
     private(set) var gameArt: [String: GameArt]
     private(set) var rows: [RuntimeRow] = []
     private(set) var consentRequest: ConsentRequest?
@@ -50,7 +53,16 @@ final class AppModel {
     @ObservationIgnored private let services: any RuntimeServices
     @ObservationIgnored private let artService: any GameArtProviding
     @ObservationIgnored private let defaults: UserDefaults?
-    @ObservationIgnored private let now: @Sendable () -> ContinuousClock.Instant
+    @ObservationIgnored let gameServices: any GameServices
+    @ObservationIgnored var gameTask: Task<Void, Never>?
+    @ObservationIgnored var gameStartupTask: Task<Void, Never>?
+    @ObservationIgnored var gameActivationTask: Task<Void, Never>?
+    @ObservationIgnored var gameOperation: GameOperationToken?
+    @ObservationIgnored var gameProgress = GameProgress()
+    @ObservationIgnored var gameLastRefresh: ContinuousClock.Instant?
+    @ObservationIgnored var gameRefreshInFlight = false
+    @ObservationIgnored var gameRevisions: [String: UUID] = [:]
+    @ObservationIgnored let now: @Sendable () -> ContinuousClock.Instant
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var generations: [String: UUID] = [:]
     @ObservationIgnored private var working: [String: RowState] = [:]
@@ -69,15 +81,20 @@ final class AppModel {
     init(paths: AppPaths = .standard(), manifest: RuntimeManifest? = nil,
         services: (any RuntimeServices)? = nil, defaults: UserDefaults? = .standard,
         artService: any GameArtProviding = EmptyGameArtProvider(),
+        gameServices: any GameServices = PreviewGameServices(),
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }) {
-        self.paths = paths; self.manifest = manifest
+        self.paths = paths; self.manifest = manifest; self.gameServices = gameServices
         self.services = services ?? LiveRuntimeServices(paths: paths)
         self.defaults = defaults; self.now = now; self.artService = artService; self.gameArt = artService.cached()
         let stored = defaults?.string(forKey: "installRoot")
         self.installRoot = stored.flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Games/MacGacha", isDirectory: true)
         rebuildRows()
+        observeGameActivation()
     }
+
+    func setGameState(_ id: String, _ state: GameState) { games[id] = state }
+    func setGameRecord(_ id: String, _ record: GameRecord?) { gameRecords[id] = record }
 
     static func live() -> AppModel {
         // Keep legacy entry points safe too while the app switches to forCurrentProcess().
@@ -88,7 +105,7 @@ final class AppModel {
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artService: GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
-                bundleIdentifier: Bundle.main.bundleIdentifier), log: log))
+                bundleIdentifier: Bundle.main.bundleIdentifier), log: log), gameServices: LiveGameServices(paths: paths, log: log))
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -100,7 +117,7 @@ final class AppModel {
     }
 
     private static func inert() -> AppModel {
-        preview(rows: [], logLines: [])
+        preview(rows: [], logLines: [], games: [:])
     }
 
     static func gameArtCacheDirectory(in caches: URL, bundleIdentifier: String?) -> URL {
@@ -124,6 +141,7 @@ final class AppModel {
     deinit {
         for task in tasks.values { task.cancel() }
         searchTask?.cancel()
+        gameTask?.cancel(); gameStartupTask?.cancel(); gameActivationTask?.cancel()
     }
 
     func start() async {
@@ -136,6 +154,7 @@ final class AppModel {
             try await scanAndApply()
             await refreshLogs()
         } catch { show(error) }
+        await refreshGames()
     }
 
     func refreshRuntimes() async {
@@ -405,7 +424,7 @@ final class AppModel {
         rows = result
     }
 
-    private func show(_ error: any Error) {
+    func show(_ error: any Error) {
         let error = launcherError(error)
         if error != .cancelled { lastError = error.userMessage }
     }
@@ -436,6 +455,11 @@ struct BundledRuntimeManifest {
 }
 
 extension AppModel {
+    static var sampleGameStates: [String: GameState] {
+        ["genshin": GameState(status: .installed(tag: "7.1.0")),
+         "starrail": GameState(status: .paused(.update)),
+         "zzz": GameState(status: .notInstalled)]
+    }
     static var sampleRows: [RuntimeRow] {
         [RuntimeRow(id: "wine-10.0", kindName: "Wine", version: "10.0", licenseName: "LGPL-2.1",
             state: .installed(source: .download), canImportGPTK: false, needsConsent: false),
@@ -447,10 +471,12 @@ extension AppModel {
 
     static func preview(rows: [RuntimeRow] = sampleRows, consent: ConsentRequest? = nil,
         importState: ImportState? = nil, lastError: String? = nil,
-        logLines: [String] = ["Runtime manager ready", "D3DMetal requires acceptance of Apple's license terms"]) -> AppModel {
+        logLines: [String] = ["Runtime manager ready", "D3DMetal requires acceptance of Apple's license terms"],
+        games: [String: GameState] = sampleGameStates) -> AppModel {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacGacha-Preview-\(UUID().uuidString)")
         let model = AppModel(paths: AppPaths(root: root), manifest: try? RuntimeManifest(components: []),
-            services: PreviewRuntimeServices(), defaults: nil)
+            services: PreviewRuntimeServices(), defaults: nil, gameServices: PreviewGameServices(states: games))
+        model.games = games
         model.rows = rows; model.consentRequest = consent; model.importState = importState
         model.installed = rows.compactMap { row in
             guard case .installed(let source) = row.state,
