@@ -31,6 +31,21 @@ public struct Stager: Sendable {
             disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
+    package func forOperation() -> OperationStager {
+        OperationStager(session: StagingSession(plan: plan, files: [], fs: fs, fetcher: fetcher, journal: journal,
+            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks))
+    }
+
+}
+
+/// One validated plan, referrer index and progress history for the locked operation.
+package struct OperationStager: Sendable {
+    fileprivate let session: StagingSession
+    package func stage(files: [FileTask]) -> AsyncThrowingStream<OperationEvent, any Error> {
+        let token = UUID()
+        return AsyncThrowingStream(unfolding: { try await session.next(files: files, token: token) })
+    }
+    package func committed(_ files: [FileTask]) async throws { try await session.committed(files) }
 }
 
 private final class StagingGate: Sendable {
@@ -56,7 +71,7 @@ private final class StagingLease: Sendable {
 private actor StagingSession {
     private enum Step { case start, file, progress, done }
     private let plan: InstallPlan
-    private let files: [FileTask]
+    private var files: [FileTask]
     private let fs: ContainedFileSystem
     private let fetcher: ChunkFetcher
     private let journal: OperationJournal
@@ -66,6 +81,10 @@ private actor StagingSession {
     private let crashHooks: CrashHooks
     private let layout: StagingLayout
     private let referrers: [String: Set<SafeRelativePath>]
+    private let known: [SafeRelativePath: FileTask]
+    private var initialized = false
+    private var token: UUID?
+    private var donePaths = Set<SafeRelativePath>()
     private var step = Step.start
     private var state = JournalState()
     private var cursor = 0
@@ -86,6 +105,19 @@ private actor StagingSession {
         var refs: [String: Set<SafeRelativePath>] = [:]
         for file in plan.files { for id in SpaceBudget.references(file) { refs[id, default: []].insert(file.path) } }
         referrers = refs
+        known = Dictionary(uniqueKeysWithValues: plan.files.map { ($0.path, $0) })
+    }
+
+    func next(files incoming: [FileTask], token incomingToken: UUID) async throws -> OperationEvent? {
+        if token != incomingToken {
+            guard token == nil || step == .done else { throw LauncherError.busy("staging already in use") }
+            token = incomingToken; files = incoming; cursor = 0; allocation = nil; lastProgress = nil; step = .start
+        }
+        return try await next()
+    }
+
+    func committed(_ batch: [FileTask]) throws {
+        for file in batch { try state.apply(.fileCommitted(path: file.path)); donePaths.insert(file.path) }
     }
 
     func next() async throws -> OperationEvent? {
@@ -126,46 +158,43 @@ private actor StagingSession {
     }
 
     private func prepare() async throws {
-        let known = Set(plan.files)
-        guard Set(files).count == files.count, files.allSatisfy({ known.contains($0) }) else {
+        guard Set(files.map(\.path)).count == files.count, files.allSatisfy({ known[$0.path] == $0 }) else {
             throw LauncherError.io("Staging files are not a unique subset of the plan")
         }
-        state = try await journal.snapshot()
-        for file in plan.files where state.stagedFiles.contains(file.path) && !state.committedFiles.contains(file.path) {
-            if try fs.size(at: layout.file(file.path)) != file.size { try await record(.fileUnstaged(path: file.path)) }
+        if !initialized {
+            state = try await journal.snapshot()
+            for file in plan.files where state.stagedFiles.contains(file.path) && !state.committedFiles.contains(file.path) {
+                if try fs.size(at: layout.file(file.path)) != file.size { try await record(.fileUnstaged(path: file.path)) }
+            }
+            donePaths = state.stagedFiles.union(state.committedFiles)
+            downloadedObjects = state.verifiedObjects.intersection(plan.objects.keys)
+            for file in plan.files where donePaths.contains(file.path) {
+                for extent in file.extents { if case .chunk(let id) = extent.source { downloadedObjects.insert(id) } }
+            }
+            downloaded = progressBytes(downloadedObjects)
+            try refreshNetworkPrediction()
+            try cleanupObjects(ids: Set(plan.objects.keys))
+            initialized = true
         }
-        // Budget this subset with the same full-plan referrers used by cleanup.
-        let budget = try SpaceBudget.estimate(plan: plan, files: files, state: state, fs: fs, maxConcurrentObjects: limit)
-        let donePaths = state.stagedFiles.union(state.committedFiles)
-        let remaining = files.filter { !donePaths.contains($0.path) }
-        let selected = Set(remaining.map(\.path))
+        let remaining = files.filter { !donePaths.contains($0.path) }, selected = Set(files.map(\.path))
+        let objects = try SpaceBudget.networkObjectIDs(files: remaining, plan: plan, state: state, fs: fs)
         var external = Set<String>()
-        for file in plan.files where !donePaths.contains(file.path) && !selected.contains(file.path) {
-            external.formUnion(SpaceBudget.references(file))
-        }
-        allocation = try RemainingAllocation(files: remaining,
-            costs: Dictionary(uniqueKeysWithValues: budget.objects.map { ($0, plan.objects[$0]!.transferSize) }),
-            retainedObjects: external, limit: limit)
-        let written: Int64
-        if let first = remaining.first {
-            written = min(first.size, try fs.size(at: layout.file(first.path)) ?? 0)
-        } else { written = 0 }
-        try checkCapacity(written: written)
-        // Transfer progress belongs to the full durable plan, not this batch or
-        // this session. Verified IDs remain in the journal after parts are consumed.
-        downloadedObjects = state.verifiedObjects.intersection(plan.objects.keys)
-        let done = state.stagedFiles.union(state.committedFiles)
-        for file in plan.files where done.contains(file.path) {
-            for extent in file.extents {
-                if case .chunk(let id) = extent.source { downloadedObjects.insert(id) }
+        for file in remaining {
+            for id in SpaceBudget.references(file) {
+                if referrers[id]?.contains(where: { !selected.contains($0) && !donePaths.contains($0) }) == true { external.insert(id) }
             }
         }
-        downloaded = progressBytes(downloadedObjects)
-        try refreshNetworkPrediction()
+        allocation = try RemainingAllocation(files: remaining,
+            costs: Dictionary(uniqueKeysWithValues: objects.map { ($0, plan.objects[$0]!.transferSize) }),
+            retainedObjects: external, limit: limit)
+        let written = try remaining.first.map { min($0.size, try fs.size(at: layout.file($0.path)) ?? 0) } ?? 0
+        try checkCapacity(written: written)
+        // Recheck only this batch's sources. Initial prediction visited future
+        // ranges once; commits can invalidate later reuse without a rescan.
+        for id in objects where networkObjects.insert(id).inserted { totalNetwork = progressAdding(totalNetwork, plan.objects[id]!.transferSize) }
         let uncommitted = files.filter { !state.committedFiles.contains($0.path) }
         totalStaged = try uncommitted.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
         staged = try uncommitted.filter { state.stagedFiles.contains($0.path) }.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
-        try cleanupObjects(ids: Set(plan.objects.keys))
     }
 
     private func progress() -> OperationEvent {
@@ -205,16 +234,23 @@ private actor StagingSession {
     }
 
     private func reconcileFinishedPredictions() {
-        let done = state.stagedFiles.union(state.committedFiles)
-        networkObjects = networkObjects.filter { id in
-            downloadedObjects.contains(id) || !(referrers[id]?.isSubset(of: done) ?? true)
+        for file in files {
+            for id in SpaceBudget.references(file) where !downloadedObjects.contains(id) {
+                if referrers[id]?.isSubset(of: donePaths) == true, networkObjects.remove(id) != nil {
+                    totalNetwork -= plan.objects[id]!.transferSize
+                }
+            }
         }
-        totalNetwork = progressBytes(networkObjects)
     }
 
     private func record(_ record: JournalRecord) async throws {
         try await journal.append(record)
         try state.apply(record)
+        switch record {
+        case .fileStaged(let path): donePaths.insert(path)
+        case .fileUnstaged(let path): if !state.committedFiles.contains(path) { donePaths.remove(path) }
+        default: break
+        }
     }
 
     private func fetchObjects(_ ids: Set<String>) async throws {
@@ -428,10 +464,9 @@ private actor StagingSession {
     }
 
     private func cleanupObjects(ids: Set<String>) throws {
-        let done = state.stagedFiles.union(state.committedFiles)
         for id in ids {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
-            if let refs = referrers[id], refs.isSubset(of: done), let object = plan.objects[id] {
+            if let refs = referrers[id], refs.isSubset(of: donePaths), let object = plan.objects[id] {
                 try fs.removeFile(at: layout.object(object))
             }
         }

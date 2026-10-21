@@ -6,6 +6,7 @@ import Synchronization
 import Testing
 import LauncherCore
 import DownloadEngine
+import Sophon
 import TestSupport
 @testable import GameLibrary
 
@@ -39,7 +40,7 @@ import TestSupport
             bridgeServe(cdn, plan)
             let store = GameRecordStore(directory: records.url)
             var record = try bridgeRecord(root.url); if kind == .adopt { record.installed = nil; record.ownership = .adopted }
-            let runner = bridgeRunner(store, cdn, bytes: SpaceBudget.margin + 10)
+            let runner = bridgeRunner(store, cdn, bytes: SpaceBudget.margin + 15)
             try await pauseBridge(await runner.start("genshin", record: record, plan: plan, kind: kind,
                 target: bridgeBuild("new"), approved: true, managedPaths: Set(plan.files.map(\.path))), plan: plan, fs: fs, afterFirstBatch: afterFirstBatch)
             let pending = try #require(try await store.load("genshin")?.pending)
@@ -61,7 +62,7 @@ import TestSupport
         let root = try TempDir(); let records = try TempDir(); let cdn = MockCDN()
         let plan = try bridgePlan(); bridgeServe(cdn, plan)
         let store = GameRecordStore(directory: records.url)
-        let runner = bridgeRunner(store, cdn, bytes: SpaceBudget.margin + 10)
+        let runner = bridgeRunner(store, cdn, bytes: SpaceBudget.margin + 15)
         _ = try await bridgeCollect(await runner.start("genshin", record: bridgeRecord(root.url), plan: plan,
             kind: .update, target: bridgeBuild("new"), approved: false, managedPaths: Set(plan.files.map(\.path))))
         cdn.serve("getGameBranches", data: Data("newer released build".utf8))
@@ -77,10 +78,10 @@ import TestSupport
         let root = try TempDir(); let records = try TempDir(); let cdn = MockCDN()
         let plan = try bridgePlan(); bridgeServe(cdn, plan)
         let store = GameRecordStore(directory: records.url)
-        let runner = bridgeRunner(store, cdn, bytes: SpaceBudget.margin + 10)
+        let runner = bridgeRunner(store, cdn, bytes: SpaceBudget.margin + 15)
         let events = try await bridgeCollect(await runner.start("genshin", record: bridgeRecord(root.url), plan: plan,
             kind: .update, target: bridgeBuild("new"), approved: false, managedPaths: Set(plan.files.map(\.path))))
-        #expect(events.last == .needsBatchApproval(required: SpaceBudget.margin + 20, available: SpaceBudget.margin + 10))
+        #expect(events.last == .needsBatchApproval(required: SpaceBudget.margin + 20, available: SpaceBudget.margin + 15))
         #expect(try await store.load("genshin")?.pending?.planDigest == plan.planDigest)
         #expect(try await store.load("genshin")?.installed == bridgeBuild("old"))
         #expect(cdn.requestLog.isEmpty)
@@ -301,11 +302,107 @@ import TestSupport
         let root = try TempDir(); let records = try TempDir(); let cdn = MockCDN(); let plan = try bridgePlan()
         let store = GameRecordStore(directory: records.url)
         let runner = bridgeRunner(store, cdn, bytes: SpaceBudget.margin)
-        await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + 20, available: SpaceBudget.margin)) {
+        await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + 15, available: SpaceBudget.margin)) {
             _ = try await bridgeCollect(await runner.start("genshin", record: bridgeRecord(root.url), plan: plan,
                 kind: .install, target: bridgeBuild("new"), approved: false, managedPaths: Set(plan.files.map(\.path))))
         }
         #expect(try await store.load("genshin")?.pending != nil); #expect(cdn.requestLog.isEmpty)
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func cacheWriteProcessDeathReconcilesYoungAndOldTemporaries(existingRecord: Bool, old: Bool) async throws {
+        let root = try TempDir(), records = try TempDir()
+        let store = GameRecordStore(directory: records.url)
+        if existingRecord { try await bridgeSave(bridgeRecord(root.url), store: store) }
+        let harness = Bundle(for: BridgeBundleToken.self).bundleURL.deletingLastPathComponent().appendingPathComponent("CrashHarness")
+        let result = try await SystemProcessRunner().run(harness, arguments: ["crash-cache-write", records.url.path], environment: [:], currentDirectory: nil)
+        #expect(result.exitCode == 137, "\(String(decoding: result.stderr, as: UTF8.self))")
+        let fs = try ContainedFileSystem(root: records.url), directory = try SafeRelativePath("genshin")
+        let temporary = try #require(try fs.contentsOfDirectory(at: directory).first {
+            $0.components.last!.hasPrefix(".macgacha-cache-write-")
+        })
+        #expect(try fs.size(at: temporary) == 20)
+        let nested = try SafeRelativePath("genshin/manifests/.macgacha-cache-write-\(UUID().uuidString)")
+        try fs.writeAtomically(Data("nested".utf8), to: nested)
+        if old {
+            for path in [temporary, nested] {
+                try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7200)],
+                    ofItemAtPath: path.resolved(against: records.url).path)
+            }
+        }
+        // Both orphan and installed-record reconciliation must finish other
+        // metadata retirement even when a young cache sibling remains.
+        try await store.savePlan(bridgePlan(), for: "genshin")
+        let reconciled = try await bridgeRunner(store, MockCDN()).reconcile("genshin")
+        #expect(reconciled?.installed == (existingRecord ? bridgeBuild("old") : nil))
+        #expect(try fs.itemType(at: temporary) == (old ? nil : .regularFile))
+        #expect(try fs.itemType(at: nested) == (old ? nil : .regularFile))
+        #expect(try await store.loadPlan(for: "genshin") == nil)
+        #expect(try fs.itemType(at: directory) == ((!existingRecord && old) ? nil : .directory))
+    }
+
+    @Test func orphanRecoveryRejectsMalformedCacheTemporaryNames() async throws {
+        let records = try TempDir(), fs = try ContainedFileSystem(root: records.url)
+        let path = try SafeRelativePath("genshin/.macgacha-cache-write-\(UUID().uuidString)-foreign")
+        try fs.writeAtomically(Data("keep".utf8), to: path)
+        await #expect(throws: LauncherError.journalCorrupt("unexpected game metadata")) {
+            _ = try await bridgeRunner(GameRecordStore(directory: records.url), MockCDN()).reconcile("genshin")
+        }
+        #expect(try fs.readFile(at: path, maxBytes: 4) == Data("keep".utf8))
+    }
+
+    @Test func existingRecordReclaimsInterruptedPlanWriteAfterProcessDeath() async throws {
+        let scenario = try await bridgeCrash(.duringGamePlanWrite)
+        let fs = try ContainedFileSystem(root: scenario.records.url)
+        let directory = try SafeRelativePath("genshin")
+        let before = try fs.contentsOfDirectory(at: directory)
+        #expect(before.contains { $0.components.last!.hasPrefix(".macgacha-write-") })
+        let unrelated = try SafeRelativePath("genshin/.macgacha-write-not-a-uuid")
+        try fs.writeAtomically(Data("keep".utf8), to: unrelated)
+        let runner = bridgeRunner(scenario.store, MockCDN())
+        let record = try await runner.reconcile("genshin")
+        #expect(record?.installed == bridgeBuild("old") && record?.pending == nil)
+        let remaining = try fs.contentsOfDirectory(at: directory)
+        #expect(!remaining.contains { UUID(uuidString: String($0.components.last!.dropFirst(".macgacha-write-".count))) != nil })
+        #expect(try fs.readFile(at: unrelated, maxBytes: 4) == Data("keep".utf8))
+        let cdn = MockCDN(); bridgeServe(cdn, scenario.plan)
+        let events = try await bridgeCollect(await bridgeRunner(scenario.store, cdn).start("genshin", record: #require(record),
+            plan: scenario.plan, kind: .update, target: bridgeBuild("new"), approved: true, managedPaths: Set(scenario.plan.files.map(\.path))))
+        #expect(events.last == .phase(.completed))
+    }
+
+    @Test func anotherProcessCannotPrepareReconcileOrUninstallWhileStoreIsOwned() async throws {
+        let root = try TempDir(), records = try TempDir(), signals = try TempDir(), cdn = MockCDN()
+        let store = GameRecordStore(directory: records.url), record = try bridgeRecord(root.url)
+        let plan = try bridgePlan()
+        try await bridgeSave(record, store: store)
+        try await store.savePlan(plan, for: "genshin")
+        let ready = signals.url.appendingPathComponent("ready"), release = signals.url.appendingPathComponent("release")
+        let harness = Bundle(for: BridgeBundleToken.self).bundleURL.deletingLastPathComponent().appendingPathComponent("CrashHarness")
+        let child = Task { try await SystemProcessRunner().run(harness,
+            arguments: ["hold-game-store", records.url.path, ready.path, release.path], environment: [:], currentDirectory: nil) }
+        defer { try? Data().write(to: release) }
+        for _ in 0..<500 {
+            if FileManager.default.fileExists(atPath: ready.path) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(FileManager.default.fileExists(atPath: ready.path))
+        let runner = bridgeRunner(store, cdn)
+        await #expect(throws: LauncherError.busy("another game operation is running")) {
+            _ = try await bridgeCollect(await runner.start("genshin", record: record, plan: bridgePlan(id: "contender"),
+                kind: .update, target: bridgeBuild("new"), approved: true, managedPaths: Set(plan.files.map(\.path))))
+        }
+        await #expect(throws: LauncherError.busy("another game operation is running")) { _ = try await runner.reconcile("genshin") }
+        let library = GameLibrary(paths: AppPaths(root: signals.url), api: Sophon.DeliveryAPI(http: cdn), runner: runner,
+            store: store, disk: FixedDiskSpace(bytes: Int64.max), log: nil)
+        await #expect(throws: LauncherError.busy("another game operation is running")) { try await library.uninstall(GameDefinition.all[0]) }
+        #expect(try await store.load("genshin") == record)
+        #expect(try await store.loadPlan(for: "genshin")?.planDigest == plan.planDigest)
+        #expect(cdn.requestLog.isEmpty)
+        try Data().write(to: release)
+        #expect(try await child.value.exitCode == 0)
+        let lease = try await store.acquireOperationLease()
+        withExtendedLifetime(lease) {}
     }
 
     @Test(arguments: [false, true])

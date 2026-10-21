@@ -11,6 +11,75 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized) struct GameLibraryTests {
+    @Test(arguments: [false, true])
+    func branchCacheWriteSurvivesAnotherStoresOperationSweep(expired: Bool) async throws {
+        let gate = BranchWriteGate(), f = try LibraryFixture(fileOps: gate)
+        try f.advertise(1)
+        let library = f.library, location = f.install
+        let estimate = Task { try await library.estimate(game, voices: ["en-us"], at: location) }
+        defer { gate.release() }
+        try await gate.waitUntilPaused()
+        let fs = try ContainedFileSystem(root: f.paths.games)
+        let files = try fs.contentsOfDirectory(at: SafeRelativePath(game.id))
+        let temporary = try #require(files.first { $0.components.last!.hasPrefix(".macgacha-") })
+        if expired {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7200)],
+                ofItemAtPath: temporary.resolved(against: f.paths.games).path)
+        }
+        let other = GameRecordStore(directory: f.paths.games)
+        let runner = OperationRunner(store: other, fetcher: ChunkFetcher(http: f.cdn,
+            retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: FixedDiskSpace(bytes: Int64.max), log: nil)
+        #expect(try await runner.reconcile(game.id) == nil)
+        #expect(try fs.itemType(at: temporary) == (expired ? nil : .regularFile))
+        gate.release()
+        #expect(try await estimate.value.download > 0)
+        #expect(try fs.itemType(at: temporary) == nil)
+        #expect((try await other.readState("branch.json", for: game.id, maxBytes: 2 << 20) != nil) == !expired)
+        // A swept writer returns its fresh branch; a later request repairs the cache.
+        #expect(try await library.estimate(game, voices: ["en-us"], at: location).download > 0)
+        #expect(try await other.readState("branch.json", for: game.id, maxBytes: 2 << 20) != nil)
+        #expect(try await other.load(game.id) == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func manifestCacheFailureDoesNotPreventEstimateOrInstall(unavailable: Bool) async throws {
+        let f = try LibraryFixture(); try f.advertise(1)
+        let cacheURL = try await f.store.manifestCache(for: game.id)
+        if unavailable {
+            try FileManager.default.removeItem(at: cacheURL)
+            try Data("not a directory".utf8).write(to: cacheURL)
+        } else {
+            // A directory where a cache leaf belongs prevents its atomic replacement.
+            try FileManager.default.createDirectory(at: cacheURL.appendingPathComponent("v1-base.zst"), withIntermediateDirectories: false)
+        }
+        #expect(try await f.library.estimate(game, voices: ["en-us"], at: f.install).download > 0)
+        #expect(try await f.store.load(game.id) == nil)
+        try await f.installGame()
+        try f.assertFiles(1)
+    }
+
+    @Test(arguments: ["branch.json", ".zst"])
+    func cacheRenameFailureReturnsVerifiedDataAndCleansTemporary(suffix: String) async throws {
+        let logs = try TempDir(), log = EventLog(directory: logs.url)
+        let gate = BranchWriteGate(failingSuffix: suffix)
+        let f = try LibraryFixture(fileOps: gate, log: log); try f.advertise(1)
+        #expect(try await f.library.estimate(game, voices: ["en-us"], at: f.install).download > 0)
+        let cache = try ContainedFileSystem(root: f.paths.games)
+        let directory = try SafeRelativePath(suffix == "branch.json" ? game.id : "\(game.id)/manifests")
+        #expect(try cache.contentsOfDirectory(at: directory).isEmpty == (suffix == ".zst"))
+        let leaves = try cache.contentsOfDirectory(at: directory)
+        #expect(!leaves.contains { $0.components.last!.hasPrefix(".macgacha-") })
+        let destination = try SafeRelativePath(suffix == "branch.json" ? "\(game.id)/branch.json" : "\(game.id)/manifests/v1-base.zst")
+        #expect(try cache.itemType(at: destination) == nil)
+        let text = try String(contentsOf: logs.url.appendingPathComponent("macgacha.log"), encoding: .utf8)
+        #expect(text.contains("game-library"))
+        #expect(!text.contains("secret") && !text.contains("https://") && !text.contains(f.base.path))
+        gate.release()
+        #expect(try await f.library.estimate(game, voices: ["en-us"], at: f.install).download > 0)
+        #expect(try cache.itemType(at: destination) == .regularFile)
+        #expect(try await f.store.load(game.id) == nil)
+    }
+
     @Test func freshInstallThenInstalledStatus() async throws {
         let f = try LibraryFixture(); try f.advertise(1)
         #expect(await f.library.status(game) == .notInstalled)
@@ -68,8 +137,8 @@ import TestSupport
 
     @Test func pausedUpdateBlocksOtherOperations() async throws {
         let disk = LibraryDisk(); let f = try LibraryFixture(disk: disk)
-        try f.advertise(1); try await f.installGame(); try f.advertise(2)
-        disk.bytes.withLock { $0 = SpaceBudget.margin + 48 }
+        try f.advertise(1); try await f.installGame(); try f.advertise(2, changedFiles: 4)
+        disk.bytes.withLock { $0 = SpaceBudget.margin + 80 }
         try await pauseAfterBatch(await f.library.update(game, approved: true), fs: f.fs, store: f.store)
         let record = try #require(try await f.store.load(game.id)); let digest = try #require(record.pending?.planDigest)
         let before = f.cdn.requestLog.count
@@ -80,7 +149,7 @@ import TestSupport
         #expect(try await f.store.loadPlan(for: game.id)?.planDigest == digest)
         #expect(f.cdn.requestLog.count == before)
         disk.bytes.withLock { $0 = Int64.max }
-        _ = try await libraryCollect(await f.library.resume(game, approved: true)); try f.assertFiles(2)
+        _ = try await libraryCollect(await f.library.resume(game, approved: true)); try f.assertFiles(2, changedFiles: 4)
     }
 
     @Test func uninstallPausedFreshInstallBeforeFirstCommit() async throws {
@@ -458,8 +527,8 @@ import TestSupport
 
     @Test func engineRefusesReplacementBetweenBatches() async throws {
         let disk = LibraryDisk(); let f = try LibraryFixture(disk: disk)
-        try f.advertise(1); try await f.installGame(); try f.advertise(2)
-        disk.bytes.withLock { $0 = SpaceBudget.margin + 48 }
+        try f.advertise(1); try await f.installGame(); try f.advertise(2, changedFiles: 4)
+        disk.bytes.withLock { $0 = SpaceBudget.margin + 80 }
         var replaced = false
         await #expect(throws: LauncherError.io("install folder was replaced")) {
             for try await event in await f.library.update(game, approved: true) {
@@ -554,12 +623,12 @@ import TestSupport
         let stream: AsyncThrowingStream<OperationEvent, any Error>
         if operation == "voices" {
             _ = try await libraryCollect(await f.library.install(game, voices: [], at: f.install, approved: true))
-            disk.bytes.withLock { $0 = SpaceBudget.margin + 30 }
+            disk.bytes.withLock { $0 = SpaceBudget.margin + 33 }
             stream = await f.library.setVoices(game, ["en-us"])
         } else {
             if operation == "verify" { try await f.installGame() } else { try f.seedExisting() }
-            for path in syntheticFiles(1).keys { try f.fs.writeAtomically(Data("bad".utf8), to: SafeRelativePath(path)) }
-            disk.bytes.withLock { $0 = SpaceBudget.margin + 48 }
+            for (path, body) in syntheticFiles(1) { try f.fs.writeAtomically(Data(repeating: 0x42, count: body.count), to: SafeRelativePath(path)) }
+            disk.bytes.withLock { $0 = SpaceBudget.margin + 185 }
             stream = operation == "verify" ? await f.library.verify(game, mode: .full) : await f.library.adopt(game, folder: f.install, voices: ["en-us"])
         }
         let events = try await libraryCollect(stream)
@@ -597,15 +666,16 @@ private struct LibraryFixture: ~Copyable {
     let library: GameLibrary
     let disk: any DiskSpaceProbe
     var fs: ContainedFileSystem { get throws { try ContainedFileSystem(root: install) } }
-    init(disk: any DiskSpaceProbe = FixedDiskSpace(bytes: Int64.max), metadataGate: LibraryMetadataGate? = nil, requestGate: LibraryRequestGate? = nil) throws {
+    init(disk: any DiskSpaceProbe = FixedDiskSpace(bytes: Int64.max), metadataGate: LibraryMetadataGate? = nil, requestGate: LibraryRequestGate? = nil,
+        fileOps: any FileOps = SystemFileOps(), log: EventLog? = nil) throws {
         temp = try TempDir(); base = temp.url; paths = AppPaths(root: base.appendingPathComponent("App"))
-        install = base.appendingPathComponent("Install"); store = GameRecordStore(directory: paths.games)
+        install = base.appendingPathComponent("Install"); store = GameRecordStore(directory: paths.games, fileOps: fileOps)
         cdn = MockCDN(); self.disk = disk
         let http: any HTTPClient
         if let requestGate { http = LibraryGatedHTTP(cdn: cdn, gate: requestGate) }
         else if let metadataGate { http = LibraryDelayedHTTP(cdn: cdn, gate: metadataGate) } else { http = cdn }
         library = GameLibrary(paths: paths, api: DeliveryAPI(http: http), runner: OperationRunner(store: store,
-            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil), store: store, disk: disk, log: nil)
+            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: log), store: store, disk: disk, log: log, fileOps: fileOps)
     }
     func restarted(http: (any HTTPClient)? = nil, runnerHooks: CrashHooks = .none) -> GameLibrary {
         GameLibrary(paths: paths, api: DeliveryAPI(http: http ?? cdn), runner: OperationRunner(store: store,
@@ -616,10 +686,10 @@ private struct LibraryFixture: ~Copyable {
         for (path, body) in syntheticFiles(1) { try fs.writeAtomically(Data(body.utf8), to: SafeRelativePath(path)) }
         try fs.writeAtomically(Data("bad".utf8), to: SafeRelativePath("Game.exe"))
     }
-    func assertFiles(_ version: Int) throws {
-        for (path, body) in syntheticFiles(version) { #expect(try fs.readFile(at: SafeRelativePath(path), maxBytes: 100) == Data(body.utf8)) }
+    func assertFiles(_ version: Int, changedFiles: Int = 1) throws {
+        for (path, body) in syntheticFiles(version, changedFiles: changedFiles) { #expect(try fs.readFile(at: SafeRelativePath(path), maxBytes: 100) == Data(body.utf8)) }
     }
-    func advertise(_ version: Int, opaqueIDs: Bool = false, collidingID: Bool = false, buildID: String? = nil, sharedAcrossFiles: Bool = false, games: [GameDefinition] = [game]) throws {
+    func advertise(_ version: Int, opaqueIDs: Bool = false, collidingID: Bool = false, buildID: String? = nil, sharedAcrossFiles: Bool = false, changedFiles: Int = 1, games: [GameDefinition] = [game]) throws {
         let groups = [("base", "game"), ("extra", "extra"), ("voice", "en-us")]
         let categories: [[String: Any]] = groups.map { id, matching in ["category_id": id, "matching_field": matching,
             "type": id == "voice" ? "CATEGORY_TYPE_AUDIO" : "CATEGORY_TYPE_RESOURCE", "scenarios": ["CATEGORY_SCENARIO_FULL"]] }
@@ -629,7 +699,7 @@ private struct LibraryFixture: ~Copyable {
         var descriptors: [[String: Any]] = []
         for (id, matching) in groups {
             var manifest = ProtobufWriter()
-            for (path, body) in syntheticFiles(version, sharedAcrossFiles: sharedAcrossFiles).sorted(by: { $0.key < $1.key }) {
+            for (path, body) in syntheticFiles(version, sharedAcrossFiles: sharedAcrossFiles, changedFiles: changedFiles).sorted(by: { $0.key < $1.key }) {
                 let belongs = id == "base" ? (path == "Game.exe" || (path.hasPrefix("data/") && Int(path.suffix(2))! < 10)) :
                     id == "extra" ? (path == "shared.bin" || (path.hasPrefix("data/") && Int(path.suffix(2))! >= 10)) : (path.hasPrefix("audio/") || path == "shared.bin")
                 if !belongs { continue }
@@ -662,9 +732,9 @@ private struct LibraryFixture: ~Copyable {
         cdn.serve("downloader/sophon_chunk/api/getBuild", data: try jsonData(["build_id": buildID ?? "build-\(version)", "tag": "\(version).0", "manifests": descriptors]))
     }
 }
-private func syntheticFiles(_ version: Int, sharedAcrossFiles: Bool = false) -> [String: String] {
+private func syntheticFiles(_ version: Int, sharedAcrossFiles: Bool = false, changedFiles: Int = 1) -> [String: String] {
     var files = ["Game.exe": "commonv\(version)!!!", "shared.bin": "shared-resource", "audio/en1": "voice-1", "audio/en2": "voice-2"]
-    for i in 1...17 { files[String(format: "data/%02d", i)] = i == 1 ? "edit-\(version)" : "file-\(i)" }
+    for i in 1...17 { files[String(format: "data/%02d", i)] = i == 1 ? "edit-\(version)" : (i <= changedFiles ? "edit-\(version)-\(i)" : "file-\(i)") }
     if sharedAcrossFiles {
         files["data/01"] = "common" + String(repeating: "A", count: 100)
         files["data/02"] = "common" + String(repeating: "B", count: 100)
@@ -761,4 +831,37 @@ private struct LibraryDelayedHTTP: HTTPClient {
         if url.path.hasSuffix("getGameConfigs") { await gate.pause() }
         return try await cdn.get(url, byteRangeFrom: offset)
     }
+}
+
+/// Pause exactly between a completed cache temporary and its atomic rename.
+private final class BranchWriteGate: FileOps {
+    private let flags = Mutex((paused: false, released: false))
+    private let failingSuffix: String?
+    init(failingSuffix: String? = nil) { self.failingSuffix = failingSuffix }
+    func release() { flags.withLock { $0.released = true } }
+    func waitUntilPaused() async throws {
+        for _ in 0..<500 {
+            if flags.withLock({ $0.paused }) { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw LauncherError.io("branch write did not pause")
+    }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(descriptor, bytes: bytes) }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try SystemFileOps().synchronize(descriptor, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        if let failingSuffix {
+            if destination.hasSuffix(failingSuffix), !flags.withLock({ $0.released }) {
+                throw LauncherError.io("https://example.invalid/private?secret=selector")
+            }
+        } else if destination == "branch.json" {
+            flags.withLock { $0.paused = true }
+            for _ in 0..<5000 {
+                if flags.withLock({ $0.released }) { break }
+                usleep(1000)
+            }
+            guard flags.withLock({ $0.released }) else { throw LauncherError.io("branch write release deadline") }
+        }
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
 }

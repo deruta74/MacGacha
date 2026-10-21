@@ -27,12 +27,28 @@ public struct SophonManifest: Sendable {
     /// never returned; directories are created from each regular file's safe path.
     /// Unknown fields are skipped, but known scalar fields must occur at most once.
     public static func decode(_ protobuf: Data) throws -> SophonManifest {
+        try decode(protobuf, limits: Limits())
+    }
+
+    // Testable at small limits; production shares the engine/planner limits.
+    struct Limits {
+        var files = InstallPlan.maximumFiles
+        var chunksPerFile = InstallPlan.maximumExtents
+        var chunks = InstallPlan.maximumExtents
+    }
+
+    static func decode(_ protobuf: Data, limits: Limits) throws -> SophonManifest {
         var reader = ProtobufReader(protobuf)
         var files: [SophonFile] = []
         var paths = Set<String>()
+        var entries = 0, chunkCount = 0
         while let field = try reader.nextField() {
             guard field.number == 1 else { continue }
-            if let file = try decodeFile(reader.child(field)) {
+            // Count wire entries, including skipped directories, before decoding
+            // any nested strings, digests, paths or chunks.
+            guard entries < limits.files else { throw LauncherError.io("sophon file limit") }
+            entries += 1
+            if let file = try decodeFile(reader.child(field), limits: limits, chunkCount: &chunkCount) {
                 let key = file.path.description.folding(options: [.caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
                 guard paths.insert(key).inserted else { throw LauncherError.io("duplicate path") }
                 files.append(file)
@@ -41,7 +57,7 @@ public struct SophonManifest: Sendable {
         return SophonManifest(files: files)
     }
 
-    private static func decodeFile(_ input: ProtobufReader) throws -> SophonFile? {
+    private static func decodeFile(_ input: ProtobufReader, limits: Limits, chunkCount: inout Int) throws -> SophonFile? {
         var reader = input
         var seen = ScalarFields()
         var path: String?
@@ -53,7 +69,10 @@ public struct SophonManifest: Sendable {
             if [1, 3, 4, 5].contains(field.number) { try seen.insert(field.number) }
             switch field.number {
             case 1: path = try field.string()
-            case 2: chunks.append(try decodeChunk(reader.child(field)))
+            case 2:
+                guard chunks.count < limits.chunksPerFile, chunkCount < limits.chunks else { throw LauncherError.io("sophon chunk limit") }
+                chunkCount += 1
+                chunks.append(try decodeChunk(reader.child(field)))
             case 3: type = try field.uint64()
             case 4: size = try field.int64()
             case 5: md5 = try Digest(algorithm: .md5, hex: field.string())

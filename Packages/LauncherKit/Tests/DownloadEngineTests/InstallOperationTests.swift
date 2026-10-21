@@ -181,7 +181,7 @@ func planChangeBeforeCommitDiscardsStaging(sameID: Bool) async throws {
 func batchedModeRequiresApproval(denied: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("batch", [("a", "abc"), ("b", "def")]); let cdn = MockCDN()
-    let available: Int64 = (1 << 30) + 6; var events: [OperationEvent] = []
+    let available: Int64 = (1 << 30) + 9; var events: [OperationEvent] = []
     let operation = try opEngine(plan, temp.url, cdn, bytes: available, mode: denied ? .batched(approved: false) : .automatic)
     await #expect(throws: LauncherError.insufficientSpace(required: (1 << 30) + 12, available: available)) {
         _ = try await opCollect(operation.run(), onEvent: { events.append($0) })
@@ -195,7 +195,7 @@ func batchedModeCommitsInBatchesAndBlocksViaMarker() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("batch", [("a", "abc"), ("b", "def")]); let cdn = MockCDN(); opServe(cdn, plan, ["abc", "def"])
     var sawIntermediate = false
-    let operation = try opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true))
+    let operation = try opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 9, mode: .batched(approved: true))
     let events = try await opCollect(operation.run(), onEvent: { (event: OperationEvent) throws in
         if event == .phase(.checkingSpace), try InstallStateMarker.load(fs: fs) != nil,
            try fs.size(at: plan.files[0].path) == 3, try fs.size(at: plan.files[1].path) == nil {
@@ -255,7 +255,7 @@ func batchedModePreservesLocalSourcesNeededByLaterFilesWithoutFallback() async t
 @Test(arguments: [false, true], [false, true])
 func batchedModeUsesFallbackForOverwrittenLocalSource(resume: Bool, batched: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
-    let a = try opPlan("fallback", [("a", "new")])
+    let a = try opPlan("fallback", [("a", "new"), ("independent", "xyz")])
     let fallback = ChunkObject(id: "fallback-old", urls: [URL(string: "https://cdn.test/fallback-old")!],
         transferSize: 3, transferDigest: opDigest("old"), decodedSize: 3, decodedDigest: opDigest("old"))
     var objects = a.objects; objects[fallback.id] = fallback
@@ -265,8 +265,8 @@ func batchedModeUsesFallbackForOverwrittenLocalSource(resume: Bool, batched: Boo
     ])
     let plan = InstallPlan(id: a.id, objects: objects, files: a.files + [b])
     try fs.writeAtomically(Data("old".utf8), to: a.files[0].path)
-    let cdn = MockCDN(); opServe(cdn, a, ["new"]); cdn.serve(fallback.id, data: Data("old".utf8))
-    let bytes = batched ? (1 << 30) + 6 : Int64.max
+    let cdn = MockCDN(); opServe(cdn, a, ["new", "xyz"]); cdn.serve(fallback.id, data: Data("old".utf8))
+    let bytes = batched ? (1 << 30) + 12 : Int64.max
     var events: [OperationEvent] = []
     for try await event in try opEngine(plan, temp.url, cdn, bytes: bytes, mode: .batched(approved: true)).run() {
         events.append(event)
@@ -276,7 +276,7 @@ func batchedModeUsesFallbackForOverwrittenLocalSource(resume: Bool, batched: Boo
         let resumed = try await opCollect(opEngine(plan, temp.url, cdn, bytes: bytes, mode: .batched(approved: true)).run())
         if batched {
             let initial = resumed.first { if case .progress = $0 { true } else { false } }
-            #expect(initial == .progress(downloaded: 3, totalNetwork: 6, staged: 0, totalStaged: 3))
+            #expect(initial == .progress(downloaded: 3, totalNetwork: 9, staged: 0, totalStaged: 6))
         }
         events.append(contentsOf: resumed)
     }
@@ -287,7 +287,7 @@ func batchedModeUsesFallbackForOverwrittenLocalSource(resume: Bool, batched: Boo
     #expect(zip(progress, progress.dropFirst()).allSatisfy { $0.0.0 <= $0.1.0 })
     #expect(progress.last?.0 == progress.last?.1)
     #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("old".utf8))
-    #expect(cdn.requestLog.map(\.path) == (batched ? ["fallback-0", "fallback-old"] : ["fallback-0"]))
+    #expect(cdn.requestLog.map(\.path) == (batched ? ["fallback-0", "fallback-1", "fallback-old"] : ["fallback-0", "fallback-1"]))
 }
 
 @Test
@@ -295,7 +295,7 @@ func sharedObjectIsNotDownloadedAgainAcrossCommittedBatches() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try retainedSpacePlan(); let cdn = MockCDN(); serveRetainedSpacePlan(cdn, plan)
     var batches = 0
-    _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 13, mode: .batched(approved: true)).run(),
+    _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 21, mode: .batched(approved: true)).run(),
         onEvent: { event in if event == .phase(.committing) { batches += 1 } })
     #expect(batches == 4)
     #expect(cdn.requestLog.count == 3)
@@ -434,14 +434,14 @@ func laterBatchLocalDependencyIsRejectedBeforeAnyCommit() async throws {
         Extent(source: .local(path: remote.files[1].path, offset: 0), fileOffset: 0, length: 3, digest: opDigest("old")),
     ])
     let plan = InstallPlan(id: remote.id, objects: remote.objects, files: remote.files + [local])
-    try fs.writeAtomically(Data("untouched".utf8), to: remote.files[0].path)
+    try fs.writeAtomically(Data("old".utf8), to: remote.files[0].path)
     try fs.writeAtomically(Data("old".utf8), to: remote.files[1].path)
     try fs.writeAtomically(Data("consumer-old".utf8), to: local.path)
     let cdn = MockCDN(); opServe(cdn, remote, ["one", "new"])
-    await #expect(throws: LauncherError.insufficientSpace(required: (1 << 30) + 15, available: (1 << 30) + 6)) {
+    await #expect(throws: LauncherError.insufficientSpace(required: (1 << 30) + 12, available: (1 << 30) + 6)) {
         _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true)).run())
     }
-    #expect(try fs.readFile(at: remote.files[0].path, maxBytes: 20) == Data("untouched".utf8))
+    #expect(try fs.readFile(at: remote.files[0].path, maxBytes: 20) == Data("old".utf8))
     #expect(try fs.readFile(at: remote.files[1].path, maxBytes: 20) == Data("old".utf8))
     #expect(try fs.readFile(at: local.path, maxBytes: 20) == Data("consumer-old".utf8))
     #expect(try OperationJournal.replay(fs: fs, path: opJournal(plan)).commitStartedBatches.isEmpty)
@@ -465,7 +465,7 @@ func stagedFilesCostNothingAndBatchMembershipSurvivesRestart(restart: Bool) asyn
     }
     let first: Set<SafeRelativePath> = [plan.files[0].path, plan.files[1].path, plan.files[3].path]
     let cdn = MockCDN(); cdn.serve("staged-batches-1", data: Data("abc".utf8)); cdn.serve("staged-batches-2", data: Data("def".utf8))
-    let operation = try opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true))
+    let operation = try opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 9, mode: .batched(approved: true))
     if restart {
         do {
             var iterator = operation.run().makeAsyncIterator()
@@ -501,7 +501,7 @@ func batchMembershipMismatchThrowsBeforeCommitStarts() async throws {
     let plan = try opPlan("membership", [("a", "abc"), ("b", "def")])
     let cdn = MockCDN(); opServe(cdn, plan, ["abc", "def"])
     try fs.writeAtomically(Data("old".utf8), to: plan.files[0].path)
-    let operation = try opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true))
+    let operation = try opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 9, mode: .batched(approved: true))
     await #expect(throws: LauncherError.journalCorrupt("Staged batch membership mismatch")) {
         for try await event in operation.run() {
             if event == .fileVerified(plan.files[0].path) {
@@ -540,7 +540,7 @@ func conservativePartitionRejectsUnsafeSharedLocalBoundary() async throws {
 func sharedBatchPartsRequireConservativeSpaceReserveBeforeCommit() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try retainedSpacePlan(); let cdn = MockCDN(); serveRetainedSpacePlan(cdn, plan)
-    await #expect(throws: LauncherError.insufficientSpace(required: (1 << 30) + 13, available: (1 << 30) + 12)) {
+    await #expect(throws: LauncherError.insufficientSpace(required: (1 << 30) + 21, available: (1 << 30) + 12)) {
         _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 12, mode: .batched(approved: true)).run())
     }
     #expect(cdn.requestLog.isEmpty)
@@ -562,7 +562,7 @@ func retainedPartsAndInstalledGrowthCauseResumableExactShortfall() async throws 
             if event == .phase(.staging) { stagingEvents += 1 }
         })
     }
-    #expect(stagingEvents == 1)
+    #expect(stagingEvents == 2)
     let state = try OperationJournal.replay(fs: fs, path: opJournal(plan))
     #expect(state.committedFiles == [plan.files[0].path])
     #expect(!state.completed)
@@ -588,7 +588,7 @@ func staleStagedRecordsAreInvalidatedBeforePartitioning(wrongSize: Bool) async t
     if wrongSize { try fs.writeAtomically(Data("x".utf8), to: opStaged(plan, plan.files[1].path)) }
     let cdn = MockCDN(); opServe(cdn, plan, ["abc", "def"])
     var checked = false
-    _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true)).run(),
+    _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 9, mode: .batched(approved: true)).run(),
         onEvent: { (event: OperationEvent) throws in
             if event == .phase(.staging), !checked {
                 checked = true
@@ -660,7 +660,7 @@ struct RetainedPartsDisk: DiskSpaceProbe {
         let retained = try fs.size(at: SafeRelativePath(".macgacha-staging/\(plan.id)/objects/\(object.partFileName)")) ?? 0
         let state = try OperationJournal.replay(fs: fs, path: opJournal(plan))
         let installed = try state.committedFiles.contains(plan.files[0].path) ? fs.size(at: plan.files[0].path) ?? 0 : 0
-        return (1 << 30) + 13 - retained - installed
+        return (1 << 30) + (installed > 0 ? 7 : 21 - retained)
     }
 }
 
@@ -720,7 +720,7 @@ func constructingZstdInstallDoesNotRequestOrWrite() throws {
     #expect(try FileManager.default.contentsOfDirectory(atPath: temp.url.path).isEmpty)
 }
 
-@Test(arguments: [Int64(29), 30, 32])
+@Test(arguments: [Int64(31), 32, 34])
 func minimumPartitionSurvivesNonMonotonicGreedyBudget(extra: Int64) async throws {
     let temp = try TempDir(); let cdn = MockCDN()
     var objects: [String: ChunkObject] = [:]
@@ -737,8 +737,8 @@ func minimumPartitionSurvivesNonMonotonicGreedyBudget(extra: Int64) async throws
     }
     let plan = InstallPlan(id: try SafeIdentifier("nonmonotonic"), objects: objects, files: files)
     let operation = try opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + extra, mode: .batched(approved: true))
-    if extra == 29 {
-        await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + 30, available: SpaceBudget.margin + 29)) {
+    if extra == 31 {
+        await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + 32, available: SpaceBudget.margin + 31)) {
             _ = try await opCollect(operation.run())
         }
         #expect(cdn.requestLog.isEmpty)
@@ -749,7 +749,7 @@ func minimumPartitionSurvivesNonMonotonicGreedyBudget(extra: Int64) async throws
     }
 }
 
-@Test(arguments: [Int64(20), 36])
+@Test(arguments: [Int64(30), 36])
 func minimumPartitionHandlesGreedyDependencyFailure(extra: Int64) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let base = try opPlan("dependency-fallback", [("a", "aaaaaaaaaa"), ("b", "bbbbbbbb")])

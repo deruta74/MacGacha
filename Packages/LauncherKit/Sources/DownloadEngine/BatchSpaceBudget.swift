@@ -4,119 +4,97 @@ import Foundation
 import LauncherCore
 
 extension SpaceBudget {
-    /// The engine's dependency check and conservative reservation for a complete
-    /// partition. Every cross-batch object remains reserved beside the largest
-    /// batch. The live free space is checked again before each batch is staged.
+    /// Minimal contiguous batches preserve every local dependency without a
+    /// fallback. Their reservation covers the entire sequence, including output
+    /// kept after commits and parts retained for later batches.
     package static func batchedPreflight(plan: InstallPlan, state: JournalState, fs: ContainedFileSystem,
         available: Int64) throws -> (batches: [[FileTask]], required: Int64) {
-        let required = try Self.required(plan: plan, state: state, fs: fs).disk
-        let paths = StagingLayout(id: plan.id)
-        let staged = state.stagedFiles.subtracting(state.committedFiles)
-        var transferCosts: [String: Int64] = [:]
-        for object in plan.objects.values {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-            let verified = try state.verifiedObjects.contains(object.id) && fs.size(at: paths.object(object)) == object.transferSize
-            transferCosts[object.id] = verified ? 0 : object.transferSize
-        }
+        try plan.validate(supportedCodecs: Set(ChunkCodec.allCases))
         let pending = plan.files.filter { !state.committedFiles.contains($0.path) }
-        let remaining = pending.filter { !staged.contains($0.path) }
-        var referenceCounts: [String: Int] = [:]
-        for file in remaining {
-            for id in references(file) { referenceCounts[id, default: 0] += 1 }
-        }
-        // Every prefix may leave these parts referenced outside the candidate
-        // batch. Once both references enter it they are internally shared anyway.
-        let retained = Set(referenceCounts.filter { $0.value > 1 }.keys)
-        var batches: [[FileTask]] = []
-        var index = 0, first = true
-        // Consume each file once; repeatedly filtering the remaining plan would
-        // make a one-file-per-batch partition quadratic at delivery scale.
-        while index < remaining.count || (first && !staged.isEmpty) {
-            let start = index
-            var allocation = PeakAllocation(retainedObjects: retained)
-            while index < remaining.count {
+        guard !pending.isEmpty else { return ([], margin) }
+        let staged = pending.filter { state.stagedFiles.contains($0.path) }
+        let stagedPaths = Set(staged.map(\.path)), stagedKeys = Set(staged.map { batchPathKey($0.path) })
+        let remaining = pending.filter { !stagedPaths.contains($0.path) }
+        if remaining.isEmpty { return ([staged], try sequencePeak([staged], plan: plan, state: state, fs: fs)) }
+        let indexes = Dictionary(uniqueKeysWithValues: remaining.enumerated().map { (batchPathKey($0.element.path), $0.offset) })
+        var ends = Array(remaining.indices)
+        for (index, file) in remaining.enumerated() {
+            for extent in file.extents {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
-                try allocation.append(remaining[index], costs: transferCosts)
-                if try allocation.disk() > available { break }
-                index += 1
-            }
-            guard start != index || (first && !staged.isEmpty) else {
-                throw LauncherError.insufficientSpace(required: required, available: available)
-            }
-            if first && !staged.isEmpty {
-                let selected = staged.union(remaining[start..<index].map(\.path))
-                batches.append(pending.filter { selected.contains($0.path) })
-            } else { batches.append(Array(remaining[start..<index])) }
-            first = false
-        }
-        var overwritten = Set<String>()
-        for batch in batches {
-            for file in batch where !staged.contains(file.path) {
-                for extent in file.extents {
-                    guard !Task.isCancelled else { throw LauncherError.cancelled }
-                    if case .local(let source, _) = extent.source, extent.fallbackChunkID == nil,
-                        overwritten.contains(batchPathKey(source)) {
-                        throw LauncherError.insufficientSpace(required: required, available: available)
-                    }
+                if case .local(let source, _) = extent.source, extent.fallbackChunkID == nil {
+                    if let earlier = indexes[batchPathKey(source)], earlier < index { ends[earlier] = max(ends[earlier], index) }
+                    if stagedKeys.contains(batchPathKey(source)) { ends[0] = max(ends[0], index) }
                 }
             }
-            overwritten.formUnion(batch.map { batchPathKey($0.path) })
         }
-        var seen = Set<String>(), shared = Set<String>()
-        for batch in batches {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-            let files = batch.filter { !staged.contains($0.path) }
-            let ids = Set(files.flatMap { references($0) })
-            shared.formUnion(seen.intersection(ids)); seen.formUnion(ids)
+        var batches: [[FileTask]] = [], start = 0
+        while start < remaining.count {
+            var end = ends[start], cursor = start
+            while cursor <= end { end = max(end, ends[cursor]); cursor += 1 }
+            if start == 0, !staged.isEmpty {
+                let selected = stagedPaths.union(remaining[start...end].map(\.path))
+                batches.append(pending.filter { selected.contains($0.path) })
+            } else { batches.append(Array(remaining[start...end])) }
+            start = end + 1
         }
-        // Cross-batch parts can coexist with any batch. Keep that conservative
-        // reserve beside the same peak-allocation model used for a whole plan.
-        var reserve: Int64 = 0
-        for id in shared {
-            reserve = try adding(reserve, transferCosts[id] ?? 0)
-        }
-        var largest = margin
-        for batch in batches {
-            var allocation = PeakAllocation(retainedObjects: retained)
-            for file in batch where !staged.contains(file.path) {
-                try allocation.append(file, costs: transferCosts)
-            }
-            largest = max(largest, try allocation.disk())
-        }
-        return (batches, try adding(largest, reserve))
+        let sequential = try sequencePeak(batches, plan: plan, state: state, fs: fs)
+        let whole = try required(plan: plan, state: state, fs: fs).disk
+        // Whole mode may avoid a fallback by preserving a local source until all
+        // consumers stage. It is itself a valid single-batch partition.
+        return whole < sequential ? ([pending], whole) : (batches, sequential)
     }
 
-    /// Find a stable conservative budget: adding the shared-part reserve may
-    /// change greedy boundaries, so repartition until the advertised amount
-    /// passes the same preflight. Bound the work and fall back to whole mode.
     package static func minimumBatchedPreflight(plan: InstallPlan, state: JournalState, fs: ContainedFileSystem) throws -> Int64 {
-        let whole = try required(plan: plan, state: state, fs: fs).disk
+        try batchedPreflight(plan: plan, state: state, fs: fs, available: Int64.max).required
+    }
+
+    private static func sequencePeak(_ batches: [[FileTask]], plan: InstallPlan, state: JournalState,
+        fs: ContainedFileSystem) throws -> Int64 {
         let layout = StagingLayout(id: plan.id)
-        var candidate = margin
-        for file in try remainingFiles(plan: plan, state: state, fs: fs) {
-            var costs: [String: Int64] = [:]
-            for id in references(file) {
-                guard let object = plan.objects[id] else { throw LauncherError.io("Missing plan object") }
-                if try !state.verifiedObjects.contains(id) || fs.size(at: layout.object(object)) != object.transferSize {
-                    costs[id] = object.transferSize
+        var first: [String: Int] = [:], last: [String: Int] = [:], costs: [String: Int64] = [:]
+        for (index, batch) in batches.enumerated() {
+            for file in batch {
+                for id in references(file) {
+                    if first[id] == nil { first[id] = index }
+                    last[id] = index
                 }
             }
-            var allocation = PeakAllocation()
-            try allocation.append(file, costs: costs)
-            candidate = max(candidate, try allocation.disk())
         }
-        for _ in 0..<64 {
-            if candidate >= whole { return whole }
-            do {
-                let result = try batchedPreflight(plan: plan, state: state, fs: fs, available: candidate)
-                if result.required <= candidate { return candidate }
-                candidate = result.required
-            } catch LauncherError.insufficientSpace {
-                // A dependency boundary may require a whole-mode partition.
-                return whole
+        for id in first.keys {
+            let object = plan.objects[id]!
+            let resident = try state.verifiedObjects.contains(id) && fs.size(at: layout.object(object)) == object.transferSize
+            costs[id] = resident ? 0 : object.transferSize
+        }
+        var growth: Int64 = 0, peak = margin, decoded: Int64 = 0, largestBatchParts: Int64 = 0
+        // Lifetime events avoid scanning every object at every batch.
+        var newParts = Array(repeating: [String](), count: batches.count)
+        var expiredParts = newParts
+        for id in first.keys {
+            newParts[first[id]!].append(id)
+            expiredParts[last[id]!].append(id)
+        }
+        for (index, batch) in batches.enumerated() {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            let newCosts = Dictionary(uniqueKeysWithValues: newParts[index].map { ($0, costs[$0]!) })
+            let retained = Set(newParts[index].filter { last[$0]! > index })
+            var allocation = PeakAllocation(retainedObjects: retained)
+            for file in batch where !state.stagedFiles.contains(file.path) { try allocation.append(file, costs: newCosts) }
+            let batchDecoded = try batch.filter { !state.stagedFiles.contains($0.path) }.reduce(Int64(0)) { try adding($0, $1.size) }
+            let batchPeak = try allocation.disk()
+            decoded = try adding(decoded, batchDecoded)
+            largestBatchParts = max(largestBatchParts, batchPeak - batchDecoded - margin)
+            peak = max(peak, try adding(growth, batchPeak))
+            for file in batch {
+                if !state.stagedFiles.contains(file.path) { growth = try adding(growth, file.size) }
+                // Never assume an unlink releases destination blocks: APFS
+                // clones and snapshots can retain them despite st_nlink == 1.
+                // Only the live disk probe may report that capacity as freed.
             }
+            for id in newParts[index] { growth = try adding(growth, costs[id]!) }
+            for id in expiredParts[index] { growth -= costs[id]! }
         }
-        return whole
+        peak = max(peak, try adding(adding(decoded, largestBatchParts), margin))
+        return peak
     }
 
     private static func batchPathKey(_ path: SafeRelativePath) -> String {
