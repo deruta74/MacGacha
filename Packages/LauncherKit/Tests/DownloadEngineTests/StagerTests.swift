@@ -30,8 +30,8 @@ func committedBatchIsDoneForBudgetProgressAndObjectCleanup(includeCommittedInBat
     #expect(try SpaceBudget.requiredLargestFile(plan: plan, state: state, fs: fs) == SpaceBudget.margin + 3)
     let before = try fs.readFile(at: journalPath(plan), maxBytes: 16_384)
     let events = try await collectStaging(stager.stage(files: includeCommittedInBatch ? [a, b] : [b]))
-    #expect(events == [.progress(downloaded: 0, totalNetwork: 0, staged: 0, totalStaged: 3),
-        .fileVerified(b.path), .progress(downloaded: 0, totalNetwork: 0, staged: 3, totalStaged: 3)])
+    #expect(events == [.progress(downloaded: 3, totalNetwork: 3, staged: 0, totalStaged: 3),
+        .fileVerified(b.path), .progress(downloaded: 3, totalNetwork: 3, staged: 3, totalStaged: 3)])
     let after = try fs.readFile(at: journalPath(plan), maxBytes: 16_384)
     let records = try after.dropFirst(before.count).split(separator: 0x0a).map {
         try JSONDecoder().decode(JournalRecord.self, from: Data($0))

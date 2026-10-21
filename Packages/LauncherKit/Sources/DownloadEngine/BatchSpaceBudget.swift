@@ -20,21 +20,25 @@ extension SpaceBudget {
         }
         let pending = plan.files.filter { !state.committedFiles.contains($0.path) }
         let remaining = pending.filter { !staged.contains($0.path) }
+        var referenceCounts: [String: Int] = [:]
+        for file in remaining {
+            for id in references(file) { referenceCounts[id, default: 0] += 1 }
+        }
+        // Every prefix may leave these parts referenced outside the candidate
+        // batch. Once both references enter it they are internally shared anyway.
+        let retained = Set(referenceCounts.filter { $0.value > 1 }.keys)
         var batches: [[FileTask]] = []
         var index = 0, first = true
         // Consume each file once; repeatedly filtering the remaining plan would
         // make a one-file-per-batch partition quadratic at delivery scale.
         while index < remaining.count || (first && !staged.isEmpty) {
             let start = index
-            var cost = margin, counted = Set<String>()
+            var allocation = PeakAllocation(retainedObjects: retained)
             while index < remaining.count {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
-                let file = remaining[index], ids = references(file)
-                var added = file.size
-                for id in ids.subtracting(counted) { added = try adding(added, transferCosts[id] ?? 0) }
-                let next = try adding(cost, added)
-                if next > available { break }
-                counted.formUnion(ids); cost = next; index += 1
+                try allocation.append(remaining[index], costs: transferCosts)
+                if try allocation.disk() > available { break }
+                index += 1
             }
             guard start != index || (first && !staged.isEmpty) else {
                 throw LauncherError.insufficientSpace(required: required, available: available)
@@ -58,23 +62,28 @@ extension SpaceBudget {
             }
             overwritten.formUnion(batch.map { batchPathKey($0.path) })
         }
-        var largest: Int64 = 0
         var seen = Set<String>(), shared = Set<String>()
         for batch in batches {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let files = batch.filter { !staged.contains($0.path) }
             let ids = Set(files.flatMap { references($0) })
-            var need = try files.reduce(Int64(0)) { try adding($0, $1.size) }
-            for id in ids { need = try adding(need, transferCosts[id] ?? 0) }
-            largest = max(largest, need)
             shared.formUnion(seen.intersection(ids)); seen.formUnion(ids)
         }
-        var preflight = try adding(largest, margin)
+        // Cross-batch parts can coexist with any batch. Keep that conservative
+        // reserve beside the same peak-allocation model used for a whole plan.
+        var reserve: Int64 = 0
         for id in shared {
-            guard let object = plan.objects[id] else { throw LauncherError.io("Missing plan object") }
-            preflight = try adding(preflight, object.transferSize)
+            reserve = try adding(reserve, transferCosts[id] ?? 0)
         }
-        return (batches, preflight)
+        var largest = margin
+        for batch in batches {
+            var allocation = PeakAllocation(retainedObjects: retained)
+            for file in batch where !staged.contains(file.path) {
+                try allocation.append(file, costs: transferCosts)
+            }
+            largest = max(largest, try allocation.disk())
+        }
+        return (batches, try adding(largest, reserve))
     }
 
     /// Find a stable conservative budget: adding the shared-part reserve may
@@ -85,14 +94,16 @@ extension SpaceBudget {
         let layout = StagingLayout(id: plan.id)
         var candidate = margin
         for file in try remainingFiles(plan: plan, state: state, fs: fs) {
-            var need = file.size
+            var costs: [String: Int64] = [:]
             for id in references(file) {
                 guard let object = plan.objects[id] else { throw LauncherError.io("Missing plan object") }
                 if try !state.verifiedObjects.contains(id) || fs.size(at: layout.object(object)) != object.transferSize {
-                    need = try adding(need, object.transferSize)
+                    costs[id] = object.transferSize
                 }
             }
-            candidate = max(candidate, try adding(need, margin))
+            var allocation = PeakAllocation()
+            try allocation.append(file, costs: costs)
+            candidate = max(candidate, try allocation.disk())
         }
         for _ in 0..<64 {
             if candidate >= whole { return whole }
