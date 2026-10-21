@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Synchronization
 import LauncherCore
 import DownloadEngine
 
@@ -12,6 +13,14 @@ public actor GameRecordStore {
     private let fileOps: any FileOps
     public init(directory: URL, fileOps: any FileOps = SystemFileOps()) {
         self.directory = directory; self.fileOps = fileOps
+    }
+
+    /// The store directory's identity excludes other runners, including runners
+    /// using another store instance or another pathname for the same directory.
+    /// Retain the lease through record advancement and receipt acknowledgement.
+    package func acquireOperationLease() throws -> GameOperationLease {
+        let fs = try writableFilesystem()
+        return try GameOperationLease.acquire(key: fs.rootIdentity())
     }
 
     public func load(_ game: String) throws -> GameRecord? {
@@ -94,4 +103,18 @@ public actor GameRecordStore {
     private func encoder() -> JSONEncoder {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]; return encoder
     }
+}
+
+/// Only active leases occupy the registry; filesystem work never holds its mutex.
+package final class GameOperationLease: Sendable {
+    private static let active = Mutex<Set<String>>([])
+    private let key: String
+    private init(key: String) { self.key = key }
+    fileprivate static func acquire(key: String) throws -> GameOperationLease {
+        guard active.withLock({ $0.insert(key).inserted }) else {
+            throw LauncherError.busy("another game operation is running")
+        }
+        return GameOperationLease(key: key)
+    }
+    deinit { _ = Self.active.withLock { $0.remove(key) } }
 }

@@ -267,7 +267,7 @@ public struct InstallPlan: Codable, Sendable {
 
 private func validateManifestPath(_ path: SafeRelativePath) throws {
     let first = caseFold(path.components[0])
-    guard first != ".macgacha-staging", first != ".macgacha-state.json" else {
+    guard first != ".macgacha-staging", first != ".macgacha-state.json", first != ".macgacha-receipts" else {
         throw LauncherError.unsafePath(path.description)
     }
 }

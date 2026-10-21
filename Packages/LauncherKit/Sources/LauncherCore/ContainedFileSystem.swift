@@ -53,6 +53,16 @@ public struct ContainedFileSystem: Sendable, Hashable {
         close(fd)
     }
 
+    /// Process-local reservations use the actual directory identity, including
+    /// when trusted ancestors reach it through symlink or firmlink aliases.
+    package func rootIdentity() throws -> String {
+        guard let fd = try directory([], create: false) else { throw LauncherError.io("Directory is missing") }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { throw LauncherError.io("Cannot inspect contained root") }
+        return "\(info.st_dev):\(info.st_ino)"
+    }
+
     private func durableRootDirectory(_ path: URL, remainingDepth: Int, trustedAncestor: Bool) throws -> Int32 {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard remainingDepth > 0 else { throw LauncherError.io("Directory depth exceeds limit") }

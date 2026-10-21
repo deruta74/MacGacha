@@ -15,19 +15,25 @@ public struct InstallOperation: Sendable {
     private let disk: any DiskSpaceProbe
     private let mode: Mode
     private let crashHooks: CrashHooks
+    private let writesCompletionReceipt: Bool
+    private let requireRequestedPlan: Bool
 
     public init(plan: InstallPlan, installRoot: URL, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), mode: Mode = .automatic,
-        fileOps: any FileOps = SystemFileOps(), crashHooks: CrashHooks = .none) throws {
+        fileOps: any FileOps = SystemFileOps(), crashHooks: CrashHooks = .none,
+        writesCompletionReceipt: Bool = false, requireRequestedPlan: Bool = false) throws {
         try plan.validate(supportedCodecs: ChunkCodec.supportedCodecs)
         self.plan = plan; fs = try ContainedFileSystem(root: installRoot, fileOps: fileOps)
         self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks
+        self.writesCompletionReceipt = writesCompletionReceipt
+        self.requireRequestedPlan = requireRequestedPlan
     }
 
     /// Pull-driven events: cancellation follows the consumer task, and discarding the
     /// stream releases the root lock without leaving a producer running in the background.
     public func run() -> AsyncThrowingStream<OperationEvent, any Error> {
-        let session = CommitSession(requested: plan, fs: fs, fetcher: fetcher, disk: disk, mode: mode, crashHooks: crashHooks)
+        let session = CommitSession(requested: plan, fs: fs, fetcher: fetcher, disk: disk, mode: mode, crashHooks: crashHooks,
+            writesCompletionReceipt: writesCompletionReceipt, requireRequestedPlan: requireRequestedPlan)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
 }
@@ -48,12 +54,18 @@ private actor CommitSession {
         let journal: OperationJournal
         let state: JournalState
     }
+    private struct Discovered {
+        let plan: InstallPlan
+        let state: JournalState
+    }
     private let requested: InstallPlan
     private let fs: ContainedFileSystem
     private let fetcher: ChunkFetcher
     private let disk: any DiskSpaceProbe
     private let mode: InstallOperation.Mode
     private let crashHooks: CrashHooks
+    private let writesCompletionReceipt: Bool
+    private let requireRequestedPlan: Bool
     private var lock: InstallLock?
     private var active: Stored?
     private var state = JournalState()
@@ -67,8 +79,11 @@ private actor CommitSession {
     private static let planLimit = InstallPlan.maximumEncodedBytes
 
     init(requested: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher,
-        disk: any DiskSpaceProbe, mode: InstallOperation.Mode, crashHooks: CrashHooks) {
+        disk: any DiskSpaceProbe, mode: InstallOperation.Mode, crashHooks: CrashHooks, writesCompletionReceipt: Bool,
+        requireRequestedPlan: Bool) {
         self.requested = requested; self.fs = fs; self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks
+        self.writesCompletionReceipt = writesCompletionReceipt
+        self.requireRequestedPlan = requireRequestedPlan
     }
 
     func next() async throws -> OperationEvent? {
@@ -104,11 +119,17 @@ private actor CommitSession {
                 try await deleteFiles()
                 crashHooks.reach(.beforeCompleted)
                 try await record(.operationCompleted)
+                crashHooks.reach(.afterOperationCompleted)
                 step = .cleanup
                 return .phase(.cleaningUp)
             case .cleanup:
                 let finished = try context().plan
+                if writesCompletionReceipt, finished.id == requested.id, finished.planDigest == requested.planDigest {
+                    try CompletionReceipt(planID: finished.id, planDigest: finished.planDigest).write(fs: fs)
+                    crashHooks.reach(.afterCompletionReceipt)
+                }
                 try cleanup(finished)
+                crashHooks.reach(.afterEngineCleanup)
                 if finished.planDigest != requested.planDigest {
                     try await createRequested()
                     return try activate()
@@ -143,7 +164,8 @@ private actor CommitSession {
     private func selectStoredOrRequested() async throws {
         let root = try SafeRelativePath(".macgacha-staging")
         let marker = try InstallStateMarker.load(fs: fs)
-        var stored: [Stored] = []
+        var stored: [Discovered] = []
+        var orphans: [SafeRelativePath] = []
         var loadedBytes = 0
         for path in try fs.contentsOfDirectory(at: root).sorted(by: { $0.description < $1.description }) {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -155,7 +177,7 @@ private actor CommitSession {
                 guard marker?.planID.description != path.components.last else {
                     throw LauncherError.journalCorrupt("Install marker has no stored plan")
                 }
-                try fs.removeItem(at: path)
+                orphans.append(path)
                 continue
             }
             let id = try SafeIdentifier(path.components.last ?? "")
@@ -173,14 +195,18 @@ private actor CommitSession {
             // actionable codec error, before any stored plan can fetch or commit.
             guard plan.id == id else { throw LauncherError.journalCorrupt("Stored plan directory mismatch") }
             try plan.validate()
-            let journal = try OperationJournal(fs: fs, path: paths.journal, crashHooks: crashHooks)
-            let replay = journal.recoveredState
+            // Read-only discovery: constructing a journal can repair its tail.
+            // No recovery writes are allowed until every plan passes identity checks.
+            let replay = try OperationJournal.replay(fs: fs, path: paths.journal)
             guard (replay.planID == nil || replay.planID == plan.id),
                   (replay.planDigest == nil || replay.planDigest == plan.planDigest) else {
                 throw LauncherError.journalCorrupt("Stored plan digest mismatch")
             }
-            stored.append(Stored(plan: plan, journal: journal, state: replay))
+            stored.append(Discovered(plan: plan, state: replay))
         }
+        if requireRequestedPlan, stored.contains(where: {
+            !$0.state.completed && ($0.plan.id != requested.id || $0.plan.planDigest != requested.planDigest)
+        }) { throw LauncherError.journalCorrupt("staging holds another plan") }
         if let marker, !stored.contains(where: { $0.plan.id == marker.planID }) {
             throw LauncherError.journalCorrupt("Install marker has no stored plan")
         }
@@ -191,13 +217,16 @@ private actor CommitSession {
            !selected.state.completed, marker.planID != selected.plan.id {
             throw LauncherError.journalCorrupt("Install marker belongs to another plan")
         }
+        for orphan in orphans { try fs.removeItem(at: orphan) }
         for other in stored where other.plan.id != selected?.plan.id {
             // Any unfinished committed plan was selected above. Only disposable pre-commit
             // staging or completed cleanup remains, and all paths stay inside CFS.
             try cleanup(other.plan)
         }
         if let selected {
-            active = selected; state = selected.state
+            let journal = try OperationJournal(fs: fs, path: CommitPaths(id: selected.plan.id).journal, crashHooks: crashHooks)
+            active = Stored(plan: selected.plan, journal: journal, state: journal.recoveredState)
+            state = journal.recoveredState
             try validateDeletions(selected.plan)
             if state.planID == nil {
                 // plan.json is persisted first; a crash or repaired first line can leave
@@ -473,15 +502,7 @@ private actor CommitSession {
     }
 
     private func cleanup(_ plan: InstallPlan) throws {
-        let marker = try InstallStateMarker.load(fs: fs)
-        if marker == nil || marker?.planID == plan.id {
-            try InstallStateMarker.clear(fs: fs, matching: plan.id)
-        }
-        let paths = CommitPaths(id: plan.id)
-        // Retire the plan durably before recursive cleanup can remove its completion journal.
-        // If interrupted, discovery treats the remaining directory as disposable orphan data.
-        try fs.removeFile(at: paths.plan)
-        try fs.removeItem(at: paths.directory)
+        try cleanupInstallStaging(planID: plan.id, fs: fs)
     }
 
     private func references(_ file: FileTask) -> Set<String> {
