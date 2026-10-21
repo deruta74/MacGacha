@@ -3,6 +3,7 @@
 import Foundation
 import Darwin
 import Testing
+import Synchronization
 import LauncherCore
 import TestSupport
 
@@ -408,4 +409,65 @@ private struct FailedDirectorySwap: FileOps {
     func swap(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32) throws {
         throw LauncherError.io("injected swap failure")
     }
+}
+
+@Test func pinnedRootUsesFreshEnumerationOffsets() throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    try fs.writeAtomically(Data("x".utf8), to: SafeRelativePath("child"))
+    let pinned = try fs.pinRoot()
+    #expect(try pinned.contentsOfRootDirectory() == [SafeRelativePath("child")])
+    #expect(try pinned.contentsOfRootDirectory() == [SafeRelativePath("child")])
+}
+
+@Test func pinnedOperationsNeverReopenAReplacementRoot() throws {
+    let temp = try TempDir(); let root = temp.url.appendingPathComponent("root")
+    let fs = try ContainedFileSystem(root: root)
+    try fs.writeAtomically(Data("original".utf8), to: SafeRelativePath("managed"))
+    let pinned = try fs.pinRoot()
+    let originalIdentity = try pinned.rootIdentity()
+    try FileManager.default.moveItem(at: root, to: temp.url.appendingPathComponent("moved"))
+    try fs.writeAtomically(Data("replacement".utf8), to: SafeRelativePath("managed"))
+    try pinned.removeFile(at: SafeRelativePath("managed"))
+    #expect(try fs.readFile(at: SafeRelativePath("managed"), maxBytes: 100) == Data("replacement".utf8))
+    #expect(try pinned.rootIdentity() == originalIdentity)
+    #expect(throws: LauncherError.io("install folder was replaced")) { try pinned.removePinnedRoot(onlyIfEmpty: false) }
+}
+
+@Test func persistentIdentityAcceptsRemountButRefusesAnotherVolume() throws {
+    let temp = try TempDir(); let provider = RemountIdentityProvider()
+    let fs = try ContainedFileSystem(root: temp.url, identityProvider: provider)
+    let identity = try fs.rootIdentity()
+    provider.remount(device: 2, differentVolume: false)
+    let checked = try ContainedFileSystem(root: temp.url, expectedRootIdentity: identity, identityProvider: provider)
+    try checked.writeAtomically(Data("same".utf8), to: SafeRelativePath("accepted"))
+    provider.remount(device: 3, differentVolume: true)
+    #expect(throws: LauncherError.io("install folder was replaced")) {
+        try checked.writeAtomically(Data("other".utf8), to: SafeRelativePath("refused"))
+    }
+    #expect(try fs.itemType(at: SafeRelativePath("refused")) == nil)
+    #expect(try fs.readFile(at: SafeRelativePath("accepted"), maxBytes: 10) == Data("same".utf8))
+}
+
+private final class RemountIdentityProvider: FileSystemIdentityProvider, Sendable {
+    private let state = Mutex((device: Int64(1), differentVolume: false))
+    func remount(device: Int64, differentVolume: Bool) { state.withLock { $0 = (device, differentVolume) } }
+    func identity(of descriptor: Int32) throws -> FileSystemIdentity {
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { throw LauncherError.io("test identity unavailable") }
+        let value = state.withLock { $0 }
+        let uuid = UUID(uuidString: value.differentVolume ? "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB" : "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        return FileSystemIdentity(volumeUUID: uuid, device: value.device, inode: UInt64(info.st_ino))
+    }
+}
+
+@Test func durableRootCreationCannotClaimAReplacement() throws {
+    let temp = try TempDir(); let root = temp.url.appendingPathComponent("claimed")
+    let fs = try ContainedFileSystem(root: root); try fs.createRootDurably()
+    let checked = try ContainedFileSystem(root: root, expectedRootIdentity: fs.rootIdentity())
+    try FileManager.default.moveItem(at: root, to: temp.url.appendingPathComponent("moved"))
+    try fs.createRootDurably()
+    #expect(throws: LauncherError.io("install folder was replaced")) { try checked.createRootDurably() }
+    try FileManager.default.removeItem(at: root)
+    #expect(throws: LauncherError.io("install folder was replaced")) { try checked.createRootDurably() }
+    #expect(!FileManager.default.fileExists(atPath: root.path))
 }

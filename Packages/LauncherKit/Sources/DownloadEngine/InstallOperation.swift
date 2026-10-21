@@ -21,9 +21,10 @@ public struct InstallOperation: Sendable {
     public init(plan: InstallPlan, installRoot: URL, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), mode: Mode = .automatic,
         fileOps: any FileOps = SystemFileOps(), crashHooks: CrashHooks = .none,
-        writesCompletionReceipt: Bool = false, requireRequestedPlan: Bool = false) throws {
+        writesCompletionReceipt: Bool = false, requireRequestedPlan: Bool = false,
+        expectedRootIdentity: FileSystemIdentity? = nil, identityProvider: any FileSystemIdentityProvider = SystemFileSystemIdentityProvider()) throws {
         try plan.validate(supportedCodecs: ChunkCodec.supportedCodecs)
-        self.plan = plan; fs = try ContainedFileSystem(root: installRoot, fileOps: fileOps)
+        self.plan = plan; fs = try ContainedFileSystem(root: installRoot, fileOps: fileOps, expectedRootIdentity: expectedRootIdentity, identityProvider: identityProvider)
         self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks
         self.writesCompletionReceipt = writesCompletionReceipt
         self.requireRequestedPlan = requireRequestedPlan
@@ -343,86 +344,21 @@ private actor CommitSession {
         }
     }
 
-    private func partitionAll(_ pending: InstallPlan, required: Int64, available: Int64) throws -> [[FileTask]] {
-        let paths = CommitPaths(id: pending.id)
-        let staged = state.stagedFiles.subtracting(state.committedFiles)
-        var transferCosts: [String: Int64] = [:]
-        for object in pending.objects.values {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-            let verified = try state.verifiedObjects.contains(object.id) && fs.size(at: paths.object(object)) == object.transferSize
-            transferCosts[object.id] = verified ? 0 : object.transferSize
+    private func partitionAll(_ pending: InstallPlan, required _: Int64, available: Int64) throws -> [[FileTask]] {
+        let minimum = try SpaceBudget.minimumBatchedPreflight(plan: pending, state: state, fs: fs)
+        guard minimum <= available else { throw LauncherError.insufficientSpace(required: minimum, available: available) }
+        do {
+            let result = try SpaceBudget.batchedPreflight(plan: pending, state: state, fs: fs, available: available)
+            if result.required <= available { return result.batches }
+        } catch LauncherError.insufficientSpace {
+            // Greedy boundaries can also invalidate a local-source dependency.
+            // Other errors, including cancellation and I/O failures, propagate.
         }
-        var remaining = pending.files
-        var result: [[FileTask]] = []
-        while !remaining.isEmpty {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-            let candidate = try partitionPrefix(remaining, staged: staged, transferCosts: transferCosts,
-                required: required, available: available)
-            let selected = Set(candidate.map(\.path))
-            remaining.removeAll { selected.contains($0.path) }
-            result.append(candidate)
-        }
-        try validateBatchDependencies(result, staged: staged, required: required, available: available)
-        // Do not project future allocation/reclamation. Reserve every cross-batch object
-        // in addition to the largest batch, then recheck the live need before each batch.
-        var largest: Int64 = 0
-        var seen = Set<String>(), shared = Set<String>()
-        for batch in result {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-            let files = batch.filter { !staged.contains($0.path) }
-            let ids = Set(files.flatMap { references($0) })
-            var need = try files.reduce(Int64(0)) { try sum($0, $1.size) }
-            for id in ids { need = try sum(need, transferCosts[id] ?? 0) }
-            largest = max(largest, need)
-            shared.formUnion(seen.intersection(ids)); seen.formUnion(ids)
-        }
-        var preflight = try sum(largest, SpaceBudget.margin)
-        for id in shared {
-            guard let object = pending.objects[id] else { throw LauncherError.io("Missing plan object") }
-            preflight = try sum(preflight, object.transferSize)
-        }
-        guard preflight <= available else { throw LauncherError.insufficientSpace(required: preflight, available: available) }
-        return result
-    }
-
-    private func validateBatchDependencies(_ batches: [[FileTask]], staged: Set<SafeRelativePath>,
-        required: Int64, available: Int64) throws {
-        var overwritten = Set<String>()
-        for batch in batches {
-            for file in batch where !staged.contains(file.path) {
-                for extent in file.extents {
-                    guard !Task.isCancelled else { throw LauncherError.cancelled }
-                    if case .local(let source, _) = extent.source, extent.fallbackChunkID == nil,
-                       overwritten.contains(folded(source)) {
-                        throw LauncherError.insufficientSpace(required: required, available: available)
-                    }
-                }
-            }
-            overwritten.formUnion(batch.map { folded($0.path) })
-        }
-    }
-
-    private func partitionPrefix(_ files: [FileTask], staged: Set<SafeRelativePath>, transferCosts: [String: Int64],
-        required: Int64, available: Int64) throws -> [FileTask] {
-        // Always include staged files, even beyond the first file that cannot fit.
-        // Do not count their object references: the parts may already have been deleted.
-        var selected = staged.intersection(files.map(\.path)), counted = Set<String>()
-        var cost = SpaceBudget.margin
-        for file in files where !selected.contains(file.path) {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-            var added = file.size
-            let ids = references(file)
-            for id in ids.subtracting(counted) { added = try sum(added, transferCosts[id] ?? 0) }
-            let next = try sum(cost, added)
-            if next > available { break }
-            selected.insert(file.path); counted.formUnion(ids); cost = next
-        }
-        guard !selected.isEmpty else { throw LauncherError.insufficientSpace(required: required, available: available) }
-        return files.filter { selected.contains($0.path) }
-    }
-
-    private func folded(_ path: SafeRelativePath) -> String {
-        path.description.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
+        // More free space can change greedy boundaries and increase the shared
+        // reserve or break dependencies. Retain the validated minimum partition.
+        let fallback = try SpaceBudget.batchedPreflight(plan: pending, state: state, fs: fs, available: minimum)
+        guard fallback.required <= available else { throw LauncherError.insufficientSpace(required: fallback.required, available: available) }
+        return fallback.batches
     }
 
     private func beginCommit() async throws {

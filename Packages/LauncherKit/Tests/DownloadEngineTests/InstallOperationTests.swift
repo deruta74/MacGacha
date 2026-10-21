@@ -700,3 +700,49 @@ func constructingZstdInstallDoesNotRequestOrWrite() throws {
     #expect(cdn.requestLog.isEmpty)
     #expect(try FileManager.default.contentsOfDirectory(atPath: temp.url.path).isEmpty)
 }
+
+@Test(arguments: [Int64(29), 30, 32])
+func minimumPartitionSurvivesNonMonotonicGreedyBudget(extra: Int64) async throws {
+    let temp = try TempDir(); let cdn = MockCDN()
+    var objects: [String: ChunkObject] = [:]
+    for (id, body) in [("shared", "aa"), ("other", "bb")] {
+        let bytes = Data([0x28, 0xb5, 0x2f, 0xfd, 0xa0, 2, 0, 0, 0, 0x11, 0, 0]) + Data(body.utf8)
+        objects[id] = ChunkObject(id: id, urls: [URL(string: "https://cdn.hoyoverse.com/\(id)")!],
+            transferSize: 14, decodedSize: 2, decodedDigest: opDigest(body), codec: .zstd)
+        cdn.serve(id, data: bytes)
+    }
+    let files = try [("a", "shared", "aa"), ("b", "other", "bb"), ("c", "shared", "aa")].map { name, id, body in
+        FileTask(path: try SafeRelativePath(name), size: 2, digest: opDigest(body), extents: [
+            Extent(source: .chunk(id: id), fileOffset: 0, length: 2, digest: opDigest(body)),
+        ])
+    }
+    let plan = InstallPlan(id: try SafeIdentifier("nonmonotonic"), objects: objects, files: files)
+    let operation = try opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + extra, mode: .batched(approved: true))
+    if extra == 29 {
+        await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + 30, available: SpaceBudget.margin + 29)) {
+            _ = try await opCollect(operation.run())
+        }
+        #expect(cdn.requestLog.isEmpty)
+    } else {
+        let events = try await opCollect(operation.run())
+        #expect(events.last == .phase(.completed))
+        for file in files { #expect(try ContainedFileSystem(root: temp.url).size(at: file.path) == 2) }
+    }
+}
+
+@Test(arguments: [Int64(20), 36])
+func minimumPartitionHandlesGreedyDependencyFailure(extra: Int64) async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let base = try opPlan("dependency-fallback", [("a", "aaaaaaaaaa"), ("b", "bbbbbbbb")])
+    let c = FileTask(path: try SafeRelativePath("c"), size: 2, digest: opDigest("xx"), extents: [
+        Extent(source: .local(path: base.files[1].path, offset: 0), fileOffset: 0, length: 2, digest: opDigest("xx")),
+    ])
+    let plan = InstallPlan(id: base.id, objects: base.objects, files: base.files + [c])
+    try fs.writeAtomically(Data("xx......".utf8), to: base.files[1].path)
+    let cdn = MockCDN(); opServe(cdn, base, ["aaaaaaaaaa", "bbbbbbbb"])
+    let events = try await opCollect(opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + extra, mode: .batched(approved: true)).run())
+    #expect(events.last == .phase(.completed))
+    #expect(try fs.readFile(at: base.files[0].path, maxBytes: 100) == Data("aaaaaaaaaa".utf8))
+    #expect(try fs.readFile(at: base.files[1].path, maxBytes: 100) == Data("bbbbbbbb".utf8))
+    #expect(try fs.readFile(at: c.path, maxBytes: 100) == Data("xx".utf8))
+}

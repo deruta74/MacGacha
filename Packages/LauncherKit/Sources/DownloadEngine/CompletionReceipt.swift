@@ -25,10 +25,13 @@ public struct CompletionReceipt: Codable, Sendable, Equatable {
     }
 
     public static func acknowledge(installRoot: URL, planID: SafeIdentifier) throws {
-        try ContainedFileSystem(root: installRoot).removeFile(at: path(planID))
+        try acknowledge(fs: ContainedFileSystem(root: installRoot), planID: planID)
+    }
+    package static func acknowledge(fs: ContainedFileSystem, planID: SafeIdentifier) throws {
+        try fs.removeFile(at: path(planID))
     }
 
-    static func load(fs: ContainedFileSystem, planID: SafeIdentifier) throws -> Self? {
+    package static func load(fs: ContainedFileSystem, planID: SafeIdentifier) throws -> Self? {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         let path = try path(planID)
         guard try fs.itemType(at: path) != nil else { return nil }
@@ -54,7 +57,9 @@ public struct CompletionReceipt: Codable, Sendable, Equatable {
     /// Bounded discovery lets reconciliation acknowledge a receipt even if the
     /// process died after deleting the library's stored plan.
     package static func unacknowledged(installRoot: URL) throws -> [Self] {
-        let fs = try ContainedFileSystem(root: installRoot)
+        try unacknowledged(fs: ContainedFileSystem(root: installRoot))
+    }
+    package static func unacknowledged(fs: ContainedFileSystem) throws -> [Self] {
         let directory = try SafeRelativePath(".macgacha-receipts")
         guard let type = try fs.itemType(at: directory) else { return [] }
         guard type == .directory else { throw LauncherError.journalCorrupt("Invalid completion receipt directory") }
@@ -73,7 +78,9 @@ public struct CompletionReceipt: Codable, Sendable, Equatable {
     /// Finish the cleanup window after a crash, without downloading or running
     /// the plan again. The receipt proves the journal reached operationCompleted.
     package func finishCleanup(installRoot: URL) throws {
-        let fs = try ContainedFileSystem(root: installRoot)
+        try finishCleanup(fs: ContainedFileSystem(root: installRoot))
+    }
+    package func finishCleanup(fs: ContainedFileSystem) throws {
         let lock = try InstallLock(fs: fs, path: SafeRelativePath(".macgacha-staging/.lock"))
         defer { withExtendedLifetime(lock) {} }
         try Self.discardInterruptedWrites(fs: fs)
@@ -88,7 +95,7 @@ public struct CompletionReceipt: Codable, Sendable, Equatable {
         try discardInterruptedWrites(fs: fs)
     }
 
-    private static func discardInterruptedWrites(fs: ContainedFileSystem) throws {
+    package static func discardInterruptedWrites(fs: ContainedFileSystem) throws {
         let directory = try SafeRelativePath(".macgacha-receipts")
         guard let type = try fs.itemType(at: directory) else { return }
         guard type == .directory else { throw LauncherError.journalCorrupt("Invalid completion receipt directory") }

@@ -17,6 +17,14 @@ public enum CrashPoint: String, CaseIterable, Sendable {
     case afterGameRecordSaved
     case afterGamePlanDeleted
     case afterReceiptAcknowledged
+    case afterGameFolderRemoved
+    case afterUninstallPlanDeleted
+    case afterUninstallManifestCacheDeleted
+    case afterUninstallBranchDeleted
+    case afterUninstallManagedPathsDeleted
+    case afterUninstallCleanupDeleted
+    case afterUninstallRecordDeleted
+    case beforeGameRecordDeleted
 }
 
 /// Explicit injection only: normal callers use .none and never split journal writes.
