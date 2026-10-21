@@ -17,6 +17,8 @@ public struct AppPaths: Sendable {
             .appendingPathComponent("MacGacha", isDirectory: true))
     }
 
+    public var games: URL { root.appendingPathComponent("Games", isDirectory: true) }
+
     public var runtimes: URL { root.appendingPathComponent("Runtimes", isDirectory: true) }
     public var prefixes: URL { root.appendingPathComponent("Prefixes", isDirectory: true) }
     public var logs: URL { root.appendingPathComponent("Logs", isDirectory: true) }
