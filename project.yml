@@ -26,6 +26,10 @@ targets:
         product: Diagnostics
       - package: LauncherKit
         product: HoYoPlayAPI
+      - package: LauncherKit
+        product: Sophon
+      - package: LauncherKit
+        product: GameLibrary
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.deruta.macgacha
@@ -60,6 +64,10 @@ targets:
         product: Diagnostics
       - package: LauncherKit
         product: HoYoPlayAPI
+      - package: LauncherKit
+        product: Sophon
+      - package: LauncherKit
+        product: GameLibrary
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.deruta.macgacha.tests
