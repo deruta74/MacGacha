@@ -316,7 +316,7 @@ private actor CommitSession {
             }
         }
         let next = plannedBatches[0]
-        let need = try SpaceBudget.required(plan: projection(pending, files: next), state: state, fs: fs).disk
+        let need = try SpaceBudget.estimate(plan: plan, files: next, state: state, fs: fs).disk
         let free = try fs.availableBytes(using: disk)
         guard need <= free else { throw LauncherError.insufficientSpace(required: need, available: free) }
         batch = plannedBatches.removeFirst()
@@ -328,7 +328,7 @@ private actor CommitSession {
             guard !overflow else { throw LauncherError.journalCorrupt("Batch index overflow") }
             batchIndex = next
         }
-        let stager = try Stager(plan: pending, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, crashHooks: crashHooks)
+        let stager = try Stager(plan: plan, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, crashHooks: crashHooks)
         staging = stager.stage(files: batch).makeAsyncIterator()
         step = .staging
         return .phase(.staging)
@@ -395,7 +395,7 @@ private actor CommitSession {
                 try fs.fullSync(at: file.path)
             } else {
                 try await record(.fileUnstaged(path: file.path))
-                let stager = try Stager(plan: pendingPlan(), fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, crashHooks: crashHooks)
+                let stager = try Stager(plan: plan, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, crashHooks: crashHooks)
                 for try await _ in stager.stage(files: [file]) {}
                 try await refresh()
                 guard state.stagedFiles.contains(file.path), try fs.size(at: staged) == file.size else {

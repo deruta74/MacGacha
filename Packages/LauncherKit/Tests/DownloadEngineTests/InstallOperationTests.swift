@@ -252,8 +252,8 @@ func batchedModePreservesLocalSourcesNeededByLaterFilesWithoutFallback() async t
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test
-func batchedModeUsesFallbackForOverwrittenLocalSource() async throws {
+@Test(arguments: [false, true], [false, true])
+func batchedModeUsesFallbackForOverwrittenLocalSource(resume: Bool, batched: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let a = try opPlan("fallback", [("a", "new")])
     let fallback = ChunkObject(id: "fallback-old", urls: [URL(string: "https://cdn.test/fallback-old")!],
@@ -266,9 +266,28 @@ func batchedModeUsesFallbackForOverwrittenLocalSource() async throws {
     let plan = InstallPlan(id: a.id, objects: objects, files: a.files + [b])
     try fs.writeAtomically(Data("old".utf8), to: a.files[0].path)
     let cdn = MockCDN(); opServe(cdn, a, ["new"]); cdn.serve(fallback.id, data: Data("old".utf8))
-    _ = try await opCollect(opEngine(plan, temp.url, cdn, bytes: (1 << 30) + 6, mode: .batched(approved: true)).run())
+    let bytes = batched ? (1 << 30) + 6 : Int64.max
+    var events: [OperationEvent] = []
+    for try await event in try opEngine(plan, temp.url, cdn, bytes: bytes, mode: .batched(approved: true)).run() {
+        events.append(event)
+        if resume, event == .phase(.checkingSpace), try OperationJournal.replay(fs: fs, path: opJournal(plan)).committedFiles.contains(a.files[0].path) { break }
+    }
+    if resume {
+        let resumed = try await opCollect(opEngine(plan, temp.url, cdn, bytes: bytes, mode: .batched(approved: true)).run())
+        if batched {
+            let initial = resumed.first { if case .progress = $0 { true } else { false } }
+            #expect(initial == .progress(downloaded: 3, totalNetwork: 6, staged: 0, totalStaged: 3))
+        }
+        events.append(contentsOf: resumed)
+    }
+    let progress = events.compactMap { event -> (Int64, Int64)? in
+        if case .progress(let done, let total, _, _) = event { return (done, total) }; return nil
+    }
+    #expect(!progress.isEmpty && progress.allSatisfy { $0.0 <= $0.1 })
+    #expect(zip(progress, progress.dropFirst()).allSatisfy { $0.0.0 <= $0.1.0 })
+    #expect(progress.last?.0 == progress.last?.1)
     #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("old".utf8))
-    #expect(cdn.requestLog.map(\.path) == ["fallback-0", "fallback-old"])
+    #expect(cdn.requestLog.map(\.path) == (batched ? ["fallback-0", "fallback-old"] : ["fallback-0"]))
 }
 
 @Test

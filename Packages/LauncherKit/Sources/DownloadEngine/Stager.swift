@@ -17,7 +17,7 @@ public struct Stager: Sendable {
     private let gate = StagingGate()
 
     public init(plan: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher, journal: OperationJournal,
-        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), maxConcurrentObjects: Int = 8, crashHooks: CrashHooks = .none) throws {
+        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, crashHooks: CrashHooks = .none) throws {
         try plan.validate()
         guard maxConcurrentObjects > 0 else { throw LauncherError.io("Invalid object concurrency limit") }
         self.plan = plan; self.fs = fs; self.fetcher = fetcher; self.journal = journal
@@ -76,6 +76,8 @@ private actor StagingSession {
     private var objectMirrors: [String: Int] = [:]
     private var staged: Int64 = 0
     private var totalStaged: Int64 = 0
+    private var allocation: RemainingAllocation?
+    private var lastProgress: OperationEvent?
 
     init(plan: InstallPlan, files: [FileTask], fs: ContainedFileSystem, fetcher: ChunkFetcher,
         journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks) {
@@ -108,7 +110,12 @@ private actor StagingSession {
                     step = .progress
                     return .fileVerified(file.path)
                 }
-                step = .done; lease.release(); return nil
+                // Drop predictions satisfied through local reuse. Refcounts avoid
+                // rehashing future local ranges merely to display final progress.
+                reconcileFinishedPredictions()
+                let final = OperationEvent.progress(downloaded: downloaded, totalNetwork: totalNetwork, staged: staged, totalStaged: totalStaged)
+                step = .done; lease.release()
+                return final == lastProgress ? nil : progress()
             case .done: return nil
             }
         } catch {
@@ -127,14 +134,34 @@ private actor StagingSession {
         for file in plan.files where state.stagedFiles.contains(file.path) && !state.committedFiles.contains(file.path) {
             if try fs.size(at: layout.file(file.path)) != file.size { try await record(.fileUnstaged(path: file.path)) }
         }
-        // Account only for the requested batch, while keeping full-plan refcounts below.
-        let ids = Set(files.flatMap { SpaceBudget.references($0) })
-        let subset = InstallPlan(id: plan.id, objects: plan.objects.filter { ids.contains($0.key) }, files: files)
-        let budget = try SpaceBudget.estimate(plan: subset, state: state, fs: fs)
-        let available = try fs.availableBytes(using: disk)
-        guard available >= budget.disk else { throw LauncherError.insufficientSpace(required: budget.disk, available: available) }
-        totalNetwork = budget.network
-        networkObjects = budget.objects
+        // Budget this subset with the same full-plan referrers used by cleanup.
+        let budget = try SpaceBudget.estimate(plan: plan, files: files, state: state, fs: fs, maxConcurrentObjects: limit)
+        let donePaths = state.stagedFiles.union(state.committedFiles)
+        let remaining = files.filter { !donePaths.contains($0.path) }
+        let selected = Set(remaining.map(\.path))
+        var external = Set<String>()
+        for file in plan.files where !donePaths.contains(file.path) && !selected.contains(file.path) {
+            external.formUnion(SpaceBudget.references(file))
+        }
+        allocation = try RemainingAllocation(files: remaining,
+            costs: Dictionary(uniqueKeysWithValues: budget.objects.map { ($0, plan.objects[$0]!.transferSize) }),
+            retainedObjects: external, limit: limit)
+        let written: Int64
+        if let first = remaining.first {
+            written = min(first.size, try fs.size(at: layout.file(first.path)) ?? 0)
+        } else { written = 0 }
+        try checkCapacity(written: written)
+        // Transfer progress belongs to the full durable plan, not this batch or
+        // this session. Verified IDs remain in the journal after parts are consumed.
+        downloadedObjects = state.verifiedObjects.intersection(plan.objects.keys)
+        let done = state.stagedFiles.union(state.committedFiles)
+        for file in plan.files where done.contains(file.path) {
+            for extent in file.extents {
+                if case .chunk(let id) = extent.source { downloadedObjects.insert(id) }
+            }
+        }
+        downloaded = progressBytes(downloadedObjects)
+        try refreshNetworkPrediction()
         let uncommitted = files.filter { !state.committedFiles.contains($0.path) }
         totalStaged = try uncommitted.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
         staged = try uncommitted.filter { state.stagedFiles.contains($0.path) }.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
@@ -142,7 +169,47 @@ private actor StagingSession {
     }
 
     private func progress() -> OperationEvent {
-        .progress(downloaded: downloaded, totalNetwork: totalNetwork, staged: staged, totalStaged: totalStaged)
+        let event = OperationEvent.progress(downloaded: downloaded, totalNetwork: totalNetwork, staged: staged, totalStaged: totalStaged)
+        lastProgress = event
+        return event
+    }
+
+    /// Display only: an unreadable local range predicts its fallback; actual
+    /// staging owns the I/O error policy. Predictions never authorize transfers.
+    private func refreshNetworkPrediction() throws {
+        var predicted = downloadedObjects
+        let done = state.stagedFiles.union(state.committedFiles)
+        for file in plan.files where !done.contains(file.path) {
+            for extent in file.extents {
+                guard !Task.isCancelled else { throw LauncherError.cancelled }
+                switch extent.source {
+                case .chunk(let id): predicted.insert(id)
+                case .local(let path, let offset):
+                    if let fallback = extent.fallbackChunkID,
+                        (try? LocalRange.matches(path: path, offset: offset, length: extent.length, digest: extent.digest, fs: fs)) != true {
+                        predicted.insert(fallback)
+                    }
+                }
+            }
+        }
+        networkObjects = predicted
+        totalNetwork = progressBytes(predicted)
+    }
+
+    private func progressBytes(_ ids: Set<String>) -> Int64 {
+        ids.reduce(Int64(0)) { progressAdding($0, plan.objects[$1]?.transferSize ?? 0) }
+    }
+    private func progressAdding(_ a: Int64, _ b: Int64) -> Int64 {
+        let (sum, overflow) = a.addingReportingOverflow(b)
+        return overflow ? Int64.max : sum
+    }
+
+    private func reconcileFinishedPredictions() {
+        let done = state.stagedFiles.union(state.committedFiles)
+        networkObjects = networkObjects.filter { id in
+            downloadedObjects.contains(id) || !(referrers[id]?.isSubset(of: done) ?? true)
+        }
+        totalNetwork = progressBytes(networkObjects)
     }
 
     private func record(_ record: JournalRecord) async throws {
@@ -176,11 +243,12 @@ private actor StagingSession {
             while let (object, mirror) = try await group.next() {
                 objectMirrors[object.id] = mirror
                 try state.apply(.objectVerified(id: object.id))
+                try allocation?.setCost(object.id, to: 0)
                 if networkObjects.insert(object.id).inserted {
-                    totalNetwork = try SpaceBudget.adding(totalNetwork, object.transferSize)
+                    totalNetwork = progressAdding(totalNetwork, object.transferSize)
                 }
                 if downloadedObjects.insert(object.id).inserted {
-                    downloaded = try SpaceBudget.adding(downloaded, object.transferSize)
+                    downloaded = progressAdding(downloaded, object.transferSize)
                 }
                 if next < needed.count { submit(needed[next]); next += 1 }
             }
@@ -198,6 +266,10 @@ private actor StagingSession {
                 let direct = Set(file.extents.compactMap { extent -> String? in
                     if case .chunk(let id) = extent.source { return id }; return nil
                 })
+                // A retry may have deleted a corrupt part; admit it again before
+                // allocating. Unfinished output already occupies disk space.
+                for id in direct { try admitMissingPart(id) }
+                try checkCapacity(written: min(file.size, try fs.size(at: layout.file(file.path)) ?? 0))
                 try await fetchObjects(direct)
                 try await assemble(file)
                 let path = try layout.file(file.path)
@@ -211,6 +283,7 @@ private actor StagingSession {
                 crashHooks.reach(.afterFileStagedBeforeJournal)
                 try await record(.fileStaged(path: file.path))
                 try cleanupObjects(ids: SpaceBudget.references(file))
+                try allocation?.finish(file)
                 return
             } catch {
                 if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
@@ -258,9 +331,38 @@ private actor StagingSession {
                 guard let fallback = extent.fallbackChunkID else {
                     throw LauncherError.digestMismatch(path: path.description, expected: extent.digest.hex, actual: "local range mismatch")
                 }
+                guard let object = plan.objects[fallback] else { throw LauncherError.io("Missing plan object") }
+                let part = try layout.object(object)
+                let cached = try state.verifiedObjects.contains(fallback) && fs.size(at: part) == object.transferSize
+                if !cached {
+                    try admitMissingPart(fallback)
+                    do {
+                        try checkCapacity(written: min(file.size, try fs.size(at: staged) ?? 0))
+                    } catch {
+                        // A partial unverified download is not a resumable object.
+                        try fs.removeFile(at: part)
+                        throw error
+                    }
+                }
                 try await fetchObjects([fallback])
                 try decode(fallback, extent: extent, output: output, staged: staged)
             }
+        }
+    }
+
+    private func admitMissingPart(_ id: String) throws {
+        guard let object = plan.objects[id] else { throw LauncherError.io("Missing plan object") }
+        let cached = try state.verifiedObjects.contains(id) && fs.size(at: layout.object(object)) == object.transferSize
+        try allocation?.setCost(id, to: cached ? 0 : object.transferSize)
+    }
+
+    private func checkCapacity(written: Int64 = 0) throws {
+        guard let required = try allocation?.disk(written: written) else {
+            throw LauncherError.io("Missing session allocation")
+        }
+        let available = try fs.availableBytes(using: disk)
+        guard available >= required else {
+            throw LauncherError.insufficientSpace(required: required, available: available)
         }
     }
 
