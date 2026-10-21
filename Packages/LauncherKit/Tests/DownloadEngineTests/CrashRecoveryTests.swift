@@ -55,7 +55,7 @@ struct CrashRecoveryTests {
             #expect(state.committedFiles.count == plan.files.count)
             #expect(state.deletedFiles == Set(plan.deletions))
             #expect(try InstallStateMarker.load(fs: fs) != nil)
-        case .afterOperationCompleted, .duringCompletionReceiptWrite, .afterCompletionReceipt, .afterEngineCleanup, .afterGamePlanSaved,
+        case .afterOperationCompleted, .duringCompletionReceiptWrite, .duringGamePlanWrite, .afterCompletionReceipt, .afterEngineCleanup, .afterGamePlanSaved,
             .afterGamePendingSaved, .afterGameRecordSaved, .afterGamePlanDeleted, .afterReceiptAcknowledged,
             .afterGameFolderRemoved, .beforeGameRecordDeleted, .afterUninstallPlanDeleted, .afterUninstallManifestCacheDeleted,
             .afterUninstallBranchDeleted, .afterUninstallManagedPathsDeleted, .afterUninstallCleanupDeleted, .afterUninstallRecordDeleted:

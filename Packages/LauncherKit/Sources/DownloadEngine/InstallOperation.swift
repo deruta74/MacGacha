@@ -72,6 +72,10 @@ private actor CommitSession {
     private var state = JournalState()
     private var batch: [FileTask] = []
     private var plannedBatches: [[FileTask]] = []
+    private var nextBatch = 0
+    private var nextCommitIndex = 0
+    private var batchingPrepared = false
+    private var operationStager: OperationStager?
     private var batchIndex = 0
     private var staging: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
     private var step = Step.start
@@ -109,11 +113,12 @@ private actor CommitSession {
                 staging = iterator
                 if let event { return event }
                 staging = nil
-                try await refresh()
+                for file in batch { try state.apply(.fileStaged(path: file.path)) }
                 try await beginCommit()
                 return .phase(.committing)
             case .commit:
                 try await commitBatch()
+                try await operationStager?.committed(batch)
                 step = .space
                 return .phase(.checkingSpace)
             case .delete:
@@ -240,7 +245,7 @@ private actor CommitSession {
 
     private func createRequested() async throws {
         try validateDeletions(requested)
-        plannedBatches = []
+        plannedBatches = []; nextBatch = 0; batchingPrepared = false; operationStager = nil
         let paths = CommitPaths(id: requested.id)
         if let type = try fs.itemType(at: paths.directory) {
             guard type == .directory else { throw LauncherError.unsafePath(try paths.directory.description) }
@@ -287,49 +292,49 @@ private actor CommitSession {
 
     private func chooseBatch() async throws -> OperationEvent {
         let plan = try context().plan
-        try await invalidateStaleStagedFiles(plan)
-        let pending = try pendingPlan()
-        if pending.files.isEmpty {
-            if state.commitStartedBatches.isEmpty, plan.deletions.contains(where: { !state.deletedFiles.contains($0) }) {
-                batch = []; batchIndex = 0
-                try await beginCommit()
-                return .phase(.committing)
+        if !batchingPrepared {
+            try await invalidateStaleStagedFiles(plan)
+            // Unverified output is disposable and assembly truncates it. Reclaim
+            // it once, under the root lock, before ALL preflight calculations.
+            let paths = CommitPaths(id: plan.id)
+            for file in plan.files where !state.stagedFiles.contains(file.path) && !state.committedFiles.contains(file.path) {
+                try fs.removeFile(at: paths.staged(file.path))
             }
-            step = .delete; return .phase(.deleting)
-        }
-        let available = try fs.availableBytes(using: disk)
-        if plannedBatches.isEmpty {
+            let pending = try pendingPlan()
+            if pending.files.isEmpty {
+                if state.commitStartedBatches.isEmpty, plan.deletions.contains(where: { !state.deletedFiles.contains($0) }) {
+                    batch = []; batchIndex = 0
+                    try await beginCommit()
+                    return .phase(.committing)
+                }
+                step = .delete; return .phase(.deleting)
+            }
+            let available = try fs.availableBytes(using: disk)
             let required = try SpaceBudget.required(plan: pending, state: state, fs: fs).disk
             if required <= available { plannedBatches = [pending.files] }
             else {
-                let largest = try SpaceBudget.requiredLargestFile(plan: pending, state: state, fs: fs)
-                guard largest <= available else { throw LauncherError.insufficientSpace(required: required, available: available) }
-                // Validate every boundary before the first commit, and retain those boundaries
-                // for this run. A later batch must not be split differently after an earlier commit.
-                plannedBatches = try partitionAll(pending, required: required, available: available)
-                // A durable commit is an already-started operation: recovery must roll forward,
-                // including any remaining batches of the previously approved stored plan.
+                plannedBatches = try partitionAll(pending, available: available)
                 if state.commitStartedBatches.isEmpty, mode != .batched(approved: true) {
                     pendingError = .insufficientSpace(required: required, available: available)
                     return .needsBatchApproval(required: required, available: available)
                 }
             }
-        }
-        let next = plannedBatches[0]
-        let need = try SpaceBudget.estimate(plan: plan, files: next, state: state, fs: fs).disk
-        let free = try fs.availableBytes(using: disk)
-        guard need <= free else { throw LauncherError.insufficientSpace(required: need, available: free) }
-        batch = plannedBatches.removeFirst()
-        if let started = state.currentBatch, !state.commitStartedBatches.contains(started) {
-            batchIndex = started
-        } else {
+            operationStager = try Stager(plan: plan, fs: fs, fetcher: fetcher,
+                journal: context().journal, disk: disk, crashHooks: crashHooks).forOperation()
             let previous = max(state.currentBatch ?? -1, state.commitStartedBatches.max() ?? -1)
-            let (next, overflow) = previous.addingReportingOverflow(1)
-            guard !overflow else { throw LauncherError.journalCorrupt("Batch index overflow") }
-            batchIndex = next
+            guard previous < Int.max else { throw LauncherError.journalCorrupt("Batch index overflow") }
+            nextCommitIndex = previous + 1
+            batchingPrepared = true
         }
-        let stager = try Stager(plan: plan, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, crashHooks: crashHooks)
-        staging = stager.stage(files: batch).makeAsyncIterator()
+        guard nextBatch < plannedBatches.count else { step = .delete; return .phase(.deleting) }
+        batch = plannedBatches[nextBatch]; nextBatch += 1
+        if let started = state.currentBatch, !state.commitStartedBatches.contains(started) { batchIndex = started }
+        else {
+            guard nextCommitIndex < Int.max else { throw LauncherError.journalCorrupt("Batch index overflow") }
+            batchIndex = nextCommitIndex; nextCommitIndex += 1
+        }
+        guard let operationStager else { throw LauncherError.io("Missing operation stager") }
+        staging = operationStager.stage(files: batch).makeAsyncIterator()
         step = .staging
         return .phase(.staging)
     }
@@ -344,25 +349,16 @@ private actor CommitSession {
         }
     }
 
-    private func partitionAll(_ pending: InstallPlan, required _: Int64, available: Int64) throws -> [[FileTask]] {
-        let minimum = try SpaceBudget.minimumBatchedPreflight(plan: pending, state: state, fs: fs)
-        guard minimum <= available else { throw LauncherError.insufficientSpace(required: minimum, available: available) }
-        do {
-            let result = try SpaceBudget.batchedPreflight(plan: pending, state: state, fs: fs, available: available)
-            if result.required <= available { return result.batches }
-        } catch LauncherError.insufficientSpace {
-            // Greedy boundaries can also invalidate a local-source dependency.
-            // Other errors, including cancellation and I/O failures, propagate.
-        }
-        // More free space can change greedy boundaries and increase the shared
-        // reserve or break dependencies. Retain the validated minimum partition.
-        let fallback = try SpaceBudget.batchedPreflight(plan: pending, state: state, fs: fs, available: minimum)
-        guard fallback.required <= available else { throw LauncherError.insufficientSpace(required: fallback.required, available: available) }
-        return fallback.batches
+    private func partitionAll(_ pending: InstallPlan, available: Int64) throws -> [[FileTask]] {
+        let result = try SpaceBudget.batchedPreflight(plan: pending, state: state, fs: fs, available: available)
+        guard result.required <= available else { throw LauncherError.insufficientSpace(required: result.required, available: available) }
+        return result.batches
     }
 
     private func beginCommit() async throws {
-        guard Set(batch.map(\.path)) == state.stagedFiles.subtracting(state.committedFiles) else {
+        let selected = Set(batch.map(\.path))
+        guard selected == state.uncommittedStagedFiles,
+            selected == (try await context().journal.stagedForCommit()) else {
             throw LauncherError.journalCorrupt("Staged batch membership mismatch")
         }
         try await record(.batchStarted(index: batchIndex))

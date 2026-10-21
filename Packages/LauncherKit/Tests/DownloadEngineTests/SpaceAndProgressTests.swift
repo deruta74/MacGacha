@@ -38,7 +38,115 @@ import TestSupport
     print("Synthetic Genshin: decoded=150000000000 network=\(budget.network) old=\(old) new=\(budget.disk) minimum=\(minimum) bytes")
     #expect(budget.network == 146_000_000_000)
     #expect(budget.disk == 151_102_941_824)
-    #expect(minimum == 1_088_541_824)
+    #expect(minimum == 151_081_041_824)
+}
+
+@Test(arguments: [false, true], [false, true])
+func completeInstallFitsMinimumWithDecreasingSpace(update: Bool, batched: Bool) async throws {
+    let temp = try TempDir(), initial = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let body = String(repeating: "N", count: 4096)
+    let plan = try opPlan("complete-peak", (0..<4).map { ("file-\($0)", body) })
+    if update { for file in plan.files { try initial.writeAtomically(Data(repeating: 0x4f, count: 4096), to: file.path) } }
+    opServe(cdn, plan, Array(repeating: body, count: 4))
+    let whole = try SpaceBudget.required(plan: plan, state: JournalState(), fs: initial).disk
+    let minimum = try SpaceBudget.minimumBatchedPreflight(plan: plan, state: JournalState(), fs: initial)
+    #expect(minimum == SpaceBudget.margin + 20_480)
+    let budget = (batched ? minimum : whole) - SpaceBudget.margin
+    let ops = try PeakDiskOps(root: temp.url), disk = PayloadCapacityDisk(ops: ops, capacity: budget)
+    ops.setPayloadLimit(ops.baseline.payload + budget)
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: disk,
+        mode: .batched(approved: true), fileOps: ops)
+    let events = try await opCollect(engine.run())
+    #expect(events.last == .phase(.completed))
+    #expect(ops.deniedWrites == 0 && ops.peak.payload <= ops.baseline.payload + budget)
+    if batched { #expect(events.filter { $0 == .phase(.staging) }.count > 1) }
+    for file in plan.files { #expect(try initial.readFile(at: file.path, maxBytes: 4096) == Data(body.utf8)) }
+}
+
+@Test func clonedInstallationGetsNoReclamationCreditBeforeAnyBatchStarts() async throws {
+    let temp = try TempDir(), backup = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let size = 65_536, old = Data(repeating: 0x4f, count: size), body = String(repeating: "N", count: size)
+    let plan = try opPlan("cloned-update", (0..<4).map { ("file-\($0)", body) })
+    for file in plan.files {
+        try fs.writeAtomically(old, to: file.path)
+        let source = file.path.resolved(against: temp.url), clone = file.path.resolved(against: backup.url)
+        try #require(clonefile(source.path, clone.path, 0) == 0, "APFS clonefile failed: \(errno)")
+        var originalInfo = stat(), cloneInfo = stat()
+        try #require(lstat(source.path, &originalInfo) == 0 && lstat(clone.path, &cloneInfo) == 0)
+        #expect(originalInfo.st_ino != cloneInfo.st_ino && originalInfo.st_nlink == 1 && cloneInfo.st_nlink == 1)
+    }
+    opServe(cdn, plan, Array(repeating: body, count: 4))
+    let quota = CloneAllocationQuota(root: temp.url, originals: Set(plan.files.map { $0.path.resolved(against: temp.url).path }), capacity: Int64(2 * size))
+    #expect(try quota.availableBytes(at: temp.url) == SpaceBudget.margin + Int64(2 * size))
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: quota,
+        mode: .batched(approved: true), fileOps: quota)
+    var stagingEvents = 0
+    await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + Int64(5 * size), available: SpaceBudget.margin + Int64(2 * size))) {
+        _ = try await opCollect(engine.run(), onEvent: { if $0 == .phase(.staging) { stagingEvents += 1 } })
+    }
+    #expect(stagingEvents == 0 && cdn.requestLog.isEmpty && quota.deniedWrites == 0)
+    #expect(try OperationJournal.replay(fs: fs, path: journalPath(plan)).committedFiles.isEmpty)
+    for file in plan.files { #expect(try fs.readFile(at: file.path, maxBytes: size) == old) }
+    quota.capacity.withLock { $0 = Int64(5 * size) }
+    let events = try await opCollect(engine.run())
+    #expect(events.last == .phase(.completed) && events.filter { $0 == .phase(.staging) }.count == 4)
+    #expect(quota.deniedWrites == 0 && quota.peak <= Int64(5 * size))
+    for file in plan.files {
+        #expect(try fs.readFile(at: file.path, maxBytes: size) == Data(body.utf8))
+        #expect(try Data(contentsOf: file.path.resolved(against: backup.url)) == old)
+    }
+}
+
+/// The backup retains every old clone extent throughout the test, so deleting
+/// an original inode cannot release those blocks. Measure additional allocation
+/// of new inodes using st_blocks (not logical file lengths), including parts and
+/// output across renames. The separate retained clone group is already baseline.
+private final class CloneAllocationQuota: FileOps, DiskSpaceProbe {
+    let capacity: Mutex<Int64>
+    private let root: URL
+    private let originals: Set<String>
+    private let replaced = Mutex<Set<String>>([])
+    private let usage = Mutex((peak: Int64(0), denied: 0))
+    init(root: URL, originals: Set<String>, capacity: Int64) {
+        self.root = root
+        // All fixture originals are direct children. Relative names avoid the
+        // /var versus /private/var spelling used by Foundation's URL enumerator.
+        self.originals = Set(originals.map { URL(fileURLWithPath: $0).lastPathComponent })
+        self.capacity = Mutex(capacity)
+    }
+    var peak: Int64 { usage.withLock { $0.peak } }
+    var deniedWrites: Int { usage.withLock { $0.denied } }
+    private func allocated() throws -> Int64 {
+        var bytes: Int64 = 0
+        let walker = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+        for case let url as URL in walker {
+            var info = stat()
+            guard lstat(url.path, &info) == 0 else { throw LauncherError.io("cannot inspect allocation") }
+            guard info.st_mode & S_IFMT == S_IFREG else { continue }
+            if url.deletingLastPathComponent().lastPathComponent == root.lastPathComponent,
+                originals.contains(url.lastPathComponent), !replaced.withLock({ $0.contains(url.lastPathComponent) }) { continue }
+            let path = url.path
+            if path.contains("/.macgacha-") && !path.contains("/files/") && !path.contains("/objects/") { continue }
+            bytes += info.st_blocks * 512
+        }
+        return bytes
+    }
+    func availableBytes(at url: URL) throws -> Int64 { max(0, SpaceBudget.margin + capacity.withLock { $0 } - (try allocated())) }
+    private func sample() throws {
+        let bytes = try allocated(), limit = capacity.withLock { $0 }
+        usage.withLock { $0.peak = max($0.peak, bytes); if bytes > limit { $0.denied += 1 } }
+        guard bytes <= limit else { throw LauncherError.io("test allocation capacity exhausted") }
+    }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        let count = try SystemFileOps().write(descriptor, bytes: bytes); try sample(); return count
+    }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try SystemFileOps().synchronize(descriptor, durable: durable); try sample() }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+        if originals.contains(destination) { _ = replaced.withLock { $0.insert(destination) } }
+        try sample()
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory); try sample() }
 }
 
 @Test(arguments: ["fresh", "update", "batched", "shared", "shared-batched", "update-batched"])
@@ -58,7 +166,7 @@ func measuredInstallPeakIsWithinBudget(scenario: String) async throws {
     #expect(tracker.peak.payload <= tracker.baseline.payload + budget.disk - SpaceBudget.margin)
     print("Peak \(scenario): total=\(tracker.peak.total) payloadGrowth=\(tracker.peak.payload - tracker.baseline.payload) bound=\(budget.disk - SpaceBudget.margin) parts=\(tracker.peak.parts) bytes")
     #expect(tracker.peak.parts >= 12 * 512) // The current file retains more than eight completed parts.
-    if batched { #expect(events.filter { $0 == .phase(.staging) }.count > 1) }
+    if batched && minimum < budget.disk { #expect(events.filter { $0 == .phase(.staging) }.count > 1) }
     for file in plan.files {
         let data = try fs.readFile(at: file.path, maxBytes: Int(file.size))
         #expect(opDataDigest(data) == file.digest)
@@ -69,7 +177,7 @@ func measuredInstallPeakIsWithinBudget(scenario: String) async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let plan = try opPlan("cumulative", (0..<12).map { ("file-\($0)", "abc") })
     opServe(cdn, plan, Array(repeating: "abc", count: 12))
-    let bytes = batched ? SpaceBudget.margin + 6 : Int64.max
+    let bytes = batched ? SpaceBudget.margin + 39 : Int64.max
     let operation = try opEngine(plan, temp.url, cdn, bytes: bytes, mode: .batched(approved: true))
     let first = Task {
         var samples: [(Int64, Int64)] = []
@@ -217,16 +325,19 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     let a = FileTask(path: initial.files[0].path, size: partialRange ? 6 : 3,
         digest: opDigest(partialRange ? "oldNEW" : "old"), extents: extents)
     let fallback = stagingObject("preserved-fallback", "old")
-    var objects = initial.objects; objects[fallback.id] = fallback
+    let independentObject = stagingObject("preserved-independent", "xyz")
+    let independent = try stagingFile("independent", "xyz", [Extent(source: .chunk(id: independentObject.id), fileOffset: 0,
+        length: 3, digest: independentObject.decodedDigest)])
+    var objects = initial.objects; objects[fallback.id] = fallback; objects[independentObject.id] = independentObject
     let b = FileTask(path: try SafeRelativePath("b"), size: 3, digest: opDigest("old"), extents: [
         Extent(source: .local(path: a.path, offset: 0), fileOffset: 0, length: 3, digest: opDigest("old"), fallbackChunkID: fallback.id),
     ])
-    let plan = InstallPlan(id: initial.id, objects: objects, files: [a, b])
+    let plan = InstallPlan(id: initial.id, objects: objects, files: [a, independent, b])
     // Initially unusable; committing a makes this range reusable by the next batch.
     try fs.writeAtomically(Data((partialRange ? "badBAD" : "bad").utf8), to: a.path)
     opServe(cdn, initial, partialRange ? ["old", "NEW"] : ["old"])
-    cdn.serve(fallback.id, data: Data("old".utf8))
-    let events = try await opCollect(opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + (partialRange ? 12 : 6), mode: .batched(approved: true)).run())
+    cdn.serve(fallback.id, data: Data("old".utf8)); cdn.serve(independentObject.id, data: Data("xyz".utf8))
+    let events = try await opCollect(opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + (partialRange ? 18 : 12), mode: .batched(approved: true)).run())
     #expect(events.last == .phase(.completed))
     let progress = events.compactMap { event -> (Int64, Int64)? in
         if case .progress(let done, let total, _, _) = event { return (done, total) }; return nil
@@ -240,7 +351,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
 
 @Test func resumeFetchesFallbackForLocalRangeInvalidatedAfterEarlierCommit() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
-    let a = try opPlan("changed-local", [("a", "new")]), fallback = stagingObject("changed-fallback", "old")
+    let a = try opPlan("changed-local", [("a", "new"), ("independent", "xyz")]), fallback = stagingObject("changed-fallback", "old")
     var objects = a.objects; objects[fallback.id] = fallback
     let source = try SafeRelativePath("source")
     let b = FileTask(path: try SafeRelativePath("b"), size: 3, digest: opDigest("old"), extents: [
@@ -248,42 +359,43 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     ])
     let plan = InstallPlan(id: a.id, objects: objects, files: a.files + [b])
     try fs.writeAtomically(Data("old".utf8), to: source)
-    opServe(cdn, a, ["new"]); cdn.serve(fallback.id, data: Data("old".utf8))
-    for try await event in try opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + 6, mode: .batched(approved: true)).run() {
+    try fs.writeAtomically(Data("old".utf8), to: a.files[0].path)
+    opServe(cdn, a, ["new", "xyz"]); cdn.serve(fallback.id, data: Data("old".utf8))
+    for try await event in try opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + 12, mode: .batched(approved: true)).run() {
         if event == .phase(.checkingSpace), try OperationJournal.replay(fs: fs, path: opJournal(plan)).committedFiles.contains(a.files[0].path) { break }
     }
     try fs.writeAtomically(Data("bad".utf8), to: source)
-    let events = try await opCollect(opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + 6, mode: .batched(approved: true)).run())
+    let events = try await opCollect(opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + 12, mode: .batched(approved: true)).run())
     #expect(events.last == .phase(.completed))
     let progress = events.compactMap { event -> (Int64, Int64)? in
         if case .progress(let done, let total, _, _) = event { return (done, total) }; return nil
     }
-    #expect(progress.first?.0 == 3 && progress.first?.1 == 6)
+    #expect(progress.first?.0 == 3 && progress.first?.1 == 9)
     #expect(progress.allSatisfy { $0.0 <= $0.1 })
-    #expect(progress.last?.0 == 6 && progress.last?.1 == 6)
+    #expect(progress.last?.0 == 9 && progress.last?.1 == 9)
     #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("old".utf8))
-    #expect(cdn.requestLog.map(\.path) == ["changed-local-0", fallback.id])
+    #expect(cdn.requestLog.map(\.path) == ["changed-local-0", "changed-local-1", fallback.id])
 }
 
 @Test func preStagingResumeCanRepartitionWithLocalReuse() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
-    let a = try opPlan("repartition-local", [("a", "new")]), fallback = stagingObject("repartition-fallback", "old")
+    let a = try opPlan("repartition-local", [("a", "new"), ("independent", "xyz")]), fallback = stagingObject("repartition-fallback", "old")
     var objects = a.objects; objects[fallback.id] = fallback
     let b = FileTask(path: try SafeRelativePath("b"), size: 3, digest: opDigest("old"), extents: [
         Extent(source: .local(path: a.files[0].path, offset: 0), fileOffset: 0, length: 3, digest: opDigest("old"), fallbackChunkID: fallback.id),
     ])
     let plan = InstallPlan(id: a.id, objects: objects, files: a.files + [b])
     try fs.writeAtomically(Data("old".utf8), to: a.files[0].path)
-    opServe(cdn, a, ["new"]); cdn.serve(fallback.id, data: Data("old".utf8))
-    for try await event in try opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + 6, mode: .batched(approved: true)).run() {
+    opServe(cdn, a, ["new", "xyz"]); cdn.serve(fallback.id, data: Data("old".utf8))
+    for try await event in try opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + 12, mode: .batched(approved: true)).run() {
         if event == .phase(.staging) { break }
     }
     #expect(cdn.requestLog.isEmpty)
-    let events = try await opCollect(opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + 9, mode: .batched(approved: true)).run())
+    let events = try await opCollect(opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + 15, mode: .batched(approved: true)).run())
     #expect(events.last == .phase(.completed))
     #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("old".utf8))
-    #expect(cdn.requestLog.map(\.path) == ["repartition-local-0"])
-    #expect(events.contains(.progress(downloaded: 3, totalNetwork: 3, staged: 6, totalStaged: 6)))
+    #expect(cdn.requestLog.map(\.path) == ["repartition-local-0", "repartition-local-1"])
+    #expect(events.contains(.progress(downloaded: 6, totalNetwork: 6, staged: 9, totalStaged: 9)))
 }
 
 @Test(arguments: [false, true]) func localRangeChangesAfterPredictionDoNotConstrainFetching(initiallyReusable: Bool) async throws {
@@ -475,6 +587,111 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
         #expect(try fs.readFile(at: file.path, maxBytes: 8192) == Data((file.path == files[1].path ? large : small).utf8))
     }
     #expect(try fs.size(at: objectPath(plan, object)) == nil)
+}
+
+@Test func operationStagesOneThousandBatchesWithLinearWork() async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let local = String(repeating: "L", count: 1024), remote = String(repeating: "N", count: 1024)
+    let source = try SafeRelativePath("source"), fallback = stagingObject("scale-local", local)
+    try fs.writeAtomically(Data(local.utf8), to: source)
+    var files: [FileTask] = [], objects: [ChunkObject] = [fallback]
+    for index in 0..<1000 {
+        let object = stagingObject("scale-\(index)", remote)
+        let file = try stagingFile("file-\(index)", local + remote, [
+            Extent(source: .local(path: source, offset: 0), fileOffset: 0, length: 1024,
+                digest: fallback.decodedDigest, fallbackChunkID: fallback.id),
+            Extent(source: .chunk(id: object.id), fileOffset: 1024, length: 1024, digest: object.decodedDigest),
+        ])
+        files.append(file); objects.append(object); cdn.serve(object.id, data: Data(remote.utf8))
+        try fs.writeAtomically(Data(repeating: 0x4f, count: 2048), to: file.path)
+    }
+    let plan = try stagingPlan(objects, files), clock = ContinuousClock(), start = clock.now
+    let work = EngineWorkCounter()
+    let events = try await OperationWork.$observer.withValue({ work.record($0) }) {
+        let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn),
+            disk: FixedDiskSpace(bytes: SpaceBudget.margin + 2_050_048), mode: .batched(approved: true), fileOps: ScaleFileOps())
+        var events: [OperationEvent] = [], batches = 0
+        for try await event in engine.run() {
+            events.append(event)
+            if event == .phase(.staging) {
+                batches += 1
+                // Fail early if operation-wide setup regresses to per-batch
+                // work, without running the entire quadratic mutant first.
+                if batches == 2 { try #require(work.snapshot[.referrerIndexBuild] == 1) }
+            }
+        }
+        return events
+    }
+    let elapsed = start.duration(to: clock.now)
+    print("InstallOperation scale: 1000 batches, 1000 reusable ranges with fallbacks, \(elapsed); work: \(work.snapshot)")
+    // Constant operation-wide setup and linear local checks, independent of
+    // runner speed. The fallback makes repeated prediction actually rehash data.
+    #expect(work.snapshot[.referrerIndexBuild] == 1)
+    #expect((work.snapshot[.planValidation] ?? 0) <= 5)
+    #expect(work.snapshot[.predictionFile] == files.count)
+    #expect((work.snapshot[.localRangeHash] ?? 0) <= 5 * files.count)
+    #expect(events.filter { $0 == .phase(.staging) }.count == 1000 && events.last == .phase(.completed))
+    #expect(cdn.requestLog.count == 1000)
+    for file in files { #expect(try fs.size(at: file.path) == 2048) }
+}
+
+final class EngineWorkCounter: Sendable {
+    private let counts = Mutex<[OperationWork: Int]>([:])
+    func record(_ work: OperationWork) { counts.withLock { $0[work, default: 0] += 1 } }
+    var snapshot: [OperationWork: Int] { counts.withLock { $0 } }
+}
+
+/// Keep the execution-scale test about indexes and range reads, not storage latency.
+private struct ScaleFileOps: FileOps {
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(descriptor, bytes: bytes) }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws {}
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
+}
+
+@Test func cancelledPartialDecodeResumesWithoutAddingSpace() async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let body = String(repeating: "N", count: 131_072), plan = try opPlan("partial-resume", [("output", body)])
+    opServe(cdn, plan, [body])
+    let tracker = try PeakDiskOps(root: temp.url), ops = CancelOutputOps(tracker: tracker)
+    let disk = PayloadCapacityDisk(ops: tracker, capacity: 262_144)
+    tracker.setPayloadLimit(tracker.baseline.payload + 262_144)
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: disk, fileOps: ops)
+    let first = Task {
+        await #expect(throws: LauncherError.cancelled) { _ = try await opCollect(engine.run()) }
+        return ()
+    }
+    await first.value
+    #expect(try fs.size(at: stagedPath(plan, plan.files[0].path)) == 65_536)
+    #expect(try OperationJournal.replay(fs: fs, path: journalPath(plan)).stagedFiles.isEmpty)
+    let events = try await opCollect(engine.run())
+    #expect(events.last == .phase(.completed) && tracker.deniedWrites == 0)
+    #expect(cdn.requestLog.count == 1)
+    #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 131_072) == Data(body.utf8))
+}
+
+private final class CancelOutputOps: FileOps {
+    let tracker: PeakDiskOps
+    private let armed = Mutex(true)
+    init(tracker: PeakDiskOps) { self.tracker = tracker }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        let count = try tracker.write(descriptor, bytes: bytes)
+        var path = [UInt8](repeating: 0, count: Int(MAXPATHLEN))
+        if fcntl(descriptor, F_GETPATH, &path) == 0,
+            String(decoding: path.prefix { $0 != 0 }, as: UTF8.self).contains("/files/"),
+            armed.withLock({ value in let old = value; value = false; return old }) {
+            withUnsafeCurrentTask { $0?.cancel() }
+            throw LauncherError.cancelled
+        }
+        return count
+    }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try tracker.synchronize(descriptor, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try tracker.rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try tracker.unlink(name, in: directory, isDirectory: isDirectory) }
 }
 
 /// Available payload bytes above the engine's safety margin, tied to actual writes.

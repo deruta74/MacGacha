@@ -300,7 +300,7 @@ func pausedAndDiscardedStagingStreamDoesNotRunAheadOrLeakItsLease() async throws
     #expect(cdn.requestLog.count == 2)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func cancellationKeepsPartsAndStaged() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let objects = [stagingObject("a", "abc"), stagingObject("b", "abcdef")]
@@ -309,11 +309,18 @@ func cancellationKeepsPartsAndStaged() async throws {
     let plan = try stagingPlan(objects, files); let client = StagingStallClient()
     let journal = try stagingJournal(fs, plan)
     let stager = try stagingEngine(plan, fs, client, journal)
-    let task = Task { try await collectStaging(stager.stage(files: files)) }
+    let clock = ContinuousClock(), started = clock.now, work = EngineWorkCounter()
+    let task = Task {
+        try await OperationWork.$observer.withValue({ work.record($0) }) {
+            try await collectStaging(stager.stage(files: files))
+        }
+    }
     defer { task.cancel() }
-    let clock = ContinuousClock(); let deadline = clock.now.advanced(by: .seconds(5))
-    while !client.waiting && clock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
-    try #require(client.waiting)
+    try await client.waitUntilStalled()
+    print("Stager cancellation reached stalled body after \(started.duration(to: clock.now))")
+    #expect(work.snapshot[.referrerIndexBuild] == 1)
+    #expect(work.snapshot[.predictionFile] == 2)
+    #expect(work.snapshot[.localRangeHash] == nil)
     task.cancel()
     await #expect(throws: LauncherError.cancelled) { _ = try await task.value }
     #expect(client.cancelled)
@@ -359,9 +366,13 @@ func collectStaging(_ stream: AsyncThrowingStream<OperationEvent, any Error>) as
 }
 
 private final class StagingStallClient: HTTPClient {
-    private struct State { var calls = 0; var waiting = false; var cancelled = false }
+    private struct State { var calls = 0; var cancelled = false }
     private let state = Mutex(State())
-    var waiting: Bool { state.withLock { $0.waiting } }
+    private let stalled = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    func waitUntilStalled() async throws {
+        var iterator = stalled.stream.makeAsyncIterator()
+        guard await iterator.next() != nil else { throw LauncherError.cancelled }
+    }
     var cancelled: Bool { state.withLock { $0.cancelled } }
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         if url.lastPathComponent == "a" {
@@ -370,8 +381,8 @@ private final class StagingStallClient: HTTPClient {
         return (HTTPResponseHead(status: 200, contentLength: 6), HTTPBody(next: { [self] in
             let first = state.withLock { value in value.calls += 1; return value.calls == 1 }
             if first { return Data("abc".utf8) }
-            state.withLock { $0.waiting = true }
-            try await Task.sleep(for: .seconds(30)); return nil
+            stalled.continuation.yield(())
+            try await Task.sleep(for: .seconds(60)); return nil
         }, onCancel: { [self] in state.withLock { $0.cancelled = true } }))
     }
 }

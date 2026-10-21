@@ -182,6 +182,7 @@ public struct InstallPlan: Codable, Sendable {
     }
 
     public func validate(supportedCodecs: Set<ChunkCodec> = ChunkCodec.supportedCodecs) throws {
+        OperationWork.record(.planValidation)
         try checkPlanCount(objects.count, maximum: Self.maximumObjects, kind: "objects")
         try checkPlanCount(files.count, maximum: Self.maximumFiles, kind: "files")
         try checkPlanCount(deletions.count, maximum: Self.maximumDeletions, kind: "deletions")

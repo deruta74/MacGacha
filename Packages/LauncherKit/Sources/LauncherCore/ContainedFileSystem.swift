@@ -45,6 +45,16 @@ public struct ContainedFileSystem: Sendable, Hashable {
         try probe.availableBytes(at: root)
     }
 
+    /// Descriptor-relative metadata only; a symlink is never followed or aged
+    /// as a regular temporary file. Missing/non-regular leaves return nil.
+    package func modificationDate(at path: SafeRelativePath) throws -> Date? {
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else { return nil }
+        defer { close(parent) }
+        guard let info = try entry(path.components.last!, parent: parent), info.st_mode & S_IFMT == S_IFREG else { return nil }
+        let seconds = TimeInterval(info.st_mtimespec.tv_sec) + TimeInterval(info.st_mtimespec.tv_nsec) / 1_000_000_000
+        return Date(timeIntervalSince1970: seconds)
+    }
+
     /// Creates missing parent directories as well as the requested directory.
     public func createDirectory(at path: SafeRelativePath) throws {
         guard let fd = try directory(path.components, create: true) else { throw LauncherError.io("Cannot create directory") }
@@ -658,6 +668,16 @@ public struct ContainedFileSystem: Sendable, Hashable {
 
     /// Creates missing parents, then fsyncs a sibling temporary file before atomic replacement.
     public func writeAtomically(_ data: Data, to path: SafeRelativePath) throws {
+        try writeAtomically(data, to: path, temporaryPrefix: ".macgacha-write-")
+    }
+
+    /// Lease-free cache writers never share operation-owned temporary names.
+    /// Operation sweeps may run while this temporary is waiting for its rename.
+    package func writeCacheAtomically(_ data: Data, to path: SafeRelativePath) throws {
+        try writeAtomically(data, to: path, temporaryPrefix: ".macgacha-cache-write-")
+    }
+
+    private func writeAtomically(_ data: Data, to path: SafeRelativePath, temporaryPrefix: String) throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard let parent = try directory(Array(path.components.dropLast()), create: true) else {
             throw LauncherError.io("Cannot open destination directory")
@@ -665,7 +685,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
         defer { close(parent) }
         let name = path.components.last!
         try checkRegularDestination(name, parent: parent, display: display(path.components))
-        let temporary = ".macgacha-write-\(UUID().uuidString)"
+        let temporary = "\(temporaryPrefix)\(UUID().uuidString)"
         let fd = openat(parent, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw LauncherError.io("Cannot create temporary file") }
         defer { close(fd); try? fileOps.unlink(temporary, in: parent, isDirectory: false) }

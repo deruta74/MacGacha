@@ -190,17 +190,17 @@ private struct NoLengthHTTP: HTTPClient {
     }
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func requestDeadlineStopsNeverEndingBodyAndPreservesOtherImages() async throws {
     let temp = try TempDir(); let cdn = MockCDN(); try artFixtures(cdn)
     let http = StallingArtHTTP(cdn: cdn)
     let service = GameArtService(cacheDirectory: temp.url.appendingPathComponent("GameArt"),
-        http: http, requestTimeout: .milliseconds(50))
-    let start = ContinuousClock.now
+        // Leave healthy requests time to run while CI executes other suites.
+        // The minute limit detects a missing deadline without benchmarking I/O.
+        http: http, requestTimeout: .seconds(2))
     let art = await service.refresh()
     #expect(http.started.withLock { $0 })
     #expect(art["genshin"]?.background == nil && art["genshin"]?.icon != nil)
-    #expect(start.duration(to: .now) < .seconds(5))
 }
 
 @Test

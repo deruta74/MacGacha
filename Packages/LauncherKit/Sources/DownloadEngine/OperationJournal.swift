@@ -116,6 +116,7 @@ public struct JournalState: Sendable, Equatable {
     public private(set) var planDigest: Digest?
     public private(set) var verifiedObjects: Set<String> = []
     public private(set) var stagedFiles: Set<SafeRelativePath> = []
+    package private(set) var uncommittedStagedFiles: Set<SafeRelativePath> = []
     public private(set) var currentBatch: Int?
     public private(set) var committedFiles: Set<SafeRelativePath> = []
     public private(set) var deletedFiles: Set<SafeRelativePath> = []
@@ -144,14 +145,16 @@ public struct JournalState: Sendable, Equatable {
         case .planStored(let id, let digest): planID = id; planDigest = digest
         case .operationStarted: break
         case .objectVerified(let id): verifiedObjects.insert(id)
-        case .fileStaged(let path): stagedFiles.insert(path)
-        case .fileUnstaged(let path): stagedFiles.remove(path)
+        case .fileStaged(let path):
+            stagedFiles.insert(path)
+            if !committedFiles.contains(path) { uncommittedStagedFiles.insert(path) }
+        case .fileUnstaged(let path): stagedFiles.remove(path); uncommittedStagedFiles.remove(path)
         case .batchStarted(let index):
             currentBatch = index
-            batchFiles = stagedFiles.subtracting(committedFiles)
+            batchFiles = uncommittedStagedFiles
         case .commitStarted(let batch):
             commitStartedBatches.insert(batch)
-        case .fileCommitted(let path): committedFiles.insert(path)
+        case .fileCommitted(let path): committedFiles.insert(path); uncommittedStagedFiles.remove(path)
         case .fileDeleted(let path): deletedFiles.insert(path)
         case .operationCompleted: completed = true
         }
@@ -179,6 +182,7 @@ public actor OperationJournal {
     private let synchronize: ContainedFileSystem.FileSynchronizer?
     private let crashHooks: CrashHooks
     private var needsRecovery = false
+    private var knownBytes: Int64
 
     public init(fs: ContainedFileSystem, path: SafeRelativePath,
         synchronize: ContainedFileSystem.FileSynchronizer? = nil, crashHooks: CrashHooks = .none) throws {
@@ -189,12 +193,14 @@ public actor OperationJournal {
         if try fs.itemType(at: path) == nil {
             try fs.append(Data(), to: path, durable: true, synchronize: synchronize)
             recoveredState = JournalState()
+            knownBytes = 0
         } else {
             let result = try Self.scan(fs: fs, path: path)
             try fs.truncateFile(at: path, toByteCount: result.validBytes, synchronize: synchronize)
             // A prior creation may have synced the file but failed its directory sync.
             try fs.synchronizeParentDirectory(of: path)
             recoveredState = result.state
+            knownBytes = result.validBytes
         }
         currentState = recoveredState
     }
@@ -232,11 +238,26 @@ public actor OperationJournal {
             throw error
         }
         try currentState.apply(record)
+        knownBytes += Int64(bytes.count)
     }
 
     package func snapshot() throws -> JournalState {
         guard !needsRecovery else { throw LauncherError.journalCorrupt("Reopen journal after failed append") }
-        return try Self.replay(fs: fs, path: path)
+        // The locked operation has one writer. Avoid replaying its growing
+        // journal at every batch; still detect an unexpected writer (including
+        // a programming mistake recording a file outside the selected batch).
+        if try fs.size(at: path) != knownBytes {
+            currentState = try Self.replay(fs: fs, path: path)
+            knownBytes = try fs.size(at: path) ?? 0
+        }
+        return currentState
+    }
+
+    /// Only the small current batch is copied at commit boundaries. Returning a
+    /// full state snapshot each batch would force growing Set copies on append.
+    package func stagedForCommit() throws -> Set<SafeRelativePath> {
+        _ = try snapshot() // Includes the unexpected-writer length check.
+        return currentState.uncommittedStagedFiles
     }
 
     /// Replays complete LF-terminated records without modifying the file. Missing is empty;

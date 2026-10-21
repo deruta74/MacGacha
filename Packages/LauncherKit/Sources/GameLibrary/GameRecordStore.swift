@@ -9,6 +9,11 @@ import DownloadEngine
 /// descriptor-relative ContainedFileSystem operations, including cache creation.
 public actor GameRecordStore {
     public static let maximumRecordBytes = 4 << 20
+    /// Shared by normal sweeping and orphan recovery. Younger cache siblings
+    /// may belong to a lease-free writer, even while an operation owns the store.
+    package static let cacheTemporarySafeAge: TimeInterval = 3600
+    private static let cacheTemporaryPrefix = ".macgacha-cache-write-"
+    private static let operationTemporaryPrefix = ".macgacha-write-"
     private let directory: URL
     private let fileOps: any FileOps
     public init(directory: URL, fileOps: any FileOps = SystemFileOps()) {
@@ -20,7 +25,11 @@ public actor GameRecordStore {
     /// Retain the lease through record advancement and receipt acknowledgement.
     package func acquireOperationLease() throws -> GameOperationLease {
         let fs = try writableFilesystem()
-        return try GameOperationLease.acquire(key: fs.rootIdentity())
+        let lease = try GameOperationLease.acquire(fs: fs)
+        do {
+            for game in try gameDirectories() { try sweepInterruptedWrites(for: game, fs: fs) }
+            return lease
+        } catch { withExtendedLifetime(lease) {}; throw error }
     }
 
     public func load(_ game: String) throws -> GameRecord? {
@@ -154,17 +163,39 @@ public actor GameRecordStore {
         let fs = try filesystem(), directory = try SafeRelativePath(SafeIdentifier(game).rawValue)
         guard try fs.itemType(at: directory) != nil else { return }
         let paths = try fs.contentsOfDirectory(at: directory)
-        guard paths.count <= 64 else { throw LauncherError.journalCorrupt("too many game metadata entries") }
+        // Cache siblings have their own bounded directory-enumeration limit;
+        // young recognized names must not prevent retiring other orphan state.
+        guard paths.lazy.filter({ !Self.isTemporary($0, prefix: Self.cacheTemporaryPrefix) }).count <= 64 else {
+            throw LauncherError.journalCorrupt("too many game metadata entries")
+        }
+        let cutoff = Date().addingTimeInterval(-Self.cacheTemporarySafeAge)
         let files: Set<String> = ["pending-plan.json", "branch.json", "managed-paths.json", "uninstall-cleaned.json"]
+        var removable: [SafeRelativePath] = []
         for path in paths {
-            let name = path.components.last!
-            let temporary = name.hasPrefix(".macgacha-write-") && UUID(uuidString: String(name.dropFirst(".macgacha-write-".count))) != nil
-            let type = try fs.itemType(at: path)
-            guard (name == "manifests" && type == .directory) || ((files.contains(name) || temporary) && type == .regularFile) else {
+            if Self.isTemporary(path, prefix: Self.cacheTemporaryPrefix) {
+                if try cacheTemporaryIsExpired(path, fs: fs, cutoff: cutoff) { removable.append(path) }
+                continue
+            }
+            let name = path.components.last!, type = try fs.itemType(at: path)
+            guard (name == "manifests" && type == .directory) ||
+                ((files.contains(name) || Self.isTemporary(path, prefix: Self.operationTemporaryPrefix)) && type == .regularFile) else {
                 throw LauncherError.journalCorrupt("unexpected game metadata")
             }
+            removable.append(path)
         }
-        for path in paths { try fs.removeItem(at: path) }
+        for path in removable {
+            if path.components.last == "manifests" {
+                // Manifest cache writers use the same age policy. Keep their
+                // young siblings and parent while retiring other cached entries.
+                for child in try fs.contentsOfDirectory(at: path) {
+                    if Self.isTemporary(child, prefix: Self.cacheTemporaryPrefix) {
+                        if try cacheTemporaryIsExpired(child, fs: fs, cutoff: cutoff) { try fs.removeFile(at: child) }
+                    } else { try fs.removeItem(at: child) }
+                }
+                try fs.removeEmptyDirectory(at: path)
+            } else { try fs.removeFile(at: path) }
+        }
+        // A young cache sibling can deliberately keep this directory nonempty.
         try fs.removeEmptyDirectory(at: directory)
     }
 
@@ -203,11 +234,50 @@ public actor GameRecordStore {
         guard data.count <= InstallPlan.maximumEncodedBytes else { throw LauncherError.fileTooLarge(path: name, limit: InstallPlan.maximumEncodedBytes) }
         try writableFilesystem().writeAtomically(data, to: relative(game, name))
     }
+    /// Status and estimate persist caches without the operation lease. Only
+    /// siblings older than cacheTemporarySafeAge are eligible for reclamation.
+    package func writeCacheState(_ data: Data, named name: String, for game: String) throws {
+        _ = try SafeIdentifier(name)
+        guard data.count <= InstallPlan.maximumEncodedBytes else { throw LauncherError.fileTooLarge(path: name, limit: InstallPlan.maximumEncodedBytes) }
+        try writableFilesystem().writeCacheAtomically(data, to: relative(game, name))
+    }
     package func deleteState(_ name: String, for game: String) throws {
         _ = try SafeIdentifier(name)
         try filesystem().removeFile(at: relative(game, name))
     }
     package func deleteManifestCache(for game: String) throws { try filesystem().removeItem(at: relative(game, "manifests")) }
+
+    /// Called only with exclusive operation ownership. Never follow a temporary
+    /// symlink or remove a similarly named foreign file.
+    private func sweepInterruptedWrites(for game: String, fs: ContainedFileSystem) throws {
+        let gamePath = try SafeRelativePath(SafeIdentifier(game).rawValue)
+        let cachePath = try relative(game, "manifests")
+        var directories = [gamePath]
+        if try fs.itemType(at: cachePath, allowingLeafSymlink: true) == .directory { directories.append(cachePath) }
+        let cutoff = Date().addingTimeInterval(-Self.cacheTemporarySafeAge)
+        for directory in directories {
+            for path in try fs.contentsOfDirectory(at: directory) {
+                if Self.isTemporary(path, prefix: Self.cacheTemporaryPrefix) {
+                    if try cacheTemporaryIsExpired(path, fs: fs, cutoff: cutoff) { try fs.removeFile(at: path) }
+                } else if directory == gamePath, Self.isTemporary(path, prefix: Self.operationTemporaryPrefix),
+                    try fs.itemType(at: path) == .regularFile {
+                    try fs.removeFile(at: path)
+                }
+            }
+        }
+    }
+
+    private static func isTemporary(_ path: SafeRelativePath, prefix: String) -> Bool {
+        let name = path.components.last!
+        guard name.hasPrefix(prefix) else { return false }
+        let suffix = String(name.dropFirst(prefix.count))
+        return suffix.count == 36 && UUID(uuidString: suffix)?.uuidString.lowercased() == suffix.lowercased()
+    }
+
+    private func cacheTemporaryIsExpired(_ path: SafeRelativePath, fs: ContainedFileSystem, cutoff: Date) throws -> Bool {
+        guard let date = try fs.modificationDate(at: path) else { return false }
+        return date < cutoff
+    }
 
     private func filesystem() throws -> ContainedFileSystem { try ContainedFileSystem(root: directory, fileOps: fileOps) }
     private func writableFilesystem() throws -> ContainedFileSystem {
@@ -228,12 +298,21 @@ public actor GameRecordStore {
 package final class GameOperationLease: Sendable {
     private static let active = Mutex<Set<FileSystemIdentity>>([])
     private let key: FileSystemIdentity
-    private init(key: FileSystemIdentity) { self.key = key }
-    fileprivate static func acquire(key: FileSystemIdentity) throws -> GameOperationLease {
+    private let lock: InstallLock
+    private init(key: FileSystemIdentity, lock: InstallLock) { self.key = key; self.lock = lock }
+    fileprivate static func acquire(fs: ContainedFileSystem) throws -> GameOperationLease {
+        let key = try fs.rootIdentity()
         guard active.withLock({ $0.insert(key).inserted }) else {
             throw LauncherError.busy("another game operation is running")
         }
-        return GameOperationLease(key: key)
+        do {
+            let lock = try InstallLock(fs: fs, path: SafeRelativePath(".operation.lock"))
+            return GameOperationLease(key: key, lock: lock)
+        } catch {
+            _ = active.withLock { $0.remove(key) }
+            if case LauncherError.busy = error { throw LauncherError.busy("another game operation is running") }
+            throw error
+        }
     }
     deinit { _ = Self.active.withLock { $0.remove(key) } }
 }

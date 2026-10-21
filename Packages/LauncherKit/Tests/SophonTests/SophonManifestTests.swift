@@ -8,6 +8,27 @@ import Testing
 @testable import Sophon
 
 @Suite struct SophonManifestTests {
+    @Test func parsingStopsBeforeDecodingAnExcessFile() throws {
+        var wire = ProtobufWriter()
+        wire.bytes(1, manifestFile(path: "a", size: 0, chunks: []))
+        wire.bytes(1, Data([0xff])) // The count limit wins over malformed entry contents.
+        #expect(throws: LauncherError.io("sophon file limit")) {
+            try SophonManifest.decode(wire.data, limits: .init(files: 1, chunksPerFile: 2, chunks: 2))
+        }
+    }
+
+    @Test(arguments: [false, true]) func parsingBoundsChunksBeforeDecodingOrSorting(aggregate: Bool) throws {
+        let chunk = manifestChunk(id: "a", offset: 0, compressed: 1, decoded: 1)
+        let data = aggregate
+            ? manifestData([manifestFile(path: "a", size: 1, chunks: [chunk]), manifestFile(path: "b", size: 1, chunks: [Data([0xff])])])
+            : manifestData([manifestFile(path: "a", size: 2, chunks: [chunk, Data([0xff])])])
+        #expect(throws: LauncherError.io("sophon chunk limit")) {
+            try SophonManifest.decode(data, limits: .init(files: 2, chunksPerFile: aggregate ? 2 : 1, chunks: aggregate ? 1 : 2))
+        }
+        #expect(try SophonManifest.decode(manifestData([manifestFile(path: "a", size: 1, chunks: [chunk])]),
+            limits: .init(files: 1, chunksPerFile: 1, chunks: 1)).files.count == 1)
+    }
+
     @Test func fixedVectorFileWithOneChunk() throws {
         let file = try #require(SophonManifest.decode(fixedManifest()).files.first)
         #expect(file.path.description == "a/b.dat")

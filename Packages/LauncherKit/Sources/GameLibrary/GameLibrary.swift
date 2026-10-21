@@ -241,20 +241,31 @@ public actor GameLibrary {
     }
 
     private func branch(_ game: GameDefinition, cachedFallback: Bool) async throws -> GameBranch {
+        let value: GameBranch
         do {
-            let value = try await api.branch(biz: game.biz)
-            try await store.writeState(JSONEncoder().encode(value), named: "branch.json", for: game.id)
-            return value
+            value = try await api.branch(biz: game.biz)
         } catch {
             if Task.isCancelled { throw LauncherError.cancelled }
-            if cachedFallback, let data = try await store.readState("branch.json", for: game.id, maxBytes: 2 << 20),
+            if cachedFallback, let data = try? await store.readState("branch.json", for: game.id, maxBytes: 2 << 20),
                 let value = try? JSONDecoder().decode(GameBranch.self, from: data), value.biz == game.biz { return value }
             throw error
         }
+        do {
+            try await store.writeCacheState(JSONEncoder().encode(value), named: "branch.json", for: game.id)
+        } catch {
+            try await cacheFailure(error, game: game, kind: "branch", action: "write")
+        }
+        return value
     }
 
     private func planned(_ categories: [BuildCategory], game: GameDefinition) async throws -> [PlannedCategory] {
-        let cache = try ContainedFileSystem(root: await store.manifestCache(for: game.id))
+        let cache: ContainedFileSystem?
+        do {
+            cache = try ContainedFileSystem(root: await store.manifestCache(for: game.id), fileOps: fileOps)
+        } catch {
+            try await cacheFailure(error, game: game, kind: "manifest", action: "open")
+            cache = nil
+        }
         var result: [PlannedCategory] = []
         for category in categories {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -269,21 +280,41 @@ public actor GameLibrary {
                 name = "%sha256-" + hash.finalize().hex
             }
             let path = try SafeRelativePath("\(name).zst")
-            if try cache.itemType(at: path) != nil {
+            if let cache {
                 do {
-                    let bytes = try cache.readFile(at: path, maxBytes: Int(category.manifest.compressedSize))
-                    let manifest = try DeliveryAPI.decodeManifest(bytes, ref: category.manifest)
-                    result.append(PlannedCategory(category: category, manifest: manifest)); continue
+                    if try cache.itemType(at: path) != nil {
+                        let bytes = try cache.readFile(at: path, maxBytes: Int(category.manifest.compressedSize))
+                        let manifest = try DeliveryAPI.decodeManifest(bytes, ref: category.manifest)
+                        result.append(PlannedCategory(category: category, manifest: manifest)); continue
+                    }
                 } catch {
-                    if Task.isCancelled { throw LauncherError.cancelled }
-                    try cache.removeFile(at: path)
+                    try await cacheFailure(error, game: game, kind: "manifest", action: "read")
+                    // A bad cache is disposable; failure to remove it must not
+                    // prevent a verified network response from being used.
+                    try? cache.removeFile(at: path)
                 }
             }
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
             let fetched = try await api.manifest(category)
-            try cache.writeAtomically(fetched.compressed, to: path)
+            if let cache {
+                do {
+                    try cache.writeCacheAtomically(fetched.compressed, to: path)
+                } catch {
+                    try await cacheFailure(error, game: game, kind: "manifest", action: "write")
+                }
+            }
             result.append(PlannedCategory(category: category, manifest: fetched.manifest))
         }
         return result
+    }
+
+    private func cacheFailure(_ error: any Error, game: GameDefinition, kind: String, action: String) async throws {
+        if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled {
+            throw LauncherError.cancelled
+        }
+        // Cache errors can carry paths, URLs or selectors. Log only fixed fields.
+        await log?.log(.warning, "game-library", "Metadata cache unavailable",
+            metadata: ["game": game.id, "cache": kind, "action": action])
     }
 
     private func checkNewLocation(_ location: URL, records: [String: GameRecord], game: GameDefinition, empty: Bool) throws {

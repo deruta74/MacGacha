@@ -10,6 +10,7 @@ public enum CrashPoint: String, CaseIterable, Sendable {
     case beforeCompleted
     case afterOperationCompleted
     case duringCompletionReceiptWrite
+    case duringGamePlanWrite
     case afterCompletionReceipt
     case afterEngineCleanup
     case afterGamePlanSaved
