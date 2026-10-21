@@ -8,7 +8,8 @@ import TestSupport
 
 @Suite(.serialized)
 struct CrashRecoveryTests {
-    @Test(arguments: CrashPoint.allCases)
+    @Test(arguments: [CrashPoint.afterObjectVerified, .afterFileStagedBeforeJournal, .afterRenameBeforeJournal,
+        .midJournalWrite, .afterCommitStartedBeforeFirstRename, .beforeCompleted])
     func processDeathIsRecoverable(point: CrashPoint) async throws {
         let fixtures = try TempDir(); let root = try TempDir()
         let fixtureURL = fixtures.url, rootURL = root.url
@@ -54,6 +55,9 @@ struct CrashRecoveryTests {
             #expect(state.committedFiles.count == plan.files.count)
             #expect(state.deletedFiles == Set(plan.deletions))
             #expect(try InstallStateMarker.load(fs: fs) != nil)
+        case .afterOperationCompleted, .duringCompletionReceiptWrite, .afterCompletionReceipt, .afterEngineCleanup, .afterGamePlanSaved,
+            .afterGamePendingSaved, .afterGameRecordSaved, .afterGamePlanDeleted, .afterReceiptAcknowledged:
+            Issue.record("Receipt/bridge crash points have separate recovery scenarios")
         }
         if state.commitStartedBatches.isEmpty {
             #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 100) == Data("old-a".utf8))

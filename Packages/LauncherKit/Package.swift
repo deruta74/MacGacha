@@ -30,7 +30,7 @@ let package = Package(
         .target(name: "Sophon", dependencies: ["LauncherCore", "DownloadEngine"]),
         .target(name: "GameLibrary", dependencies: ["LauncherCore", "DownloadEngine", "Sophon"]),
         .target(name: "TestSupport", dependencies: ["LauncherCore", "DownloadEngine"]),
-        .executableTarget(name: "CrashHarness", dependencies: ["DownloadEngine", "TestSupport"], path: "Tests/CrashHarness"),
+        .executableTarget(name: "CrashHarness", dependencies: ["DownloadEngine", "GameLibrary", "TestSupport"], path: "Tests/CrashHarness"),
         .testTarget(name: "LauncherCoreTests", dependencies: ["LauncherCore", "TestSupport"]),
         .testTarget(name: "DownloadEngineTests", dependencies: ["DownloadEngine", "TestSupport", "CrashHarness"],
             resources: [.copy("Resources/zstd")]),
@@ -38,7 +38,7 @@ let package = Package(
         .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "LauncherCore"]),
         .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"]),
         .testTarget(name: "SophonTests", dependencies: ["Sophon", "TestSupport"]),
-        .testTarget(name: "GameLibraryTests", dependencies: ["GameLibrary", "TestSupport"]),
+        .testTarget(name: "GameLibraryTests", dependencies: ["GameLibrary", "TestSupport", "CrashHarness"]),
     ],
     swiftLanguageModes: [.v6]
 )

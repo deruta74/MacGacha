@@ -8,6 +8,15 @@ public enum CrashPoint: String, CaseIterable, Sendable {
     case midJournalWrite
     case afterCommitStartedBeforeFirstRename
     case beforeCompleted
+    case afterOperationCompleted
+    case duringCompletionReceiptWrite
+    case afterCompletionReceipt
+    case afterEngineCleanup
+    case afterGamePlanSaved
+    case afterGamePendingSaved
+    case afterGameRecordSaved
+    case afterGamePlanDeleted
+    case afterReceiptAcknowledged
 }
 
 /// Explicit injection only: normal callers use .none and never split journal writes.
@@ -21,5 +30,5 @@ public struct CrashHooks: Sendable {
         self.point = point; self.action = action
     }
     func enabled(_ point: CrashPoint) -> Bool { self.point == point }
-    @inline(__always) func reach(_ point: CrashPoint) { if self.point == point { action?() } }
+    @inline(__always) package func reach(_ point: CrashPoint) { if self.point == point { action?() } }
 }
