@@ -15,7 +15,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "LauncherCore"),
-        .target(name: "DownloadEngine", dependencies: ["LauncherCore"]),
+        // Decompression only; CZstd.h is the public umbrella over unchanged upstream headers.
+        .target(name: "CZstd", exclude: ["LICENSE", "VENDOR.txt"], publicHeadersPath: "include", cSettings: [
+            .define("ZSTD_DISABLE_ASM", to: "1"), .define("ZSTD_LEGACY_SUPPORT", to: "0"),
+            .unsafeFlags(["-Wno-everything"]),
+        ]),
+        .target(name: "DownloadEngine", dependencies: ["LauncherCore", "CZstd"]),
         .systemLibrary(name: "CArchive"),
         .target(name: "RuntimeManager", dependencies: ["LauncherCore", "DownloadEngine", "CArchive"]),
         .target(name: "Diagnostics", dependencies: ["LauncherCore"]),
@@ -23,7 +28,8 @@ let package = Package(
         .target(name: "TestSupport", dependencies: ["LauncherCore", "DownloadEngine"]),
         .executableTarget(name: "CrashHarness", dependencies: ["DownloadEngine", "TestSupport"], path: "Tests/CrashHarness"),
         .testTarget(name: "LauncherCoreTests", dependencies: ["LauncherCore", "TestSupport"]),
-        .testTarget(name: "DownloadEngineTests", dependencies: ["DownloadEngine", "TestSupport", "CrashHarness"]),
+        .testTarget(name: "DownloadEngineTests", dependencies: ["DownloadEngine", "TestSupport", "CrashHarness"],
+            resources: [.copy("Resources/zstd")]),
         .testTarget(name: "RuntimeManagerTests", dependencies: ["RuntimeManager", "TestSupport"]),
         .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "LauncherCore"]),
         .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"]),

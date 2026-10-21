@@ -15,7 +15,7 @@ public enum ChunkCodec: String, Codable, Sendable, CaseIterable {
     public func decoder(fileOps: any FileOps = SystemFileOps()) throws -> any ChunkDecoder {
         switch self {
         case .identity: return IdentityDecoder(fileOps: fileOps)
-        case .zstd: throw LauncherError.io("codec unsupported: zstd")
+        case .zstd: return ZstdDecoder(fileOps: fileOps)
         }
     }
 }

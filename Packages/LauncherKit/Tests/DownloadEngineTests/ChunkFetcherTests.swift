@@ -328,8 +328,8 @@ func symlinkPartParentIsRefusedWithoutWritingOutside() async throws {
 }
 
 @Test
-func zstdCodecReportsUnsupported() throws {
-    #expect(throws: LauncherError.io("codec unsupported: zstd")) { try ChunkCodec.zstd.decoder() }
+func zstdCodecReportsSupported() throws {
+    #expect(try ChunkCodec.zstd.decoder() is ZstdDecoder)
 }
 
 @Test

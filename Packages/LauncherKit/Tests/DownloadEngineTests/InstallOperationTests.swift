@@ -7,6 +7,23 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
+@Test
+func installsTwoFilesFromZstdObjects() async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url); let cdn = MockCDN()
+    let a = compressedObject(try zstdVector("good"), id: "a")
+    let b = compressedObject(try zstdVector("wrong"), mirrors: ["https://cdn.test/b"], id: "b", byte: 66)
+    cdn.serve("object", data: try zstdVector("good")); cdn.serve("b", data: try zstdVector("wrong"))
+    let files = try [compressedFile(a, path: "a.bin"), compressedFile(b, path: "nested/b.bin")]
+    let plan = try stagingPlan([a, b], files)
+    let operation = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn),
+        disk: FixedDiskSpace(bytes: Int64.max))
+    let events = try await collectStaging(operation.run())
+    #expect(events.filter { $0 == .phase(.completed) }.count == 1)
+    #expect(try fs.readFile(at: files[0].path, maxBytes: 4096) == Data(repeating: 65, count: 4096))
+    #expect(try fs.readFile(at: files[1].path, maxBytes: 4096) == Data(repeating: 66, count: 4096))
+    #expect(cdn.requestLog.count == 2)
+}
+
 @Test(arguments: ["fresh", "lock"])
 func freshInstall(id: String) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
@@ -674,13 +691,12 @@ func opCollect(_ stream: AsyncThrowingStream<OperationEvent, any Error>, onEvent
 }
 
 @Test
-func installRejectsUnsupportedCodecBeforeAnyRequestOrDiskWrite() throws {
+func constructingZstdInstallDoesNotRequestOrWrite() throws {
     let temp = try TempDir(); let cdn = MockCDN()
-    let object = ChunkObject(id: "compressed", urls: [URL(string: "https://cdn.test/compressed")!], transferSize: 2,
-        decodedSize: 3, decodedDigest: opDigest("abc"), codec: .zstd)
-    let file = try stagingFile("new", "abc", [stagingChunk("compressed", "abc")])
+    let object = compressedObject(try zstdVector("good"))
+    let file = try compressedFile(object)
     let plan = try stagingPlan([object], [file])
-    #expect(throws: LauncherError.io("codec unsupported: zstd")) { try opEngine(plan, temp.url, cdn) }
+    _ = try opEngine(plan, temp.url, cdn)
     #expect(cdn.requestLog.isEmpty)
     #expect(try FileManager.default.contentsOfDirectory(atPath: temp.url.path).isEmpty)
 }
