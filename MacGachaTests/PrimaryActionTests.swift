@@ -10,7 +10,7 @@ struct PrimaryActionTests {
     @Test func activityBeatsStatus() {
         let cases: [(GameStatus, GameActivity, PrimaryAction)] = [
             (.notInstalled, .resolving, .preparing),
-            (.notInstalled, .working(.staging, fraction: 0.2, bytesPerSecond: 10), .progress),
+            (.notInstalled, .working(.staging, fraction: 0.2, bytesPerSecond: 10, downloaded: 20, total: 100), .progress),
             (.paused(.update), .working(.verifying, fraction: nil, bytesPerSecond: nil), .progress),
             (.paused(.install), .needsApproval(required: 200, available: 100), .continueInParts),
             (.locationUnavailable(URL(fileURLWithPath: "/unmounted")), .resolving, .preparing),

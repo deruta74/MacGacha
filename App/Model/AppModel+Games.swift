@@ -44,16 +44,12 @@ private struct GameSnapshot: Sendable {
         }
     }
 
-    func estimate(_ id: String, voices: Set<String>, at location: URL) async -> GameEstimate? {
-        guard let token = reserveGame(id, activity: .resolving) else { return nil }
-        defer { releaseGame(token, activity: nil) }
-        do {
-            await ensureGameStartup().value
-            try Task.checkCancellation()
-            let value = try await gameServices.estimate(id, voices: voices, at: location)
-            try Task.checkCancellation()
-            return value
-        } catch { show(error); return nil }
+    func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate {
+        await ensureGameStartup().value
+        try Task.checkCancellation()
+        let value = try await gameServices.estimate(id, voices: voices, at: location)
+        try Task.checkCancellation()
+        return value
     }
 
     func installGame(_ id: String, voices: Set<String>, at location: URL, approved: Bool) { beginGame(id, .install(voices, location, approved)) }
@@ -167,9 +163,11 @@ private struct GameSnapshot: Sendable {
         if case .needsApproval = games[id]?.activity { return }
         guard let value = gameProgress.update(at: now(), downloaded: downloaded, network: network, staged: staged, totalStaged: totalStaged) else { return }
         let phase: OperationPhase
-        if case .working(let current, _, _) = games[id]?.activity { phase = current } else { phase = .staging }
+        if case .working(let current, _, _, _, _) = games[id]?.activity { phase = current } else { phase = .staging }
+        let downloading = phase == .staging && network > 0
         setGameState(id, GameState(status: games[id]?.status ?? .unknown,
-            activity: .working(phase, fraction: value.fraction, bytesPerSecond: value.speed)))
+            activity: .working(phase, fraction: value.fraction, bytesPerSecond: value.speed,
+                downloaded: downloading ? downloaded : nil, total: downloading ? network : nil)))
     }
 }
 

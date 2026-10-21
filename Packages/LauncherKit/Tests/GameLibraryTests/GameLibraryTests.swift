@@ -181,6 +181,66 @@ import TestSupport
         #expect(try await f.store.load(game.id) == nil)
     }
 
+    @Test(arguments: [false, true]) func blockedEstimateDoesNotPreventInstallOrAdopt(adopt: Bool) async throws {
+        let gate = LibraryRequestGate(pathSuffix: "getGameBranches")
+        let f = try LibraryFixture(requestGate: gate); try f.advertise(1)
+        let library = f.library, location = f.install
+        let estimate = Task { try await library.estimate(game, voices: ["en-us"], at: location) }
+        defer { estimate.cancel(); gate.release() }
+        try await gate.waitUntilEntered()
+        if adopt { try f.seedExisting() }
+        let stream = adopt ? await library.adopt(game, folder: location, voices: ["en-us"]) :
+            await library.install(game, voices: ["en-us"], at: location, approved: true)
+        let events = try await libraryCollect(stream)
+        #expect(events.last == .phase(.completed)); try f.assertFiles(1)
+        let record = try #require(try await f.store.load(game.id))
+        let managed = try await f.store.readState("managed-paths.json", for: game.id, maxBytes: 1 << 20)
+        gate.release()
+        #expect(try await estimate.value.download > 0)
+        #expect(try await f.store.load(game.id) == record)
+        #expect(try await f.store.loadPlan(for: game.id) == nil)
+        #expect(try await f.store.readState("managed-paths.json", for: game.id, maxBytes: 1 << 20) == managed)
+        try f.assertFiles(1)
+    }
+
+    @Test func overlappingEstimatesBothSucceedWithoutCreatingOperationState() async throws {
+        let gate = LibraryRequestGate(pathSuffix: "getGameBranches")
+        let f = try LibraryFixture(requestGate: gate); try f.advertise(1)
+        let library = f.library, location = f.install
+        let first = Task { try await library.estimate(game, voices: ["en-us"], at: location) }
+        defer { first.cancel(); gate.release() }
+        try await gate.waitUntilEntered()
+        let second = try await library.estimate(game, voices: [], at: location)
+        #expect(second.download > 0)
+        gate.release()
+        #expect(try await first.value.download > second.download)
+        #expect(try await f.store.load(game.id) == nil)
+        #expect(try await f.store.loadPlan(for: game.id) == nil)
+        #expect(try await f.store.readState("managed-paths.json", for: game.id, maxBytes: 1 << 20) == nil)
+        #expect(!FileManager.default.fileExists(atPath: location.path))
+    }
+
+    @Test(arguments: [false, true]) func estimateDuringRunningInstallSucceeds(otherGame: Bool) async throws {
+        let gate = LibraryRequestGate(pathSuffix: "getGameConfigs")
+        let f = try LibraryFixture(requestGate: gate)
+        let other = GameDefinition.all[1]
+        try f.advertise(1, games: [game, other])
+        let library = f.library, location = f.install
+        let install = Task { try await libraryCollect(await library.install(game, voices: [], at: location, approved: true)) }
+        defer { install.cancel(); gate.release() }
+        try await gate.waitUntilEntered()
+        let selected = otherGame ? other : game
+        let estimateLocation = f.base.appendingPathComponent("Estimate")
+        let estimate = try await library.estimate(selected, voices: ["en-us"], at: estimateLocation)
+        #expect(estimate.download > 0)
+        #expect(try await f.store.load(selected.id) == nil)
+        #expect(try await f.store.loadPlan(for: selected.id) == nil)
+        #expect(try await f.store.readState("managed-paths.json", for: selected.id, maxBytes: 1 << 20) == nil)
+        #expect(!FileManager.default.fileExists(atPath: estimateLocation.path))
+        gate.release()
+        #expect(try await install.value.last == .phase(.completed))
+    }
+
     @Test func uninstallRefusesAContainingRoot() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         let nested = f.install.appendingPathComponent("OtherGame")
@@ -537,12 +597,13 @@ private struct LibraryFixture: ~Copyable {
     let library: GameLibrary
     let disk: any DiskSpaceProbe
     var fs: ContainedFileSystem { get throws { try ContainedFileSystem(root: install) } }
-    init(disk: any DiskSpaceProbe = FixedDiskSpace(bytes: Int64.max), metadataGate: LibraryMetadataGate? = nil) throws {
+    init(disk: any DiskSpaceProbe = FixedDiskSpace(bytes: Int64.max), metadataGate: LibraryMetadataGate? = nil, requestGate: LibraryRequestGate? = nil) throws {
         temp = try TempDir(); base = temp.url; paths = AppPaths(root: base.appendingPathComponent("App"))
         install = base.appendingPathComponent("Install"); store = GameRecordStore(directory: paths.games)
         cdn = MockCDN(); self.disk = disk
         let http: any HTTPClient
-        if let metadataGate { http = LibraryDelayedHTTP(cdn: cdn, gate: metadataGate) } else { http = cdn }
+        if let requestGate { http = LibraryGatedHTTP(cdn: cdn, gate: requestGate) }
+        else if let metadataGate { http = LibraryDelayedHTTP(cdn: cdn, gate: metadataGate) } else { http = cdn }
         library = GameLibrary(paths: paths, api: DeliveryAPI(http: http), runner: OperationRunner(store: store,
             fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil), store: store, disk: disk, log: nil)
     }
@@ -558,13 +619,13 @@ private struct LibraryFixture: ~Copyable {
     func assertFiles(_ version: Int) throws {
         for (path, body) in syntheticFiles(version) { #expect(try fs.readFile(at: SafeRelativePath(path), maxBytes: 100) == Data(body.utf8)) }
     }
-    func advertise(_ version: Int, opaqueIDs: Bool = false, collidingID: Bool = false, buildID: String? = nil, sharedAcrossFiles: Bool = false) throws {
+    func advertise(_ version: Int, opaqueIDs: Bool = false, collidingID: Bool = false, buildID: String? = nil, sharedAcrossFiles: Bool = false, games: [GameDefinition] = [game]) throws {
         let groups = [("base", "game"), ("extra", "extra"), ("voice", "en-us")]
         let categories: [[String: Any]] = groups.map { id, matching in ["category_id": id, "matching_field": matching,
             "type": id == "voice" ? "CATEGORY_TYPE_AUDIO" : "CATEGORY_TYPE_RESOURCE", "scenarios": ["CATEGORY_SCENARIO_FULL"]] }
-        cdn.serve("hyp/hyp-connect/api/getGameBranches", data: try jsonData(["game_branches": [["game": ["id": "test", "biz": game.biz],
-            "main": ["package_id": "public-package", "password": "public-selector", "branch": "main", "tag": "\(version).0", "categories": categories]]]]))
-        cdn.serve("hyp/hyp-connect/api/getGameConfigs", data: try jsonData(["launch_configs": [["game": ["id": "test", "biz": game.biz], "installation_dir": "TestGame", "exe_file_name": "Game.exe"]]]))
+        cdn.serve("hyp/hyp-connect/api/getGameBranches", data: try jsonData(["game_branches": games.map { game in ["game": ["id": "test", "biz": game.biz],
+            "main": ["package_id": "public-package", "password": "public-selector", "branch": "main", "tag": "\(version).0", "categories": categories]] }]))
+        cdn.serve("hyp/hyp-connect/api/getGameConfigs", data: try jsonData(["launch_configs": games.map { game in ["game": ["id": "test", "biz": game.biz], "installation_dir": "TestGame", "exe_file_name": "Game.exe"] }]))
         var descriptors: [[String: Any]] = []
         for (id, matching) in groups {
             var manifest = ProtobufWriter()
@@ -631,6 +692,52 @@ private func pauseAfterBatch(_ stream: AsyncThrowingStream<OperationEvent, any E
         }
     }
     Issue.record("No partial batch boundary")
+}
+
+/// Holds the first matching MockCDN response, leaving later requests independent.
+private final class LibraryRequestGate: Sendable {
+    private struct State {
+        var entered = false, released = false
+        var continuation: CheckedContinuation<Void, Never>?
+    }
+    private let state = Mutex(State())
+    private let pathSuffix: String
+    init(pathSuffix: String) { self.pathSuffix = pathSuffix }
+    func pause(_ url: URL) async {
+        guard url.path.hasSuffix(pathSuffix) else { return }
+        await withCheckedContinuation { continuation in
+            let shouldResume = state.withLock {
+                guard !$0.entered, !$0.released else { return true }
+                $0.continuation = continuation; $0.entered = true
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+    func waitUntilEntered() async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !state.withLock({ $0.entered }) {
+            guard ContinuousClock.now < deadline else { throw LauncherError.io("MockCDN request did not reach gate") }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+    func release() {
+        let continuation = state.withLock {
+            $0.released = true
+            let continuation = $0.continuation; $0.continuation = nil
+            return continuation
+        }
+        continuation?.resume()
+    }
+}
+private struct LibraryGatedHTTP: HTTPClient {
+    let cdn: MockCDN
+    let gate: LibraryRequestGate
+    func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
+        let response = try await cdn.get(url, byteRangeFrom: offset)
+        await gate.pause(url)
+        return response
+    }
 }
 
 private actor LibraryMetadataGate {

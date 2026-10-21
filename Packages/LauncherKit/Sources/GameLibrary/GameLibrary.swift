@@ -63,7 +63,8 @@ public actor GameLibrary {
     }
 
     public func estimate(_ game: GameDefinition, voices: Set<String>, at location: URL) async throws -> GameEstimate {
-        let lease = try await store.acquireOperationLease(); defer { withExtendedLifetime(lease) {} }
+        // Estimates only read operation state. Metadata caches are atomic and
+        // verified on read, so they do not require the exclusive operation lease.
         let records = try await store.records()
         try GameRecordRules.check(.install, record: records[game.id], others: others(records, game))
         try checkNewLocation(location, records: records, game: game, empty: true)
