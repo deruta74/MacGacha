@@ -57,10 +57,14 @@ public struct RuntimeComponent: Codable, Sendable, Identifiable {
     public let archive: ArchiveFormat?
     public let license: ComponentLicense
     public let consent: ConsentKind?
+    public let rootPath: SafeRelativePath?
+    public let wineBinary: SafeRelativePath?
+    public let overlay: [RuntimeOverlay]
 
     public init(id: SafeIdentifier, kind: ComponentKind, version: SafeIdentifier, sourceMode: SourceMode,
         url: URL? = nil, size: Int64? = nil, installedSize: Int64? = nil, sha256: Digest? = nil,
-        archive: ArchiveFormat? = nil, license: ComponentLicense, consent: ConsentKind? = nil) throws {
+        archive: ArchiveFormat? = nil, license: ComponentLicense, consent: ConsentKind? = nil,
+        rootPath: SafeRelativePath? = nil, wineBinary: SafeRelativePath? = nil, overlay: [RuntimeOverlay] = []) throws {
         guard id.rawValue == "\(kind.rawValue)-\(version.rawValue)" else {
             throw LauncherError.io("Runtime component ID must be <kind>-<version>")
         }
@@ -95,11 +99,16 @@ public struct RuntimeComponent: Codable, Sendable, Identifiable {
         self.sha256 = sha256
         self.archive = archive
         self.license = license
+        guard overlay.count <= 16, kind == .dxmt || overlay.isEmpty, kind != .dxmt || wineBinary == nil else {
+            throw LauncherError.io("Invalid runtime layout")
+        }
         self.consent = consent
+        if let rootPath { try ArchivePolicy.validateRoot(rootPath) }
+        self.rootPath = rootPath; self.wineBinary = wineBinary; self.overlay = overlay
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, version, sourceMode, url, size, installedSize, sha256, archive, license, consent
+        case id, kind, version, sourceMode, url, size, installedSize, sha256, archive, license, consent, rootPath, wineBinary, overlay
     }
 
     public init(from decoder: any Decoder) throws {
@@ -109,37 +118,46 @@ public struct RuntimeComponent: Codable, Sendable, Identifiable {
             url: c.decodeIfPresent(URL.self, forKey: .url), size: c.decodeIfPresent(Int64.self, forKey: .size),
             installedSize: c.decodeIfPresent(Int64.self, forKey: .installedSize), sha256: c.decodeIfPresent(Digest.self, forKey: .sha256),
             archive: c.decodeIfPresent(ArchiveFormat.self, forKey: .archive), license: c.decode(ComponentLicense.self, forKey: .license),
-            consent: c.decodeIfPresent(ConsentKind.self, forKey: .consent))
+            consent: c.decodeIfPresent(ConsentKind.self, forKey: .consent),
+            rootPath: c.decodeIfPresent(SafeRelativePath.self, forKey: .rootPath),
+            wineBinary: c.decodeIfPresent(SafeRelativePath.self, forKey: .wineBinary),
+            overlay: c.decodeIfPresent([RuntimeOverlay].self, forKey: .overlay) ?? [])
     }
 }
 
 public struct RuntimeManifest: Codable, Sendable {
     public let schemaVersion: Int
     public let components: [RuntimeComponent]
+    public let bundles: [RuntimeBundle]
 
-    public init(schemaVersion: Int = 1, components: [RuntimeComponent]) throws {
-        guard schemaVersion == 1 else { throw LauncherError.io("Unsupported runtime manifest schema") }
+    public init(schemaVersion: Int = 2, components: [RuntimeComponent], bundles: [RuntimeBundle] = []) throws {
+        guard schemaVersion == 2 else { throw LauncherError.io("Unsupported runtime manifest schema") }
         guard components.count <= 256 else { throw LauncherError.io("Too many runtime components") }
         guard Set(components.map(\.id)).count == components.count else { throw LauncherError.io("Duplicate runtime component ID") }
         let destinations = components.map { $0.kind.rawValue + "/" + $0.version.rawValue.lowercased() }
         guard Set(destinations).count == components.count else { throw LauncherError.io("Colliding runtime install destinations") }
+        guard bundles.count <= 64, Set(bundles.map { $0.id.rawValue.lowercased() }).count == bundles.count else {
+            throw LauncherError.io("Invalid runtime bundles")
+        }
+        for bundle in bundles { try bundle.validate(components: components) }
+        self.bundles = bundles
         self.schemaVersion = schemaVersion
         self.components = components
     }
 
-    private enum CodingKeys: String, CodingKey { case schemaVersion, components }
+    private enum CodingKeys: String, CodingKey { case schemaVersion, components, bundles }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let schema = try c.decode(Int.self, forKey: .schemaVersion)
-        guard schema == 1 else { throw LauncherError.io("Unsupported runtime manifest schema") }
+        guard schema == 2 else { throw LauncherError.io("Unsupported runtime manifest schema") }
         var array = try c.nestedUnkeyedContainer(forKey: .components)
         var components: [RuntimeComponent] = []
         while !array.isAtEnd {
             guard components.count < 256 else { throw LauncherError.io("Too many runtime components") }
             components.append(try array.decode(RuntimeComponent.self))
         }
-        try self.init(schemaVersion: schema, components: components)
+        try self.init(schemaVersion: schema, components: components, bundles: c.decodeIfPresent([RuntimeBundle].self, forKey: .bundles) ?? [])
     }
 
     public static func load(from url: URL) throws -> RuntimeManifest {

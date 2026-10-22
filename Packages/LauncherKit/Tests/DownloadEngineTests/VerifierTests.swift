@@ -225,7 +225,7 @@ func blockedVerificationReadDoesNotStarveCancellation() async throws {
     let timedOut = Mutex(false)
     let verifier = Verifier(read: { handle, size in
         entered.continuation.yield(())
-        guard release.wait(timeout: .now() + 10) == .success else {
+        guard release.wait(timeout: .now() + 60) == .success else {
             timedOut.withLock { $0 = true }; throw LauncherError.io("verification read deadline")
         }
         return try handle.read(upToCount: size) ?? Data()

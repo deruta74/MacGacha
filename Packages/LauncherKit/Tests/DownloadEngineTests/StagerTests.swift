@@ -243,7 +243,7 @@ func stagingBoundsConcurrentObjectFetches() async throws {
     let stager = try Stager(plan: plan, fs: fs, fetcher: stagingFetcher(client), journal: journal,
         disk: FixedDiskSpace(bytes: Int64.max), maxConcurrentObjects: 3)
     _ = try await collectStaging(stager.stage(files: plan.files))
-    #expect(client.peak > 0 && client.peak <= 3)
+    #expect(client.peak == 3)
 }
 
 @Test(.timeLimit(.minutes(1)))
@@ -288,13 +288,22 @@ func pausedAndDiscardedStagingStreamKeepsBoundedWorkAndReleasesLease() async thr
     let cdn = MockCDN(); cdn.serve("a", data: Data("abc".utf8)); cdn.serve("b", data: Data("def".utf8))
     let stager = try stagingEngine(plan, fs, cdn, journal)
     let released = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
-    try await OperationWork.$observer.withValue({ if $0 == .stagingLeaseReleased { released.continuation.yield(()) } }) {
+    let fetched = AsyncStream<Void>.makeStream()
+    try await OperationWork.$observer.withValue({
+        if $0 == .stagingLeaseReleased { released.continuation.yield(()) }
+        if $0 == .fetchTaskFinished { fetched.continuation.yield(()) }
+    }) {
         do {
             var iterator = stager.stage(files: files).makeAsyncIterator()
             _ = try await iterator.next()
             #expect(cdn.requestLog.isEmpty)
             while let event = try await iterator.next() { if case .fileVerified = event { break } }
             #expect(cdn.requestLog.count <= 2) // Both fit in this bounded window.
+            // A counted request is not yet a durable cached object. Wait for
+            // both fetch workers before discarding, so the restart's exact
+            // request-count assertion proves reuse rather than racing a retry.
+            var fetch = fetched.stream.makeAsyncIterator()
+            for _ in objects { _ = try #require(await fetch.next()) }
             await #expect(throws: LauncherError.busy("staging already in use")) { _ = try await collectStaging(stager.stage(files: files)) }
             withExtendedLifetime(iterator) {}
         }
@@ -305,8 +314,8 @@ func pausedAndDiscardedStagingStreamKeepsBoundedWorkAndReleasesLease() async thr
     #expect(cdn.requestLog.count == 2)
 }
 
-@Test(.timeLimit(.minutes(1)))
-func cancellationKeepsPartsAndStaged() async throws {
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
+func cancellationKeepsPartsAndStaged(betweenPulls: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let objects = [stagingObject("a", "abc"), stagingObject("b", "abcdef")]
     let files = try [stagingFile("a", "abc", [stagingChunk("a", "abc")]),
@@ -314,14 +323,32 @@ func cancellationKeepsPartsAndStaged() async throws {
     let plan = try stagingPlan(objects, files); let client = StagingStallClient()
     let journal = try stagingJournal(fs, plan)
     let stager = try stagingEngine(plan, fs, client, journal)
-    let clock = ContinuousClock(), started = clock.now, work = EngineWorkCounter()
+    let work = EngineWorkCounter(), pullWaiting = TestEvent(), released = TestEvent()
+    let hasStaged = Mutex(false)
+    let holdBetweenPulls = AsyncStream<Void>.makeStream()
     let firstStaged = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     let task = Task {
-        try await OperationWork.$observer.withValue({ work.record($0) }) {
+        try await OperationWork.$observer.withValue({
+            work.record($0)
+            if $0 == .pipelinePullWaiting && hasStaged.withLock({ $0 }) && !betweenPulls {
+                // Cancel inside the unfolding call. Cancelling from a different
+                // task after a notification can race the next iterator boundary.
+                withUnsafeCurrentTask { $0?.cancel() }
+                pullWaiting.signal()
+            }
+            if $0 == .stagingLeaseReleased { released.signal() }
+        }) {
             var events: [OperationEvent] = []
             for try await event in stager.stage(files: files) {
                 events.append(event)
-                if event == .fileVerified(files[0].path) { firstStaged.continuation.yield(()) }
+                if event == .fileVerified(files[0].path) {
+                    hasStaged.withLock { $0 = true }
+                    firstStaged.continuation.yield(())
+                    if betweenPulls {
+                        var hold = holdBetweenPulls.stream.makeAsyncIterator()
+                        _ = await hold.next() // Cancellation ends this gate without throwing.
+                    }
+                }
             }
             return events
         }
@@ -330,12 +357,19 @@ func cancellationKeepsPartsAndStaged() async throws {
     try await client.waitUntilStalled()
     var stagedEvent = firstStaged.stream.makeAsyncIterator()
     _ = await stagedEvent.next()
-    print("Stager cancellation reached stalled body after \(started.duration(to: clock.now))")
+    if !betweenPulls { try await pullWaiting.wait() }
     #expect(work.snapshot[.referrerIndexBuild] == 1)
     #expect(work.snapshot[.predictionFile] == 2)
     #expect(work.snapshot[.localRangeHash] == nil)
-    task.cancel()
-    await #expect(throws: LauncherError.cancelled) { _ = try await task.value }
+    if betweenPulls {
+        task.cancel()
+        let events = try await task.value
+        #expect(events.filter { if case .fileVerified = $0 { true } else { false } } == [.fileVerified(files[0].path)])
+    } else {
+        await #expect(throws: LauncherError.cancelled) { _ = try await task.value }
+    }
+    // Stream disposal schedules cleanup; await its completion before inspecting disk.
+    try await released.wait()
     #expect(client.cancelled)
     #expect(try fs.size(at: objectPath(plan, objects[1])) == 3)
     #expect(try fs.readFile(at: stagedPath(plan, files[0].path), maxBytes: 3) == Data("abc".utf8))
@@ -381,21 +415,25 @@ func collectStaging(_ stream: AsyncThrowingStream<OperationEvent, any Error>) as
 private final class StagingStallClient: HTTPClient {
     private struct State { var calls = 0; var cancelled = false }
     private let state = Mutex(State())
-    private let stalled = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private let stalled = TestEvent()
+    private let hold = TestEvent()
     func waitUntilStalled() async throws {
-        var iterator = stalled.stream.makeAsyncIterator()
-        guard await iterator.next() != nil else { throw LauncherError.cancelled }
+        try await stalled.wait()
     }
     var cancelled: Bool { state.withLock { $0.cancelled } }
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         if url.lastPathComponent == "a" {
+            // Stage the first file only after the other fetch has persisted its
+            // prefix and entered the stalled read. Cancellation then has a
+            // deterministic partial object to preserve in either boundary case.
+            try await stalled.wait()
             let cdn = MockCDN(); cdn.serve("a", data: Data("abc".utf8)); return try await cdn.get(url, byteRangeFrom: offset)
         }
         return (HTTPResponseHead(status: 200, contentLength: 6), HTTPBody(next: { [self] in
             let first = state.withLock { value in value.calls += 1; return value.calls == 1 }
             if first { return Data("abc".utf8) }
-            stalled.continuation.yield(())
-            try await Task.sleep(for: .seconds(60)); return nil
+            stalled.signal()
+            try await hold.wait(); return nil
         }, onCancel: { [self] in state.withLock { $0.cancelled = true } }))
     }
 }
@@ -403,12 +441,14 @@ private final class StagingStallClient: HTTPClient {
 private final class ConcurrentStagingClient: HTTPClient {
     private let cdn = MockCDN()
     private let counts = Mutex((active: 0, peak: 0))
+    private let threeEntered = TestEvent()
     var peak: Int { counts.withLock { $0.peak } }
     init(objects: [ChunkObject]) { for object in objects { cdn.serve(object.id, data: Data("abc".utf8)) } }
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
-        counts.withLock { $0.active += 1; $0.peak = max($0.peak, $0.active) }
+        let active = counts.withLock { $0.active += 1; $0.peak = max($0.peak, $0.active); return $0.active }
+        if active == 3 { threeEntered.signal() }
         defer { counts.withLock { $0.active -= 1 } }
-        try await Task.sleep(for: .milliseconds(20))
+        try await threeEntered.wait()
         return try await cdn.get(url, byteRangeFrom: offset)
     }
 }

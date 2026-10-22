@@ -303,17 +303,37 @@ struct AppModelTests {
         #expect(!model.rows.contains { $0.id == invalidID })
     }
 
-    @Test func bundledManifestDecodesAndUsesSpecifiedPlaceholders() throws {
+    @Test func bundledManifestDecodesPinnedBundles() throws {
         let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: url))
         #expect(manifest.components.count == 3)
         for c in manifest.components {
-            #expect(c.url?.absoluteString == "https://example.invalid/\(c.kind.rawValue).tar.xz")
-            #expect(c.sha256?.hex == String(repeating: "0", count: 64))
+            #expect(c.url?.host == "github.com")
+            #expect(c.sha256?.hex != String(repeating: "0", count: 64))
             #expect(c.installedSize != nil)
         }
         let metal = try #require(manifest.components.first { $0.kind == .d3dmetal })
         #expect(!metal.license.redistributable && metal.consent == .appleGPTK)
+    }
+
+    @Test func bundleRowsInstallAndRemoveThroughExistingPanelAPI() async throws {
+        let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
+        let manifest = try RuntimeManifest.load(from: url)
+        let model = AppModel(paths: testPaths(), manifest: manifest, services: PreviewRuntimeServices(), defaults: nil)
+        await model.start()
+        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue })
+        let dxmt = manifest.bundles[0].id.rawValue
+        model.install(dxmt)
+        try await eventually { model.rows.first?.state == .installed(source: .download) }
+        #expect(model.runtimesReady)
+        await model.remove(dxmt)
+        #expect(model.rows.first?.state == .notInstalled)
+        #expect(!model.runtimesReady)
+        model.install(manifest.bundles[1].id.rawValue)
+        try await eventually { model.consentRequest != nil }
+        #expect(model.consentRequest?.body == AppleNotice.body)
+        model.respondToConsent(accept: false)
+        #expect(model.rows.last?.state == .notInstalled)
     }
 
     @Test func progressIsThrottledAndPreviewHasNoLiveDependencies() async throws {
@@ -334,7 +354,7 @@ struct AppModelTests {
         fake.emit(.progress(downloaded: 95, totalNetwork: 100, staged: 0, totalStaged: 100))
         try await eventually { model.rows.first?.state == .working(phase: .verifying, fraction: 0.95) }
         let preview = AppModel.preview()
-        #expect(preview.rows.count == 3 && !preview.isStarting)
+        #expect(preview.rows.count == AppModel.sampleRows.count && !preview.isStarting)
     }
 
     @Test func runtimesReadyRequiresWineAndATranslator() async throws {

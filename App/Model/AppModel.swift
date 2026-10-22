@@ -34,6 +34,9 @@ final class AppModel {
         var state: RowState
         let canImportGPTK: Bool
         let needsConsent: Bool
+        /// Bundles only: what is inside, and the total download.
+        var summary: String? = nil
+        var downloadSize: Int64? = nil
     }
 
     private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
@@ -69,6 +72,8 @@ final class AppModel {
     @ObservationIgnored private var working: [String: RowState] = [:]
     @ObservationIgnored private var errors: [String: String] = [:]
     @ObservationIgnored private var installed: [InstalledComponent] = []
+    private(set) var installedBundles: [String: InstalledRuntimeBundle] = [:]
+    @ObservationIgnored private var importRuntimeBundle: RuntimeBundle?
     @ObservationIgnored private var invalid: [String: InvalidRuntimeEntry] = [:]
     @ObservationIgnored private var requestModes: [String: ConsentMode] = [:]
     @ObservationIgnored private var progressTimes: [String: ContinuousClock.Instant] = [:]
@@ -128,7 +133,8 @@ final class AppModel {
     }
 
     var runtimesReady: Bool {
-        installed.contains { $0.kind == .wine } && installed.contains { $0.kind == .dxmt || $0.kind == .d3dmetal }
+        if manifest?.bundles.isEmpty == false { return !installedBundles.isEmpty }
+        return installed.contains { $0.kind == .wine } && installed.contains { $0.kind == .dxmt || $0.kind == .d3dmetal }
     }
 
     func loadGameArt() async {
@@ -166,17 +172,28 @@ final class AppModel {
     private func scanAndApply() async throws {
         let generation = UUID(); scanGeneration = generation
         let scan = try await services.scan()
+        let bundles: [String: InstalledRuntimeBundle]
+        if let manifest { bundles = try await services.scanBundles(manifest) } else { bundles = [:] }
         try Task.checkCancellation()
         guard scanGeneration == generation else { return }
+        installedBundles = bundles
         apply(scan)
     }
 
     func install(_ id: String) { request(id, mode: .download) }
     func importGPTK(_ id: String) { request(id, mode: .importGPTK) }
 
+    private func bundle(_ id: String) -> RuntimeBundle? { manifest?.bundles.first { $0.id.rawValue == id } }
+    private func requestedComponent(_ id: String) -> RuntimeComponent? {
+        if let bundle = bundle(id) {
+            return manifest?.components.first { bundle.components.contains($0.id) && $0.wineBinary != nil }
+        }
+        return manifest?.components.first { $0.id.rawValue == id }
+    }
+
     private func request(_ id: String, mode: ConsentMode) {
         guard tasks[id] == nil, consentRequest == nil,
-            let component = manifest?.components.first(where: { $0.id.rawValue == id }),
+            let component = requestedComponent(id),
             mode != .importGPTK || component.kind == .d3dmetal else { return }
         let generation = UUID(); generations[id] = generation; requestModes[id] = mode
         let services = services
@@ -191,8 +208,8 @@ final class AppModel {
             if !accepted {
                 self.consentRequest = ConsentRequest(id: id, mode: mode, title: AppleNotice.title,
                     body: AppleNotice.body, termsURL: AppleNotice.termsURL)
-            } else if mode == .importGPTK { self.beginImport(component) }
-            else { self.beginOperation(component, from: nil) }
+            } else if mode == .importGPTK { self.beginImport(component, bundle: self.bundle(id)) }
+            else { self.beginOperation(component, from: nil, bundle: self.bundle(id)) }
         }
     }
 
@@ -200,7 +217,7 @@ final class AppModel {
         guard let request = consentRequest else { return }
         consentRequest = nil
         guard accept, tasks[request.id] == nil,
-            let component = manifest?.components.first(where: { $0.id.rawValue == request.id }) else { return }
+            let component = requestedComponent(request.id) else { return }
         let id = request.id; let generation = UUID(); generations[id] = generation; requestModes[id] = request.mode
         let services = services
         working[id] = .working(phase: .checkingSpace, fraction: nil); rebuildRows()
@@ -210,8 +227,8 @@ final class AppModel {
                 try Task.checkCancellation()
                 guard self?.generations[id] == generation else { return }
                 self?.finish(id, generation: generation)
-                if request.mode == .importGPTK { self?.beginImport(component) }
-                else { self?.beginOperation(component, from: nil) }
+                if request.mode == .importGPTK { self?.beginImport(component, bundle: self?.bundle(id)) }
+                else { self?.beginOperation(component, from: nil, bundle: self?.bundle(id)) }
             } catch {
                 if self?.generations[id] == generation { self?.show(error) }
                 self?.finish(id, generation: generation)
@@ -223,8 +240,9 @@ final class AppModel {
         guard let component = importComponent, case .choose(let candidates) = importState,
             candidates.contains(candidate), tasks[component.id.rawValue] == nil else { return }
         searchTask?.cancel(); searchTask = nil; searchGeneration = UUID()
-        importComponent = nil; importState = nil
-        beginOperation(component, from: candidate)
+        let bundle = importRuntimeBundle
+        importComponent = nil; importRuntimeBundle = nil; importState = nil
+        beginOperation(component, from: candidate, bundle: bundle)
     }
 
     func rescanGPTK() {
@@ -264,7 +282,7 @@ final class AppModel {
 
     func cancelImport() {
         searchTask?.cancel(); searchTask = nil; searchGeneration = UUID()
-        importComponent = nil; importState = nil; extraRoots = []
+        importComponent = nil; importRuntimeBundle = nil; importState = nil; extraRoots = []
         if consentRequest?.mode == .importGPTK { consentRequest = nil }
         for (id, mode) in requestModes where mode == .importGPTK { tasks[id]?.cancel() }
     }
@@ -272,24 +290,28 @@ final class AppModel {
     func cancel(_ id: String) {
         tasks[id]?.cancel()
         if consentRequest?.id == id { consentRequest = nil }
-        if importComponent?.id.rawValue == id { cancelImport() }
+        if importComponent?.id.rawValue == id || importRuntimeBundle?.id.rawValue == id { cancelImport() }
     }
 
-    private func beginImport(_ component: RuntimeComponent) {
+    private func beginImport(_ component: RuntimeComponent, bundle: RuntimeBundle? = nil) {
         cancelImport()
-        importComponent = component
+        importComponent = component; importRuntimeBundle = bundle
         rescanGPTK()
     }
 
-    private func beginOperation(_ component: RuntimeComponent, from candidate: GPTKCandidate?) {
-        let id = component.id.rawValue; let generation = UUID(); generations[id] = generation
+    private func beginOperation(_ component: RuntimeComponent, from candidate: GPTKCandidate?, bundle: RuntimeBundle? = nil) {
+        let id = bundle?.id.rawValue ?? component.id.rawValue; let generation = UUID(); generations[id] = generation
         let services = services
         errors[id] = nil; progressTimes[id] = nil
         working[id] = .working(phase: .staging, fraction: nil); rebuildRows()
+        let manifest = manifest
         tasks[id] = Task { [weak self] in
+            let stream: RuntimeInstallStream
+            if let bundle, let manifest { stream = services.install(bundle, manifest: manifest, from: candidate) }
+            else { stream = RuntimeInstallStream(services.install(component, from: candidate)) }
             do {
                 var completed = false
-                for try await event in services.install(component, from: candidate) {
+                for try await event in stream {
                     try Task.checkCancellation()
                     guard self?.generations[id] == generation else { return }
                     switch event {
@@ -312,12 +334,23 @@ final class AppModel {
                 try Task.checkCancellation()
                 if !completed { throw LauncherError.transport("Operation ended before completion") }
             } catch {
+                // Also join when cancellation is observed between two iterator pulls.
+                await stream.cancelAndWait()
                 if launcherError(error) == .cancelled {
                     // Publication can win a late cancellation; show the actual visible tree.
                     let scanToken = UUID(); self?.scanGeneration = scanToken
-                    let scan = await Task.detached { try? await services.scan() }.value
-                    if self?.generations[id] == generation, self?.scanGeneration == scanToken,
-                        let scan { self?.apply(scan) }
+                    let snapshot = await Task.detached { () -> (RuntimeScan, [String: InstalledRuntimeBundle])? in
+                        guard let scan = try? await services.scan() else { return nil }
+                        let bundles: [String: InstalledRuntimeBundle]
+                        if let manifest {
+                            guard let scanned = try? await services.scanBundles(manifest) else { return nil }
+                            bundles = scanned
+                        } else { bundles = [:] }
+                        return (scan, bundles)
+                    }.value
+                    if self?.generations[id] == generation, self?.scanGeneration == scanToken, let snapshot {
+                        self?.installedBundles = snapshot.1; self?.apply(snapshot.0)
+                    }
                 } else if self?.generations[id] == generation {
                     self?.errors[id] = launcherError(error).userMessage; self?.show(error)
                 }
@@ -346,6 +379,13 @@ final class AppModel {
 
     func remove(_ id: String) async {
         guard tasks[id] == nil, working[id] == nil else { return }
+        if let bundle = bundle(id), let manifest {
+            working[id] = .working(phase: .deleting, fraction: nil); rebuildRows()
+            defer { working[id] = nil; rebuildRows() }
+            do { try await services.remove(bundle, manifest: manifest); try await scanAndApply(); errors[id] = nil }
+            catch { errors[id] = launcherError(error).userMessage; show(error) }
+            return
+        }
         let component = installed.first { Self.id($0) == id }
         let bad = invalid[id]
         guard component != nil || bad?.removable == true else { return }
@@ -404,7 +444,17 @@ final class AppModel {
 
     private func rebuildRows() {
         var result: [RuntimeRow] = []
-        for component in manifest?.components ?? [] {
+        let covered = Set((manifest?.bundles ?? []).flatMap(\.components))
+        for bundle in manifest?.bundles ?? [] {
+            let id = bundle.id.rawValue
+            let components = (manifest?.components ?? []).filter { bundle.components.contains($0.id) }
+            result.append(RuntimeRow(id: id, kindName: bundle.displayName, version: components.map { $0.version.rawValue }.joined(separator: " + "),
+                licenseName: components.map { $0.license.name }.joined(separator: " / "),
+                state: working[id] ?? errors[id].map { .failed(message: $0) } ?? installedBundles[id].map { .installed(source: $0.source) } ?? .notInstalled,
+                canImportGPTK: bundle.backend == .d3dmetal, needsConsent: components.contains { $0.consent != nil },
+                summary: bundle.summary, downloadSize: components.reduce(Int64(0)) { $0 + ($1.size ?? 0) }))
+        }
+        for component in manifest?.components ?? [] where !covered.contains(component.id) {
             let id = component.id.rawValue
             let existing = installed.first { $0.kind == component.kind && $0.version == component.version.rawValue }
             result.append(RuntimeRow(id: id, kindName: Self.kindName(component.kind), version: component.version.rawValue,
@@ -412,7 +462,7 @@ final class AppModel {
                 state: working[id] ?? errors[id].map { .failed(message: $0) } ?? existing.map { .installed(source: $0.source) } ?? .notInstalled,
                 canImportGPTK: component.kind == .d3dmetal, needsConsent: component.consent != nil))
         }
-        for component in installed where !result.contains(where: { $0.id == Self.id(component) }) {
+        for component in installed where !covered.contains(where: { $0.rawValue == Self.id(component) }) && !result.contains(where: { $0.id == Self.id(component) }) {
             let id = Self.id(component)
             result.append(RuntimeRow(id: id, kindName: Self.kindName(component.kind), version: component.version,
                 licenseName: "Installed runtime", state: working[id] ?? .installed(source: component.source), canImportGPTK: false, needsConsent: false))
@@ -451,7 +501,7 @@ struct BundledRuntimeManifest {
         guard let url = Bundle.main.url(forResource: "runtime-manifest", withExtension: "json") else {
             throw LauncherError.io("Bundled runtime manifest is missing")
         }
-        return try RuntimeManifest.load(from: url)
+        return try await BlockingIO.run { try RuntimeManifest.load(from: url) }
     }
 }
 
@@ -462,12 +512,12 @@ extension AppModel {
          "zzz": GameState(status: .notInstalled)]
     }
     static var sampleRows: [RuntimeRow] {
-        [RuntimeRow(id: "wine-10.0", kindName: "Wine", version: "10.0", licenseName: "LGPL-2.1",
-            state: .installed(source: .download), canImportGPTK: false, needsConsent: false),
-         RuntimeRow(id: "dxmt-0.62", kindName: "DXMT", version: "0.62", licenseName: "MIT",
-            state: .working(phase: .staging, fraction: 0.42), canImportGPTK: false, needsConsent: false),
-         RuntimeRow(id: "d3dmetal-3.0", kindName: "D3DMetal", version: "3.0", licenseName: "Apple Game Porting Toolkit",
-            state: .notInstalled, canImportGPTK: true, needsConsent: true)]
+        [RuntimeRow(id: "dxmt-wine11.0-dxmt0.80", kindName: "DXMT", version: "11.0-yaagl + 0.80", licenseName: "LGPL-2.1 / MIT",
+            state: .working(phase: .staging, fraction: 0.42), canImportGPTK: false, needsConsent: false,
+            summary: "Wine 11.0 with game patches · DXMT 0.80", downloadSize: 465_267_389),
+         RuntimeRow(id: "d3dmetal-wine11.20-gptk4.0b3", kindName: "D3DMetal", version: "4.0b3", licenseName: "Apple Game Porting Toolkit",
+            state: .notInstalled, canImportGPTK: true, needsConsent: true,
+            summary: "Wine 11.20 · Apple D3DMetal 4.0 beta 3", downloadSize: 307_352_548)]
     }
 
     static func preview(rows: [RuntimeRow] = sampleRows, consent: ConsentRequest? = nil,

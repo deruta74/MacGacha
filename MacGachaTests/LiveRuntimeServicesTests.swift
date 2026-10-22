@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Synchronization
 import Testing
 import LauncherCore
 import DownloadEngine
@@ -36,6 +37,56 @@ struct LiveRuntimeServicesTests {
                 #expect(entry.metadata["host"] == "example.invalid" && entry.metadata["status"] == "503")
             } else { #expect(!text.contains("example.invalid")) }
         }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func liveBundleCancellationJoinsCleanupBeforeReadinessAndRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let payload = root.appendingPathComponent("payload")
+        try FileManager.default.createDirectory(at: payload.appendingPathComponent("bin"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: payload.appendingPathComponent("x86_64-windows"), withIntermediateDirectories: true)
+        try Data("wine".utf8).write(to: payload.appendingPathComponent("bin/wine"))
+        try Data("dxmt".utf8).write(to: payload.appendingPathComponent("x86_64-windows/d3d11.dll"))
+        let archive = root.appendingPathComponent("fixture.tar")
+        let result = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/tar"),
+            arguments: ["-cf", archive.path, "-C", root.path, "payload"],
+            environment: [:], currentDirectory: nil)
+        #expect(result.exitCode == 0)
+        let bytes = try Data(contentsOf: archive)
+        let http = CleanupHeldHTTP(bytes: bytes)
+        let live = LiveRuntimeServices(paths: AppPaths(root: root.appendingPathComponent("app")), http: http,
+            retry: RetryPolicy(maxAttempts: 1))
+        let manifest = try liveBundleManifest(version: "1", bytes: bytes)
+        let bundle = manifest.bundles[0]
+        for try await _ in live.install(bundle, manifest: manifest, from: nil) { }
+        #expect(try await live.scanBundles(manifest)[bundle.id.rawValue] != nil)
+        let update = try liveBundleManifest(version: "2", bytes: bytes)
+        let finished = Mutex(false)
+        let consumer = Task {
+            defer { finished.withLock { $0 = true } }
+            do {
+                for try await _ in live.install(update.bundles[0], manifest: update, from: nil) {
+                    try Task.checkCancellation()
+                }
+                throw LauncherError.io("Cancelled stream ended successfully")
+            } catch {
+                // This is the model's cancellation refresh: it must see the old bundle,
+                // never a busy lease that the model could mistake for empty readiness.
+                let ready = try await Task.detached { try await live.scanBundles(manifest) }.value
+                #expect(ready[bundle.id.rawValue] != nil)
+                throw launcherError(error)
+            }
+        }
+        await http.started.wait()
+        consumer.cancel()
+        await http.cancelled.wait()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!finished.withLock { $0 })
+        await http.release.open()
+        await #expect(throws: LauncherError.cancelled) { try await consumer.value }
+        for try await _ in live.install(bundle, manifest: manifest, from: nil) { }
+        #expect(try await live.scanBundles(manifest)[bundle.id.rawValue] != nil)
     }
 
     @Test func liveDiagnosticBundleIsACompleteTemporaryZip() async throws {
@@ -114,3 +165,49 @@ private struct NoWaitSleeper: Sleeper {
 }
 
 private func onMainThread() -> Bool { Thread.isMainThread }
+
+private actor LiveTestGate {
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func open() { opened = true; let pending = waiters; waiters = []; for waiter in pending { waiter.resume() } }
+}
+
+private final class CleanupHeldHTTP: HTTPClient, Sendable {
+    let bytes: Data
+    let started = LiveTestGate(), cancelled = LiveTestGate(), release = LiveTestGate()
+    init(bytes: Data) { self.bytes = bytes }
+    func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
+        if url.lastPathComponent.hasSuffix("-2") {
+            await started.open()
+            await withTaskCancellationHandler {
+                await release.wait() // Deliberately hold HTTP cleanup after cancellation.
+            } onCancel: { Task { await self.cancelled.open() } }
+            throw LauncherError.cancelled
+        }
+        let remaining = Mutex<Data?>(bytes)
+        return (HTTPResponseHead(status: 200, contentLength: Int64(bytes.count)),
+            HTTPBody(next: { remaining.withLock { value in let data = value; value = nil; return data } }))
+    }
+}
+
+private func liveBundleManifest(version: String, bytes: Data) throws -> RuntimeManifest {
+    var hasher = StreamingHasher(.sha256); hasher.update(bytes); let digest = hasher.finalize()
+    let components = try [ComponentKind.wine, .dxmt].map { kind in
+        try RuntimeComponent(id: SafeIdentifier("\(kind.rawValue)-\(version)"), kind: kind,
+            version: SafeIdentifier(version), sourceMode: .download,
+            url: URL(string: "https://fixtures.invalid/\(kind.rawValue)-\(version)"),
+            size: Int64(bytes.count), installedSize: 1024, sha256: digest, archive: .tarGZ,
+            license: ComponentLicense(name: "Fixture", url: URL(string: "https://fixtures.invalid/license")!,
+                redistributable: true, termsRevision: "1"),
+            rootPath: SafeRelativePath("payload"), wineBinary: kind == .wine ? SafeRelativePath("bin/wine") : nil,
+            overlay: kind == .dxmt ? [RuntimeOverlay(source: SafeRelativePath("x86_64-windows"),
+                destination: SafeRelativePath("lib/wine/x86_64-windows"))] : [])
+    }
+    let bundle = try RuntimeBundle(id: SafeIdentifier("test-dxmt"), displayName: "DXMT", backend: .dxmt,
+        components: components.map(\.id))
+    return try RuntimeManifest(components: components, bundles: [bundle])
+}

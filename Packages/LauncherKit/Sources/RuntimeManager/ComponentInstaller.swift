@@ -32,6 +32,11 @@ public struct ComponentInstaller: Sendable {
         self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
     }
 
+    func install(_ component: RuntimeComponent, lease: RuntimeStoreLease) -> ComponentInstallStream {
+        ComponentInstallStream(session: ComponentInstallSession(component: component, candidate: nil, store: store, consent: consent,
+            fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint, lease: lease))
+    }
+
     /// Pull-driven: dropping the stream releases the store lock; cancelling its consumer
     /// cancels HTTP/extraction/copy. The only completed event follows successful publication.
     /// An import manifest requires a candidate; downloads require no candidate.
@@ -83,6 +88,7 @@ fileprivate actor ComponentInstallSession {
     private var step = Step.start
     private var fs: ContainedFileSystem?
     private var lock: InstallLock?
+    private var lease: RuntimeStoreLease?
     private var download: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
     private var incoming: SafeRelativePath?
     private var downloads: SafeRelativePath?
@@ -91,7 +97,8 @@ fileprivate actor ComponentInstallSession {
 
     init(component: RuntimeComponent, candidate: GPTKCandidate?, store: RuntimeStore, consent: ConsentStore, fetcher: ChunkFetcher?,
         extractor: ArchiveExtractor?, disk: any DiskSpaceProbe, fileOps: any FileOps,
-        failurePoint: @escaping @Sendable (ComponentInstaller.PublishPoint) throws -> Void) {
+        failurePoint: @escaping @Sendable (ComponentInstaller.PublishPoint) throws -> Void, lease: RuntimeStoreLease? = nil) {
+        self.lease = lease
         self.component = component; self.candidate = candidate; self.store = store; self.consent = consent; self.fetcher = fetcher
         self.extractor = extractor; self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
     }
@@ -123,7 +130,7 @@ fileprivate actor ComponentInstallSession {
                 let fs = try ContainedFileSystem(root: store.paths.root, fileOps: fileOps)
                 let runtimes = try RuntimeJSONFile.relativePath(store.paths.runtimes, root: store.paths.root)
                 try fs.createDirectory(at: runtimes)
-                lock = try InstallLock(fs: fs, path: SafeRelativePath("\(runtimes)/.lock"))
+                if lease == nil { lock = try InstallLock(fs: fs, path: SafeRelativePath("\(runtimes)/.lock")) }
                 self.fs = fs
                 try store.sweepStaging()
                 let kind = try SafeRelativePath("\(runtimes)/\(component.kind.rawValue)")
@@ -205,7 +212,15 @@ fileprivate actor ComponentInstallSession {
                     }
                     let archive = try SafeRelativePath("\(downloads)/archive")
                     try await extractor.extract(archive: archive, archiveFS: fs, archiveURL: archive.resolved(against: store.paths.root),
-                        format: format, fs: fs, target: incoming, expandedLimit: installedSize)
+                        format: format, fs: fs, target: incoming, expandedLimit: installedSize, rootPath: component.rootPath)
+                }
+                if let binary = component.wineBinary {
+                    guard try fs.itemType(at: SafeRelativePath("\(incoming)/\(binary)")) == .regularFile else {
+                        throw LauncherError.io("Runtime Wine binary is missing")
+                    }
+                    if component.kind == .d3dmetal {
+                        try await RuntimeBundleManager.verifyMetal(fs: fs, root: incoming, runner: SystemProcessRunner())
+                    }
                 }
                 try RuntimePublication.prepare(component, fs: fs, incoming: incoming)
                 step = .publish
@@ -222,7 +237,7 @@ fileprivate actor ComponentInstallSession {
                 let fs = try filesystem()
                 if let incoming { try fs.removeItem(at: incoming) }
                 if let downloads { try fs.removeItem(at: downloads) }
-                step = .done; lock = nil
+                step = .done; lock = nil; lease = nil
                 return .phase(.completed)
             case .done: return nil
             }
@@ -256,7 +271,7 @@ fileprivate actor ComponentInstallSession {
                 try? fs.removeItem(at: parent)
             }
         }
-        step = .done; lock = nil
+        step = .done; lock = nil; lease = nil
     }
 
     private func filesystem() throws -> ContainedFileSystem {

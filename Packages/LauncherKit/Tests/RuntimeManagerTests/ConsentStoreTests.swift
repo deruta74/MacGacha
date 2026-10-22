@@ -67,9 +67,9 @@ func consentFailsClosedForMalformedAndLegacyRecords() async throws {
 @Test
 func appleNoticeUsesMacGachaAndHashesExactBody() {
     #expect(AppleNotice.title == "Apple Game Porting Toolkit License")
-    #expect(AppleNotice.body == "D3DMetal and the Game Porting Toolkit are © Apple Inc. and are licensed under Apple's terms. MacGacha is not affiliated with, endorsed by, or supported by Apple. By continuing, you confirm that you have read and accept Apple's Game Porting Toolkit license terms and that you will use this component in accordance with them. You can decline and use DXMT instead, or import Game Porting Toolkit that you downloaded from Apple yourself.")
+    #expect(AppleNotice.body.contains("SOFTWARE LICENSE AGREEMENT FOR GAME PORTING TOOLKIT"))
     #expect(AppleNotice.termsURL.absoluteString == "https://developer.apple.com/games/game-porting-toolkit/")
-    #expect(AppleNotice.bodyDigest.hex == "b0cce478203436c55f39fb392be297c5eae0a9c373829ffb6c26a626114a71f5")
+    #expect(AppleNotice.bodyDigest.hex == "ad725146932adfca80874acdbf25942ff8c45dda56b911d62ff05bf22274883f")
 }
 
 @Test

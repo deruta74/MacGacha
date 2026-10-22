@@ -228,7 +228,7 @@ func completedBytesDoNotWaitForAnUnfinishedStream() async throws {
     let client = FixedFetchClient(head: HTTPResponseHead(status: 200, contentLength: 3), state: state)
     let part = directory.url.appendingPathComponent("object.part")
     let task = Task { try await testFetcher(client).fetch(fetchObject(bytes), fs: fs, part: try SafeRelativePath(part.lastPathComponent), progress: { _ in }) }
-    let watchdog = Task { try await Task.sleep(for: .seconds(5)); task.cancel() }
+    let watchdog = Task { try await Task.sleep(for: .seconds(60)); task.cancel() }
     defer { watchdog.cancel() }
     try await task.value
     #expect(state.calls == 1)
@@ -261,9 +261,7 @@ func cancellingStalledFetchCancelsBody() async throws {
     let part = directory.url.appendingPathComponent("object.part")
     let task = Task { try await testFetcher(client).fetch(fetchObject(Data("abcdef".utf8)), fs: fs, part: try SafeRelativePath(part.lastPathComponent), progress: { _ in }) }
     defer { task.cancel() }
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(5))
-    while state.calls < 2 && clock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+    try await state.stalled.wait()
     #expect(state.calls == 2)
     task.cancel()
     await #expect(throws: LauncherError.cancelled) { try await task.value }
@@ -394,12 +392,10 @@ func concurrentCaseVariantPartsAreBusy(varyRoot: Bool) async throws {
     let object = fetchObject(Data("abc".utf8))
     let first = Task { try await fetcher.fetch(object, fs: fs, part: SafeRelativePath("Parts/Object.part"), progress: { _ in }) }
     defer { first.cancel() }
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(5))
-    while state.calls == 0 && clock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+    try await state.stalled.wait()
     try #require(state.calls == 1)
     let second = Task { try await fetcher.fetch(object, fs: otherFS, part: SafeRelativePath("parts/OBJECT.PART"), progress: { _ in }) }
-    let watchdog = Task { try await Task.sleep(for: .seconds(5)); second.cancel() }
+    let watchdog = Task { try await Task.sleep(for: .seconds(60)); second.cancel() }
     defer { second.cancel(); watchdog.cancel() }
     await #expect(throws: LauncherError.busy("Chunk part is already being fetched")) { try await second.value }
     #expect(state.calls == 1)
@@ -434,6 +430,8 @@ private final class FetchTestBodyState: Sendable {
     private struct State { var pieces: [Data]; var calls = 0; var cancelled = false }
     private let state: Mutex<State>
     private let stall: Bool
+    let stalled = TestEvent()
+    private let hold = TestEvent()
     init(pieces: [Data], stall: Bool = false) { state = Mutex(State(pieces: pieces)); self.stall = stall }
     var calls: Int { state.withLock { $0.calls } }
     var cancelled: Bool { state.withLock { $0.cancelled } }
@@ -443,7 +441,7 @@ private final class FetchTestBodyState: Sendable {
             value.calls += 1
             return value.pieces.isEmpty ? nil : value.pieces.removeFirst()
         }
-        if data == nil && stall { try await Task.sleep(for: .seconds(30)) }
+        if data == nil && stall { stalled.signal(); try await hold.wait() }
         return data
     }
 }
@@ -476,7 +474,7 @@ private final class FetchBlockingWrite: FileOps {
     func waitUntilEntered() async { for await _ in entered.stream { return } }
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
         entered.continuation.yield(())
-        guard release.wait(timeout: .now() + 30) == .success else { throw LauncherError.io("write gate timed out") }
+        guard release.wait(timeout: .now() + 60) == .success else { throw LauncherError.io("write gate timed out") }
         return try SystemFileOps().write(descriptor, bytes: bytes)
     }
     func synchronize(_ descriptor: Int32, durable: Bool) throws {

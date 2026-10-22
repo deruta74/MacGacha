@@ -20,7 +20,7 @@ struct RuntimesView: View {
                             RuntimeRowView(row: row)
                         }
                     } footer: {
-                        Text("Translation layers the games run on. Each version is kept on its own, so an update never breaks a working one.")
+                        Text("Each runtime is Wine with a graphics layer. DXMT is open source; D3DMetal is Apple's and comes with Apple's license. Each version is kept on its own, so an update never breaks a working one.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -56,7 +56,13 @@ struct RuntimeRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(row.kindName).font(.headline)
-                    Text(row.version).foregroundStyle(.secondary).monospacedDigit()
+                    // A bundle names its contents in the summary instead of a bare version.
+                    if row.summary == nil {
+                        Text(row.version).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                if let summary = row.summary {
+                    Text(summary).font(.callout).foregroundStyle(.secondary)
                 }
                 detail
             }
@@ -79,7 +85,7 @@ struct RuntimeRowView: View {
     @ViewBuilder private var detail: some View {
         switch row.state {
         case .notInstalled:
-            Text(row.needsConsent ? "\(row.licenseName) · Needs your consent" : row.licenseName)
+            Text(notInstalledDetail)
                 .font(.caption).foregroundStyle(.secondary)
         case .working(let phase, let fraction):
             HStack(spacing: 8) {
@@ -141,6 +147,13 @@ struct RuntimeRowView: View {
             }
         }
         .controlSize(.regular)
+    }
+
+    private var notInstalledDetail: String {
+        var parts: [String] = []
+        if let size = row.downloadSize, size > 0 { parts.append("About \(ByteSize.text(size)) to download") }
+        parts.append(row.needsConsent ? "Apple license" : row.licenseName)
+        return parts.joined(separator: " · ")
     }
 
     private var symbol: String {

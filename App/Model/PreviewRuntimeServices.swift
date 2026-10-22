@@ -8,9 +8,22 @@ import RuntimeManager
 
 /// Previews never create a network client, process runner, consent file or runtime directory.
 final class PreviewRuntimeServices: RuntimeServices, Sendable {
-    private struct State: Sendable { var installed: [InstalledComponent] = []; var accepted = false }
+    private struct State: Sendable { var installed: [InstalledComponent] = []; var accepted = false; var bundles: [String: InstalledRuntimeBundle] = [:] }
     private let state = Mutex(State())
 
+    func scanBundles(_ manifest: RuntimeManifest) async throws -> [String: InstalledRuntimeBundle] { state.withLock { $0.bundles } }
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, from candidate: GPTKCandidate?) -> RuntimeInstallStream {
+        RuntimeInstallStream(AsyncThrowingStream { continuation in
+            do {
+                let root = URL(fileURLWithPath: "/preview/" + bundle.id.rawValue)
+                let digest = try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64))
+                state.withLock { $0.bundles[bundle.id.rawValue] = InstalledRuntimeBundle(id: bundle.id, root: root,
+                    wineBinary: root.appendingPathComponent("bin/wine"), digest: digest, source: candidate == nil ? .download : .importFromGPTK) }
+                continuation.yield(.phase(.completed)); continuation.finish()
+            } catch { continuation.finish(throwing: error) }
+        })
+    }
+    func remove(_ bundle: RuntimeBundle, manifest: RuntimeManifest) async throws { _ = state.withLock { $0.bundles.removeValue(forKey: bundle.id.rawValue) } }
     func scan() async throws -> RuntimeScan { state.withLock { RuntimeScan(components: $0.installed, invalid: []) } }
     func sweepStaging() async throws { }
     func install(_ c: RuntimeComponent, from candidate: GPTKCandidate?) -> AsyncThrowingStream<OperationEvent, any Error> {

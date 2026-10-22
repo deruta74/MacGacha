@@ -8,22 +8,26 @@ public struct InstalledComponent: Codable, Sendable, Equatable {
     public let version: String
     public let installedAt: Date
     public let source: SourceMode
+    public let archiveDigest: Digest?
+    public let publicationID: UUID?
 
-    public init(kind: ComponentKind, version: String, installedAt: Date, source: SourceMode) throws {
+    public init(kind: ComponentKind, version: String, installedAt: Date, source: SourceMode, archiveDigest: Digest? = nil, publicationID: UUID? = UUID()) throws {
         _ = try SafeIdentifier(version)
         guard installedAt.timeIntervalSinceReferenceDate.isFinite else { throw LauncherError.io("Invalid installation date") }
         self.kind = kind
         self.version = version
         self.installedAt = installedAt
         self.source = source
+        self.archiveDigest = archiveDigest; self.publicationID = publicationID
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, version, installedAt, source }
+    private enum CodingKeys: String, CodingKey { case kind, version, installedAt, source, archiveDigest, publicationID }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(kind: c.decode(ComponentKind.self, forKey: .kind), version: c.decode(String.self, forKey: .version),
-            installedAt: c.decode(Date.self, forKey: .installedAt), source: c.decode(SourceMode.self, forKey: .source))
+            installedAt: c.decode(Date.self, forKey: .installedAt), source: c.decode(SourceMode.self, forKey: .source),
+            archiveDigest: c.decodeIfPresent(Digest.self, forKey: .archiveDigest), publicationID: c.decodeIfPresent(UUID.self, forKey: .publicationID))
     }
 }
 
@@ -86,6 +90,7 @@ public struct RuntimeStore: Sendable {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let rawName = kindPath.components.last!
             guard rawName.utf8.first != 0x2e else { continue }
+            if rawName == "bundles" { continue }
             guard let kind = ComponentKind(rawValue: rawName) else {
                 invalid.append(InvalidRuntimeEntry(kind: nil, rawName: rawName, reason: "Unknown runtime kind"))
                 continue
@@ -137,6 +142,12 @@ public struct RuntimeStore: Sendable {
     }
 
     public func remove(_ c: InstalledComponent) throws {
+        let lease = try RuntimeStoreLease(store: self)
+        defer { withExtendedLifetime(lease) {} }
+        try removeUnderLease(c)
+    }
+
+    func removeUnderLease(_ c: InstalledComponent) throws {
         try remove(c, deleting: { try $0.removeItem(at: $1) })
     }
 
@@ -196,9 +207,9 @@ public struct RuntimeStore: Sendable {
             try fs.moveItem(at: downloads, to: abandoned)
             try deleting(fs, abandoned)
         }
-        for kind in ComponentKind.allCases {
+        for name in ComponentKind.allCases.map(\.rawValue) + ["bundles"] {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
-            let path = try SafeRelativePath(runtimes.description + "/" + kind.rawValue)
+            let path = try SafeRelativePath(runtimes.description + "/" + name)
             do {
                 guard try fs.itemType(at: path) == .directory else { continue }
             } catch LauncherError.unsafePath {
