@@ -410,3 +410,26 @@ func interruptedStaleDownloadSweepResumesUnderStoreLock() throws {
     #expect(try Data(contentsOf: control) == Data("outside".utf8))
     withExtendedLifetime(lease) {}
 }
+
+@Test(arguments: [false, true]) func quarantineCleanupAcceptsReadOnlyFilesWithoutQuarantine(quarantined: Bool) async throws {
+    let temp = try TempDir(); let cdn = MockCDN()
+    let bytes = archiveTestData([ArchiveTestEntry("readonly", body: "payload")], format: .tarGZ)
+    cdn.serve("archive", data: bytes)
+    let real = SystemProcessRunner()
+    let runner = FakeProcessRunner { invocation in
+        let result = try await real.run(invocation.executable, arguments: invocation.arguments,
+            environment: invocation.environment, currentDirectory: invocation.currentDirectory)
+        if let index = invocation.arguments.firstIndex(of: "-C") {
+            let file = URL(fileURLWithPath: invocation.arguments[index + 1]).appendingPathComponent("readonly")
+            if quarantined {
+                let data = Data("0081;test".utf8)
+                try #require(data.withUnsafeBytes { setxattr(file.path, "com.apple.quarantine", $0.baseAddress, $0.count, 0, 0) } == 0)
+            }
+            try #require(chmod(file.path, 0o444) == 0)
+        }
+        return result
+    }
+    let component = try installerComponent(bytes)
+    for try await _ in try makeInstaller(root: temp.url, cdn: cdn, runner: runner).install(component) { }
+    #expect(try RuntimeStore(paths: AppPaths(root: temp.url)).installed().count == 1)
+}

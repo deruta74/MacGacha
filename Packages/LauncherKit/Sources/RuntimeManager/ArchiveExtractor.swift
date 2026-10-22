@@ -21,6 +21,11 @@ public struct ArchiveExtractor: Sendable {
     /// Extracts only into an empty directory. Unsafe/failed extraction removes that staging
     /// directory; a pre-existing nonempty target is always preserved.
     public func extract(_ archive: URL, format: ArchiveFormat, into dir: URL) async throws {
+        do { try await BlockingIO.run { try await extractOnIO(archive, format: format, into: dir) } }
+        catch is CancellationError { throw LauncherError.cancelled }
+    }
+
+    private func extractOnIO(_ archive: URL, format: ArchiveFormat, into dir: URL) async throws {
         let archiveFS = try ContainedFileSystem(root: archive.deletingLastPathComponent())
         let archivePath = try SafeRelativePath(archive.lastPathComponent)
         let fs = try ContainedFileSystem(root: dir.deletingLastPathComponent())
@@ -29,14 +34,30 @@ public struct ArchiveExtractor: Sendable {
     }
 
     func extract(archive: SafeRelativePath, archiveFS: ContainedFileSystem, archiveURL: URL,
-        format: ArchiveFormat, fs: ContainedFileSystem, target: SafeRelativePath, expandedLimit: Int64) async throws {
+        format: ArchiveFormat, fs: ContainedFileSystem, target: SafeRelativePath, expandedLimit: Int64, rootPath: SafeRelativePath? = nil) async throws {
+        try await BlockingIO.run {
+            try await extractOnIO(archive: archive, archiveFS: archiveFS, archiveURL: archiveURL, format: format,
+                fs: fs, target: target, expandedLimit: expandedLimit, rootPath: rootPath)
+        }
+    }
+
+    private func extractOnIO(archive: SafeRelativePath, archiveFS: ContainedFileSystem, archiveURL: URL,
+        format: ArchiveFormat, fs: ContainedFileSystem, target: SafeRelativePath, expandedLimit: Int64,
+        rootPath: SafeRelativePath?) async throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         let limit = min(maxExpandedBytes, expandedLimit)
         guard limit >= 0, maxEntries > 0, maxEntries <= 100_000 else { throw LauncherError.io("Invalid archive limits") }
         let handle = try archiveFS.openForReading(at: archive)
         defer { try? handle.close() }
-        let entries = try await Self.scan(handle, format: format, limit: limit, maxEntries: maxEntries)
+        let entries = try Self.scan(handle, format: format, limit: limit, maxEntries: maxEntries)
         try ArchivePolicy.validate(entries)
+        if let rootPath {
+            guard format != .zip else { throw LauncherError.io("Rooted ZIP runtimes are unsupported") }
+            try ArchivePolicy.validateRoot(rootPath)
+            let selected = try entries.compactMap { try ArchivePolicy.project($0, under: rootPath) }
+            guard !selected.isEmpty else { throw LauncherError.io("Runtime archive root is missing") }
+            try ArchivePolicy.validate(selected)
+        }
         if let type = try fs.itemType(at: target) {
             guard type == .directory else { throw LauncherError.unsafePath(target.description) }
             guard try fs.contentsOfDirectory(at: target).isEmpty else { throw LauncherError.io("Extraction target must be empty") }
@@ -44,10 +65,26 @@ public struct ArchiveExtractor: Sendable {
         try fs.createDirectory(at: target)
         do {
             let targetURL = try fs.directoryURL(at: target)
-            if format == .zip {
+            if let rootPath {
+                // Select normalized members literally; no archive name is ever a tar pattern.
+                // The same projection was validated above, including hardlink targets.
+                try handle.seek(toOffset: 0)
+                _ = try Self.scan(handle, format: format, limit: limit, maxEntries: maxEntries, fileOps: fs.fileOps) { entry in
+                    guard let entry = try ArchivePolicy.project(entry, under: rootPath) else { return nil }
+                    let path = try SafeRelativePath("\(target)/\(entry.path)")
+                    switch entry.kind {
+                    case .directory: try fs.createDirectory(at: path)
+                    case .symlink(let link): try fs.createSymbolicLink(at: path, target: link)
+                    case .hardlink(let link): try fs.createHardLink(at: path, to: SafeRelativePath("\(target)/\(link)"))
+                    case .file: return try fs.openForWriting(at: path, truncate: true)
+                    }
+                    return nil
+                }
+            } else if format == .zip {
                 try await run("/usr/bin/ditto", ["-x", "-k", archiveURL.path, targetURL.path])
             } else {
-                try await run("/usr/bin/tar", ["-xf", archiveURL.path, "-C", targetURL.path, "--no-same-owner", "--no-same-permissions"])
+                let arguments = ["-xf", archiveURL.path, "-C", targetURL.path, "--no-same-owner", "--no-same-permissions"]
+                try await run("/usr/bin/tar", arguments)
             }
             let actual = try fs.inspectTree(at: target)
             guard actual.count <= maxEntries else { throw LauncherError.io("Archive entry limit exceeded") }
@@ -78,8 +115,8 @@ public struct ArchiveExtractor: Sendable {
         }
     }
 
-    @concurrent
-    private static func scan(_ handle: FileHandle, format: ArchiveFormat, limit: Int64, maxEntries: Int) async throws -> [ArchiveEntry] {
+    private static func scan(_ handle: FileHandle, format: ArchiveFormat, limit: Int64, maxEntries: Int, fileOps: any FileOps = SystemFileOps(),
+        output: ((ArchiveEntry) throws -> FileHandle?)? = nil) throws -> [ArchiveEntry] {
         if format == .zip { try ZIPDirectory.validate(handle, maxEntries: maxEntries) }
         guard let reader = archive_read_new() else { throw LauncherError.io("Cannot initialize archive reader") }
         defer { archive_read_free(reader) }
@@ -149,7 +186,10 @@ public struct ArchiveExtractor: Sendable {
             guard metadata <= 16 << 20, path.utf8.count <= 4096, (kind.link?.utf8.count ?? 0) <= 4096 else {
                 throw LauncherError.io("Archive metadata limit exceeded")
             }
-            result.append(ArchiveEntry(path: path, kind: kind))
+            let scanned = ArchiveEntry(path: path, kind: kind)
+            result.append(scanned)
+            let destination = try output?(scanned)
+            defer { try? destination?.close() }
             // Drain in bounded pieces to validate data and observe cancellation even for one
             // huge compressed entry. The listing's declared size must agree with actual data.
             var read: Int64 = 0
@@ -159,6 +199,14 @@ public struct ArchiveExtractor: Sendable {
                 guard count >= 0 else { throw LauncherError.io("Invalid archive data") }
                 if count == 0 { break }
                 read = try addSize(read, Int64(count), limit: min(size, limit))
+                if let destination {
+                    try fileOps.writeAll(Data(buffer.prefix(count)), to: destination.fileDescriptor)
+                }
+            }
+            if let destination {
+                guard fchmod(destination.fileDescriptor, archive_entry_perm(entry) & 0o777) == 0 else {
+                    throw LauncherError.fileSystemFailure("Cannot set runtime file permissions")
+                }
             }
         }
         return result
@@ -185,6 +233,28 @@ struct ArchiveEntry: Sendable {
 }
 
 enum ArchivePolicy {
+    static func validateRoot(_ root: SafeRelativePath) throws {
+        guard !root.description.utf8.contains(where: { [42, 63, 91, 93].contains($0) }) else {
+            throw LauncherError.unsafePath("Runtime archive root contains pattern characters")
+        }
+    }
+
+    /// One canonical name for policy checks and extraction. Symlinks stay relative
+    /// to their containing directory; hardlinks name normalized archive members.
+    static func project(_ entry: ArchiveEntry, under root: SafeRelativePath) throws -> ArchiveEntry? {
+        let directory: Bool = if case .directory = entry.kind { true } else { false }
+        let name = try normalized(entry.path, directory: directory)
+        let prefix = root.description + "/"
+        guard name.hasPrefix(prefix) else { return nil }
+        var kind = entry.kind
+        if case .hardlink(let target) = kind {
+            let target = try normalized(target, directory: false)
+            guard target.hasPrefix(prefix) else { throw LauncherError.unsafePath(entry.path) }
+            kind = .hardlink(String(target.dropFirst(prefix.count)))
+        }
+        return ArchiveEntry(path: String(name.dropFirst(prefix.count)), kind: kind)
+    }
+
     private static func key(_ value: String) -> String {
         value.precomposedStringWithCanonicalMapping.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
     }

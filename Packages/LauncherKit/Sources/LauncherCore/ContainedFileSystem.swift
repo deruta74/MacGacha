@@ -568,13 +568,21 @@ public struct ContainedFileSystem: Sendable, Hashable {
     /// Copies one regular file in bounded chunks, retaining executable permission bits.
     /// Both files are opened through descriptor-relative, no-follow traversal.
     package func copyRegularFile(at source: SafeRelativePath, to destination: SafeRelativePath,
-        in destinationFS: ContainedFileSystem, maxBytes: Int64) throws -> Int64 {
+        in destinationFS: ContainedFileSystem, maxBytes: Int64, preferClone: Bool = false) throws -> Int64 {
         guard maxBytes >= 0 else { throw LauncherError.io("Runtime import size limit exceeded") }
         let input = try openForReading(at: source)
         defer { try? input.close() }
         var info = stat()
         guard fstat(input.fileDescriptor, &info) == 0 else { throw LauncherError.io("Cannot inspect import file") }
         guard info.st_size >= 0, info.st_size <= maxBytes else { throw LauncherError.io("Runtime import size limit exceeded") }
+        if preferClone {
+            guard let parent = try destinationFS.directory(Array(destination.components.dropLast()), create: true),
+                let name = destination.components.last else { throw LauncherError.io("Cannot clone runtime file") }
+            defer { close(parent) }
+            guard try destinationFS.entry(name, parent: parent) == nil else { throw LauncherError.unsafePath(destination.description) }
+            if fclonefileat(input.fileDescriptor, parent, name, 0) == 0 { return info.st_size }
+            guard [ENOTSUP, EXDEV, EINVAL].contains(errno) else { throw LauncherError.fileSystemFailure("Cannot clone runtime file") }
+        }
         let output = try destinationFS.openForWriting(at: destination, truncate: true)
         defer { try? output.close() }
         var count: Int64 = 0
@@ -602,6 +610,27 @@ public struct ContainedFileSystem: Sendable, Hashable {
         guard try entry(name, parent: parent) == nil else { throw LauncherError.unsafePath(path.description) }
         guard symlinkat(target, parent, name) == 0 else { throw LauncherError.fileSystemFailure("Cannot create import link") }
         try synchronize(parent)
+    }
+
+    /// Creates a literal hardlink between checked parents. Only a regular file
+    /// can be the source; neither ancestor traversal nor the leaf follows links.
+    package func createHardLink(at path: SafeRelativePath, to source: SafeRelativePath) throws {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard let parent = try directory(Array(source.components.dropLast()), create: false) else {
+            throw LauncherError.io("Hardlink source is missing")
+        }
+        defer { close(parent) }
+        let name = source.components.last!
+        guard let info = try entry(name, parent: parent), info.st_mode & S_IFMT == S_IFREG else {
+            throw LauncherError.unsafePath(source.description)
+        }
+        guard let destination = try directory(Array(path.components.dropLast()), create: true) else {
+            throw LauncherError.io("Hardlink destination is missing")
+        }
+        defer { close(destination) }
+        guard linkat(parent, name, destination, path.components.last!, 0) == 0 else {
+            throw LauncherError.fileSystemFailure("Cannot create runtime hardlink")
+        }
     }
 
     /// Flushes regular files and then directories bottom-up, never following links.
@@ -643,8 +672,25 @@ public struct ContainedFileSystem: Sendable, Hashable {
         guard let fd = try directory(path.components, create: false) else { throw LauncherError.io("Directory is missing") }
         defer { close(fd) }
         func strip(_ descriptor: Int32) throws {
-            guard fremovexattr(descriptor, "com.apple.quarantine", 0) == 0 || errno == ENOATTR else {
-                throw LauncherError.fileSystemFailure("Cannot remove runtime quarantine")
+            if fgetxattr(descriptor, "com.apple.quarantine", nil, 0, 0, 0) < 0 {
+                if errno == ENOATTR { return }
+                throw LauncherError.fileSystemFailure("Cannot inspect runtime quarantine")
+            }
+            var info = stat()
+            guard fstat(descriptor, &info) == 0 else { throw LauncherError.fileSystemFailure("Cannot inspect runtime permissions") }
+            // Signed frameworks contain read-only resources. Remove quarantine only
+            // when present, temporarily granting owner write on this pinned inode.
+            let needsWrite = info.st_mode & S_IFMT != S_IFLNK && info.st_mode & S_IWUSR == 0
+            if needsWrite, fchmod(descriptor, (info.st_mode & 0o777) | S_IWUSR) != 0 {
+                throw LauncherError.fileSystemFailure("Cannot prepare runtime quarantine removal")
+            }
+            let result = fremovexattr(descriptor, "com.apple.quarantine", 0)
+            let removalError = errno
+            if needsWrite, fchmod(descriptor, info.st_mode & 0o777) != 0 {
+                throw LauncherError.fileSystemFailure("Cannot restore runtime permissions")
+            }
+            guard result == 0 || removalError == ENOATTR else {
+                throw LauncherError.io("Cannot remove runtime quarantine")
             }
         }
         try strip(fd)

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Dispatch
 import Foundation
 import LauncherCore
 
@@ -34,6 +35,8 @@ public struct ConsentRecord: Codable, Sendable, Equatable {
 }
 
 public actor ConsentStore {
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.consent")
+    nonisolated public var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
     private let url: URL
     private let root: URL
     private let clock: @Sendable () -> Date

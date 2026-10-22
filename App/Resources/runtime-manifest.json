@@ -1,66 +1,108 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "components": [
     {
-      "id": "wine-10.0",
+      "id": "wine-11.0-yaagl",
       "kind": "wine",
-      "version": "10.0",
+      "version": "11.0-yaagl",
       "sourceMode": "download",
-      "url": "https://example.invalid/wine.tar.xz",
-      "size": 1,
-      "installedSize": 1,
+      "url": "https://github.com/yaagl/anime-game-wine/releases/download/wine-11.0-signed/wine-devel-11.0-osx64-signed.tar.xz",
+      "size": 446585720,
+      "installedSize": 2112922718,
       "sha256": {
         "algorithm": "sha256",
-        "hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        "hex": "4ebba536115e937c3826fa5808dbed50cd5e91c8454999b54cbe0cd2a43d8b4c"
       },
       "archive": "tar.xz",
+      "rootPath": "wine",
       "license": {
         "name": "LGPL-2.1",
-        "url": "https://example.invalid/license",
+        "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
         "redistributable": true,
-        "termsRevision": "placeholder-1"
-      }
+        "termsRevision": "LGPL-2.1"
+      },
+      "wineBinary": "bin/wine"
     },
     {
-      "id": "dxmt-0.62",
+      "id": "dxmt-0.80",
       "kind": "dxmt",
-      "version": "0.62",
+      "version": "0.80",
       "sourceMode": "download",
-      "url": "https://example.invalid/dxmt.tar.xz",
-      "size": 1,
-      "installedSize": 1,
+      "url": "https://github.com/3Shain/dxmt/releases/download/v0.80/dxmt-v0.80-builtin.tar.gz",
+      "size": 18681669,
+      "installedSize": 53303976,
       "sha256": {
         "algorithm": "sha256",
-        "hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        "hex": "8f260e36b5739e68f3bad613381441385c4dc7b85b78ba8de653d5a6a264529d"
       },
-      "archive": "tar.xz",
+      "archive": "tar.gz",
+      "rootPath": "v0.80",
       "license": {
         "name": "MIT",
-        "url": "https://example.invalid/license",
+        "url": "https://github.com/3Shain/dxmt/blob/v0.80/LICENSE",
         "redistributable": true,
-        "termsRevision": "placeholder-1"
-      }
+        "termsRevision": "dxmt-0.80"
+      },
+      "overlay": [
+        {
+          "source": "x86_64-windows",
+          "destination": "lib/wine/x86_64-windows"
+        },
+        {
+          "source": "i386-windows",
+          "destination": "lib/wine/i386-windows"
+        },
+        {
+          "source": "x86_64-unix",
+          "destination": "lib/wine/x86_64-unix"
+        }
+      ]
     },
     {
-      "id": "d3dmetal-3.0",
+      "id": "d3dmetal-4.0b3",
       "kind": "d3dmetal",
-      "version": "3.0",
+      "version": "4.0b3",
       "sourceMode": "download",
-      "url": "https://example.invalid/d3dmetal.tar.xz",
-      "size": 1,
-      "installedSize": 1,
+      "url": "https://github.com/dbc-hbin/wine-yaagl-d3dmetal/releases/download/wine-11.20-gptk4.0b3-1/wine-11.20-d3dmetal-gptk4.0b3-macos26.tar.xz",
+      "size": 307352548,
+      "installedSize": 1530455780,
       "sha256": {
         "algorithm": "sha256",
-        "hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        "hex": "a1a6f1dab9bb373091f4b7756505b706e29c9c72e805c011d8107192574920aa"
       },
       "archive": "tar.xz",
+      "rootPath": "wine",
       "license": {
         "name": "Apple Game Porting Toolkit",
-        "url": "https://developer.apple.com/games/game-porting-toolkit/",
+        "url": "https://github.com/dbc-hbin/wine-yaagl-d3dmetal/releases/download/wine-11.20-gptk4.0b3-1/License.rtf",
         "redistributable": false,
-        "termsRevision": "placeholder-1"
+        "termsRevision": "5abb2d059be217663b00e8fd37e14411d374e11d17e3b744eebd49b8d17118c8"
       },
+      "wineBinary": "bin/wine",
       "consent": "appleGPTK"
+    }
+  ],
+  "bundles": [
+    {
+      "id": "dxmt-wine11.0-dxmt0.80",
+      "displayName": "DXMT",
+      "summary": "Wine 11.0 with game patches · DXMT 0.80",
+      "backend": "dxmt",
+      "components": [
+        "wine-11.0-yaagl",
+        "dxmt-0.80"
+      ],
+      "environment": {}
+    },
+    {
+      "id": "d3dmetal-wine11.20-gptk4.0b3",
+      "displayName": "D3DMetal",
+      "summary": "Wine 11.20 · Apple D3DMetal 4.0 beta 3",
+      "backend": "d3dmetal",
+      "components": [
+        "d3dmetal-4.0b3"
+      ],
+      "environment": {}
     }
   ]
 }

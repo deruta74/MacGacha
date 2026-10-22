@@ -11,7 +11,7 @@ struct MacGachaApp: App {
         #if DEBUG
         // `-MacGachaDebugGameState progress` shows every game in one fixed state, for screenshots.
         if let name = UserDefaults.standard.string(forKey: "MacGachaDebugGameState"), let state = debugGameState(name) {
-            return AppModel.preview(rows: [], logLines: [], games: Dictionary(uniqueKeysWithValues: LauncherGame.all.map { ($0.id, state) }))
+            return AppModel.preview(logLines: [], games: Dictionary(uniqueKeysWithValues: LauncherGame.all.map { ($0.id, state) }))
         }
         // `-MacGachaDebugGameState busy` (or `busy-<game>`): one game downloads at full speed while the others wait.
         if let name = UserDefaults.standard.string(forKey: "MacGachaDebugGameState"), name.hasPrefix("busy") {

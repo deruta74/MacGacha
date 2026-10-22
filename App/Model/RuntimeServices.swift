@@ -7,6 +7,9 @@ import RuntimeManager
 import Diagnostics
 
 protocol RuntimeServices: Sendable {
+    func scanBundles(_ manifest: RuntimeManifest) async throws -> [String: InstalledRuntimeBundle]
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, from candidate: GPTKCandidate?) -> RuntimeInstallStream
+    func remove(_ bundle: RuntimeBundle, manifest: RuntimeManifest) async throws
     func scan() async throws -> RuntimeScan
     func sweepStaging() async throws
     func install(_ component: RuntimeComponent, from candidate: GPTKCandidate?) -> AsyncThrowingStream<OperationEvent, any Error>
@@ -21,6 +24,12 @@ protocol RuntimeServices: Sendable {
 }
 
 extension RuntimeServices {
+    func scanBundles(_ manifest: RuntimeManifest) async throws -> [String: InstalledRuntimeBundle] { [:] }
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, from candidate: GPTKCandidate?) -> RuntimeInstallStream {
+        RuntimeInstallStream(AsyncThrowingStream { $0.finish(throwing: LauncherError.io("Runtime bundle service unavailable")) })
+    }
+    func remove(_ bundle: RuntimeBundle, manifest: RuntimeManifest) async throws { throw LauncherError.io("Runtime bundle service unavailable") }
+
     @concurrent func makeDiagnosticBundle() async throws -> URL {
         try await TemporaryDiagnosticBundle.make { try await self.exportDiagnostics(to: $0) }
     }
@@ -53,14 +62,43 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
         self.eventLog = log ?? EventLog(directory: paths.logs)
     }
 
+    private func bundleManager(_ manifest: RuntimeManifest) -> RuntimeBundleManager {
+        RuntimeBundleManager(manifest: manifest, store: store, consent: consent, installer: installer)
+    }
+
+    func scanBundles(_ manifest: RuntimeManifest) async throws -> [String: InstalledRuntimeBundle] {
+        var result: [String: InstalledRuntimeBundle] = [:]
+        let manager = bundleManager(manifest)
+        for bundle in manifest.bundles { result[bundle.id.rawValue] = try await manager.installed(bundle) }
+        return result
+    }
+
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, from candidate: GPTKCandidate?) -> RuntimeInstallStream {
+        let manager = bundleManager(manifest)
+        return RuntimeInstallStream { continuation in
+            do {
+                _ = try await manager.install(bundle, from: candidate) { event in
+                    if event != .phase(.completed) { continuation.yield(event) }
+                }
+                // The manager's lease is released before the model refreshes readiness.
+                continuation.yield(.phase(.completed)); continuation.finish()
+            } catch { continuation.finish(throwing: await self.record(error)) }
+        }
+    }
+
+    func remove(_ bundle: RuntimeBundle, manifest: RuntimeManifest) async throws {
+        do { try await bundleManager(manifest).remove(bundle) }
+        catch { throw await record(error) }
+    }
+
     @concurrent func scan() async throws -> RuntimeScan {
-        do { return try store.scan() }
+        do { return try await BlockingIO.run { try self.store.scan() } }
         catch { throw await record(error) }
     }
 
     @concurrent func sweepStaging() async throws {
         do {
-            try withStoreLock { try store.sweepStaging() }
+            try await BlockingIO.run { try self.withStoreLock { try self.store.sweepStaging() } }
             await eventLog.log(.info, "runtime", "Startup staging sweep completed")
         } catch { throw await record(error) }
     }
@@ -72,12 +110,12 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
     }
 
     @concurrent func remove(_ component: InstalledComponent) async throws {
-        do { try withStoreLock { try store.remove(component) } }
+        do { try await BlockingIO.run { try self.store.remove(component) } }
         catch { throw await record(error) }
     }
 
     @concurrent func removeInvalid(_ entry: InvalidRuntimeEntry) async throws {
-        do { try withStoreLock { try store.removeInvalid(entry) } }
+        do { try await BlockingIO.run { try self.withStoreLock { try self.store.removeInvalid(entry) } } }
         catch { throw await record(error) }
     }
 
@@ -94,18 +132,20 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
 
     @concurrent func locateGPTK(extraRoots: [URL]) async throws -> [GPTKCandidate] {
         do {
-            return try GPTKImporter(searchRoots: [URL(fileURLWithPath: "/Volumes")] + Array(extraRoots.prefix(32))).locate()
+            return try await BlockingIO.run { try GPTKImporter(searchRoots: [URL(fileURLWithPath: "/Volumes")] + Array(extraRoots.prefix(32))).locate() }
         } catch { throw await record(error) }
     }
 
     @concurrent func exportDiagnostics(to url: URL) async throws {
-        do { try await writeDiagnosticBundle(to: url) }
+        do { try await BlockingIO.run { try await self.writeDiagnosticBundle(to: url) } }
         catch { throw await record(error) }
     }
 
     @concurrent func makeDiagnosticBundle() async throws -> URL {
         do {
-            return try await TemporaryDiagnosticBundle.make { try await self.writeDiagnosticBundle(to: $0) }
+            return try await BlockingIO.run {
+                try await TemporaryDiagnosticBundle.make { try await self.writeDiagnosticBundle(to: $0) }
+            }
         } catch { throw await record(error) }
     }
 
@@ -119,7 +159,11 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
             .export(to: url, systemInfo: .current(appVersion: version), runtimes: runtimes, failureStage: nil)
     }
 
-    @concurrent func recentLogLines(limit: Int) async -> [String] {
+    func recentLogLines(limit: Int) async -> [String] {
+        (try? await BlockingIO.run { await self.readLogLines(limit: limit) }) ?? []
+    }
+
+    private func readLogLines(limit: Int) async -> [String] {
         let count = min(200, max(0, limit))
         guard count > 0 else { return [] }
         do {
@@ -160,6 +204,60 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
         await eventLog.log(error == .cancelled ? .info : .error, "runtime", entry.message, metadata: entry.metadata)
         return error
     }
+}
+
+/// AsyncThrowingStream can end immediately on cancellation, before its producer
+/// releases the store lease. The checked iterator joins that producer first.
+struct RuntimeInstallStream: AsyncSequence, Sendable {
+    typealias Element = OperationEvent
+    private let stream: AsyncThrowingStream<OperationEvent, any Error>
+    private let lifetime: RuntimeInstallLifetime
+
+    init(_ stream: AsyncThrowingStream<OperationEvent, any Error>) {
+        self.stream = stream; lifetime = RuntimeInstallLifetime(worker: nil)
+    }
+
+    init(operation: @escaping @Sendable (AsyncThrowingStream<OperationEvent, any Error>.Continuation) async -> Void) {
+        let (stream, continuation) = AsyncThrowingStream<OperationEvent, any Error>.makeStream()
+        let worker = Task { await operation(continuation) }
+        continuation.onTermination = { _ in worker.cancel() }
+        self.stream = stream; lifetime = RuntimeInstallLifetime(worker: worker)
+    }
+
+    func cancelAndWait() async {
+        lifetime.worker?.cancel()
+        await lifetime.worker?.value
+    }
+
+    func makeAsyncIterator() -> Iterator { Iterator(iterator: stream.makeAsyncIterator(), lifetime: lifetime) }
+
+    struct Iterator: AsyncIteratorProtocol {
+        var iterator: AsyncThrowingStream<OperationEvent, any Error>.Iterator
+        fileprivate let lifetime: RuntimeInstallLifetime
+        mutating func next() async throws -> OperationEvent? {
+            do {
+                let event = try await iterator.next()
+                if Task.isCancelled {
+                    lifetime.worker?.cancel()
+                    await lifetime.worker?.value
+                    throw LauncherError.cancelled
+                }
+                if event == nil { await lifetime.worker?.value }
+                return event
+            } catch {
+                lifetime.worker?.cancel()
+                await lifetime.worker?.value
+                if Task.isCancelled { throw LauncherError.cancelled }
+                throw error
+            }
+        }
+    }
+}
+
+private final class RuntimeInstallLifetime: Sendable {
+    let worker: Task<Void, Never>?
+    init(worker: Task<Void, Never>?) { self.worker = worker }
+    deinit { worker?.cancel() }
 }
 
 private final class OwnedHTTPSession: Sendable {

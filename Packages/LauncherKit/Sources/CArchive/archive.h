@@ -26,6 +26,7 @@ const char *archive_entry_hardlink(struct archive_entry *);
 const char *archive_entry_pathname_utf8(struct archive_entry *);
 const char *archive_entry_symlink_utf8(struct archive_entry *);
 const char *archive_entry_hardlink_utf8(struct archive_entry *);
+mode_t archive_entry_perm(struct archive_entry *);
 mode_t archive_entry_filetype(struct archive_entry *);
 int64_t archive_entry_size(struct archive_entry *);
 int archive_entry_is_encrypted(struct archive_entry *);

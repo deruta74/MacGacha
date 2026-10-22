@@ -12,7 +12,7 @@ func loadsBundledShapeManifest() throws {
     let url = directory.url.appendingPathComponent("manifest.json")
     try manifestFixtureData().write(to: url)
     let manifest = try RuntimeManifest.load(from: url)
-    #expect(manifest.schemaVersion == 1)
+    #expect(manifest.schemaVersion == 2)
     #expect(manifest.components.map(\.kind) == [.wine, .dxmt, .d3dmetal])
     #expect(manifest.components[0].id.rawValue == "wine-11.0")
     #expect(manifest.components[0].version.rawValue == "11.0")
@@ -39,10 +39,10 @@ func rejectsNonRedistributableWithoutConsent() throws {
 func rejectsUnknownSchemaVersion() throws {
     let directory = try TempDir()
     let url = directory.url.appendingPathComponent("manifest.json")
-    let object: [String: Any] = ["schemaVersion": 2, "components": []]
+    let object: [String: Any] = ["schemaVersion": 1, "components": []]
     try JSONSerialization.data(withJSONObject: object).write(to: url)
     #expect(throws: LauncherError.io("Unsupported runtime manifest schema")) { try RuntimeManifest.load(from: url) }
-    #expect(throws: LauncherError.io("Unsupported runtime manifest schema")) { try RuntimeManifest(schemaVersion: 2, components: []) }
+    #expect(throws: LauncherError.io("Unsupported runtime manifest schema")) { try RuntimeManifest(schemaVersion: 1, components: []) }
 }
 
 @Test(arguments: ["url", "size", "installedSize", "sha256", "archive"])
@@ -201,5 +201,5 @@ private func manifestFixtureData(_ modify: (inout [[String: Any]]) -> Void = { _
     }
     components[2]["consent"] = "appleGPTK"
     modify(&components)
-    return try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "components": components])
+    return try JSONSerialization.data(withJSONObject: ["schemaVersion": 2, "components": components])
 }

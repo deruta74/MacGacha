@@ -106,7 +106,7 @@ public struct GPTKImporter: Sendable {
         into store: RuntimeStore, consent: ConsentStore) async throws -> InstalledComponent {
         let installer = ComponentInstaller(store: store, consent: consent, disk: SystemDiskSpaceProbe())
         for try await _ in installer.install(component, from: candidate) { }
-        guard let installed = try store.installed().first(where: { $0.kind == component.kind && $0.version == component.version.rawValue }) else {
+        guard let installed = try await BlockingIO.run({ try store.installed().first(where: { $0.kind == component.kind && $0.version == component.version.rawValue }) }) else {
             throw LauncherError.io("Imported runtime marker is missing")
         }
         return installed

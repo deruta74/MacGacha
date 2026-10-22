@@ -10,7 +10,7 @@ enum RuntimePublication {
         try fs.removeQuarantineRecursively(at: incoming)
         try fs.synchronizeTree(at: incoming)
         let marker = try InstalledComponent(kind: component.kind, version: component.version.rawValue,
-            installedAt: Date(), source: component.sourceMode)
+            installedAt: Date(), source: component.sourceMode, archiveDigest: component.sha256)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let markerPath = try SafeRelativePath("\(incoming)/.macgacha-component.json")
         try fs.writeAtomically(encoder.encode(marker), to: markerPath)
