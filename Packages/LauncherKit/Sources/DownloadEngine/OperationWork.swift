@@ -4,10 +4,12 @@
 /// Scoped work observations for execution diagnostics. No global counters, paths
 /// or timing assumptions; normal operations leave the observer unset.
 package enum OperationWork: Hashable, Sendable {
-    case fetchTaskSubmitted, fetchTaskFinished, ownershipDrainWait
+    case fetchTaskSubmitted, fetchTaskFinished, ownershipDrainWait, pipelinePullWaiting, sleepStarted
     case planValidation, referrerIndexBuild, predictionFile, localRangeHash, assemblyStarted, assemblyFinished, stagingLeaseReleased
 
     @TaskLocal package static var observer: (@Sendable (OperationWork) -> Void)? = nil
+
+    @TaskLocal package static var progressClock: (@Sendable () -> ContinuousClock.Instant)? = nil
 
     @inline(__always) static func record(_ work: OperationWork) { observer?(work) }
 

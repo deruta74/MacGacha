@@ -776,6 +776,7 @@ private final class LibraryRequestGate: Sendable {
         var continuation: CheckedContinuation<Void, Never>?
     }
     private let state = Mutex(State())
+    private let entered = TestEvent()
     private let pathSuffix: String
     init(pathSuffix: String) { self.pathSuffix = pathSuffix }
     func pause(_ url: URL) async {
@@ -787,15 +788,10 @@ private final class LibraryRequestGate: Sendable {
                 return false
             }
             if shouldResume { continuation.resume() }
+            else { entered.signal() }
         }
     }
-    func waitUntilEntered() async throws {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while !state.withLock({ $0.entered }) {
-            guard ContinuousClock.now < deadline else { throw LauncherError.io("MockCDN request did not reach gate") }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-    }
+    func waitUntilEntered() async throws { try await entered.wait() }
     func release() {
         let continuation = state.withLock {
             $0.released = true
@@ -862,7 +858,7 @@ private final class BranchWriteGate: FileOps {
             // rename without starving the task that must resume this writer.
             released.lock(); defer { released.unlock() }
             flags.withLock { $0.paused = true }; paused.continuation.yield(())
-            let deadline = Date().addingTimeInterval(30)
+            let deadline = Date().addingTimeInterval(60)
             while !flags.withLock({ $0.released }) {
                 guard released.wait(until: deadline) else { throw LauncherError.io("branch write release deadline") }
             }

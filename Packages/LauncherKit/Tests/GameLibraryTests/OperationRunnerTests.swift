@@ -451,13 +451,11 @@ import TestSupport
         try await store.savePlan(plan, for: "genshin")
         let ready = signals.url.appendingPathComponent("ready"), release = signals.url.appendingPathComponent("release")
         let harness = Bundle(for: BridgeBundleToken.self).bundleURL.deletingLastPathComponent().appendingPathComponent("CrashHarness")
+        let readyEvent = try FileAppearanceEvent(ready)
         let child = Task { try await SystemProcessRunner().run(harness,
             arguments: ["hold-game-store", records.url.path, ready.path, release.path], environment: [:], currentDirectory: nil) }
         defer { try? Data().write(to: release) }
-        for _ in 0..<500 {
-            if FileManager.default.fileExists(atPath: ready.path) { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await readyEvent.wait()
         try #require(FileManager.default.fileExists(atPath: ready.path))
         let runner = bridgeRunner(store, cdn)
         await #expect(throws: LauncherError.busy("another game operation is running")) {
@@ -723,7 +721,7 @@ private func bridgeCrash(_ point: CrashPoint) async throws -> BridgeCrashScenari
     let arguments = [scenario.fixtures.url.path, scenario.root.url.path, point.rawValue, scenario.records.url.path, "update"]
     let result = try await withThrowingTaskGroup(of: ProcessResult.self) { group in
         group.addTask { try await SystemProcessRunner().run(harness, arguments: arguments, environment: [:], currentDirectory: nil) }
-        group.addTask { try await Task.sleep(for: .seconds(15)); throw LauncherError.io("Crash harness deadline") }
+        group.addTask { try await Task.sleep(for: .seconds(60)); throw LauncherError.io("Crash harness deadline") }
         defer { group.cancelAll() }
         guard let result = try await group.next() else { throw LauncherError.io("No crash harness result") }
         return result
@@ -752,7 +750,7 @@ private final class BridgeBlockedAssembly: FileOps {
             String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self).hasSuffix("/files/b"),
             didBlock.withLock({ if $0 { return false }; $0 = true; return true }) {
             entered.continuation.yield(())
-            guard gate.wait(timeout: .now() + 30) == .success else { throw LauncherError.io("Blocked assembly deadline") }
+            guard gate.wait(timeout: .now() + 60) == .success else { throw LauncherError.io("Blocked assembly deadline") }
         }
         return try SystemFileOps().write(descriptor, bytes: bytes)
     }
@@ -774,7 +772,7 @@ private final class CompletionCleanupGate: FileOps {
     func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
         if name == "plan.json" {
             entered.continuation.yield(())
-            guard release.wait(timeout: .now() + 10) == .success else { throw LauncherError.io("completion cleanup deadline") }
+            guard release.wait(timeout: .now() + 60) == .success else { throw LauncherError.io("completion cleanup deadline") }
         }
         try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
     }

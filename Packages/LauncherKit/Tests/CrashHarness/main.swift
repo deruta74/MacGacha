@@ -22,8 +22,9 @@ struct CrashHarness {
                 let store = GameRecordStore(directory: URL(fileURLWithPath: args[2]))
                 let lease = try await store.acquireOperationLease()
                 defer { withExtendedLifetime(lease) {} }
+                let release = try FileAppearanceEvent(URL(fileURLWithPath: args[4]))
                 try Data().write(to: URL(fileURLWithPath: args[3]))
-                waitForRelease(args[4])
+                try await release.wait()
                 return
             }
             guard (args.count == 4 || args.count == 6), let point = CrashPoint(rawValue: args[3]) else {
@@ -73,13 +74,7 @@ struct CrashHarness {
         }
     }
 
-    private static func waitForRelease(_ path: String) {
-        for _ in 0..<1500 {
-            if FileManager.default.fileExists(atPath: path) { return }
-            usleep(10_000)
-        }
-        _exit(3)
-    }
+
 }
 
 /// A real process death after writing/syncing the cache sibling, before rename.

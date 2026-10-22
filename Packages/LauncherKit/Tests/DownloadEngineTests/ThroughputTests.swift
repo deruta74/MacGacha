@@ -82,11 +82,13 @@ import TestSupport
     let http = ProgressGateHTTP(cdn: cdn, gate: gate)
     var samples: [(Int64, Int64)] = [], sawPartial = false, verified = false
     defer { gate.release() }
-    for try await event in try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(http)).run() {
-        if case .fileVerified = event { verified = true }
-        if case .progress(let done, let total, _, _) = event {
-            samples.append((done, total))
-            if done > 0 && done < total { #expect(!verified); sawPartial = true; gate.release() }
+    try await OperationWork.$progressClock.withValue({ gate.now.withLock { $0 } }) {
+        for try await event in try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(http)).run() {
+            if case .fileVerified = event { verified = true }
+            if case .progress(let done, let total, _, _) = event {
+                samples.append((done, total))
+                if done > 0 && done < total { #expect(!verified); sawPartial = true; gate.release() }
+            }
         }
     }
     #expect(sawPartial && verified)
@@ -114,6 +116,7 @@ private final class HeaderGateHTTP: HTTPClient {
 }
 private final class ProgressBodyGate: Sendable {
     private let stream = AsyncStream<Void>.makeStream()
+    let now = Mutex(ContinuousClock.now)
     func release() { stream.continuation.finish() }
     func wait() async { var iterator = stream.stream.makeAsyncIterator(); _ = await iterator.next() }
 }
@@ -132,7 +135,7 @@ private actor ProgressGateIterator {
     init(_ iterator: HTTPBody.AsyncIterator, gate: ProgressBodyGate) { self.iterator = iterator; self.gate = gate }
     func next() async throws -> Data? {
         calls += 1
-        if calls == 1 { try await Task.sleep(for: .milliseconds(100)) }
+        if calls == 1 { gate.now.withLock { $0 = $0.advanced(by: .milliseconds(100)) } }
         else { await gate.wait() }
         var iterator = self.iterator
         let piece = try await iterator.next(); self.iterator = iterator
@@ -229,9 +232,10 @@ private struct SlowPipelineHTTP: HTTPClient {
 private actor SlowPipelineIterator {
     private var iterator: HTTPBody.AsyncIterator
     private var read = false
+    private let hold = TestEvent()
     init(_ iterator: HTTPBody.AsyncIterator) { self.iterator = iterator }
     func next() async throws -> Data? {
-        if read { try await Task.sleep(for: .seconds(3600)) }
+        if read { try await hold.wait() }
         read = true
         var iterator = self.iterator
         let next = try await iterator.next()
@@ -307,10 +311,10 @@ private final class BoundedIOGate: @unchecked Sendable {
     func release() { condition.lock(); released = true; condition.broadcast(); condition.unlock() }
     func wait() throws {
         condition.lock(); defer { condition.unlock() }
-        let deadline = Date().addingTimeInterval(30)
+        let deadline = Date().addingTimeInterval(60)
         while !released {
             try Task.checkCancellation()
-            guard condition.wait(until: min(deadline, Date().addingTimeInterval(0.1))) || Date() < deadline else {
+            guard condition.wait(until: deadline) else {
                 throw LauncherError.io("I/O test gate timed out")
             }
         }

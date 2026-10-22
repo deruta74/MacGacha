@@ -9,6 +9,7 @@ public struct URLSessionHTTPClient: HTTPClient {
     private let sessions: [URLSession]
     private let requestTimeout: TimeInterval
     private var timerFactory: @Sendable () -> any HTTPRequestTimer = { DispatchHTTPRequestTimer() }
+    private var taskTransitionObserver: (@Sendable (URLSessionTask, URLSessionTask.State) -> Void)?
     private var callbackObserver: (@Sendable (Int, Duration) -> Void)?
     private let lifecycle: HTTPSessionLifecycle
     private let highWaterMark: Int
@@ -82,7 +83,7 @@ public struct URLSessionHTTPClient: HTTPClient {
         if let offset { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
         let delegate = HTTPStreamDelegate(highWaterMark: highWaterMark, lowWaterMark: lowWaterMark,
             bufferObserver: bufferObserver, lifecycle: lifecycle, redirectPolicy: redirectPolicy, callbackObserver: callbackObserver,
-            requestTimeout: requestTimeout, timer: timerFactory())
+            requestTimeout: requestTimeout, timer: timerFactory(), taskTransitionObserver: taskTransitionObserver)
         try lifecycle.invalidated.withLock { invalidated in
             guard !invalidated else { throw LauncherError.cancelled }
             let index = lifecycle.cursor.withLock { cursor in let index = cursor; cursor = (cursor + 1) % sessions.count; return index }
@@ -102,6 +103,12 @@ public struct URLSessionHTTPClient: HTTPClient {
             throw LauncherError.cancelled
         }
         return (head, body)
+    }
+
+    /// Observe the actual client task after each serialized native suspend/resume
+    /// effect. Tests can verify native state independently of buffer bookkeeping.
+    func observingTaskTransitions(_ observer: @escaping @Sendable (URLSessionTask, URLSessionTask.State) -> Void) -> Self {
+        var copy = self; copy.taskTransitionObserver = observer; return copy
     }
 
     /// Opt-in transport profiling, propagated into native callbacks (which do
@@ -148,12 +155,15 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
     private let redirectPolicy: @Sendable (URL) -> Bool
     private let callbackObserver: (@Sendable (Int, Duration) -> Void)?
     private let requestTimeout: TimeInterval
+    private let taskTransitionObserver: (@Sendable (URLSessionTask, URLSessionTask.State) -> Void)?
     private let timer: any HTTPRequestTimer
 
     init(highWaterMark: Int, lowWaterMark: Int, bufferObserver: (@Sendable (Int, Bool) -> Void)?,
         lifecycle: HTTPSessionLifecycle, redirectPolicy: @escaping @Sendable (URL) -> Bool,
         callbackObserver: (@Sendable (Int, Duration) -> Void)?, requestTimeout: TimeInterval,
-        timer: any HTTPRequestTimer) {
+        timer: any HTTPRequestTimer,
+        taskTransitionObserver: (@Sendable (URLSessionTask, URLSessionTask.State) -> Void)?) {
+        self.taskTransitionObserver = taskTransitionObserver
         self.highWaterMark = highWaterMark
         self.lowWaterMark = lowWaterMark
         self.bufferObserver = bufferObserver
@@ -321,8 +331,12 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         }) {
             for effect in effects {
                 switch effect {
-                case .resume(let task): task.resume()
-                case .suspend(let task): task.suspend()
+                case .resume(let task):
+                    task.resume()
+                    taskTransitionObserver?(task, .running)
+                case .suspend(let task):
+                    task.suspend()
+                    taskTransitionObserver?(task, .suspended)
                 case .cancel(let task): task.cancel()
                 case .observe(let bytes, let suspended): bufferObserver?(bytes, suspended)
                 }

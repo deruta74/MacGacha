@@ -49,6 +49,7 @@ public struct ContinuousSleeper: Sleeper {
     public func sleep(for duration: Duration) async throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         do {
+            OperationWork.record(.sleepStarted)
             try await Task.sleep(for: duration)
         } catch is CancellationError {
             throw LauncherError.cancelled

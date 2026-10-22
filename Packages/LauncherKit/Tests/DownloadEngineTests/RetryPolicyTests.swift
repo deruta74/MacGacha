@@ -73,8 +73,14 @@ func sleepersRecordAndRespectCancellation() async throws {
 
 @Test(.timeLimit(.minutes(1)))
 func continuousSleeperMapsCancellationDuringSleep() async throws {
-    let task = Task { try await ContinuousSleeper().sleep(for: .seconds(30)) }
-    try await Task.sleep(for: .milliseconds(20))
+    let entered = TestEvent()
+    let task = Task {
+        try await OperationWork.$observer.withValue({ if $0 == .sleepStarted { entered.signal() } }) {
+            try await ContinuousSleeper().sleep(for: .seconds(3600))
+        }
+    }
+    defer { task.cancel() }
+    try await entered.wait()
     task.cancel()
     await #expect(throws: LauncherError.cancelled) { try await task.value }
 }

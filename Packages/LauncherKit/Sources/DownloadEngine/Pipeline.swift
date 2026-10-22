@@ -77,6 +77,7 @@ package final class PipelineChannel: Sendable {
                     return nil
                 }
                 if let result { continuation.resume(with: result) }
+                else { OperationWork.record(.pipelinePullWaiting) }
             }
         } onCancel: { self.finish(LauncherError.cancelled) }
     }
@@ -119,7 +120,7 @@ package final class PipelineProgress: Sendable {
         var sequence: UInt64 = 0
         var credited = Set<String>(), predicted = Set<String>()
         var bytes: [String: Int64] = [:]
-        var last = ContinuousClock.now
+        var last = OperationWork.progressClock?() ?? ContinuousClock.now
     }
     private let state = Mutex(State())
     private let sizes: [String: Int64]
@@ -137,8 +138,9 @@ package final class PipelineProgress: Sendable {
             let next = max(s.bytes[id] ?? 0, min(size, bytes)), previous = s.bytes[id] ?? 0
             s.bytes[id] = next; s.downloaded = Self.add(s.downloaded, next - previous)
             s.total = max(s.total, s.downloaded)
-            guard s.last.duration(to: .now) >= .milliseconds(50) else { return nil }
-            s.last = .now
+            let now = OperationWork.progressClock?() ?? ContinuousClock.now
+            guard s.last.duration(to: now) >= .milliseconds(50) else { return nil }
+            s.last = now
             return Self.snapshot(&s)
         }
     }

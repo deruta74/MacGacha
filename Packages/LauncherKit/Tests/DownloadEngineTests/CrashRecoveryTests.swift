@@ -65,7 +65,7 @@ struct CrashRecoveryTests {
                     arguments: [fixtureURL.path, rootURL.path, point.rawValue], environment: [:], currentDirectory: nil)
             }
             group.addTask {
-                try await Task.sleep(for: .seconds(15))
+                try await Task.sleep(for: .seconds(60))
                 throw LauncherError.io("Crash harness deadline")
             }
             defer { group.cancelAll() }
