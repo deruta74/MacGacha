@@ -47,13 +47,28 @@ public struct VerifyReport: Sendable {
 
 public struct Verifier: Sendable {
     public enum Mode: Sendable, Equatable { case quick, full }
-    public init() {}
+    private let read: @Sendable (FileHandle, Int) throws -> Data
+    public init() { read = { try $0.read(upToCount: $1) ?? Data() } }
+    package init(read: @escaping @Sendable (FileHandle, Int) throws -> Data) { self.read = read }
 
     /// Reads regular files through fs, with at most maxConcurrent workers and 64 KiB per read.
     /// Progress receives hashed-byte deltas on worker tasks and may be called concurrently.
     public func verify(fs: ContainedFileSystem, files: [ManifestFile], excluding: Set<SafeRelativePath> = [],
         mode: Mode = .full, maxConcurrent: Int = 4,
         progress: @escaping @Sendable (Int64) -> Void = { _ in }) async throws -> VerifyReport {
+        do {
+            return try await BlockingIO.run {
+                try await verifyOnIO(fs: fs, files: files, excluding: excluding, mode: mode,
+                    maxConcurrent: maxConcurrent, progress: progress)
+            }
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
+            throw error
+        }
+    }
+
+    private func verifyOnIO(fs: ContainedFileSystem, files: [ManifestFile], excluding: Set<SafeRelativePath>,
+        mode: Mode, maxConcurrent: Int, progress: @escaping @Sendable (Int64) -> Void) async throws -> VerifyReport {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard maxConcurrent > 0 else { throw LauncherError.io("maxConcurrent must be positive") }
         var seen = Set<String>(), active: [ManifestFile] = []
@@ -75,7 +90,7 @@ public struct Verifier: Sendable {
                 var bytes: Int64 = 0
                 var problems: [SafeRelativePath: FileProblem] = [:]
                 func submit(_ file: ManifestFile) {
-                    group.addTask { try await Self.inspect(file, fs: fs, mode: mode, progress: progress) }
+                    group.addTask { try await Self.inspect(file, fs: fs, mode: mode, read: read, progress: progress) }
                 }
                 while cursor < min(maxConcurrent, active.count) { submit(active[cursor]); cursor += 1 }
                 while let result = try await group.next() {
@@ -106,7 +121,7 @@ public struct Verifier: Sendable {
 
     @concurrent
     private static func inspect(_ file: ManifestFile, fs: ContainedFileSystem, mode: Mode,
-        progress: @Sendable (Int64) -> Void) async throws -> FileResult {
+        read: @Sendable (FileHandle, Int) throws -> Data, progress: @Sendable (Int64) -> Void) async throws -> FileResult {
         do {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             guard let type = try fs.itemType(at: file.path, allowingLeafSymlink: true) else {
@@ -126,7 +141,7 @@ public struct Verifier: Sendable {
             var checked: Int64 = 0
             while checked < file.size {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
-                let data = try autoreleasepool { try handle.read(upToCount: Int(min(65_536, file.size - checked))) ?? Data() }
+                let data = try autoreleasepool { try read(handle, Int(min(65_536, file.size - checked))) }
                 if data.isEmpty {
                     return FileResult(path: file.path, problem: .sizeMismatch(actual: checked), bytes: checked)
                 }

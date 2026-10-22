@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Darwin
+import Dispatch
 import Foundation
 import Synchronization
 import Testing
@@ -212,4 +213,27 @@ private func vDigest(_ body: String, algorithm: DigestAlgorithm = .md5) -> Diges
 }
 private func vManifest(_ path: String, _ body: String) throws -> ManifestFile {
     ManifestFile(path: try SafeRelativePath(path), size: Int64(body.utf8.count), digest: vDigest(body))
+}
+
+@Test(.timeLimit(.minutes(1)))
+func blockedVerificationReadDoesNotStarveCancellation() async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url)
+    let file = try vManifest("file", "abc")
+    try fs.writeAtomically(Data("abc".utf8), to: file.path)
+    let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    let release = DispatchSemaphore(value: 0)
+    let timedOut = Mutex(false)
+    let verifier = Verifier(read: { handle, size in
+        entered.continuation.yield(())
+        guard release.wait(timeout: .now() + 10) == .success else {
+            timedOut.withLock { $0 = true }; throw LauncherError.io("verification read deadline")
+        }
+        return try handle.read(upToCount: size) ?? Data()
+    })
+    let worker = Task { try await verifier.verify(fs: fs, files: [file], maxConcurrent: 1) }
+    defer { release.signal(); worker.cancel() }
+    var iterator = entered.stream.makeAsyncIterator(); _ = await iterator.next()
+    #expect(!timedOut.withLock { $0 })
+    worker.cancel(); release.signal()
+    await #expect(throws: LauncherError.cancelled) { _ = try await worker.value }
 }

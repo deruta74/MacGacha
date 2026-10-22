@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Dispatch
 import Foundation
 import LauncherCore
 import DownloadEngine
@@ -34,14 +35,40 @@ public struct ComponentInstaller: Sendable {
     /// Pull-driven: dropping the stream releases the store lock; cancelling its consumer
     /// cancels HTTP/extraction/copy. The only completed event follows successful publication.
     /// An import manifest requires a candidate; downloads require no candidate.
-    public func install(_ component: RuntimeComponent, from candidate: GPTKCandidate? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
+    public func install(_ component: RuntimeComponent, from candidate: GPTKCandidate? = nil) -> ComponentInstallStream {
         let session = ComponentInstallSession(component: component, candidate: candidate, store: store, consent: consent,
             fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint)
-        return AsyncThrowingStream(unfolding: { try await session.next() })
+        return ComponentInstallStream(session: session)
     }
 }
 
-private actor ComponentInstallSession {
+/// A checked iterator deliberately differs from AsyncThrowingStream: cancellation
+/// must reach the session and finish cleanup before it throws to the consumer.
+public struct ComponentInstallStream: AsyncSequence, Sendable {
+    public typealias Element = OperationEvent
+    public typealias AsyncIterator = Iterator
+    fileprivate let lifetime: ComponentInstallLifetime
+    fileprivate init(session: ComponentInstallSession) { lifetime = ComponentInstallLifetime(session) }
+    public func makeAsyncIterator() -> Iterator { Iterator(lifetime: lifetime) }
+    public struct Iterator: AsyncIteratorProtocol, Sendable {
+        fileprivate let lifetime: ComponentInstallLifetime
+        public mutating func next() async throws -> OperationEvent? { try await lifetime.session.next() }
+    }
+}
+
+fileprivate final class ComponentInstallLifetime: Sendable {
+    let session: ComponentInstallSession
+    init(_ session: ComponentInstallSession) { self.session = session }
+    deinit {
+        let session = session
+        Task { await session.abandon() }
+    }
+}
+
+fileprivate actor ComponentInstallSession {
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.component-install")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     private enum Step { case start, space, download, extract, publish, cleanup, done }
     private let component: RuntimeComponent
     private let candidate: GPTKCandidate?
@@ -73,7 +100,10 @@ private actor ComponentInstallSession {
         guard !pulling else { throw LauncherError.busy("component stream already in use") }
         pulling = true
         defer { pulling = false }
-        if step == .done { return nil }
+        if step == .done {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            return nil
+        }
         do {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             switch step {
@@ -197,25 +227,36 @@ private actor ComponentInstallSession {
             case .done: return nil
             }
         } catch {
-            download = nil; importSource = nil
-            if let fs {
-                // If publish/rollback failed, incoming might still be the old version.
-                // Preserve it for recovery rather than deleting an uncertain tree here.
-                let abandoned = [publicationUncertain ? nil : incoming, downloads].compactMap { $0 }
-                let downloadRoot = downloads.flatMap { try? SafeRelativePath($0.components.dropLast().joined(separator: "/")) }
-                // Cleanup must finish even when the consumer is cancelled. Await this bounded,
-                // uncancelled task while retaining the store lock; no producer outlives the stream.
-                await Task.detached {
-                    for path in abandoned { try? fs.removeItem(at: path) }
-                    if let downloadRoot, (try? fs.contentsOfDirectory(at: downloadRoot).isEmpty) == true {
-                        try? fs.removeItem(at: downloadRoot)
-                    }
-                }.value
-            }
-            step = .done; lock = nil
-            if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
+            // A cancelled consumer must join the engine before removing its
+            // root; otherwise a still-running fetch can recreate .downloads.
+            let cancelled = Task.isCancelled || error is CancellationError
+            await Task.detached { await self.abandon() }.value
+            if cancelled { throw LauncherError.cancelled }
             throw error
         }
+    }
+
+    func abandon() async {
+        guard step != .done else { return }
+        download = nil; importSource = nil
+        if let fs {
+            if let downloads {
+                let root = downloads.resolved(against: store.paths.root)
+                if let inner = try? ContainedFileSystem(root: root),
+                    let path = try? SafeRelativePath(".macgacha-staging/.lock") {
+                    try? await PipelineRootRetention.waitIfDraining(inner.caseFoldedPathKey(for: path))
+                }
+            }
+            // If publish/rollback failed, incoming may hold the old version.
+            let abandoned = [publicationUncertain ? nil : incoming, downloads].compactMap { $0 }
+            for path in abandoned { try? fs.removeItem(at: path) }
+            if let downloads,
+                let parent = try? SafeRelativePath(downloads.components.dropLast().joined(separator: "/")),
+                (try? fs.contentsOfDirectory(at: parent).isEmpty) == true {
+                try? fs.removeItem(at: parent)
+            }
+        }
+        step = .done; lock = nil
     }
 
     private func filesystem() throws -> ContainedFileSystem {

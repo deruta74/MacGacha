@@ -66,7 +66,7 @@ public actor OperationRunner {
             return nil
         }
         if record.uninstalling { return record }
-        let fs = try ContainedFileSystem(root: record.installPath, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
+        let fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
         try CompletionReceipt.discardInterruptedWrites(fs: fs)
         if let pending = record.pending {
             for receipt in try CompletionReceipt.unacknowledged(fs: fs) where receipt.planID != pending.planID {
@@ -75,7 +75,7 @@ public actor OperationRunner {
             }
             if let receipt = try CompletionReceipt.load(fs: fs, planID: pending.planID) {
                 try GameCompletion.requireMatch(receipt, pending)
-                return try await GameCompletion.save(game, record: record, receipt: receipt, store: store, hooks: crashHooks, log: log, identityProvider: identityProvider)
+                return try await GameCompletion.save(game, record: record, receipt: receipt, store: store, hooks: crashHooks, log: log, identityProvider: identityProvider, fileOps: fileOps)
             }
             // Paused before engine setup or with staging: resume owns validation
             // and execution of the stored plan; reconciliation never rebuilds it.
@@ -175,7 +175,7 @@ private actor RunnerSession {
                 guard let current = try await store.load(game), current == original else {
                     throw LauncherError.journalCorrupt("Game record changed during operation")
                 }
-                _ = try await GameCompletion.save(game, record: current, receipt: receipt, store: store, hooks: hooks, log: log, identityProvider: identityProvider)
+                _ = try await GameCompletion.save(game, record: current, receipt: receipt, store: store, hooks: hooks, log: log, identityProvider: identityProvider, fileOps: fileOps)
                 finish()
             }
             return event
@@ -233,7 +233,7 @@ private actor RunnerSession {
             try requireGameLocationAvailable(saved.installPath)
             if let receipt = try CompletionReceipt.load(fs: ContainedFileSystem(root: saved.installPath, expectedRootIdentity: saved.installIdentity, identityProvider: identityProvider), planID: pending.planID) {
                 try GameCompletion.requireMatch(receipt, pending)
-                _ = try await GameCompletion.save(game, record: saved, receipt: receipt, store: store, hooks: hooks, log: log, identityProvider: identityProvider)
+                _ = try await GameCompletion.save(game, record: saved, receipt: receipt, store: store, hooks: hooks, log: log, identityProvider: identityProvider, fileOps: fileOps)
                 return true
             }
             guard let stored = try await store.loadPlan(for: game), stored.id == pending.planID,
@@ -261,10 +261,23 @@ private enum GameCompletion {
     }
 
     static func save(_ game: String, record: GameRecord, receipt: CompletionReceipt, store: GameRecordStore,
-        hooks: CrashHooks, log: EventLog?, identityProvider: any FileSystemIdentityProvider) async throws -> GameRecord {
+        hooks: CrashHooks, log: EventLog?, identityProvider: any FileSystemIdentityProvider, fileOps: any FileOps) async throws -> GameRecord {
+        do {
+            return try await BlockingIO.run {
+                try await saveOnIO(game, record: record, receipt: receipt, store: store,
+                    hooks: hooks, log: log, identityProvider: identityProvider, fileOps: fileOps)
+            }
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
+            throw error
+        }
+    }
+
+    private static func saveOnIO(_ game: String, record: GameRecord, receipt: CompletionReceipt, store: GameRecordStore,
+        hooks: CrashHooks, log: EventLog?, identityProvider: any FileSystemIdentityProvider, fileOps: any FileOps) async throws -> GameRecord {
         guard let pending = record.pending else { throw LauncherError.journalCorrupt("Missing pending operation") }
         try requireMatch(receipt, pending)
-        let fs = try ContainedFileSystem(root: record.installPath, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
+        let fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
         if pending.kind == .adopt {
             guard try fs.itemType(at: record.executable) == .regularFile else {
                 throw LauncherError.io("game executable missing")

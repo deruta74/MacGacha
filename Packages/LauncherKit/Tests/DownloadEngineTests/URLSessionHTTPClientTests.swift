@@ -223,11 +223,10 @@ struct URLSessionHTTPClientTests {
         for try await _ in rangeBody {}
     }
 
-    @Test(.timeLimit(.minutes(1)))
-    func urlSessionSlowConsumerHasLosslessBoundedBuffering() async throws {
-        // Do not divide the high-water mark evenly: the producer must deliver
-        // strictly more than it before native task suspension can pause delivery.
-        let pieceSize = 48 * 1024
+    @Test(.timeLimit(.minutes(1)), arguments: [48 * 1024, 64 * 1024])
+    func urlSessionSlowConsumerHasLosslessBoundedBuffering(pieceSize: Int) async throws {
+        // Exercise both an exact-watermark callback boundary and overshoot.
+        // URLSession may split/coalesce the stub's chunks before delivery.
         let highWaterMark = 256 * 1024
         let lowWaterMark = 64 * 1024
         let pieces = (0..<96).map { Data(repeating: UInt8($0), count: pieceSize) }
@@ -239,14 +238,10 @@ struct URLSessionHTTPClientTests {
         defer { fixture.close() }
         let (head, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
         #expect(head.status == 200)
-        // Hold the consumer until enough data has been delivered and URLSession
-        // has processed it. Starting reads earlier can bypass backpressure entirely.
-        try await waitForHTTPCondition(timeout: .seconds(10)) {
-            fixture.control.deliveredBytes > highWaterMark
-        }
-        try await waitForHTTPCondition(timeout: .seconds(10)) {
-            metrics.snapshot.suspensions > 0
-        }
+        // Native suspension can happen at exactly the high-water mark. Waiting
+        // for the producer to exceed it can deadlock a correctly paused producer.
+        await metrics.waitForSuspension()
+        try #require(metrics.snapshot.suspensions > 0)
         var received = Data()
         var largestPiece = 0
         for try await piece in body {
@@ -449,7 +444,9 @@ private final class HTTPBufferMetrics: Sendable {
         var suspensions = 0
         var resumptions = 0
     }
+    private let suspension = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private let state = Mutex(Snapshot())
+    func waitForSuspension() async { for await _ in suspension.stream { return } }
     var snapshot: Snapshot { state.withLock { $0 } }
     func record(bytes: Int, suspended: Bool) {
         state.withLock {
@@ -459,6 +456,7 @@ private final class HTTPBufferMetrics: Sendable {
             if !suspended && $0.suspended { $0.resumptions += 1 }
             $0.suspended = suspended
         }
+        if suspended { suspension.continuation.yield(()) }
     }
 }
 

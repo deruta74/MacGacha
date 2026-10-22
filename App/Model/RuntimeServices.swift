@@ -174,7 +174,7 @@ private actor LoggedRuntimeInstall {
     private let log: EventLog
     // Keep the shared HTTP session alive until this pull-driven operation is released.
     private let session: OwnedHTTPSession?
-    private var iterator: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
+    private var iterator: ComponentInstallStream.Iterator?
     private var started = false
     private var done = false
     private var pulling = false

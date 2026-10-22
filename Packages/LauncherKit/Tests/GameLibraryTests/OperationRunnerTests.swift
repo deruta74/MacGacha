@@ -59,6 +59,30 @@ import TestSupport
         #expect(try await store.load("genshin")?.pending?.planDigest == plan.planDigest)
     }
 
+    @Test func blockedCompletionCleanupDoesNotStarveCancellation() async throws {
+        let root = try TempDir(), records = try TempDir(), cdn = MockCDN()
+        let plan = try bridgePlan(), store = GameRecordStore(directory: records.url)
+        var record = try bridgeRecord(root.url)
+        record.pending = PendingOperation(kind: .update, planID: plan.id, planDigest: plan.planDigest, target: bridgeBuild("new"))
+        try await bridgeSave(record, store: store)
+        try await store.savePlan(plan, for: "genshin")
+        let fs = try ContainedFileSystem(root: root.url)
+        let receipt = CompletionReceipt(planID: plan.id, planDigest: plan.planDigest)
+        try fs.writeAtomically(JSONEncoder().encode(receipt), to: SafeRelativePath(".macgacha-receipts/\(plan.id).json"))
+        try fs.writeAtomically(JSONEncoder().encode(plan), to: SafeRelativePath(".macgacha-staging/\(plan.id)/plan.json"))
+        let gate = CompletionCleanupGate()
+        let runner = OperationRunner(store: store, fetcher: bridgeFetcher(cdn), disk: FixedDiskSpace(bytes: Int64.max), log: nil, fileOps: gate)
+        let task = Task { try await runner.reconcile("genshin") }
+        defer { gate.release.signal(); task.cancel() }
+        var entered = gate.entered.stream.makeAsyncIterator(); _ = await entered.next()
+        task.cancel(); gate.release.signal()
+        await #expect(throws: LauncherError.cancelled) { _ = try await task.value }
+        #expect(try await store.load("genshin") == record)
+        #expect(try CompletionReceipt.load(installRoot: root.url, planID: plan.id) == receipt)
+        #expect(try await bridgeRunner(store, cdn).reconcile("genshin")?.installed == bridgeBuild("new"))
+        #expect(cdn.requestLog.isEmpty)
+    }
+
     @Test func runnerCompletesAndAcknowledgesInOrder() async throws {
         let root = try TempDir(); let records = try TempDir(); let cdn = MockCDN()
         let plan = try bridgePlan(); bridgeServe(cdn, plan)
@@ -737,4 +761,21 @@ private final class BridgeBlockedAssembly: FileOps {
         try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
     }
     func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
+}
+
+private final class CompletionCleanupGate: FileOps {
+    let release = DispatchSemaphore(value: 0)
+    let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(descriptor, bytes: bytes) }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try SystemFileOps().synchronize(descriptor, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
+        if name == "plan.json" {
+            entered.continuation.yield(())
+            guard release.wait(timeout: .now() + 10) == .success else { throw LauncherError.io("completion cleanup deadline") }
+        }
+        try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
+    }
 }

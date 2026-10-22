@@ -296,7 +296,7 @@ package final class PipelineRootRetention: Sendable {
         }
         drain?.finish()
     }
-    static func waitIfDraining(_ key: String) async throws {
+    package static func waitIfDraining(_ key: String) async throws {
         if let drain = draining.withLock({ $0[key]?.drain }) { try await drain.wait() }
     }
 }
