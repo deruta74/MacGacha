@@ -1,4 +1,4 @@
-# MacGacha
+# MacGacha — universal launcher for HoYoverse games on Apple Silicon
 
 > 🚧 **Work in progress.** Games can already be installed, updated and verified, but they can't be launched yet. There are no releases yet.
 
