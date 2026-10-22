@@ -11,6 +11,13 @@ package enum FileAssembler {
     /// blocking decoding, hashing and full sync runs off the scheduling actor.
     @concurrent static func assemble(_ file: FileTask, plan: InstallPlan, fs: ContainedFileSystem, durable: Bool = false,
         fallback: @escaping @Sendable (String) async throws -> Void) async throws {
+        try await BlockingIO.run {
+            try await assembleOnIO(file, plan: plan, fs: fs, durable: durable, fallback: fallback)
+        }
+    }
+
+    @concurrent private static func assembleOnIO(_ file: FileTask, plan: InstallPlan, fs: ContainedFileSystem, durable: Bool,
+        fallback: @escaping @Sendable (String) async throws -> Void) async throws {
         let span = OperationWork.begin(.assembly); defer { span?.end() }
         OperationWork.record(.assemblyStarted); defer { OperationWork.record(.assemblyFinished) }
         let layout = StagingLayout(id: plan.id), path = try layout.file(file.path)
@@ -80,9 +87,11 @@ package enum FileAssembler {
     }
 
     @concurrent static func matches(_ file: FileTask, plan: InstallPlan, fs: ContainedFileSystem) async throws -> Bool {
-        let path = try StagingLayout(id: plan.id).file(file.path)
-        guard try fs.size(at: path) == file.size else { return false }
-        return try hash(path, size: file.size, algorithm: file.digest.algorithm, fs: fs) == file.digest
+        try await BlockingIO.run {
+            let path = try StagingLayout(id: plan.id).file(file.path)
+            guard try fs.size(at: path) == file.size else { return false }
+            return try hash(path, size: file.size, algorithm: file.digest.algorithm, fs: fs) == file.digest
+        }
     }
 
     private static func hash(_ path: SafeRelativePath, size: Int64, algorithm: DigestAlgorithm, fs: ContainedFileSystem) throws -> Digest {

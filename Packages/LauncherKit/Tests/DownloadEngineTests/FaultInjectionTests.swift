@@ -9,7 +9,7 @@ import DownloadEngine
 import TestSupport
 
 struct FaultInjectionTests {
-    @Test(arguments: [EDQUOT, ENOSPC], ["part", "output", "rename", "sync", "journal"])
+    @Test(.timeLimit(.minutes(1)), arguments: [EDQUOT, ENOSPC], ["part", "output", "rename", "sync", "journal"])
     func allocationFailurePausesAndResumes(code: Int32, point: String) async throws {
         let root = try TempDir(), fs = try ContainedFileSystem(root: root.url), cdn = MockCDN()
         let body = String(repeating: "Q", count: 160_000)
@@ -35,7 +35,7 @@ struct FaultInjectionTests {
         #expect(try fs.readFile(at: plan.files[0].path, maxBytes: body.utf8.count) == Data(body.utf8))
     }
 
-    @Test(arguments: InjectedFileOps.Fault.allCases)
+    @Test(.timeLimit(.minutes(1)), arguments: InjectedFileOps.Fault.allCases)
     func fileFaultLeavesIntactOrRecoverableInstall(fault: InjectedFileOps.Fault) async throws {
         let fixtures = try TempDir(); let root = try TempDir()
         let plan = try crashFixture(fixtures.url, root: root.url)
@@ -84,7 +84,7 @@ struct FaultInjectionTests {
         #expect(try fs.contentsOfDirectory(at: SafeRelativePath("dir")) == [path])
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func partialJournalAppendRequiresReopenThenInstallResumes() async throws {
         let fixtures = try TempDir(); let root = try TempDir()
         let plan = try crashFixture(fixtures.url, root: root.url)

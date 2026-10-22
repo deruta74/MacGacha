@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Dispatch
 import Foundation
 import Synchronization
 import LauncherCore
@@ -85,6 +86,11 @@ private final class StagingLease: Sendable {
 }
 
 private actor StagingSession {
+    // Capacity snapshots and metadata mutations can wait for filesystem I/O.
+    // Actor serialization must not occupy a cooperative worker while they do.
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.staging")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     private let durableFiles: Bool
     private enum Step { case start, file, progress, done }
     private let plan: InstallPlan

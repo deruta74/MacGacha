@@ -10,7 +10,7 @@ import Sophon
 import TestSupport
 @testable import GameLibrary
 
-@Suite(.serialized) struct GameLibraryTests {
+@Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
     @Test(arguments: [false, true])
     func branchCacheWriteSurvivesAnotherStoresOperationSweep(expired: Bool) async throws {
         let gate = BranchWriteGate(), f = try LibraryFixture(fileOps: gate)
@@ -159,6 +159,11 @@ import TestSupport
         }
         #expect(try await f.store.load(game.id)?.pending != nil)
         #expect(try f.fs.itemType(at: SafeRelativePath("Game.exe")) == nil)
+        // Dropping a stream cancels workers asynchronously. Uninstall correctly
+        // stays busy while they drain; reconcile is the supported drain barrier.
+        let runner = OperationRunner(store: f.store, fetcher: ChunkFetcher(http: f.cdn,
+            retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: f.disk, log: nil)
+        _ = try await runner.reconcile(game.id)
         try await f.library.uninstall(game)
         #expect(!FileManager.default.fileExists(atPath: f.install.path))
         #expect(try await f.store.load(game.id) == nil)
@@ -836,16 +841,15 @@ private struct LibraryDelayedHTTP: HTTPClient {
 /// Pause exactly between a completed cache temporary and its atomic rename.
 private final class BranchWriteGate: FileOps {
     private let flags = Mutex((paused: false, released: false))
+    private let paused = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private let released = NSCondition()
     private let failingSuffix: String?
     init(failingSuffix: String? = nil) { self.failingSuffix = failingSuffix }
-    func release() { flags.withLock { $0.released = true } }
-    func waitUntilPaused() async throws {
-        for _ in 0..<500 {
-            if flags.withLock({ $0.paused }) { return }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        throw LauncherError.io("branch write did not pause")
+    func release() {
+        released.lock(); defer { released.unlock() }
+        flags.withLock { $0.released = true }; released.broadcast()
     }
+    func waitUntilPaused() async throws { for await _ in paused.stream { return } }
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(descriptor, bytes: bytes) }
     func synchronize(_ descriptor: Int32, durable: Bool) throws { try SystemFileOps().synchronize(descriptor, durable: durable) }
     func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
@@ -854,12 +858,14 @@ private final class BranchWriteGate: FileOps {
                 throw LauncherError.io("https://example.invalid/private?secret=selector")
             }
         } else if destination == "branch.json" {
-            flags.withLock { $0.paused = true }
-            for _ in 0..<5000 {
-                if flags.withLock({ $0.released }) { break }
-                usleep(1000)
+            // The store's Dispatch executor models a slow synchronous cache
+            // rename without starving the task that must resume this writer.
+            released.lock(); defer { released.unlock() }
+            flags.withLock { $0.paused = true }; paused.continuation.yield(())
+            let deadline = Date().addingTimeInterval(30)
+            while !flags.withLock({ $0.released }) {
+                guard released.wait(until: deadline) else { throw LauncherError.io("branch write release deadline") }
             }
-            guard flags.withLock({ $0.released }) else { throw LauncherError.io("branch write release deadline") }
         }
         try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
     }

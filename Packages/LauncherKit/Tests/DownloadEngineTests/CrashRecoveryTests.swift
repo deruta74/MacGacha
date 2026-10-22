@@ -6,9 +6,9 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct CrashRecoveryTests {
-    @Test func repeatedProcessDeathDuringCommitRestagingRecovers() async throws {
+    @Test(.timeLimit(.minutes(1))) func repeatedProcessDeathDuringCommitRestagingRecovers() async throws {
         let fixtures = try TempDir(), root = try TempDir(), plan = try crashFixture(fixtures.url, root: root.url)
         let executable = try crashHarnessURL(in: Bundle(for: CrashTestBundleToken.self).bundleURL)
         func kill(_ point: CrashPoint) async throws {
@@ -30,7 +30,7 @@ struct CrashRecoveryTests {
         try assertFixture(plan, root: root.url)
     }
 
-    @Test func objectHintAfterProcessDeathReverifiesUnsyncedPart() async throws {
+    @Test(.timeLimit(.minutes(1))) func objectHintAfterProcessDeathReverifiesUnsyncedPart() async throws {
         let fixtures = try TempDir(), root = try TempDir(), plan = try crashFixture(fixtures.url, root: root.url)
         let executable = try crashHarnessURL(in: Bundle(for: CrashTestBundleToken.self).bundleURL)
         let result = try await SystemProcessRunner().run(executable,

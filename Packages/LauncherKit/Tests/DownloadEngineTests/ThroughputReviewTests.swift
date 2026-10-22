@@ -8,7 +8,7 @@ import LauncherCore
 @testable import DownloadEngine
 import TestSupport
 
-@Test func delayedProgressCannotOverwriteANewerDeliveredSnapshot() async throws {
+@Test(.timeLimit(.minutes(1))) func delayedProgressCannotOverwriteANewerDeliveredSnapshot() async throws {
     let plan = try opPlan("ordered", [("out", "abcd")]), tracker = PipelineProgress(plan), channel = PipelineChannel()
     tracker.initialize(downloaded: 0, total: 4, credited: [], predicted: Set(plan.objects.keys))
     let older = tracker.snapshot()
@@ -23,7 +23,7 @@ import TestSupport
     #expect(try await channel.next() == nil)
 }
 
-@Test func recoveredCommittingStagingIsFullSyncedBeforeRename() async throws {
+@Test(.timeLimit(.minutes(1))) func recoveredCommittingStagingIsFullSyncedBeforeRename() async throws {
     let root = try TempDir(), fs = try ContainedFileSystem(root: root.url), cdn = MockCDN()
     let plan = try opPlan("recovered-sync", [("a", "correct")])
     _ = try await opSeed(fs, plan, commit: true)
@@ -34,7 +34,7 @@ import TestSupport
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test(arguments: [false, true]) func committingRecoveryVerifiesAndFullSyncsBeforeStagedJournal(corrupt: Bool) async throws {
+@Test(.timeLimit(.minutes(1)), arguments: [false, true]) func committingRecoveryVerifiesAndFullSyncsBeforeStagedJournal(corrupt: Bool) async throws {
     let root = try TempDir(), fs = try ContainedFileSystem(root: root.url), cdn = MockCDN()
     let plan = try opPlan("durability", [("a", "correct")]); opServe(cdn, plan, ["correct"])
     _ = try await opSeed(fs, plan, commit: true)

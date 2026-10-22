@@ -6,8 +6,8 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Suite(.serialized) struct CompletionReceiptTests {
-    @Test(arguments: [CrashPoint.afterOperationCompleted, .afterCompletionReceipt, .afterEngineCleanup])
+@Suite(.serialized, .timeLimit(.minutes(1))) struct CompletionReceiptTests {
+    @Test(.timeLimit(.minutes(1)), arguments: [CrashPoint.afterOperationCompleted, .afterCompletionReceipt, .afterEngineCleanup])
     func receiptWrittenBeforeCleanup(point: CrashPoint) async throws {
         let fixtures = try TempDir(); let root = try TempDir()
         let plan = try crashFixture(fixtures.url, root: root.url)
@@ -32,7 +32,7 @@ import TestSupport
         try assertFixture(plan, root: root.url)
     }
 
-    @Test func discoveryKeepsReceipts() async throws {
+    @Test(.timeLimit(.minutes(1))) func discoveryKeepsReceipts() async throws {
         let root = try TempDir(); let cdn = MockCDN()
         let first = try opPlan("receipt-first", [("a", "first")])
         opServe(cdn, first, ["first"])
@@ -58,7 +58,7 @@ import TestSupport
         }
     }
 
-    @Test func noReceiptByDefault() async throws {
+    @Test(.timeLimit(.minutes(1))) func noReceiptByDefault() async throws {
         let root = try TempDir(); let cdn = MockCDN(); let plan = try opPlan("runtime", [("a", "abc")])
         opServe(cdn, plan, ["abc"])
         _ = try await opCollect(opEngine(plan, root.url, cdn).run())
@@ -66,7 +66,7 @@ import TestSupport
         #expect(try fs.itemType(at: SafeRelativePath(".macgacha-receipts")) == nil)
     }
 
-    @Test func receiptIsOnlyWrittenForRequestedPlan() async throws {
+    @Test(.timeLimit(.minutes(1))) func receiptIsOnlyWrittenForRequestedPlan() async throws {
         let root = try TempDir(); let cdn = MockCDN(); let fs = try ContainedFileSystem(root: root.url)
         let old = try opPlan("previous", [("a", "old")]), requested = try opPlan("requested", [("a", "new")])
         _ = try await opSeed(fs, old, commit: true)

@@ -8,7 +8,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func cleanTreeIsClean() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let md5 = try ManifestFile(path: SafeRelativePath("Data with spaces/日本語.bin"), size: 3,
@@ -27,7 +27,7 @@ func cleanTreeIsClean() async throws {
     #expect(progress.withLock { $0 } == 6)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func detectsMissingSizeAndDigestProblems() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let files = try ["missing", "short", "corrupt", "good"].map { try vManifest($0, "abc") }
@@ -40,7 +40,7 @@ func detectsMissingSizeAndDigestProblems() async throws {
     #expect(!report.isClean && report.checkedFiles == 4 && report.checkedBytes == 6)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func quickModeSkipsHashing() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let file = try vManifest("a", "abc"); try fs.writeAtomically(Data("bad".utf8), to: file.path)
@@ -53,7 +53,7 @@ func quickModeSkipsHashing() async throws {
     #expect(full.problems == [file.path: .digestMismatch(actual: opDigest("bad"))])
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func excludedPathsAreNotChecked() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let files = try [vManifest("good", "abc"), vManifest("patched", "original")]
@@ -62,7 +62,7 @@ func excludedPathsAreNotChecked() async throws {
     #expect(report.isClean && report.checkedFiles == 1 && report.checkedBytes == 3)
 }
 
-@Test(arguments: ["directory", "symlink", "ancestor-symlink", "fifo"])
+@Test(.timeLimit(.minutes(1)), arguments: ["directory", "symlink", "ancestor-symlink", "fifo"])
 func directoryInPlaceOfFileIsNotRegularFile(kind: String) async throws {
     let temp = try TempDir(); let outside = try TempDir()
     let fs = try ContainedFileSystem(root: temp.url), control = try ContainedFileSystem(root: outside.url)
@@ -80,7 +80,7 @@ func directoryInPlaceOfFileIsNotRegularFile(kind: String) async throws {
     #expect(try control.readFile(at: SafeRelativePath("file"), maxBytes: 3) == Data("abc".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func verifierCancellationBeforeAndDuringHashingThrowsCancelled() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let bytes = String(repeating: "a", count: 1 << 20); let file = try vManifest("large", bytes)
@@ -100,7 +100,7 @@ func verifierCancellationBeforeAndDuringHashingThrowsCancelled() async throws {
     #expect(progress.withLock { $0 } > 0 && progress.withLock { $0 } < Int64(bytes.utf8.count))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func verifierRejectsUpdatingMarkerAndBadInputs() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     for limit in [0, -1] {
@@ -188,7 +188,7 @@ func repairRejectsAllUnrepairablePathsAndUnknownReportEntries() throws {
     try empty.validate()
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func corruptInstalledFileRepairsThroughInstallOperationAndVerifiesClean() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("installed", [("a", "one"), ("b", "two")]); let cdn = MockCDN(); opServe(cdn, plan, ["one", "two"])

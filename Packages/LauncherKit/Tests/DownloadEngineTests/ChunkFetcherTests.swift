@@ -10,7 +10,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func fetchWholeObject() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -27,7 +27,7 @@ func fetchWholeObject() async throws {
     #expect(cdn.requestLog.count == 1)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func resumeFromPart() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -41,7 +41,7 @@ func resumeFromPart() async throws {
     #expect(try Data(contentsOf: part) == bytes)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func restartWhenRangeIgnored() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -58,7 +58,7 @@ func restartWhenRangeIgnored() async throws {
     #expect(try Data(contentsOf: part) == bytes)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func retryAfterDropAndCorruption() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -75,7 +75,7 @@ func retryAfterDropAndCorruption() async throws {
     #expect(try Data(contentsOf: part) == bytes)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func mirrorFallback() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -93,7 +93,7 @@ func mirrorFallback() async throws {
     #expect(try Data(contentsOf: part) == bytes)
 }
 
-@Test(arguments: [404, 410])
+@Test(.timeLimit(.minutes(1)), arguments: [404, 410])
 func missingMirrorFallsBackWithoutDelay(status: Int) async throws {
     let directory = try TempDir(); let fs = try ContainedFileSystem(root: directory.url)
     let cdn = MockCDN(); let bytes = fetchBlob()
@@ -106,7 +106,7 @@ func missingMirrorFallsBackWithoutDelay(status: Int) async throws {
     #expect(try fs.readFile(at: SafeRelativePath("object.part"), maxBytes: bytes.count) == bytes)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func allMissingMirrorsFailWithoutDelay() async throws {
     let directory = try TempDir(); let fs = try ContainedFileSystem(root: directory.url)
     let cdn = MockCDN(); let object = fetchObject(fetchBlob(), paths: ["missing", "mirror"])
@@ -118,7 +118,7 @@ func allMissingMirrorsFailWithoutDelay() async throws {
     #expect(sleeper.delays.isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func cleanTruncatedBodyResumesFromWrittenBytes() async throws {
     let directory = try TempDir(); let fs = try ContainedFileSystem(root: directory.url)
     let client = RecoveringFetchClient(malformedRange: false)
@@ -127,7 +127,7 @@ func cleanTruncatedBodyResumesFromWrittenBytes() async throws {
     #expect(try fs.readFile(at: SafeRelativePath("part"), maxBytes: 6) == Data("abcdef".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func malformedContentRangeRestartsWithoutRange() async throws {
     let directory = try TempDir(); let fs = try ContainedFileSystem(root: directory.url)
     try fs.writeAtomically(Data("abc".utf8), to: SafeRelativePath("part"))
@@ -137,31 +137,26 @@ func malformedContentRangeRestartsWithoutRange() async throws {
     #expect(try fs.readFile(at: SafeRelativePath("part"), maxBytes: 6) == Data("abcdef".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func blockedChunkWriteDoesNotSerializeOtherFetches() async throws {
     let directory = try TempDir(); let blocker = FetchBlockingWrite()
     let blockedFS = try ContainedFileSystem(root: directory.url, fileOps: blocker)
     let otherFS = try ContainedFileSystem(root: directory.url)
     let cdn = MockCDN(); let bytes = Data("abc".utf8); cdn.serve("object", data: bytes)
-    let fetcher = testFetcher(cdn); let finished = Mutex(false)
+    let fetcher = testFetcher(cdn)
     let first = Task { try await fetcher.fetch(fetchObject(bytes), fs: blockedFS, part: SafeRelativePath("first"), progress: { _ in }) }
     defer { blocker.release.signal(); first.cancel() }
-    let clock = ContinuousClock(); let deadline = clock.now.advanced(by: .seconds(3))
-    while !blocker.entered.withLock({ $0 }) && clock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
-    try #require(blocker.entered.withLock { $0 })
+    await blocker.waitUntilEntered()
     let second = Task {
         try await fetcher.fetch(fetchObject(bytes), fs: otherFS, part: SafeRelativePath("second"), progress: { _ in })
-        finished.withLock { $0 = true }
     }
     defer { second.cancel() }
-    let otherDeadline = clock.now.advanced(by: .seconds(2))
-    while !finished.withLock({ $0 }) && clock.now < otherDeadline { try await Task.sleep(for: .milliseconds(1)) }
-    #expect(finished.withLock { $0 })
+    try await second.value
     blocker.release.signal()
-    try await first.value; try await second.value
+    try await first.value
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func cancellationKeepsPart() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -185,7 +180,7 @@ func cancellationKeepsPart() async throws {
     #expect(try Data(contentsOf: part) == bytes)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func completePartIsVerifiedAfter416() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -204,7 +199,7 @@ func completePartIsVerifiedAfter416() async throws {
     #expect(try Data(contentsOf: part) == bytes)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func fetchRejectsMalformedRangeAndOverlongBody() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -224,7 +219,7 @@ func fetchRejectsMalformedRangeAndOverlongBody() async throws {
     #expect(!FileManager.default.fileExists(atPath: part.path))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func completedBytesDoNotWaitForAnUnfinishedStream() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -241,7 +236,7 @@ func completedBytesDoNotWaitForAnUnfinishedStream() async throws {
     #expect(try Data(contentsOf: part) == bytes)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func fetchWithoutTransferDigestChecksOnlyTransferSize() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -256,7 +251,7 @@ func fetchWithoutTransferDigestChecksOnlyTransferSize() async throws {
     #expect(try Data(contentsOf: part) == bytes)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func cancellingStalledFetchCancelsBody() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -276,7 +271,7 @@ func cancellingStalledFetchCancelsBody() async throws {
     #expect(try Data(contentsOf: part) == prefix)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func unsafePartLeavesAreRefusedWithoutChangingOutsideFiles() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -302,7 +297,7 @@ func unsafePartLeavesAreRefusedWithoutChangingOutsideFiles() async throws {
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func symlinkPartParentIsRefusedWithoutWritingOutside() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -387,7 +382,7 @@ func identityDecoderRejectsInvalidRangesAndSameFileHandles() throws {
     #expect(try fs.readFile(at: path, maxBytes: 5) == Data("hello".utf8))
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func concurrentCaseVariantPartsAreBusy(varyRoot: Bool) async throws {
     let directory = try TempDir()
     let root = directory.url.appendingPathComponent("InstallRoot")
@@ -476,10 +471,11 @@ private final class RecoveringFetchClient: HTTPClient {
     }
 }
 private final class FetchBlockingWrite: FileOps {
-    let entered = Mutex(false)
+    private let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     let release = DispatchSemaphore(value: 0)
+    func waitUntilEntered() async { for await _ in entered.stream { return } }
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
-        entered.withLock { $0 = true }
+        entered.continuation.yield(())
         guard release.wait(timeout: .now() + 30) == .success else { throw LauncherError.io("write gate timed out") }
         return try SystemFileOps().write(descriptor, bytes: bytes)
     }

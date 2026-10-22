@@ -11,7 +11,7 @@ import Sophon
 import TestSupport
 @testable import GameLibrary
 
-@Suite(.serialized) struct OperationRunnerTests {
+@Suite(.serialized, .timeLimit(.minutes(1))) struct OperationRunnerTests {
     @Test(.timeLimit(.minutes(1)), arguments: [false, true]) func discardedPipelineRetainsStoreLeaseUntilWorkersJoin(cancelFirstWait: Bool) async throws {
         let root = try TempDir(), records = try TempDir(), cdn = MockCDN(), ops = BridgeBlockedAssembly()
         let plan = try bridgePlan(); bridgeServe(cdn, plan)

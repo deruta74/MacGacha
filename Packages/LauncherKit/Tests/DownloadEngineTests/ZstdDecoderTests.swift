@@ -89,7 +89,7 @@ import TestSupport
         #expect(throws: CorruptObjectError.self) { try Zstd.decode(zstdVector("good") + bytes, expectedSize: 4097) }
     }
 
-    @Test func honoursCancellation() async throws {
+    @Test(.timeLimit(.minutes(1))) func honoursCancellation() async throws {
         let bytes = try zstdVector("repeat-8m")
         let writes = Mutex(0)
         let ops = ZstdTestFileOps(onWrite: { descriptor, buffer in

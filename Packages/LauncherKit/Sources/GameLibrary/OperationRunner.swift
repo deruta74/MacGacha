@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Darwin
+import Dispatch
 import Foundation
 import LauncherCore
 import DownloadEngine
@@ -10,6 +11,10 @@ public enum RunOutcome: Sendable, Equatable { case completed, paused }
 /// Persists exact plans before pending records. Dropping a stream cancels its
 /// bounded pipeline; operation ownership is retained until all workers join.
 public actor OperationRunner {
+    // Synchronous filesystem/cache work must not occupy a cooperative worker.
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.operation-runner")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     private let store: GameRecordStore
     private let fetcher: ChunkFetcher
     private let disk: any DiskSpaceProbe
@@ -105,6 +110,10 @@ private enum RunnerRecordProposal: Sendable {
 }
 
 private actor RunnerSession {
+    // Synchronous filesystem/cache work must not occupy a cooperative worker.
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.runner-session")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     private let game: String
     private let request: RunnerRequest
     private let approved: Bool

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Dispatch
 import Foundation
 import Synchronization
 import LauncherCore
@@ -8,6 +9,10 @@ import DownloadEngine
 /// Actor-isolated, bounded JSON persistence. All access below directory uses
 /// descriptor-relative ContainedFileSystem operations, including cache creation.
 public actor GameRecordStore {
+    // Synchronous filesystem/cache work must not occupy a cooperative worker.
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.game-store")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     public static let maximumRecordBytes = 4 << 20
     /// Shared by normal sweeping and orphan recovery. Younger cache siblings
     /// may belong to a lease-free writer, even while an operation owns the store.

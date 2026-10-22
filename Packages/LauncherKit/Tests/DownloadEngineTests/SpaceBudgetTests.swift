@@ -6,7 +6,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Test(arguments: ["missing", "short", "digest"])
+@Test(.timeLimit(.minutes(1)), arguments: ["missing", "short", "digest"])
 func fallbackBudgetVerifiesLocalRangesAndDeduplicatesObjects(failure: String) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let good = try SafeRelativePath("good"); let bad = try SafeRelativePath("bad")
@@ -32,7 +32,7 @@ func fallbackBudgetVerifiesLocalRangesAndDeduplicatesObjects(failure: String) as
     #expect(try fs.size(at: objectPath(plan, object)) == nil)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func spaceBudgetCountsDecodedAndTransfer() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let object = ChunkObject(id: "shared", urls: [URL(string: "https://cdn.test/shared")!], transferSize: 4,

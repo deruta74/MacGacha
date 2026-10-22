@@ -9,7 +9,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Test func disposablePartsDoNotRequestFullSync() async throws {
+@Test(.timeLimit(.minutes(1))) func disposablePartsDoNotRequestFullSync() async throws {
     let temp = try TempDir(), ops = ThroughputFileOps(), fs = try ContainedFileSystem(root: temp.url, fileOps: ops)
     let cdn = MockCDN(), object = stagingObject("part", "payload")
     cdn.serve(object.id, data: Data("payload".utf8))
@@ -18,7 +18,7 @@ import TestSupport
     #expect(try fs.readFile(at: SafeRelativePath("data.part"), maxBytes: 7) == Data("payload".utf8))
 }
 
-@Test func recoveredCompressedPartWithoutTransferDigestIsReverifiedBeforeAssembly() async throws {
+@Test(.timeLimit(.minutes(1))) func recoveredCompressedPartWithoutTransferDigestIsReverifiedBeforeAssembly() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let good = try zstdVector("good"), wrong = try zstdVector("wrong")
     #expect(good.count == wrong.count)
@@ -37,7 +37,7 @@ import TestSupport
     #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 4096) == Data(payload.utf8))
 }
 
-@Test func sharedCorruptionQuiescesReadersBeforeReplacingThePart() async throws {
+@Test(.timeLimit(.minutes(1))) func sharedCorruptionQuiescesReadersBeforeReplacingThePart() async throws {
     let temp = try TempDir(), cdn = MockCDN(), encoded = try zstdVector("good")
     let payload = String(repeating: "A", count: 4096), digest = stagingDigest(payload)
     let object = ChunkObject(id: "shared-corrupt", urls: [URL(string: "https://cdn.test/shared-corrupt")!],
@@ -51,7 +51,7 @@ import TestSupport
     for file in files { #expect(try fs.readFile(at: file.path, maxBytes: 4096) == Data(payload.utf8)) }
 }
 
-@Test func stagedFilesUseFsyncBeforeCommitBoundaries() async throws {
+@Test(.timeLimit(.minutes(1))) func stagedFilesUseFsyncBeforeCommitBoundaries() async throws {
     let temp = try TempDir(), ops = ThroughputFileOps(), fs = try ContainedFileSystem(root: temp.url, fileOps: ops)
     let cdn = MockCDN(), object = stagingObject("object", "data")
     cdn.serve(object.id, data: Data("data".utf8))
@@ -176,6 +176,7 @@ private actor ProgressGateIterator {
     defer { gate.release(); task.cancel() }
     await gate.waitForConcurrentWorkers()
     #expect(gate.peak.withLock { $0 } >= 2)
+    #expect(!gate.timedOut.withLock { $0 })
     gate.release()
     #expect(try await task.value.last == .phase(.completed))
     #expect(cdn.requestLog.count == 2)
@@ -241,9 +242,11 @@ private actor SlowPipelineIterator {
 
 private final class AssemblyObservationGate: Sendable {
     let peak = Mutex(0)
-    private let active = Mutex(0), released = Mutex(false)
+    private let active = Mutex(0)
+    private let gate = BoundedIOGate()
+    let timedOut = Mutex(false)
     private let concurrent = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
-    func release() { released.withLock { $0 = true } }
+    func release() { gate.release() }
     func waitForConcurrentWorkers() async { for await _ in concurrent.stream { return } }
     func observe(_ work: OperationWork) {
         if work == .assemblyFinished { active.withLock { $0 -= 1 }; return }
@@ -251,7 +254,7 @@ private final class AssemblyObservationGate: Sendable {
         let count = active.withLock { $0 += 1; return $0 }
         peak.withLock { $0 = max($0, count) }
         if count >= 2 { concurrent.continuation.yield(()) }
-        while !released.withLock({ $0 }) { if Task.isCancelled { return }; usleep(1000) }
+        do { try gate.wait() } catch { timedOut.withLock { $0 = true }; concurrent.continuation.finish() }
     }
 }
 
@@ -259,24 +262,21 @@ final class ThroughputFileOps: FileOps {
     let partFullSyncs = Mutex(0)
     let outputSyncs = Mutex<[Bool]>([])
     private let blockAssembly: Bool
-    private let released = Mutex(false)
+    private let gate = BoundedIOGate()
     private let assembly = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private let partWritten = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private let requireFetch: MockCDN?
     init(blockAssembly: Bool = false, requireFetch: MockCDN? = nil) { self.blockAssembly = blockAssembly; self.requireFetch = requireFetch }
     func waitForAssembly() async { for await _ in assembly.stream { return } }
     func waitForPart() async { for await _ in partWritten.stream { return } }
-    func release() { released.withLock { $0 = true } }
+    func release() { gate.release() }
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
         if descriptorPath(descriptor).contains("/files/"), let requireFetch, requireFetch.requestLog.isEmpty {
             throw LauncherError.io("Unverified recovered part reached assembly")
         }
         if blockAssembly, descriptorPath(descriptor).contains("/files/") {
             assembly.continuation.yield(())
-            while !released.withLock({ $0 }) {
-                if Task.isCancelled { throw LauncherError.cancelled }
-                usleep(1000)
-            }
+            try gate.wait()
         }
         let count = try SystemFileOps().write(descriptor, bytes: bytes)
         if descriptorPath(descriptor).hasSuffix(".part") { partWritten.continuation.yield(()) }
@@ -295,5 +295,24 @@ final class ThroughputFileOps: FileOps {
         var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         guard fcntl(fd, F_GETPATH, &buffer) == 0 else { return "" }
         return buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+    }
+}
+
+/// Deliberately blocks an I/O worker to model slow storage. This must run on
+/// BlockingIO's Dispatch executor, never a cooperative worker. Bounded waits
+/// and broadcast release prevent a broken test from retaining workers forever.
+private final class BoundedIOGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var released = false
+    func release() { condition.lock(); released = true; condition.broadcast(); condition.unlock() }
+    func wait() throws {
+        condition.lock(); defer { condition.unlock() }
+        let deadline = Date().addingTimeInterval(30)
+        while !released {
+            try Task.checkCancellation()
+            guard condition.wait(until: min(deadline, Date().addingTimeInterval(0.1))) || Date() < deadline else {
+                throw LauncherError.io("I/O test gate timed out")
+            }
+        }
     }
 }

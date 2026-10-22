@@ -8,7 +8,7 @@ import LauncherCore
 @testable import DownloadEngine
 import TestSupport
 
-@Test(arguments: [Data(), Data("{\"type\":\"planStored\",\"planID\":\"".utf8), Data("{\"type\":\"planStored\"}\n".utf8)])
+@Test(.timeLimit(.minutes(1)), arguments: [Data(), Data("{\"type\":\"planStored\",\"planID\":\"".utf8), Data("{\"type\":\"planStored\"}\n".utf8)])
 func storedPlanWithMissingFirstJournalRecordResumes(tail: Data) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("missing-first", [("Data/a", "abc"), ("Data/b", "def")])
@@ -37,7 +37,7 @@ private let followupTornTails: [Data] = [
     Data(repeating: 0x78, count: 1_048_577) + Data([10]),
 ]
 
-@Test(arguments: followupTornTails)
+@Test(.timeLimit(.minutes(1)), arguments: followupTornTails)
 func journalRecoversAnyInvalidFinalLine(tail: Data) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let path = try SafeRelativePath("journal")
@@ -66,7 +66,7 @@ func journalInvalidLineBeforeValidRecordRemainsCorrupt(tail: Data) throws {
     #expect(try fs.size(at: path) == Int64(bytes.count))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func journalCreationFinishesIfCancellationArrivesDuringOpen() async throws {
     let temp = try TempDir(); let ops = CreationSyncFaults(mode: .cancelDuringOpen)
     let fs = try ContainedFileSystem(root: temp.url, fileOps: ops)
@@ -103,7 +103,7 @@ func zstdPlanRoundTripsAndSupportsPreflight() throws {
     #expect(throws: LauncherError.io("codec unsupported: zstd")) { try decoded.validate(supportedCodecs: [.identity]) }
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func storedZstdPlanCompletesBeforeRequestedPlanOnlyAfterCommitStarted(commit: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let stored = try followupCompressedPlan(); let requested = try opPlan("requested", [("new", "abc")])
@@ -116,7 +116,7 @@ func storedZstdPlanCompletesBeforeRequestedPlanOnlyAfterCommitStarted(commit: Bo
     #expect(try fs.readFile(at: requested.files[0].path, maxBytes: 3) == Data("abc".utf8))
 }
 
-@Test(arguments: [1, 2])
+@Test(.timeLimit(.minutes(1)), arguments: [1, 2])
 func mismatched206TotalRestartsWithoutRange(attempts: Int) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let path = try SafeRelativePath("part"); try fs.writeAtomically(Data("abc".utf8), to: path)
@@ -134,7 +134,7 @@ func mismatched206TotalRestartsWithoutRange(attempts: Int) async throws {
     }
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func oversizedStoredPlanFailsBeforeJSONDecoding() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("oversized", [("new", "abc")]); let path = try opPlanPath(plan)

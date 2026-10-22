@@ -17,7 +17,7 @@ import TestSupport
     #expect(try SpaceBudget.requiredLargestFile(plan: plan, state: JournalState(), fs: fs) == SpaceBudget.margin + 2048)
 }
 
-@Test(arguments: ["bytes", "objects", "wide"]) func configuredWindowFitsEnforcedCapacityWith32Transfers(bound: String) async throws {
+@Test(.timeLimit(.minutes(1)), arguments: ["bytes", "objects", "wide"]) func configuredWindowFitsEnforcedCapacityWith32Transfers(bound: String) async throws {
     let temp = try TempDir(), initial = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let body = String(repeating: "W", count: 4096)
     let plan = try opPlan("bounded-window", (0..<40).map { ("out\($0)", body) })
@@ -37,7 +37,7 @@ import TestSupport
     #expect(cdn.requestLog.count == 40)
 }
 
-@Test func resumeReclaimsConsumedPartsBeforeItsSpacePreflight() async throws {
+@Test(.timeLimit(.minutes(1))) func resumeReclaimsConsumedPartsBeforeItsSpacePreflight() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let body = String(repeating: "R", count: 4096)
     let plan = try opPlan("consumed-resume", (0..<16).map { ("out\($0)", body) })
@@ -75,7 +75,7 @@ import TestSupport
     for file in plan.files { #expect(try fs.readFile(at: file.path, maxBytes: 4096) == Data(body.utf8)) }
 }
 
-@Test func snapshotPinnedCachedPartsDoNotSpendFutureReclamationOnResume() async throws {
+@Test(.timeLimit(.minutes(1))) func snapshotPinnedCachedPartsDoNotSpendFutureReclamationOnResume() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let body = String(repeating: "P", count: 4096)
     let plan = try opPlan("snapshot-resume", (0..<64).map { ("out\($0)", body) })
@@ -216,7 +216,7 @@ private final class ConsumedPartUnlinkFailure: FileOps {
     #expect(minimum == 151_081_041_824)
 }
 
-@Test(arguments: [false, true], [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true], [false, true])
 func completeInstallFitsMinimumWithDecreasingSpace(update: Bool, batched: Bool) async throws {
     let temp = try TempDir(), initial = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let body = String(repeating: "N", count: 4096)
@@ -238,7 +238,7 @@ func completeInstallFitsMinimumWithDecreasingSpace(update: Bool, batched: Bool) 
     for file in plan.files { #expect(try initial.readFile(at: file.path, maxBytes: 4096) == Data(body.utf8)) }
 }
 
-@Test func clonedInstallationGetsNoReclamationCreditBeforeAnyBatchStarts() async throws {
+@Test(.timeLimit(.minutes(1))) func clonedInstallationGetsNoReclamationCreditBeforeAnyBatchStarts() async throws {
     let temp = try TempDir(), backup = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let size = 65_536, old = Data(repeating: 0x4f, count: size), body = String(repeating: "N", count: size)
     let plan = try opPlan("cloned-update", (0..<4).map { ("file-\($0)", body) })
@@ -324,7 +324,7 @@ private final class CloneAllocationQuota: FileOps, DiskSpaceProbe {
     func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory); try sample() }
 }
 
-@Test(arguments: ["fresh", "update", "batched", "shared", "shared-batched", "update-batched"])
+@Test(.timeLimit(.minutes(1)), arguments: ["fresh", "update", "batched", "shared", "shared-batched", "update-batched"])
 func measuredInstallPeakIsWithinBudget(scenario: String) async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let update = scenario.contains("update"), shared = scenario.contains("shared"), batched = scenario.contains("batched")
@@ -348,7 +348,7 @@ func measuredInstallPeakIsWithinBudget(scenario: String) async throws {
     }
 }
 
-@Test(arguments: [false, true]) func resumeProgressKeepsWholePlanTransferTotals(batched: Bool) async throws {
+@Test(.timeLimit(.minutes(1)), arguments: [false, true]) func resumeProgressKeepsWholePlanTransferTotals(batched: Bool) async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let plan = try opPlan("cumulative", (0..<12).map { ("file-\($0)", "abc") })
     opServe(cdn, plan, Array(repeating: "abc", count: 12))
@@ -389,7 +389,7 @@ func measuredInstallPeakIsWithinBudget(scenario: String) async throws {
     #expect(try fs.size(at: plan.files[0].path) == 3)
 }
 
-@Test func verifiedUnconsumedPartCountsTowardResumedPlanProgress() async throws {
+@Test(.timeLimit(.minutes(1))) func verifiedUnconsumedPartCountsTowardResumedPlanProgress() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let plan = try opPlan("verified-resume", [("a", "abc"), ("b", "def")])
     try fs.writeAtomically(JSONEncoder().encode(plan), to: opPlanPath(plan))
@@ -444,7 +444,7 @@ private func peakPlan(fs: ContainedFileSystem, cdn: MockCDN, update: Bool, share
 }
 private func opDataDigest(_ data: Data) -> Digest { var h = StreamingHasher(.sha256); h.update(data); return h.finalize() }
 
-@Test func subsetRetainsPartsForOutstandingExternalReferrersWithinEnforcedCapacity() async throws {
+@Test(.timeLimit(.minutes(1))) func subsetRetainsPartsForOutstandingExternalReferrersWithinEnforcedCapacity() async throws {
     let temp = try TempDir(), cdn = MockCDN(), unit: Int64 = 1024
     let plan = try externalReferrerPlan(cdn)
     let ops = try PeakDiskOps(root: temp.url, payloadLimit: 28 * unit)
@@ -466,7 +466,7 @@ private func opDataDigest(_ data: Data) -> Digest { var h = StreamingHasher(.sha
     #expect(try await journal.snapshot().stagedFiles == Set(files.map(\.path)))
 }
 
-@Test func partitionBatchesPassFullPlanStagerCheckOnSameFreeSpace() async throws {
+@Test(.timeLimit(.minutes(1))) func partitionBatchesPassFullPlanStagerCheckOnSameFreeSpace() async throws {
     let temp = try TempDir(), cdn = MockCDN()
     let ops = try PeakDiskOps(root: temp.url)
     let fs = try ContainedFileSystem(root: temp.url, fileOps: ops)
@@ -497,7 +497,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     return InstallPlan(id: original.id, objects: original.objects, files: original.files + later)
 }
 
-@Test(arguments: [false, true]) func reuseOfEarlierReplacementCompletesProgressWithoutFallback(partialRange: Bool) async throws {
+@Test(.timeLimit(.minutes(1)), arguments: [false, true]) func reuseOfEarlierReplacementCompletesProgressWithoutFallback(partialRange: Bool) async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let initial = try opPlan("preserved", partialRange ? [("a", "old"), ("suffix", "NEW")] : [("a", "old")])
     var extents = initial.files[0].extents
@@ -531,7 +531,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("old".utf8))
 }
 
-@Test func resumeFetchesFallbackForLocalRangeInvalidatedAfterEarlierCommit() async throws {
+@Test(.timeLimit(.minutes(1))) func resumeFetchesFallbackForLocalRangeInvalidatedAfterEarlierCommit() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let a = try opPlan("changed-local", [("a", "new"), ("independent", "xyz")]), fallback = stagingObject("changed-fallback", "old")
     var objects = a.objects; objects[fallback.id] = fallback
@@ -559,7 +559,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     #expect(cdn.requestLog.map(\.path).sorted() == ["changed-local-0", "changed-local-1", fallback.id].sorted())
 }
 
-@Test func preStagingResumeCanRepartitionWithLocalReuse() async throws {
+@Test(.timeLimit(.minutes(1))) func preStagingResumeCanRepartitionWithLocalReuse() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let a = try opPlan("repartition-local", [("a", "new"), ("independent", "xyz")]), fallback = stagingObject("repartition-fallback", "old")
     var objects = a.objects; objects[fallback.id] = fallback
@@ -576,11 +576,11 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     let events = try await opCollect(opEngine(plan, temp.url, cdn, bytes: SpaceBudget.margin + 15, mode: .batched(approved: true)).run())
     #expect(events.last == .phase(.completed))
     #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("old".utf8))
-    #expect(cdn.requestLog.map(\.path) == ["repartition-local-0", "repartition-local-1"])
+    #expect(cdn.requestLog.map(\.path).sorted() == ["repartition-local-0", "repartition-local-1"])
     #expect(events.contains(.progress(downloaded: 6, totalNetwork: 6, staged: 9, totalStaged: 9)))
 }
 
-@Test(arguments: [false, true]) func localRangeChangesAfterPredictionDoNotConstrainFetching(initiallyReusable: Bool) async throws {
+@Test(.timeLimit(.minutes(1)), arguments: [false, true]) func localRangeChangesAfterPredictionDoNotConstrainFetching(initiallyReusable: Bool) async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let object = stagingObject("dynamic-fallback", "GOOD"), source = try SafeRelativePath("source")
     let file = try stagingFile("output", "GOOD", [Extent(source: .local(path: source, offset: 0), fileOffset: 0,
@@ -607,7 +607,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     #expect(try fs.readFile(at: file.path, maxBytes: 4) == Data("GOOD".utf8))
 }
 
-@Test func progressPredictionCannotBlockAnUnrelatedStagingSubset() async throws {
+@Test(.timeLimit(.minutes(1))) func progressPredictionCannotBlockAnUnrelatedStagingSubset() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let first = try opPlan("prediction-io", [("first", "abc")]), fallback = stagingObject("future-fallback", "old")
     var objects = first.objects; objects[fallback.id] = fallback
@@ -625,7 +625,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     #expect(try fs.readFile(at: stagedPath(plan, first.files[0].path), maxBytes: 3) == Data("abc".utf8))
 }
 
-@Test(arguments: [false, true]) func unexpectedFallbackPausesBeforeExhaustingCapacityAndResumes(partialPart: Bool) async throws {
+@Test(.timeLimit(.minutes(1)), arguments: [false, true]) func unexpectedFallbackPausesBeforeExhaustingCapacityAndResumes(partialPart: Bool) async throws {
     let temp = try TempDir(), initialFS = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let good = String(repeating: "G", count: 4096), bad = String(repeating: "B", count: 4096)
     let object = stagingObject("capacity-fallback", good), source = try SafeRelativePath("source")
@@ -674,7 +674,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     #expect(try fs.size(at: objectPath(plan, object)) == nil)
 }
 
-@Test(arguments: [false, true]) func unexpectedFallbackReservesLaterOutputAndMissingParts(laterFallback: Bool) async throws {
+@Test(.timeLimit(.minutes(1)), arguments: [false, true]) func unexpectedFallbackReservesLaterOutputAndMissingParts(laterFallback: Bool) async throws {
     let temp = try TempDir(), initialFS = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let first = String(repeating: "G", count: 4096), later = String(repeating: "L", count: 8192)
     let firstObject = stagingObject("first-capacity-fallback", first)
@@ -729,7 +729,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     #expect(try fs.size(at: objectPath(plan, laterObject)) == nil)
 }
 
-@Test func unexpectedSharedFallbackReservesRemainingSessionAndResumes() async throws {
+@Test(.timeLimit(.minutes(1))) func unexpectedSharedFallbackReservesRemainingSessionAndResumes() async throws {
     let temp = try TempDir(), initialFS = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let small = String(repeating: "G", count: 4096), large = String(repeating: "L", count: 8192)
     let object = stagingObject("shared-surprise", small)
@@ -773,7 +773,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     #expect(try fs.size(at: objectPath(plan, object)) == nil)
 }
 
-@Test func operationStagesOneThousandBatchesWithLinearWork() async throws {
+@Test(.timeLimit(.minutes(3))) func operationStagesOneThousandBatchesWithLinearWork() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let local = String(repeating: "L", count: 1024), remote = String(repeating: "N", count: 1024)
     let source = try SafeRelativePath("source"), fallback = stagingObject("scale-local", local)
@@ -835,7 +835,7 @@ private struct ScaleFileOps: FileOps {
     func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
 }
 
-@Test func cancelledPartialDecodeResumesWithoutAddingSpace() async throws {
+@Test(.timeLimit(.minutes(1))) func cancelledPartialDecodeResumesWithoutAddingSpace() async throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let body = String(repeating: "N", count: 131_072), plan = try opPlan("partial-resume", [("output", body)])
     opServe(cdn, plan, [body])
@@ -1024,7 +1024,7 @@ private final class PeakDiskOps: FileOps, Sendable {
     }
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func plannedFallbacksFitExactPreflightWithDecreasingSpace(batched: Bool) async throws {
     let temp = try TempDir(), initialFS = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
     let body = String(repeating: "G", count: 4096)

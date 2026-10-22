@@ -9,7 +9,7 @@ import LauncherCore
 @testable import DownloadEngine
 import TestSupport
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func journalCancellationInsideSyncFinishesRecord() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let path = try SafeRelativePath("journal")
@@ -71,7 +71,7 @@ func journalDiscardsNewlineTerminatedTornTail(zeros: Data) throws {
     #expect(try OperationJournal.replay(fs: fs, path: path).verifiedObjects == ["kept"])
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func journalOpenFailureBeforeWriteDoesNotPoisonInstance() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let path = try SafeRelativePath("journal")
@@ -93,7 +93,7 @@ func journalCreationSyncsParentsAndUsesFullSync() throws {
     #expect(calls.filter { !$0.directory }.map(\.durable) == [true])
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func journalExistingAppendDoesNotSyncParent() async throws {
     let temp = try TempDir(); let ops = JournalSyncRecorder()
     let fs = try ContainedFileSystem(root: temp.url, fileOps: ops)
@@ -143,7 +143,7 @@ func journalNewlineExactlyAtReadBoundary() throws {
     #expect(state.verifiedObjects == ["boundary"]); #expect(state.completed)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func journalRecoveredStateIsOpeningSnapshot() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let path = try SafeRelativePath("journal")
@@ -155,7 +155,7 @@ func journalRecoveredStateIsOpeningSnapshot() async throws {
     #expect(try await journal.snapshot().verifiedObjects == ["kept", "new"])
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func journalAppendRunsOnDedicatedSerialQueue() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let key = JournalQueueKey(); let observed = Mutex(false)

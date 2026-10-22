@@ -20,22 +20,24 @@ public actor ChunkFetcher {
     /// Progress is the current number of transfer bytes on disk; a restart may reset it to zero.
     /// Concurrent requests for case variants of the same absolute part path throw .busy.
     public func fetch(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath,
-        progress: @Sendable (Int64) -> Void) async throws {
+        progress: @escaping @Sendable (Int64) -> Void) async throws {
         _ = try await fetch(object, fs: fs, part: part, startingMirror: 0, progress: progress)
     }
 
     /// The stager can retry decoded corruption at the mirror after the one actually used,
     /// including when transfer-level retries already advanced through earlier mirrors.
     package func fetch(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath,
-        startingMirror: Int, progress: @Sendable (Int64) -> Void) async throws -> Int {
+        startingMirror: Int, progress: @escaping @Sendable (Int64) -> Void) async throws -> Int {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         try object.validate()
         guard object.urls.indices.contains(startingMirror) else { throw LauncherError.io("Invalid chunk mirror index") }
         let key = fs.caseFoldedPathKey(for: part)
         guard activeParts.insert(key).inserted else { throw LauncherError.busy("Chunk part is already being fetched") }
         defer { activeParts.remove(key) }
-        return try await Self.performFetch(object, http: http, retry: retry, sleeper: sleeper,
-            fs: fs, part: part, startingMirror: startingMirror, progress: progress)
+        return try await BlockingIO.run { [http, retry, sleeper] in
+            try await Self.performFetch(object, http: http, retry: retry, sleeper: sleeper,
+                fs: fs, part: part, startingMirror: startingMirror, progress: progress)
+        }
     }
 
     // Only the reservation set lives on the actor. All blocking part I/O, retries and
@@ -59,7 +61,7 @@ public actor ChunkFetcher {
                 if let cause = normalized as? LauncherError, case .insufficientSpace = cause {
                     // A failed allocation must not leave a partial transfer.
                     // Cleanup finishes even if a sibling just cancelled us.
-                    try await Task.detached { try fs.removeFile(at: part) }.value
+                    try await BlockingIO.finish { try fs.removeFile(at: part) }
                     throw cause
                 }
                 if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
@@ -196,6 +198,10 @@ public actor ChunkFetcher {
     }
 
     @concurrent package static func verifiedPart(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath) async throws -> Bool {
+        try await BlockingIO.run { try await verifyRecoveredPart(object, fs: fs, part: part) }
+    }
+
+    @concurrent private static func verifyRecoveredPart(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath) async throws -> Bool {
         guard try fs.size(at: part) == object.transferSize else { return false }
         if let digest = object.transferDigest ?? (object.codec == .identity ? object.decodedDigest : nil) {
             return try await Self.digest(fs: fs, part: part, size: object.transferSize, algorithm: digest.algorithm) == digest
