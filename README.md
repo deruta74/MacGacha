@@ -6,6 +6,8 @@ A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenl
 
 - Requirements (planned): Apple Silicon Mac, macOS 27 or later.
 
+Code and documentation in this repository may be written or modified with assistance from large language models (LLMs) and AI agents. The software is provided under the [GPL-3.0 license](LICENSE), as is, without warranty.
+
 ## Screenshots
 
 ![Launcher with the current Genshin Impact banner](assets/screenshots/launcher.jpg)
@@ -26,7 +28,10 @@ A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenl
 
 **In progress**
 - **Faster downloads.** The engine downloads and assembles many files in parallel. In early tests it is about twice as fast as before and comes close to the full speed of a 2.5 Gbit link.
-- **Compatibility testing.** Each game is run by hand under D3DMetal and DXMT, to choose the first game that launches and the graphics backend for each one.
+- **Compatibility testing.** Each game is run by hand under D3DMetal and DXMT, to choose the graphics backend for each one.
+  - **Honkai: Star Rail 4.6: launch verified.** It runs at 60 fps on Ultra on an M5 Pro, under both D3DMetal and DXMT. D3DMetal needs about half the CPU and less GPU time per frame (about 6.5 ms against 9 ms), so it will be the default.
+  - **Zenless Zone Zero:** testing next.
+  - **Genshin Impact 7.1:** doesn't start yet; a different workaround is being tested.
 
 **Next**
 - **Launching games:** a graphics backend and runtime version per game, voice-pack settings the game reads, and opt-in compatibility patches that can be reverted.
@@ -37,7 +42,9 @@ A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenl
 
 MacGacha is an unofficial, community project. It is not affiliated with, endorsed by, or supported by HoYoverse (COGNOSPHERE) or Apple Inc. All game names and trademarks belong to their respective owners.
 
-- Using third-party launchers may conflict with HoYoverse's Terms of Service. Optional compatibility patches carry a risk of account bans. Use at your own risk.
+- Using third-party launchers may conflict with HoYoverse's Terms of Service. Use at your own risk.
+- Under Wine, the games' anti-cheat stops them from starting. To launch them, MacGacha will use community workarounds: for example, [jadeite](https://codeberg.org/mkrsym1/jadeite) for Star Rail and blocking one game server while the game runs. These workarounds may conflict with the Terms of Service and could lead to an account ban. MacGacha doesn't inject cheats, FPS unlockers or other mods into the game. Any future option that changes the game process will be off by default and will warn you about the ban risk first.
+- The software is provided as is. The authors aren't responsible for account bans, data loss or any other damage.
 - D3DMetal and the Game Porting Toolkit are © Apple Inc. and licensed under Apple's terms. The launcher will ask you to accept those terms before it downloads the component.
 
 ## License
