@@ -1,10 +1,37 @@
 # MacGacha
 
-> 🚧 **Work in progress.** Nothing is usable yet: there are no releases and no game downloads.
+> 🚧 **Work in progress.** Games can already be installed, updated and verified, but they can't be launched yet. There are no releases yet.
 
 A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenless Zone Zero** on Apple Silicon. It aims to provide reliable resumable downloads, file verification, and managed Wine / DXMT / D3DMetal runtimes.
 
 - Requirements (planned): Apple Silicon Mac, macOS 27 or later.
+
+## Screenshots
+
+![Launcher with the current Genshin Impact banner](assets/screenshots/launcher.jpg)
+
+| Install | Downloading |
+|---|---|
+| ![Install sheet with location, voice packs and a disk-space estimate](assets/screenshots/install.jpg) | ![Download in progress, with pause](assets/screenshots/progress.jpg) |
+
+![Runtimes panel with Wine, DXMT and D3DMetal](assets/screenshots/runtimes.jpg)
+
+## Roadmap
+
+**Done**
+- **Download engine.** Resumable, verified downloads with a crash-safe journal. A file reaches the game folder only after its hash matches.
+- **Runtimes.** Wine, DXMT and D3DMetal are downloaded and kept side by side, so an update never breaks a working version. D3DMetal is installed only after you accept Apple's terms, or imported from an existing Game Porting Toolkit.
+- **Launcher.** One window for all three games with the official banners and background art, plus a diagnostics bundle for bug reports.
+- **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts, and free space is checked before and during the download.
+
+**In progress**
+- **Faster downloads.** The engine downloads and assembles many files in parallel. In early tests it is about twice as fast as before and comes close to the full speed of a 2.5 Gbit link.
+- **Compatibility testing.** Each game is run by hand under D3DMetal and DXMT, to choose the first game that launches and the graphics backend for each one.
+
+**Next**
+- **Launching games:** a graphics backend and runtime version per game, voice-pack settings the game reads, and opt-in compatibility patches that can be reverted.
+- **Updates:** pre-downloading the next version before release, and smaller patch-based updates.
+- **Releases:** signed and notarized builds with automatic updates.
 
 ## Disclaimer
 
