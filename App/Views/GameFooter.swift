@@ -124,6 +124,8 @@ struct GameFooter: View {
             default: return "Keep MacGacha open — you can pause and resume any time"
             }
         }
+        // A disabled button shows no tooltip on macOS, so the reason it waits goes here.
+        if let busy = busyElsewhere { return busy }
         switch state.status {
         case .unknown: return "Checking for updates…"
         case .notInstalled: return "Not installed"
@@ -133,6 +135,18 @@ struct GameFooter: View {
         case .uninstallPaused: return "Uninstall didn't finish"
         case .locationUnavailable: return "Install location unavailable — connect the drive it's on"
         }
+    }
+
+    /// Set while another game holds the one operation slot and this game is idle.
+    private var busyElsewhere: String? {
+        guard model.isGameOperationRunning, state.activity == nil else { return nil }
+        let other = LauncherGame.all.first { $0.id != game.id && model.games[$0.id]?.activity != nil }
+        guard let other, case .working(let phase, _, _, _, _) = model.games[other.id]?.activity else {
+            return "Another game is busy — this one can start when it finishes"
+        }
+        return phase == .staging
+            ? "\(other.name) is downloading — pause it to start this one"
+            : "Waiting for \(other.name) to finish"
     }
 
     private var partsMessage: String {
@@ -238,6 +252,8 @@ struct PrimaryActionButton: View {
                     .font(.callout.weight(.medium))
                     .monospacedDigit()
                     .lineLimit(1)
+                    // The capsule grows with the label instead of truncating the speed.
+                    .fixedSize(horizontal: true, vertical: false)
                 if let fraction {
                     ProgressView(value: fraction)
                 } else {
@@ -245,7 +261,8 @@ struct PrimaryActionButton: View {
                 }
             }
             .tint(game.tint)
-            .frame(width: 300)
+            .frame(minWidth: 300, alignment: .leading)
+            .fixedSize(horizontal: true, vertical: false)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(progressLabel)
             if canPause {
