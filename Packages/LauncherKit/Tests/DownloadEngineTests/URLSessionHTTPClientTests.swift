@@ -8,6 +8,40 @@ import LauncherCore
 
 @Suite(.serialized)
 struct URLSessionHTTPClientTests {
+    @Test(.timeLimit(.minutes(1))) func shardedSessionsDoNotSerializeDataCallbacks() async throws {
+        let first = HTTPFixture(.response(200, ["Content-Length": "1"], [Data([1])]))
+        let second = HTTPFixture(.response(200, ["Content-Length": "2"], [Data([2, 2])]))
+        defer { first.close(); second.close() }
+        let blocked = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let release = DispatchSemaphore(value: 0), timedOut = Mutex(false)
+        let client = URLSessionHTTPClient(configuration: first.session.configuration, sessionCount: 2)
+            .observingDataCallbacks { bytes, _ in
+                if bytes == 1 { blocked.continuation.yield(()); if release.wait(timeout: .now() + 10) == .timedOut { timedOut.withLock { $0 = true } } }
+            }
+        defer { release.signal(); client.invalidate() }
+        let firstTask = Task { let (_, body) = try await client.get(first.url, byteRangeFrom: nil); for try await _ in body {} }
+        defer { firstTask.cancel() }
+        var iterator = blocked.stream.makeAsyncIterator(); _ = await iterator.next()
+        let (_, body) = try await client.get(second.url, byteRangeFrom: nil)
+        var data = Data(); for try await bytes in body { data.append(bytes) }
+        #expect(data == Data([2, 2]) && !timedOut.withLock { $0 })
+        release.signal(); try await firstTask.value
+    }
+
+    @Test func shardedInvalidationCancelsEverySessionAndAllCopies() async throws {
+        let fixtures = (0..<4).map { _ in HTTPFixture(.stallAfterResponse) }
+        defer { for fixture in fixtures { fixture.close() } }
+        let client = URLSessionHTTPClient(configuration: fixtures[0].session.configuration, sessionCount: 4)
+        let copy = client
+        let tasks = fixtures.map { fixture in Task { let (_, body) = try await client.get(fixture.url, byteRangeFrom: nil); for try await _ in body {} } }
+        defer { client.invalidate(); for task in tasks { task.cancel() } }
+        for fixture in fixtures { try await waitForHTTPCondition { fixture.control.started } }
+        copy.invalidate(); client.invalidate()
+        for task in tasks { await #expect(throws: LauncherError.cancelled) { try await task.value } }
+        await #expect(throws: LauncherError.cancelled) { _ = try await copy.get(fixtures[0].url, byteRangeFrom: nil) }
+        for fixture in fixtures { try await waitForHTTPCondition { fixture.control.stopped } }
+    }
+
     @Test
     func urlSessionStreamsAndParsesResponseHeaders() async throws {
         let fixture = HTTPFixture(.response(206, [

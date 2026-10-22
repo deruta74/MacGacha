@@ -15,7 +15,10 @@ public struct ContainedFileSystem: Sendable, Hashable {
     private var pinnedRoot: RootDescriptor?
     private let expectedRootIdentity: FileSystemIdentity?
     private let identityProvider: any FileSystemIdentityProvider
-    package let fileOps: any FileOps
+    package private(set) var fileOps: any FileOps
+
+    /// Preserve the root pin and expected identity when layering I/O policy.
+    package func replacingFileOps(_ value: any FileOps) -> Self { var copy = self; copy.fileOps = SpaceAwareFileOps(base: value); return copy }
     private static let directoryFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
     private static let entryLimit = 100_000
 
@@ -25,7 +28,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
             throw LauncherError.unsafePath(root.absoluteString)
         }
         self.root = root
-        self.fileOps = fileOps
+        self.fileOps = SpaceAwareFileOps(base: fileOps)
         self.expectedRootIdentity = expectedRootIdentity
         self.identityProvider = identityProvider
     }
@@ -203,7 +206,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
         defer { close(parent) }
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         if mkdirat(parent, path.lastPathComponent, 0o700) != 0, errno != EEXIST {
-            throw LauncherError.io("Cannot create store directory")
+            throw LauncherError.fileSystemFailure("Cannot create store directory")
         }
         // Sync even if another caller created the directory, before reporting success.
         try synchronize(parent)
@@ -247,7 +250,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
         while true {
             let result = durable ? fcntl(descriptor, F_FULLFSYNC) : fsync(descriptor)
             if result == 0 { return }
-            guard errno == EINTR else { throw LauncherError.io("Cannot synchronize file") }
+            guard errno == EINTR else { throw LauncherError.fileSystemFailure("Cannot synchronize file") }
         }
     }
 
@@ -285,7 +288,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
             while true {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 if ftruncate(fd, count) == 0 { break }
-                guard errno == EINTR else { throw LauncherError.io("Cannot truncate contained file") }
+                guard errno == EINTR else { throw LauncherError.fileSystemFailure("Cannot truncate contained file") }
             }
             if let synchronize { try synchronize(fd, false) }
             else { try fileOps.synchronize(fd, durable: false) }
@@ -318,12 +321,15 @@ public struct ContainedFileSystem: Sendable, Hashable {
     /// Refuses hard-linked files before truncating. With truncate false, existing bytes are preserved;
     /// callers seek to the desired offset on the returned handle.
     public func openForWriting(at path: SafeRelativePath, truncate: Bool) throws -> FileHandle {
+        let barrier = fileOps as? any AllocationFileOps
+        barrier?.beginAllocation(); defer { barrier?.endAllocation() }
         let fd = try openRegularFile(at: path, writing: true, create: true)
         do {
             if truncate {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
-                guard ftruncate(fd, 0) == 0 else { throw LauncherError.io("Cannot truncate contained file") }
+                guard ftruncate(fd, 0) == 0 else { throw LauncherError.fileSystemFailure("Cannot truncate contained file") }
             }
+            try barrier?.openedForWriting(fd)
             return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         } catch {
             close(fd)
@@ -362,9 +368,14 @@ public struct ContainedFileSystem: Sendable, Hashable {
 
     /// Flushes a regular file to stable storage using Darwin F_FULLFSYNC.
     public func fullSync(at path: SafeRelativePath) throws {
+        try synchronizeFile(at: path, durable: true)
+    }
+
+    /// fsync for verified staging data; commit boundaries perform F_FULLFSYNC.
+    package func synchronizeFile(at path: SafeRelativePath, durable: Bool) throws {
         let opened = try openRegularDescriptors(at: path, writing: true, create: false, appending: false)
         defer { close(opened.file); close(opened.parent) }
-        try fileOps.synchronize(opened.file, durable: true)
+        try fileOps.synchronize(opened.file, durable: durable)
         try synchronize(opened.parent)
     }
 
@@ -576,7 +587,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
             count += Int64(data.count)
         }
         guard count == info.st_size else { throw LauncherError.io("Import source changed during copy") }
-        guard fchmod(output.fileDescriptor, info.st_mode & 0o777) == 0 else { throw LauncherError.io("Cannot preserve import permissions") }
+        guard fchmod(output.fileDescriptor, info.st_mode & 0o777) == 0 else { throw LauncherError.fileSystemFailure("Cannot preserve import permissions") }
         return count
     }
 
@@ -585,11 +596,11 @@ public struct ContainedFileSystem: Sendable, Hashable {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard !target.utf8.contains(0), !target.isEmpty, target.utf8.count <= 4096 else { throw LauncherError.unsafePath(path.description) }
         guard let parent = try directory(Array(path.components.dropLast()), create: true), let name = path.components.last else {
-            throw LauncherError.io("Cannot create import link")
+            throw LauncherError.fileSystemFailure("Cannot create import link")
         }
         defer { close(parent) }
         guard try entry(name, parent: parent) == nil else { throw LauncherError.unsafePath(path.description) }
-        guard symlinkat(target, parent, name) == 0 else { throw LauncherError.io("Cannot create import link") }
+        guard symlinkat(target, parent, name) == 0 else { throw LauncherError.fileSystemFailure("Cannot create import link") }
         try synchronize(parent)
     }
 
@@ -633,7 +644,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
         defer { close(fd) }
         func strip(_ descriptor: Int32) throws {
             guard fremovexattr(descriptor, "com.apple.quarantine", 0) == 0 || errno == ENOATTR else {
-                throw LauncherError.io("Cannot remove runtime quarantine")
+                throw LauncherError.fileSystemFailure("Cannot remove runtime quarantine")
             }
         }
         try strip(fd)
@@ -687,7 +698,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
         try checkRegularDestination(name, parent: parent, display: display(path.components))
         let temporary = "\(temporaryPrefix)\(UUID().uuidString)"
         let fd = openat(parent, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw LauncherError.io("Cannot create temporary file") }
+        guard fd >= 0 else { throw LauncherError.fileSystemFailure("Cannot create temporary file") }
         defer { close(fd); try? fileOps.unlink(temporary, in: parent, isDirectory: false) }
         try fileOps.writeAll(data, to: fd)
         try synchronize(fd)
@@ -780,7 +791,8 @@ public struct ContainedFileSystem: Sendable, Hashable {
         guard components.count <= 128 else { throw LauncherError.io("Directory depth exceeds limit") }
         var fd = pinnedRoot.map { openat($0.fd, ".", Self.directoryFlags) } ?? open(root.path, Self.directoryFlags)
         if expectedRootIdentity == nil && pinnedRoot == nil && fd < 0 && errno == ENOENT && create {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            do { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
+            catch { throw LauncherError.normalizingFileSystemError(error) }
             fd = open(root.path, Self.directoryFlags)
         }
         guard fd >= 0 else {
@@ -801,7 +813,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
             if info == nil {
                 if !create { return nil }
                 if mkdirat(fd, component, 0o700) == 0 { try synchronize(fd) }
-                else if errno != EEXIST { throw LauncherError.io("Cannot create contained directory") }
+                else if errno != EEXIST { throw LauncherError.fileSystemFailure("Cannot create contained directory") }
                 info = try entry(component, parent: fd)
             }
             let location = display(Array(components.prefix(index + 1)))
@@ -893,7 +905,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
     }
 
     private func accessError(_ path: String) -> LauncherError {
-        errno == ELOOP || errno == ENOTDIR ? .unsafePath(path) : .io("Cannot access contained path")
+        errno == ELOOP || errno == ENOTDIR ? .unsafePath(path) : .fileSystemFailure("Cannot access contained path")
     }
 }
 

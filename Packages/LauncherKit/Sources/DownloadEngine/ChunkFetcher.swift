@@ -55,6 +55,13 @@ public actor ChunkFetcher {
                 try await fetchAttempt(object, from: url, http: http, fs: fs, part: part, progress: progress)
                 return selected
             } catch {
+                let normalized = LauncherError.normalizingFileSystemError(error)
+                if let cause = normalized as? LauncherError, case .insufficientSpace = cause {
+                    // A failed allocation must not leave a partial transfer.
+                    // Cleanup finishes even if a sibling just cancelled us.
+                    try await Task.detached { try fs.removeFile(at: part) }.value
+                    throw cause
+                }
                 if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
                 let failure = error as? StatusFailure
                 let cause = failure?.error ?? (error as? LauncherError) ?? .io("Cannot access chunk part")
@@ -129,13 +136,27 @@ public actor ChunkFetcher {
             throw StatusFailure(error: .http(status: head.status, url: url), retryAfter: head.retryAfter)
         }
         try handle.seek(toOffset: UInt64(offset))
-        try await consume(body, object: object, handle: handle, fileOps: fs.fileOps, offset: offset, progress: progress)
-        try await verify(object, fs: fs, part: part)
+        var hasher = object.transferDigest.map { StreamingHasher($0.algorithm) }
+        if offset > 0, hasher != nil {
+            let prefix = try fs.openForReading(at: part)
+            defer { try? prefix.close() }
+            var remaining = offset
+            while remaining > 0 {
+                guard !Task.isCancelled else { throw LauncherError.cancelled }
+                let data = try prefix.read(upToCount: Int(min(65_536, remaining))) ?? Data()
+                guard !data.isEmpty else { throw LauncherError.io("Chunk prefix changed") }
+                hasher?.update(data); remaining -= Int64(data.count)
+            }
+        }
+        try await consume(body, object: object, handle: handle, fileOps: fs.fileOps, offset: offset, hasher: &hasher, progress: progress)
+        if let expected = object.transferDigest, let actual = hasher?.finalize(), expected != actual {
+            throw LauncherError.digestMismatch(path: object.id, expected: expected.hex, actual: actual.hex)
+        }
     }
 
     @concurrent
     private static func consume(_ body: HTTPBody, object: ChunkObject, handle: FileHandle, fileOps: any FileOps, offset: Int64,
-        progress: @Sendable (Int64) -> Void) async throws {
+        hasher: inout StreamingHasher?, progress: @Sendable (Int64) -> Void) async throws {
         var received = offset
         var iterator = body.makeAsyncIterator()
         while received < object.transferSize {
@@ -146,6 +167,9 @@ public actor ChunkFetcher {
                 throw LauncherError.sizeMismatch(path: object.id, expected: object.transferSize, actual: overflow ? Int64.max : actual)
             }
             try fileOps.writeAll(piece, to: handle.fileDescriptor)
+            let span = OperationWork.begin(.hashing)
+            hasher?.update(piece)
+            span?.end()
             received += Int64(piece.count)
             progress(received)
         }
@@ -167,12 +191,31 @@ public actor ChunkFetcher {
             }
         }
         guard !Task.isCancelled else { throw LauncherError.cancelled }
-        try fs.fullSync(at: part)
+        // Parts are disposable. Recovered verified records are hints, not proof
+        // that these bytes survived a power loss; Stager revalidates them.
+    }
+
+    @concurrent package static func verifiedPart(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath) async throws -> Bool {
+        guard try fs.size(at: part) == object.transferSize else { return false }
+        if let digest = object.transferDigest ?? (object.codec == .identity ? object.decodedDigest : nil) {
+            return try await Self.digest(fs: fs, part: part, size: object.transferSize, algorithm: digest.algorithm) == digest
+        }
+        let input = try fs.openForReading(at: part)
+        defer { try? input.close() }
+        do {
+            return try Zstd.decodedDigest(input, encodedSize: object.transferSize, decodedSize: object.decodedSize,
+                algorithm: object.decodedDigest.algorithm) == object.decodedDigest
+        } catch is CorruptObjectError { return false }
+        catch let error as LauncherError {
+            if case .sizeMismatch = error { return false }
+            throw error
+        }
     }
 
     @concurrent
     private static func digest(fs: ContainedFileSystem, part: SafeRelativePath, size: Int64,
         algorithm: DigestAlgorithm) async throws -> Digest {
+        let span = OperationWork.begin(.hashing); defer { span?.end() }
         let handle = try fs.openForReading(at: part)
         defer { try? handle.close() }
         var hasher = StreamingHasher(algorithm)

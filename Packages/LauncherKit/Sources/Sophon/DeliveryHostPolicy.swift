@@ -14,8 +14,13 @@ public enum DeliveryHostPolicy {
     }
 
     /// Create once and share with the delivery API and ChunkFetcher; invalidate when done.
-    public static func makeHTTPClient() -> URLSessionHTTPClient {
-        URLSessionHTTPClient(redirectPolicy: allows)
+    public static func makeHTTPClient(sessionCount: Int = 8) -> URLSessionHTTPClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        precondition(sessionCount > 0)
+        configuration.httpMaximumConnectionsPerHost = SpaceBudget.defaultMaxConcurrentObjects
+        return URLSessionHTTPClient(configuration: configuration, sessionCount: sessionCount,
+            highWaterMark: 4 << 20, lowWaterMark: 1 << 20, redirectPolicy: allows)
     }
 }
 

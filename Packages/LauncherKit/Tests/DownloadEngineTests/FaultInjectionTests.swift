@@ -9,6 +9,32 @@ import DownloadEngine
 import TestSupport
 
 struct FaultInjectionTests {
+    @Test(arguments: [EDQUOT, ENOSPC], ["part", "output", "rename", "sync", "journal"])
+    func allocationFailurePausesAndResumes(code: Int32, point: String) async throws {
+        let root = try TempDir(), fs = try ContainedFileSystem(root: root.url), cdn = MockCDN()
+        let body = String(repeating: "Q", count: 160_000)
+        let plan = try opPlan("quota-resume", [("out", body)])
+        opServe(cdn, plan, [body])
+        let ops = AllocationFailureOps(code: code, point: point)
+        let engine = try InstallOperation(plan: plan, installRoot: root.url, fetcher: stagingFetcher(cdn),
+            disk: FixedDiskSpace(bytes: Int64.max), fileOps: ops)
+        do {
+            _ = try await opCollect(engine.run())
+            Issue.record("Expected allocation failure")
+        } catch let error as LauncherError {
+            if case .insufficientSpace = error {} else { Issue.record("Unexpected error: \(error)") }
+        }
+        #expect(ops.injected)
+        let state = try OperationJournal.replay(fs: fs, path: opJournal(plan))
+        #expect(!state.completed)
+        if point == "part" {
+            #expect(state.verifiedObjects.isEmpty)
+            #expect(try fs.size(at: objectPath(plan, plan.objects.values.first!)) == nil)
+        }
+        #expect(try await opCollect(engine.run()).last == .phase(.completed))
+        #expect(try fs.readFile(at: plan.files[0].path, maxBytes: body.utf8.count) == Data(body.utf8))
+    }
+
     @Test(arguments: InjectedFileOps.Fault.allCases)
     func fileFaultLeavesIntactOrRecoverableInstall(fault: InjectedFileOps.Fault) async throws {
         let fixtures = try TempDir(); let root = try TempDir()
@@ -143,7 +169,7 @@ final class InjectedFileOps: FileOps {
         return try SystemFileOps().write(descriptor, bytes: bytes)
     }
     func synchronize(_ descriptor: Int32, durable: Bool) throws {
-        if take(fault == .sync && (atomic ? path(descriptor).contains("/.macgacha-write-") : path(descriptor).contains("/files/") && durable)) {
+        if take(fault == .sync && (atomic ? path(descriptor).contains("/.macgacha-write-") : path(descriptor).contains("/files/"))) {
             throw failure
         }
         if take(fault == .renameSync && state.withLock({ $0.renamed })) {
@@ -162,6 +188,56 @@ final class InjectedFileOps: FileOps {
         if take((fault == .unlink && name.hasSuffix(".part")) || (fault == .deleteUnlink && name == "obsolete")) {
             throw failure
         }
+        try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
+    }
+}
+
+/// Raw POSIX errors exercise the same normalization as failing filesystem syscalls.
+private final class AllocationFailureOps: FileOps {
+    let code: Int32
+    let point: String
+    private struct State { var writes = 0; var injected = false; var tornJournal = false }
+    private let state = Mutex(State())
+    init(code: Int32, point: String) { self.code = code; self.point = point }
+    var injected: Bool { state.withLock { $0.injected } }
+    private func path(_ fd: Int32) -> String {
+        var bytes = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard fcntl(fd, F_GETPATH, &bytes) == 0 else { return "" }
+        return String(decoding: bytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
+    private func fail(_ matches: Bool) throws {
+        if state.withLock({ s in guard matches, !s.injected else { return false }; s.injected = true; return true }) {
+            throw POSIXError(POSIXErrorCode(rawValue: code)!)
+        }
+    }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        let path = path(descriptor)
+        if point == "journal", path.hasSuffix("/journal.jsonl") {
+            if state.withLock({ $0.tornJournal }) { try fail(true) }
+            let begin = state.withLock { s in
+                guard !s.injected, !s.tornJournal,
+                    String(decoding: bytes, as: UTF8.self).contains("\"type\":\"fileStaged\"") else { return false }
+                s.tornJournal = true; return true
+            }
+            if begin {
+                return try SystemFileOps().write(descriptor, bytes: UnsafeRawBufferPointer(rebasing: bytes[..<(bytes.count / 2)]))
+            }
+        }
+        let matches = point == "part" ? path.hasSuffix(".part") : point == "output" && path.contains("/files/")
+        let second = state.withLock { s in if matches { s.writes += 1 }; return s.writes >= 2 }
+        try fail(matches && second)
+        return try SystemFileOps().write(descriptor, bytes: bytes)
+    }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws {
+        try fail(point == "sync" && path(descriptor).contains("/files/"))
+        try SystemFileOps().synchronize(descriptor, durable: durable)
+    }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String,
+        in destinationDirectory: Int32, exclusive: Bool) throws {
+        try fail(point == "rename" && path(sourceDirectory).contains("/files"))
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
         try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
     }
 }

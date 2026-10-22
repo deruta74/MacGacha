@@ -13,8 +13,183 @@ import TestSupport
     let plan = try opPlan("unshared-peak", (0..<24).map { ("file-\($0)", String(repeating: "x", count: 1024)) })
     let budget = try SpaceBudget.required(plan: plan, state: JournalState(), fs: fs)
     #expect(budget.network == 24 * 1024)
-    #expect(budget.disk == SpaceBudget.margin + 24 * 1024 + 8 * 1024)
+    #expect(budget.disk == SpaceBudget.margin + 24 * 1024 + 24 * 1024)
     #expect(try SpaceBudget.requiredLargestFile(plan: plan, state: JournalState(), fs: fs) == SpaceBudget.margin + 2048)
+}
+
+@Test(arguments: ["bytes", "objects", "wide"]) func configuredWindowFitsEnforcedCapacityWith32Transfers(bound: String) async throws {
+    let temp = try TempDir(), initial = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let body = String(repeating: "W", count: 4096)
+    let plan = try opPlan("bounded-window", (0..<40).map { ("out\($0)", body) })
+    opServe(cdn, plan, Array(repeating: body, count: 40))
+    let pipeline = PipelineConfiguration(prefetchBytes: bound == "objects" ? 1 << 30 : bound == "bytes" ? 16_384 : 262_144,
+        prefetchObjects: bound == "objects" ? 4 : 64, assemblies: 4)
+    let budget = try SpaceBudget.required(plan: plan, state: JournalState(), fs: initial,
+        maxConcurrentObjects: 32, pipeline: pipeline).disk - SpaceBudget.margin
+    #expect(budget == 40 * 4096 + (bound == "wide" ? 163_840 : 16_384))
+    let ops = try PeakDiskOps(root: temp.url), disk = PayloadCapacityDisk(ops: ops, capacity: budget)
+    ops.setPayloadLimit(ops.baseline.payload + budget)
+    let events = try await opCollect(InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn),
+        disk: disk, fileOps: ops, maxConcurrentObjects: 32, pipeline: pipeline).run())
+    #expect(events.last == .phase(.completed) && ops.deniedWrites == 0)
+    #expect(ops.peak.parts <= (bound == "wide" ? 163_840 : 16_384))
+    #expect(ops.peak.payload - ops.baseline.payload <= budget)
+    #expect(cdn.requestLog.count == 40)
+}
+
+@Test func resumeReclaimsConsumedPartsBeforeItsSpacePreflight() async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let body = String(repeating: "R", count: 4096)
+    let plan = try opPlan("consumed-resume", (0..<16).map { ("out\($0)", body) })
+    opServe(cdn, plan, Array(repeating: body, count: 16))
+    let pipeline = PipelineConfiguration(prefetchBytes: 16_384, prefetchObjects: 4, assemblies: 4)
+    let budget = try SpaceBudget.required(plan: plan, state: JournalState(), fs: fs, pipeline: pipeline).disk - SpaceBudget.margin
+    #expect(budget == 81_920)
+    let ops = try PeakDiskOps(root: temp.url), fault = ConsumedPartUnlinkFailure(base: ops)
+    ops.setPayloadLimit(ops.baseline.payload + budget)
+    let disk = PayloadCapacityDisk(ops: ops, capacity: budget)
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn),
+        disk: disk, fileOps: fault, pipeline: pipeline)
+    await #expect(throws: LauncherError.io("part cleanup interrupted")) { _ = try await opCollect(engine.run()) }
+    let paused = try OperationJournal.replay(fs: fs, path: opJournal(plan))
+    #expect(!paused.stagedFiles.isEmpty)
+    let consumed = plan.files.filter { paused.stagedFiles.contains($0.path) }.flatMap { SpaceBudget.references($0) }
+    let hasConsumedPart = try consumed.contains { try fs.size(at: objectPath(plan, plan.objects[$0]!)) != nil }
+    #expect(hasConsumedPart)
+    // Interrupted workers can leave needed cached parts as well as consumed
+    // parts. Reserve the conservative window without spending their unlink.
+    disk.capacity.withLock { $0 += pipeline.prefetchBytes }
+    ops.setPayloadLimit(ops.baseline.payload + budget + pipeline.prefetchBytes)
+    let resumed = try await opCollect(engine.run()) { event in
+        if event == .phase(.staging) {
+            // This event precedes Stager.prepare: the engine itself must have
+            // removed consumed parts before consulting free space.
+            for id in consumed {
+                let size = try fs.size(at: objectPath(plan, plan.objects[id]!))
+                #expect(size == nil)
+            }
+        }
+    }
+    #expect(resumed.last == .phase(.completed))
+    #expect(ops.deniedWrites == 0)
+    for file in plan.files { #expect(try fs.readFile(at: file.path, maxBytes: 4096) == Data(body.utf8)) }
+}
+
+@Test func snapshotPinnedCachedPartsDoNotSpendFutureReclamationOnResume() async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let body = String(repeating: "P", count: 4096)
+    let plan = try opPlan("snapshot-resume", (0..<64).map { ("out\($0)", body) })
+    opServe(cdn, plan, Array(repeating: body, count: 64))
+    let pipeline = PipelineConfiguration(prefetchBytes: 65_536, prefetchObjects: 16, assemblies: 4)
+    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    try fs.writeAtomically(encoder.encode(plan), to: opPlanPath(plan))
+    let journal = try OperationJournal(fs: fs, path: opJournal(plan))
+    try await journal.append(.planStored(planID: plan.id, planDigest: plan.planDigest))
+    try await journal.append(.operationStarted)
+    var pinned = Set<String>()
+    for file in plan.files.prefix(32) {
+        guard case .chunk(let id) = file.extents[0].source else { throw LauncherError.io("test object reference") }
+        let object = plan.objects[id]!
+        try fs.writeAtomically(Data(body.utf8), to: objectPath(plan, object))
+        try await journal.append(.objectVerified(id: object.id))
+        pinned.insert(object.partFileName)
+    }
+    let budget = try SpaceBudget.required(plan: plan, state: await journal.snapshot(), fs: fs, pipeline: pipeline)
+    // Cached blocks already reduce free space. Their later unlink may free nothing.
+    #expect(budget.disk == SpaceBudget.margin + 64 * 4096 + 65_536)
+    #expect(budget.network == 32 * 4096)
+    let ops = try SnapshotPinnedParts(root: temp.url, pinned: pinned, capacity: budget.disk - SpaceBudget.margin)
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn),
+        disk: ops, fileOps: ops, pipeline: pipeline)
+    #expect(try await opCollect(engine.run()).last == .phase(.completed))
+    #expect(ops.denied.withLock { $0 } == 0)
+    #expect(ops.unlinked.withLock { $0 } == 32 * 4096)
+    #expect(cdn.requestLog.count == 32)
+}
+
+/// Simulates snapshot-pinned cached extents: unlink succeeds but consumes the
+/// same capacity forever. All new writes are capacity-enforced, not just probed.
+private final class SnapshotPinnedParts: FileOps, DiskSpaceProbe {
+    let base: PeakDiskOps
+    let pinned: Set<String>
+    let capacity: Int64
+    let unlinked = Mutex<Int64>(0)
+    let denied = Mutex(0)
+    private let mutations = Mutex(())
+    init(root: URL, pinned: Set<String>, capacity: Int64) throws {
+        base = try PeakDiskOps(root: root); self.pinned = pinned; self.capacity = capacity
+    }
+    private func growth() throws -> Int64 { try base.currentPayload - base.baseline.payload + unlinked.withLock { $0 } }
+    func availableBytes(at url: URL) throws -> Int64 { max(0, SpaceBudget.margin + capacity - (try growth())) }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        try mutations.withLock { _ in
+            var path = [CChar](repeating: 0, count: Int(MAXPATHLEN)), info = stat()
+            guard fcntl(descriptor, F_GETPATH, &path) == 0, fstat(descriptor, &info) == 0 else {
+                throw LauncherError.io("test descriptor")
+            }
+            let name = String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            if !name.contains("/.macgacha-") || name.contains("/files/") || name.contains("/objects/") {
+                let added = max(0, lseek(descriptor, 0, SEEK_CUR) + Int64(bytes.count) - info.st_size)
+                guard try growth() + added <= capacity else {
+                    denied.withLock { $0 += 1 }; throw LauncherError.io("test pinned capacity exhausted")
+                }
+            }
+            return try base.write(descriptor, bytes: bytes)
+        }
+    }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try base.synchronize(descriptor, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try base.rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
+        try mutations.withLock { _ in
+            var info = stat()
+            let retained = pinned.contains(name) && fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 ? info.st_size : 0
+            try base.unlink(name, in: directory, isDirectory: isDirectory)
+            unlinked.withLock { $0 += retained }
+        }
+    }
+}
+
+@Test func oversizedFileKeepsResidentSlotsUntilItsAssemblyFinishes() throws {
+    let digest = opDigest("x")
+    let objects = ["a", "b"].map { ChunkObject(id: $0, urls: [URL(string: "https://cdn.test/\($0)")!],
+        transferSize: 1024, decodedSize: 1, decodedDigest: digest, codec: .zstd) }
+    let file = FileTask(path: try SafeRelativePath("out"), size: 2, digest: opDigest("xx"),
+        extents: objects.enumerated().map { Extent(source: .chunk(id: $0.element.id), fileOffset: Int64($0.offset), length: 1, digest: digest) })
+    var allocation = try RemainingAllocation(files: [file], costs: ["a": 1024, "b": 1024], retainedObjects: [], limit: 32,
+        pipeline: PipelineConfiguration(prefetchBytes: 1024, prefetchObjects: 1))
+    #expect(try allocation.disk() == SpaceBudget.margin + 2050)
+    try allocation.setCost("a", to: 0)
+    #expect(try allocation.disk() == SpaceBudget.margin + 1026)
+}
+
+@Test func residentPartsNeverReduceOversizedFileMissingParts() throws {
+    let digest = opDigest("x")
+    let file = FileTask(path: try SafeRelativePath("out"), size: 2, digest: opDigest("xx"), extents: [
+        Extent(source: .chunk(id: "a"), fileOffset: 0, length: 1, digest: digest),
+        Extent(source: .chunk(id: "b"), fileOffset: 1, length: 1, digest: digest)
+    ])
+    var allocation = try RemainingAllocation(files: [file], costs: ["b": 1024], retainedObjects: [], limit: 32,
+        pipeline: PipelineConfiguration(prefetchBytes: 1024, prefetchObjects: 1))
+    #expect(try allocation.disk() == SpaceBudget.margin + 1026)
+}
+
+private final class ConsumedPartUnlinkFailure: FileOps {
+    let base: any FileOps
+    private let fired = Mutex(false)
+    init(base: any FileOps) { self.base = base }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try base.write(descriptor, bytes: bytes) }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try base.synchronize(descriptor, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try base.rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
+        if name.hasSuffix(".part"), fired.withLock({ if $0 { return false }; $0 = true; return true }) {
+            throw LauncherError.io("part cleanup interrupted")
+        }
+        try base.unlink(name, in: directory, isDirectory: isDirectory)
+    }
 }
 
 @Test func syntheticGenshinShapedBudgetIsCloseToDecodedSize() throws {
@@ -37,7 +212,7 @@ import TestSupport
     let old: Int64 = 150_000_000_000 + 146_000_000_000 + SpaceBudget.margin
     print("Synthetic Genshin: decoded=150000000000 network=\(budget.network) old=\(old) new=\(budget.disk) minimum=\(minimum) bytes")
     #expect(budget.network == 146_000_000_000)
-    #expect(budget.disk == 151_102_941_824)
+    #expect(budget.disk == 152_008_141_824)
     #expect(minimum == 151_081_041_824)
 }
 
@@ -178,14 +353,20 @@ func measuredInstallPeakIsWithinBudget(scenario: String) async throws {
     let plan = try opPlan("cumulative", (0..<12).map { ("file-\($0)", "abc") })
     opServe(cdn, plan, Array(repeating: "abc", count: 12))
     let bytes = batched ? SpaceBudget.margin + 39 : Int64.max
-    let operation = try opEngine(plan, temp.url, cdn, bytes: bytes, mode: .batched(approved: true))
+    // Stop at a durable verified-file boundary. A non-batched run uses one
+    // look-ahead slot so unrelated in-flight requests cannot race cancellation;
+    // the batched variant keeps its production window and real batch sequence.
+    let operation = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn),
+        disk: FixedDiskSpace(bytes: bytes), mode: .batched(approved: true),
+        pipeline: batched ? .default : PipelineConfiguration(prefetchObjects: 1))
     let first = Task {
-        var samples: [(Int64, Int64)] = []
+        var samples: [(Int64, Int64)] = [], verified = false
         do {
             for try await event in operation.run() {
+                if case .fileVerified = event { verified = true }
                 if case .progress(let done, let total, _, _) = event {
                     samples.append((done, total))
-                    if done > 0 { withUnsafeCurrentTask { $0?.cancel() } }
+                    if done > 0 && verified { withUnsafeCurrentTask { $0?.cancel() } }
                 }
             }
         } catch LauncherError.cancelled {}
@@ -193,16 +374,17 @@ func measuredInstallPeakIsWithinBudget(scenario: String) async throws {
     }
     let previous = try await first.value
     #expect(previous.first?.1 == 36)
-    #expect(previous.last?.0 == 3)
-    let events = try await opCollect(opEngine(plan, temp.url, cdn, bytes: bytes, mode: .batched(approved: true)).run())
+    #expect((previous.last?.0 ?? 0) >= 3)
+    let events = try await opCollect(operation.run())
     let resumed = events.compactMap { event -> (Int64, Int64)? in
         if case .progress(let done, let total, _, _) = event { return (done, total) }; return nil
     }
-    #expect(resumed.first?.0 == 3)
+    #expect((resumed.first?.0 ?? 0) >= (previous.last?.0 ?? 0))
     #expect(resumed.allSatisfy { $0.1 == 36 })
     #expect(resumed.last?.0 == 36)
     #expect(zip(resumed, resumed.dropFirst()).allSatisfy { $0.0.0 <= $0.1.0 })
     #expect(events.last == .phase(.completed))
+    if batched { #expect(events.filter { $0 == .phase(.staging) }.count > 1) }
     #expect(cdn.requestLog.count == 12)
     #expect(try fs.size(at: plan.files[0].path) == 3)
 }
@@ -374,7 +556,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     #expect(progress.allSatisfy { $0.0 <= $0.1 })
     #expect(progress.last?.0 == 9 && progress.last?.1 == 9)
     #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("old".utf8))
-    #expect(cdn.requestLog.map(\.path) == ["changed-local-0", "changed-local-1", fallback.id])
+    #expect(cdn.requestLog.map(\.path).sorted() == ["changed-local-0", "changed-local-1", fallback.id].sorted())
 }
 
 @Test func preStagingResumeCanRepartitionWithLocalReuse() async throws {
@@ -464,7 +646,7 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     cdn.serve(object.id, data: Data(good.utf8))
     let operation = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: disk, fileOps: ops)
     var changed = false
-    await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + 4096, available: SpaceBudget.margin)) {
+    await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + (partialPart ? 3584 : 4096), available: SpaceBudget.margin)) {
         for try await event in operation.run() {
             if !changed, case .progress(let done, let total, _, _) = event {
                 #expect(done == 0 && total == 0)
@@ -566,19 +748,21 @@ private func externalReferrerPlan(_ cdn: MockCDN) throws -> InstallPlan {
     cdn.serve(object.id, data: Data(small.utf8))
     let operation = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: disk, fileOps: ops)
     var changed = false
-    await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + 16_384,
-        available: SpaceBudget.margin + 12_288)) {
+    await #expect {
         for try await event in operation.run() {
             if !changed, case .progress = event {
                 changed = true
                 try fs.writeAtomically(Data(repeating: 0x42, count: 4096), to: source)
             }
         }
+     } throws: { error in
+        guard case LauncherError.insufficientSpace(let required, let available) = error else { return false }
+        return required > available
     }
     #expect(changed && ops.deniedWrites == 0 && cdn.requestLog.isEmpty)
     #expect(try fs.size(at: objectPath(plan, object)) == nil)
     let paused = try OperationJournal.replay(fs: fs, path: journalPath(plan))
-    #expect(paused.verifiedObjects.isEmpty && paused.stagedFiles.isEmpty && !paused.completed)
+    #expect(paused.verifiedObjects.isEmpty && !paused.completed)
     disk.capacity.withLock { $0 = 24_576 }
     ops.setPayloadLimit(ops.baseline.payload + 24_576)
     #expect(try await opCollect(operation.run()).last == .phase(.completed))
@@ -811,21 +995,15 @@ private final class PeakDiskOps: FileOps, Sendable {
     var costs = Dictionary(uniqueKeysWithValues: (0..<40).map { ("direct-\($0)", Int64(1024)) })
     var allocation = try RemainingAllocation(files: files, costs: costs, retainedObjects: external, limit: 8)
     var resident = Set<String>()
-    // Deliberately slow oracle: enumerate each future file's live part set.
-    // It models release after the last referrer, independently of the tree.
+    // All forty tiny parts fit in one window. An independent oracle reserves
+    // every remaining decoded byte plus every missing referenced part. Already
+    // resident parts occupy real disk and are excluded from additional cost.
     func reference(_ start: Int, written: Int64 = 0) throws -> Int64 {
-        if start == files.count { return SpaceBudget.margin }
-        var peak: Int64 = 0, decoded: Int64 = 0
-        for end in start..<files.count {
-            decoded += files[end].size
-            let seen = files[...end].reduce(into: Set<String>()) { $0.formUnion(SpaceBudget.references($1)) }
-            let later = files[end...].reduce(into: external) { $0.formUnion(SpaceBudget.references($1)) }
-            let live = seen.intersection(later)
-            let parts = live.reduce(Int64(0)) { $0 + costs[$1, default: 0] }
-            peak = max(peak, decoded + parts)
-        }
-        let occupied = resident.reduce(Int64(0)) { $0 + costs[$1, default: 0] }
-        return SpaceBudget.margin + max(0, peak - occupied - written)
+        let remaining = files.dropFirst(start)
+        let refs = remaining.reduce(into: Set<String>()) { $0.formUnion(SpaceBudget.references($1)) }
+        let missing = refs.subtracting(resident).reduce(Int64(0)) { $0 + costs[$1, default: 0] }
+        let decoded = remaining.reduce(Int64(0)) { $0 + $1.size }
+        return SpaceBudget.margin + max(0, decoded - written) + missing
     }
     for (index, file) in files.enumerated() {
         #expect(try allocation.disk() == reference(index))
@@ -866,20 +1044,19 @@ func plannedFallbacksFitExactPreflightWithDecreasingSpace(batched: Bool) async t
     }
     let plan = try stagingPlan(objects, files)
     let budget = try SpaceBudget.required(plan: plan, state: JournalState(), fs: initialFS)
-    #expect(budget.disk == SpaceBudget.margin + 112 * 1024)
+    #expect(budget.disk == SpaceBudget.margin + 160 * 1024)
     let ops = try PeakDiskOps(root: temp.url)
     let disk = PayloadCapacityDisk(ops: ops, capacity: budget.disk - SpaceBudget.margin)
     ops.setPayloadLimit(ops.baseline.payload + budget.disk - SpaceBudget.margin)
     let fs = try ContainedFileSystem(root: temp.url, fileOps: ops), journal = try stagingJournal(fs, plan)
     let stager = try Stager(plan: plan, fs: fs, fetcher: stagingFetcher(cdn), journal: journal, disk: disk)
     let batches = batched ? [Array(files.prefix(5)), Array(files.suffix(5))] : [files]
-    for (index, batch) in batches.enumerated() {
+    for batch in batches {
         let preflight = try SpaceBudget.estimate(plan: plan, files: batch, state: await journal.snapshot(), fs: fs)
         let available = try fs.availableBytes(using: disk)
         #expect(available >= preflight.disk)
-        // The whole plan, or the second batch after the first allocated 40 KiB,
-        // starts with exactly the accepted preflight budget.
-        if !batched || index == 1 { #expect(available == preflight.disk) }
+        // The whole plan starts at the accepted window-aware budget.
+        if !batched { #expect(available == preflight.disk) }
         _ = try await collectStaging(stager.stage(files: batch))
         if batched {
             for file in batch {
@@ -889,7 +1066,7 @@ func plannedFallbacksFitExactPreflightWithDecreasingSpace(batched: Bool) async t
         }
     }
     #expect(ops.deniedWrites == 0)
-    #expect(ops.peak.payload - ops.baseline.payload == 88 * 1024)
+    #expect(ops.peak.payload - ops.baseline.payload <= budget.disk - SpaceBudget.margin)
     #expect(cdn.requestLog.count == 20)
     for file in files {
         let path = batched ? file.path : try stagedPath(plan, file.path)

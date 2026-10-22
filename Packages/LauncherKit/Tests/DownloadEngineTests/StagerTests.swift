@@ -280,23 +280,28 @@ func symlinkInStagingDestinationCannotRedirectWrites() async throws {
 }
 
 @Test
-func pausedAndDiscardedStagingStreamDoesNotRunAheadOrLeakItsLease() async throws {
+func pausedAndDiscardedStagingStreamKeepsBoundedWorkAndReleasesLease() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let objects = [stagingObject("a", "abc"), stagingObject("b", "def")]
     let files = try [stagingFile("a", "abc", [stagingChunk("a", "abc")]), stagingFile("b", "def", [stagingChunk("b", "def")])]
     let plan = try stagingPlan(objects, files); let journal = try stagingJournal(fs, plan)
     let cdn = MockCDN(); cdn.serve("a", data: Data("abc".utf8)); cdn.serve("b", data: Data("def".utf8))
     let stager = try stagingEngine(plan, fs, cdn, journal)
-    do {
-        var iterator = stager.stage(files: files).makeAsyncIterator()
-        _ = try await iterator.next()
-        #expect(cdn.requestLog.isEmpty)
-        #expect(try await iterator.next() == .fileVerified(files[0].path))
-        #expect(cdn.requestLog.count == 1)
-        await #expect(throws: LauncherError.busy("staging already in use")) { _ = try await collectStaging(stager.stage(files: files)) }
-        withExtendedLifetime(iterator) {}
+    let released = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    try await OperationWork.$observer.withValue({ if $0 == .stagingLeaseReleased { released.continuation.yield(()) } }) {
+        do {
+            var iterator = stager.stage(files: files).makeAsyncIterator()
+            _ = try await iterator.next()
+            #expect(cdn.requestLog.isEmpty)
+            while let event = try await iterator.next() { if case .fileVerified = event { break } }
+            #expect(cdn.requestLog.count <= 2) // Both fit in this bounded window.
+            await #expect(throws: LauncherError.busy("staging already in use")) { _ = try await collectStaging(stager.stage(files: files)) }
+            withExtendedLifetime(iterator) {}
+        }
+        var release = released.stream.makeAsyncIterator()
+        _ = await release.next() // Discard cancels and joins owned workers.
+        _ = try await collectStaging(stager.stage(files: files))
     }
-    _ = try await collectStaging(stager.stage(files: files))
     #expect(cdn.requestLog.count == 2)
 }
 
@@ -310,13 +315,21 @@ func cancellationKeepsPartsAndStaged() async throws {
     let journal = try stagingJournal(fs, plan)
     let stager = try stagingEngine(plan, fs, client, journal)
     let clock = ContinuousClock(), started = clock.now, work = EngineWorkCounter()
+    let firstStaged = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     let task = Task {
         try await OperationWork.$observer.withValue({ work.record($0) }) {
-            try await collectStaging(stager.stage(files: files))
+            var events: [OperationEvent] = []
+            for try await event in stager.stage(files: files) {
+                events.append(event)
+                if event == .fileVerified(files[0].path) { firstStaged.continuation.yield(()) }
+            }
+            return events
         }
     }
     defer { task.cancel() }
     try await client.waitUntilStalled()
+    var stagedEvent = firstStaged.stream.makeAsyncIterator()
+    _ = await stagedEvent.next()
     print("Stager cancellation reached stalled body after \(started.duration(to: clock.now))")
     #expect(work.snapshot[.referrerIndexBuild] == 1)
     #expect(work.snapshot[.predictionFile] == 2)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Darwin
+import Dispatch
 import Foundation
 import Synchronization
 import Testing
@@ -11,6 +12,53 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized) struct OperationRunnerTests {
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true]) func discardedPipelineRetainsStoreLeaseUntilWorkersJoin(cancelFirstWait: Bool) async throws {
+        let root = try TempDir(), records = try TempDir(), cdn = MockCDN(), ops = BridgeBlockedAssembly()
+        let plan = try bridgePlan(); bridgeServe(cdn, plan)
+        let rootURL = root.url
+        let store = GameRecordStore(directory: records.url)
+        let runner = OperationRunner(store: store, fetcher: bridgeFetcher(cdn), disk: FixedDiskSpace(bytes: Int64.max),
+            log: nil, fileOps: ops)
+        let released = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { ops.release() }
+        try await OperationWork.$observer.withValue({
+            if $0 == .stagingLeaseReleased { released.continuation.yield(()) }
+            if $0 == .ownershipDrainWait { waiting.continuation.yield(()) }
+        }) {
+            let task = Task {
+                for try await event in await runner.start("genshin", record: try bridgeRecord(rootURL), plan: plan,
+                    kind: .update, target: bridgeBuild("new"), approved: true, managedPaths: Set(plan.files.map(\.path))) {
+                    if event == .fileVerified(plan.files[0].path) {
+                        await ops.waitUntilBlocked()
+                        return // Destroy the stream while another output write is still running.
+                    }
+                }
+                Issue.record("Missing first file event")
+            }
+            try await task.value
+            await #expect(throws: LauncherError.busy("another game operation is running")) {
+                _ = try await store.acquireOperationLease()
+            }
+            if cancelFirstWait {
+                let cancelled = Task { _ = try await runner.reconcile("genshin") }
+                var firstWait = waiting.stream.makeAsyncIterator(); _ = await firstWait.next()
+                cancelled.cancel()
+                await #expect(throws: LauncherError.cancelled) { try await cancelled.value }
+                // Cancelling one waiter cannot release another waiter's barrier.
+            }
+            let reconciliation = Task { _ = try await runner.reconcile("genshin") }
+            defer { reconciliation.cancel() }
+            var drainWait = waiting.stream.makeAsyncIterator(); _ = await drainWait.next()
+            ops.release()
+            try await reconciliation.value
+            var iterator = released.stream.makeAsyncIterator(); _ = await iterator.next()
+        }
+        let lease = try await store.acquireOperationLease()
+        withExtendedLifetime(lease) {}
+        #expect(try await store.load("genshin")?.pending?.planDigest == plan.planDigest)
+    }
+
     @Test func runnerCompletesAndAcknowledgesInOrder() async throws {
         let root = try TempDir(); let records = try TempDir(); let cdn = MockCDN()
         let plan = try bridgePlan(); bridgeServe(cdn, plan)
@@ -661,6 +709,29 @@ private func bridgeCrash(_ point: CrashPoint) async throws -> BridgeCrashScenari
 }
 private struct BridgeNoSpace: FileOps {
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { throw LauncherError.io("Cannot write file (errno 28)") }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try SystemFileOps().synchronize(descriptor, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
+}
+
+private final class BridgeBlockedAssembly: FileOps {
+    private let gate = DispatchSemaphore(value: 0)
+    private let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private let didBlock = Mutex(false)
+    func release() { gate.signal() }
+    func waitUntilBlocked() async { var iterator = entered.stream.makeAsyncIterator(); _ = await iterator.next() }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        if fcntl(descriptor, F_GETPATH, &path) == 0,
+            String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self).hasSuffix("/files/b"),
+            didBlock.withLock({ if $0 { return false }; $0 = true; return true }) {
+            entered.continuation.yield(())
+            guard gate.wait(timeout: .now() + 30) == .success else { throw LauncherError.io("Blocked assembly deadline") }
+        }
+        return try SystemFileOps().write(descriptor, bytes: bytes)
+    }
     func synchronize(_ descriptor: Int32, durable: Bool) throws { try SystemFileOps().synchronize(descriptor, durable: durable) }
     func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
         try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)

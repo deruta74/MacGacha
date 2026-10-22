@@ -156,7 +156,8 @@ public actor GameLibrary {
     }
 
     fileprivate func prepare(_ game: GameDefinition, request: LibraryRequest) async throws -> LibraryPrepared {
-        let lease = try await store.acquireOperationLease()
+        let resumes = if case .resume = request { true } else { false }
+        let lease = try await store.acquireOperationLease(waitForPipelineDrain: resumes)
         let records = try await store.records(); let record = records[game.id]
         try GameRecordRules.check(request.action, record: record, others: others(records, game))
         if let record { try requireGameLocationAvailable(record.installPath) }

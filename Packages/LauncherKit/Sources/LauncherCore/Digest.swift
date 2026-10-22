@@ -19,12 +19,23 @@ public struct Digest: Hashable, Codable, Sendable {
     public let hex: String
 
     public init(algorithm: DigestAlgorithm, hex: String) throws {
-        let normalized = hex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard normalized.utf8.count == algorithm.hexLength,
-              normalized.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) })
-        else {
-            throw LauncherError.invalidDigest(hex)
-        }
+        // Manifests normally contain exact-length ASCII. Avoid Unicode case
+        // conversion/trimming and generic range searches for every chunk.
+        // Preserve the public whitespace contract on the uncommon slow path.
+        var candidate = hex.utf8.count == algorithm.hexLength ? hex : hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        candidate.makeContiguousUTF8()
+        guard candidate.utf8.count == algorithm.hexLength else { throw LauncherError.invalidDigest(hex) }
+        let normalized = try candidate.utf8.withContiguousStorageIfAvailable { bytes in
+            try String(unsafeUninitializedCapacity: bytes.count) { output in
+                for index in bytes.indices {
+                    let byte = bytes[index]
+                    if byte >= 48 && byte <= 57 || byte >= 97 && byte <= 102 { output[index] = byte }
+                    else if byte >= 65 && byte <= 70 { output[index] = byte + 32 }
+                    else { throw LauncherError.invalidDigest(hex) }
+                }
+                return bytes.count
+            }
+        }!
         self.init(algorithm: algorithm, validatedHex: normalized)
     }
 
@@ -62,12 +73,17 @@ public struct StreamingHasher: Sendable {
     }
 
     public mutating func update(_ data: Data) {
+        data.withUnsafeBytes { update(buffer: $0) }
+    }
+
+    /// Borrows a synchronous decoder write buffer without allocating Data.
+    package mutating func update(buffer: UnsafeRawBufferPointer) {
         switch state {
         case .sha256(var hasher):
-            hasher.update(data: data)
+            hasher.update(bufferPointer: buffer)
             state = .sha256(hasher)
         case .md5(var hasher):
-            hasher.update(data: data)
+            hasher.update(bufferPointer: buffer)
             state = .md5(hasher)
         }
     }
@@ -75,9 +91,24 @@ public struct StreamingHasher: Sendable {
     public func finalize() -> Digest {
         switch state {
         case .sha256(let hasher):
-            Digest(algorithm: .sha256, validatedHex: hasher.finalize().map { String(format: "%02x", $0) }.joined())
+            Digest(algorithm: .sha256, validatedHex: Self.hex(hasher.finalize()))
         case .md5(let hasher):
-            Digest(algorithm: .md5, validatedHex: hasher.finalize().map { String(format: "%02x", $0) }.joined())
+            Digest(algorithm: .md5, validatedHex: Self.hex(hasher.finalize()))
+        }
+    }
+
+    private static func hex(_ digest: some ContiguousBytes) -> String {
+        digest.withUnsafeBytes { bytes in
+            String(unsafeUninitializedCapacity: bytes.count * 2) { output in
+                var index = 0
+                for byte in bytes {
+                    let high = byte >> 4, low = byte & 15
+                    output[index] = high < 10 ? high + 48 : high + 87
+                    output[index + 1] = low < 10 ? low + 48 : low + 87
+                    index += 2
+                }
+                return index
+            }
         }
     }
 }

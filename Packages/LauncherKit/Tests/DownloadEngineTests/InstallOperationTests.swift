@@ -287,7 +287,7 @@ func batchedModeUsesFallbackForOverwrittenLocalSource(resume: Bool, batched: Boo
     #expect(zip(progress, progress.dropFirst()).allSatisfy { $0.0.0 <= $0.1.0 })
     #expect(progress.last?.0 == progress.last?.1)
     #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("old".utf8))
-    #expect(cdn.requestLog.map(\.path) == (batched ? ["fallback-0", "fallback-1", "fallback-old"] : ["fallback-0", "fallback-1"]))
+    #expect(cdn.requestLog.map(\.path).sorted() == (batched ? ["fallback-0", "fallback-1", "fallback-old"] : ["fallback-0", "fallback-1"]))
 }
 
 @Test

@@ -7,8 +7,8 @@ import DownloadEngine
 
 public enum RunOutcome: Sendable, Equatable { case completed, paused }
 
-/// Persists exact plans before pending records. Streams are pull-driven: no
-/// detached producer can keep installing after the consumer pauses or cancels.
+/// Persists exact plans before pending records. Dropping a stream cancels its
+/// bounded pipeline; operation ownership is retained until all workers join.
 public actor OperationRunner {
     private let store: GameRecordStore
     private let fetcher: ChunkFetcher
@@ -54,7 +54,7 @@ public actor OperationRunner {
     }
 
     public func reconcile(_ game: String) async throws -> GameRecord? {
-        let lease = try await store.acquireOperationLease()
+        let lease = try await store.acquireOperationLease(waitForPipelineDrain: true)
         defer { withExtendedLifetime(lease) {} }
         guard let record = try await store.load(game) else {
             try await store.cleanupOrphanGameDirectory(game)
@@ -139,7 +139,7 @@ private actor RunnerSession {
         do {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             if !prepared {
-                if lease == nil { lease = try await store.acquireOperationLease() }
+                if lease == nil { lease = try await store.acquireOperationLease(waitForPipelineDrain: true) }
                 if try await prepare() {
                     finish()
                     return .phase(.completed) // An earlier durable receipt was reconciled.
@@ -237,7 +237,7 @@ private actor RunnerSession {
         let engine = try InstallOperation(plan: plan, installRoot: current.installPath, fetcher: fetcher, disk: disk,
             mode: .batched(approved: approved), fileOps: fileOps, crashHooks: hooks, writesCompletionReceipt: true,
             requireRequestedPlan: true, expectedRootIdentity: current.installIdentity, identityProvider: identityProvider)
-        iterator = engine.run().makeAsyncIterator()
+        iterator = engine.run(retaining: lease).makeAsyncIterator()
         return false
     }
 

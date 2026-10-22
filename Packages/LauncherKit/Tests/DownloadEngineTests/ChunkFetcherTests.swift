@@ -138,8 +138,8 @@ func malformedContentRangeRestartsWithoutRange() async throws {
 }
 
 @Test
-func blockedChunkFullSyncDoesNotSerializeOtherFetches() async throws {
-    let directory = try TempDir(); let blocker = FetchBlockingSync()
+func blockedChunkWriteDoesNotSerializeOtherFetches() async throws {
+    let directory = try TempDir(); let blocker = FetchBlockingWrite()
     let blockedFS = try ContainedFileSystem(root: directory.url, fileOps: blocker)
     let otherFS = try ContainedFileSystem(root: directory.url)
     let cdn = MockCDN(); let bytes = Data("abc".utf8); cdn.serve("object", data: bytes)
@@ -475,15 +475,15 @@ private final class RecoveringFetchClient: HTTPClient {
         return (head, HTTPBody(next: { try await state.next() }, onCancel: { state.cancel() }))
     }
 }
-private final class FetchBlockingSync: FileOps {
+private final class FetchBlockingWrite: FileOps {
     let entered = Mutex(false)
     let release = DispatchSemaphore(value: 0)
-    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(descriptor, bytes: bytes) }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        entered.withLock { $0 = true }
+        guard release.wait(timeout: .now() + 30) == .success else { throw LauncherError.io("write gate timed out") }
+        return try SystemFileOps().write(descriptor, bytes: bytes)
+    }
     func synchronize(_ descriptor: Int32, durable: Bool) throws {
-        if durable {
-            entered.withLock { $0 = true }
-            guard release.wait(timeout: .now() + 8) == .success else { throw LauncherError.io("sync gate timed out") }
-        }
         try SystemFileOps().synchronize(descriptor, durable: durable)
     }
     func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {

@@ -125,7 +125,8 @@ func durableRecordsAlwaysUseFullFsync() async throws {
     for (record, durable) in records {
         syncs.withLock { $0.removeAll() }
         try await journal.append(record)
-        #expect(syncs.withLock { $0 } == [durable], "Unexpected durability for \(record)")
+        if case .objectVerified = record { #expect(syncs.withLock { $0 }.isEmpty) }
+        else { #expect(syncs.withLock { $0 } == [durable], "Unexpected durability for \(record)") }
     }
     #expect(try OperationJournal.replay(fs: fs, path: path).completed)
 }

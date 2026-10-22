@@ -69,7 +69,7 @@ private func redirectClient() -> URLSessionHTTPClient {
     let config = URLSessionConfiguration.ephemeral
     config.timeoutIntervalForRequest = 15; config.timeoutIntervalForResource = 15
     config.protocolClasses = [DeliveryRedirectStub.self]
-    return URLSessionHTTPClient(session: URLSession(configuration: config), redirectPolicy: DeliveryHostPolicy.allows)
+    return URLSessionHTTPClient(configuration: config, sessionCount: 2, redirectPolicy: DeliveryHostPolicy.allows)
 }
 
 /// URLProtocol intercepts all traffic locally; redirect targets never reach the network.
