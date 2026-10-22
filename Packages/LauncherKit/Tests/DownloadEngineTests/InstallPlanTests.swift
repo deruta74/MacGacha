@@ -317,7 +317,7 @@ func planCapsBoundCollectionsAndOpaqueIDs() throws {
     #expect(throws: LauncherError.io("invalid plan: too many objects")) { try JSONDecoder().decode(InstallPlan.self, from: bytes) }
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func localSourceCanBeDeletedAfterStagingWithoutFallback() async throws {
     let temp = try TestSupport.TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let old = try SafeRelativePath("old")

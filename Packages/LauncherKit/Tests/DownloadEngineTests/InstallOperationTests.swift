@@ -7,7 +7,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func installsTwoFilesFromZstdObjects() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url); let cdn = MockCDN()
     let a = compressedObject(try zstdVector("good"), id: "a")
@@ -24,7 +24,7 @@ func installsTwoFilesFromZstdObjects() async throws {
     #expect(cdn.requestLog.count == 2)
 }
 
-@Test(arguments: ["fresh", "lock"])
+@Test(.timeLimit(.minutes(1)), arguments: ["fresh", "lock"])
 func freshInstall(id: String) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan(id, [("Data/a", "abc"), ("Data/b", "def")]); let cdn = MockCDN()
@@ -37,7 +37,7 @@ func freshInstall(id: String) async throws {
     #expect(try fs.itemType(at: opDirectory(plan)) == nil)
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func orphanedCompletedCleanupIsDiscardedBeforeStartingNewPlan(sameID: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let old = try opPlan("orphan", [("a", "old")]); let next = try opPlan(sameID ? "orphan" : "next", [("a", "new")]); let cdn = MockCDN()
@@ -61,7 +61,7 @@ func orphanedCompletedCleanupIsDiscardedBeforeStartingNewPlan(sameID: Bool) asyn
     #expect(cdn.requestLog.count == 1)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func updateTouchesNothingBeforeCommit() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("update", [("a", "new"), ("b", "new")]); let cdn = MockCDN()
@@ -77,7 +77,7 @@ func updateTouchesNothingBeforeCommit() async throws {
     #expect(try OperationJournal.replay(fs: fs, path: opJournal(plan)).commitStartedBatches.isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func committedRecoveryRowSkipsAlreadyCommittedFiles() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("skip", [("a", "abc")]); let cdn = MockCDN()
@@ -89,7 +89,7 @@ func committedRecoveryRowSkipsAlreadyCommittedFiles() async throws {
     #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 10) == Data("changed".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func stagedRecoveryRowRenamesBeforeJournaling() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("staged", [("a", "abc")]); let cdn = MockCDN()
@@ -105,7 +105,7 @@ func stagedRecoveryRowRenamesBeforeJournaling() async throws {
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func crashBetweenRenameAndJournalRecovers() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("renamed", [("a", "abc")]); let cdn = MockCDN()
@@ -120,7 +120,7 @@ func crashBetweenRenameAndJournalRecovers() async throws {
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test(arguments: ["missing", "wrong-digest", "wrong-size", "unstaged-before-restart", "bad-staged", "unstaged-full-file", "bad-staged-good-destination"])
+@Test(.timeLimit(.minutes(1)), arguments: ["missing", "wrong-digest", "wrong-size", "unstaged-before-restart", "bad-staged", "unstaged-full-file", "bad-staged-good-destination"])
 func stagedMissingDestinationWrongRefetches(scenario: String) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("repair", [("a", "abc")]); let cdn = MockCDN(); opServe(cdn, plan, ["abc"])
@@ -138,7 +138,7 @@ func stagedMissingDestinationWrongRefetches(scenario: String) async throws {
     #expect(try InstallStateMarker.load(fs: fs) == nil)
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func planChangeAfterCommitFinishesOldPlanFirst(sameID: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let old = try opPlan("old", [("a", "old"), ("b", "old-b")])
@@ -160,7 +160,7 @@ func planChangeAfterCommitFinishesOldPlanFirst(sameID: Bool) async throws {
     #expect(try fs.readFile(at: next.files[0].path, maxBytes: 3) == Data("new".utf8))
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func planChangeBeforeCommitDiscardsStaging(sameID: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let old = try opPlan("old", [("a", "old")]); let next = try opPlan(sameID ? "old" : "next", [("a", "new")]); let cdn = MockCDN()
@@ -177,7 +177,7 @@ func planChangeBeforeCommitDiscardsStaging(sameID: Bool) async throws {
     #expect(try fs.readFile(at: next.files[0].path, maxBytes: 3) == Data("new".utf8))
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func batchedModeRequiresApproval(denied: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("batch", [("a", "abc"), ("b", "def")]); let cdn = MockCDN()
@@ -190,7 +190,7 @@ func batchedModeRequiresApproval(denied: Bool) async throws {
     #expect(cdn.requestLog.isEmpty); #expect(try InstallStateMarker.load(fs: fs) == nil)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func batchedModeCommitsInBatchesAndBlocksViaMarker() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("batch", [("a", "abc"), ("b", "def")]); let cdn = MockCDN(); opServe(cdn, plan, ["abc", "def"])
@@ -210,7 +210,7 @@ func batchedModeCommitsInBatchesAndBlocksViaMarker() async throws {
     #expect(try InstallStateMarker.load(fs: fs) == nil)
 }
 
-@Test(arguments: ["regular", "missing", "directory", "symlink"])
+@Test(.timeLimit(.minutes(1)), arguments: ["regular", "missing", "directory", "symlink"])
 func deletionsOnlyRegularFiles(kind: String) async throws {
     let temp = try TempDir(); let outside = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let target = try SafeRelativePath("old")
@@ -233,7 +233,7 @@ func deletionsOnlyRegularFiles(kind: String) async throws {
     #expect(try Data(contentsOf: control) == Data("preserved".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func batchedModePreservesLocalSourcesNeededByLaterFilesWithoutFallback() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let a = try opPlan("dependency", [("a", "new")])
@@ -252,7 +252,7 @@ func batchedModePreservesLocalSourcesNeededByLaterFilesWithoutFallback() async t
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test(arguments: [false, true], [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true], [false, true])
 func batchedModeUsesFallbackForOverwrittenLocalSource(resume: Bool, batched: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let a = try opPlan("fallback", [("a", "new"), ("independent", "xyz")])
@@ -287,10 +287,10 @@ func batchedModeUsesFallbackForOverwrittenLocalSource(resume: Bool, batched: Boo
     #expect(zip(progress, progress.dropFirst()).allSatisfy { $0.0.0 <= $0.1.0 })
     #expect(progress.last?.0 == progress.last?.1)
     #expect(try fs.readFile(at: b.path, maxBytes: 3) == Data("old".utf8))
-    #expect(cdn.requestLog.map(\.path) == (batched ? ["fallback-0", "fallback-1", "fallback-old"] : ["fallback-0", "fallback-1"]))
+    #expect(cdn.requestLog.map(\.path).sorted() == (batched ? ["fallback-0", "fallback-1", "fallback-old"] : ["fallback-0", "fallback-1"]))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func sharedObjectIsNotDownloadedAgainAcrossCommittedBatches() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try retainedSpacePlan(); let cdn = MockCDN(); serveRetainedSpacePlan(cdn, plan)
@@ -302,7 +302,7 @@ func sharedObjectIsNotDownloadedAgainAcrossCommittedBatches() async throws {
     #expect(try fs.readFile(at: plan.files[2].path, maxBytes: 3) == Data("abc".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func completedJournalOnlyNeedsCleanup() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("completed", [("a", "abc")]); let cdn = MockCDN()
@@ -315,7 +315,7 @@ func completedJournalOnlyNeedsCleanup() async throws {
     #expect(try InstallStateMarker.load(fs: fs) == nil)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func preCommitMissingStagedFileIsRefetchedBeforeChangingInstalledFiles() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("precommit", [("a", "abc")]); let cdn = MockCDN(); opServe(cdn, plan, ["abc"])
@@ -332,7 +332,7 @@ func preCommitMissingStagedFileIsRefetchedBeforeChangingInstalledFiles() async t
     #expect(verified && cdn.requestLog.count == 1)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func crashAfterBatchStartedReusesTheUncommittedBatchIndex() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("batch-gap", [("a", "abc")]); let cdn = MockCDN()
@@ -348,7 +348,7 @@ func crashAfterBatchStartedReusesTheUncommittedBatchIndex() async throws {
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func markerRemovedOnlyAfterCompleted() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("marker", [("a", "abc")]); let cdn = MockCDN(); opServe(cdn, plan, ["abc"])
@@ -364,7 +364,7 @@ func markerRemovedOnlyAfterCompleted() async throws {
     #expect(checked)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func uppercaseDigestInPlanAccepted() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let original = try opPlan("uppercase", [("a", "abc")])
@@ -376,7 +376,7 @@ func uppercaseDigestInPlanAccepted() async throws {
     #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 3) == Data("abc".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func unicodeAndSpacesInPaths() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("unicode", [("Data with spaces/日本語 é.bin", "hello")]); let cdn = MockCDN(); opServe(cdn, plan, ["hello"])
@@ -384,7 +384,7 @@ func unicodeAndSpacesInPaths() async throws {
     #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 5) == Data("hello".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func cancellationAfterCommitStartedKeepsMarkerAndResumesWithoutDownload() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("cancel", [("a", "abc")]); let cdn = MockCDN(); opServe(cdn, plan, ["abc"])
@@ -412,7 +412,7 @@ func cancellationAfterCommitStartedKeepsMarkerAndResumesWithoutDownload() async 
     #expect(try InstallStateMarker.load(fs: fs) == nil)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func concurrentInstallOperationsShareTheRootLockAndReleaseOnDiscard() async throws {
     let temp = try TempDir(); let plan = try opPlan("concurrent", [("a", "abc")]); let cdn = MockCDN(); opServe(cdn, plan, ["abc"])
     let operation = try opEngine(plan, temp.url, cdn)
@@ -426,7 +426,7 @@ func concurrentInstallOperationsShareTheRootLockAndReleaseOnDiscard() async thro
     #expect(cdn.requestLog.count == 1)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func laterBatchLocalDependencyIsRejectedBeforeAnyCommit() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let remote = try opPlan("late-dependency", [("independent", "one"), ("source", "new")])
@@ -449,7 +449,7 @@ func laterBatchLocalDependencyIsRejectedBeforeAnyCommit() async throws {
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func stagedFilesCostNothingAndBatchMembershipSurvivesRestart(restart: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let large = String(repeating: "large", count: 4_000)
@@ -495,7 +495,7 @@ func stagedFilesCostNothingAndBatchMembershipSurvivesRestart(restart: Bool) asyn
     #expect(try InstallStateMarker.load(fs: fs) == nil)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func batchMembershipMismatchThrowsBeforeCommitStarts() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("membership", [("a", "abc"), ("b", "def")])
@@ -516,7 +516,7 @@ func batchMembershipMismatchThrowsBeforeCommitStarts() async throws {
     #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 3) == Data("old".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func conservativePartitionRejectsUnsafeSharedLocalBoundary() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let first = try opPlan("partition-shared", [("independent", "new")])
@@ -536,7 +536,7 @@ func conservativePartitionRejectsUnsafeSharedLocalBoundary() async throws {
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func sharedBatchPartsRequireConservativeSpaceReserveBeforeCommit() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try retainedSpacePlan(); let cdn = MockCDN(); serveRetainedSpacePlan(cdn, plan)
@@ -549,7 +549,7 @@ func sharedBatchPartsRequireConservativeSpaceReserveBeforeCommit() async throws 
     #expect(try fs.size(at: plan.files[0].path) == nil)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func retainedPartsAndInstalledGrowthCauseResumableExactShortfall() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try retainedSpacePlan(); let cdn = MockCDN(); serveRetainedSpacePlan(cdn, plan)
@@ -579,7 +579,7 @@ func retainedPartsAndInstalledGrowthCauseResumableExactShortfall() async throws 
     #expect(try fs.itemType(at: opDirectory(plan)) == nil)
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func staleStagedRecordsAreInvalidatedBeforePartitioning(wrongSize: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let plan = try opPlan("stale-before-partition", [("a", "abc"), ("b", "def")])
@@ -600,7 +600,7 @@ func staleStagedRecordsAreInvalidatedBeforePartitioning(wrongSize: Bool) async t
     #expect(try fs.readFile(at: plan.files[1].path, maxBytes: 3) == Data("def".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func interruptedCleanupRetiresPlanBeforeJournalCanDisappear() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let remote = try opPlan("cleanup-local", [("source", "new")])
@@ -720,7 +720,7 @@ func constructingZstdInstallDoesNotRequestOrWrite() throws {
     #expect(try FileManager.default.contentsOfDirectory(atPath: temp.url.path).isEmpty)
 }
 
-@Test(arguments: [Int64(31), 32, 34])
+@Test(.timeLimit(.minutes(1)), arguments: [Int64(31), 32, 34])
 func minimumPartitionSurvivesNonMonotonicGreedyBudget(extra: Int64) async throws {
     let temp = try TempDir(); let cdn = MockCDN()
     var objects: [String: ChunkObject] = [:]
@@ -749,7 +749,7 @@ func minimumPartitionSurvivesNonMonotonicGreedyBudget(extra: Int64) async throws
     }
 }
 
-@Test(arguments: [Int64(30), 36])
+@Test(.timeLimit(.minutes(1)), arguments: [Int64(30), 36])
 func minimumPartitionHandlesGreedyDependencyFailure(extra: Int64) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let base = try opPlan("dependency-fallback", [("a", "aaaaaaaaaa"), ("b", "bbbbbbbb")])

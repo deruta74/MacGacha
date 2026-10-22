@@ -6,7 +6,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func fileBackedClientStreamsBoundedRangesAndHandlesCancellation() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let bytes = Data((0..<200_000).map { UInt8($0 % 251) })
@@ -40,7 +40,7 @@ func fileBackedClientStreamsBoundedRangesAndHandlesCancellation() async throws {
     var missingIterator = empty.makeAsyncIterator(); #expect(try await missingIterator.next() == nil)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func fileBackedClientRejectsSymlinkAncestorsAndEscapedSeparators() async throws {
     let temp = try TempDir(); let outside = try TempDir()
     let fs = try ContainedFileSystem(root: outside.url)

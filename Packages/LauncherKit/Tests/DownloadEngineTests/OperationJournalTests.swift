@@ -8,7 +8,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func roundTripsAllRecords() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -79,7 +79,7 @@ func midFileCorruptionThrows() throws {
     }
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func unstagedRemovesStagedFile() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -97,7 +97,7 @@ func unstagedRemovesStagedFile() async throws {
     #expect(state.verifiedObjects == ["shared"])
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func durableRecordsAlwaysUseFullFsync() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -125,7 +125,8 @@ func durableRecordsAlwaysUseFullFsync() async throws {
     for (record, durable) in records {
         syncs.withLock { $0.removeAll() }
         try await journal.append(record)
-        #expect(syncs.withLock { $0 } == [durable], "Unexpected durability for \(record)")
+        if case .objectVerified = record { #expect(syncs.withLock { $0 }.isEmpty) }
+        else { #expect(syncs.withLock { $0 } == [durable], "Unexpected durability for \(record)") }
     }
     #expect(try OperationJournal.replay(fs: fs, path: path).completed)
 }
@@ -166,7 +167,7 @@ func missingJournalReplaysAsEmptyWithoutCreatingAFile() throws {
     #expect(try fs.itemType(at: path) == nil)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func journalCancellationKeepsExistingRecords() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -185,7 +186,7 @@ func journalCancellationKeepsExistingRecords() async throws {
     #expect(try OperationJournal.replay(fs: fs, path: path).verifiedObjects == ["still-usable"])
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func failedAppendRequiresReopeningBeforeAnotherAppend() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -211,7 +212,7 @@ func failedAppendRequiresReopeningBeforeAnotherAppend() async throws {
     #expect(try OperationJournal.replay(fs: fs, path: path).completed)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func journalStreamsAcrossReadBoundariesAndDiscardsLongTornTail() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)
@@ -233,7 +234,7 @@ private func journalDigest() throws -> Digest {
     try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func invalidOrOversizedRecordsDoNotModifyTheJournal() async throws {
     let directory = try TempDir()
     let fs = try ContainedFileSystem(root: directory.url)

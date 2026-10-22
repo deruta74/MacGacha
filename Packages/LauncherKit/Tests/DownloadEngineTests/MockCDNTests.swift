@@ -6,7 +6,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func mockServesRangeAndFaults() async throws {
     let cdn = MockCDN()
     let blob = Data((0..<200_000).map { UInt8($0 % 251) })
@@ -43,7 +43,7 @@ func mockServesRangeAndFaults() async throws {
     #expect(cdn.requestLog.map(\.rangeFrom) == [1000, 1000, nil, nil])
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func negativeResumeOffsetIsRejected() async throws {
     let cdn = MockCDN()
     let url = URL(string: "https://mock.cdn/blob")!
@@ -54,7 +54,7 @@ func negativeResumeOffsetIsRejected() async throws {
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func mockFaultsAreFIFOAndBodiesAreChunked() async throws {
     let cdn = MockCDN()
     let url = URL(string: "https://mock.cdn/blob")!
@@ -81,7 +81,7 @@ func mockFaultsAreFIFOAndBodiesAreChunked() async throws {
     #expect(normalBody == blob)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func mockMissingAndUnsatisfiableRanges() async throws {
     let cdn = MockCDN()
     let url = URL(string: "https://mock.cdn/blob")!
@@ -111,7 +111,7 @@ private func collectMockBody(_ stream: HTTPBody) async throws -> Data {
     return result
 }
 
-@Test(arguments: [0, 3, 4, 10])
+@Test(.timeLimit(.minutes(1)), arguments: [0, 3, 4, 10])
 func mockDropAlwaysThrowsEvenAtOrBeyondEnd(dropPoint: Int) async throws {
     let cdn = MockCDN()
     let url = URL(string: "https://mock.cdn/blob")!
@@ -126,7 +126,7 @@ func mockDropAlwaysThrowsEvenAtOrBeyondEnd(dropPoint: Int) async throws {
     #expect(received == Data([2, 3, 4, 5].prefix(min(dropPoint, 4))))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func httpBodyRejectsSecondIteratorWithoutCancellingFirst() async throws {
     let cdn = MockCDN()
     let url = URL(string: "https://mock.cdn/blob")!

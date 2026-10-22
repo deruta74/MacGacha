@@ -33,7 +33,16 @@ jobs:
       - name: Run package tests
         run: |
           mkdir -p test-results
-          swift test --package-path Packages/LauncherKit --parallel --xunit-output test-results/test-results.xml
+          python3 scripts/test-package.py --events test-results/package-events.jsonl \
+            --parallel --xunit-output test-results/test-results.xml
+      - name: Run engine tests with one cooperative worker
+        timeout-minutes: 5
+        env:
+          LIBDISPATCH_COOPERATIVE_POOL_STRICT: '1'
+        run: |
+          python3 scripts/test-package.py --events test-results/strict-engine-events.jsonl \
+            --timeout-seconds 240 --skip-build --test-product DownloadEngineTests \
+            --parallel --num-workers 2 --xunit-output test-results/strict-engine.xml
 
       - name: Generate Xcode project
         run: scripts/bootstrap.sh
@@ -78,4 +87,6 @@ jobs:
           name: test-results-${{ github.sha }}
           path: |
             test-results/*.xml
+            test-results/*.jsonl
+            test-results/*.sample-*.txt
             test-results/*.xcresult

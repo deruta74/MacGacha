@@ -6,8 +6,52 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct CrashRecoveryTests {
+    @Test(.timeLimit(.minutes(1))) func repeatedProcessDeathDuringCommitRestagingRecovers() async throws {
+        let fixtures = try TempDir(), root = try TempDir(), plan = try crashFixture(fixtures.url, root: root.url)
+        let executable = try crashHarnessURL(in: Bundle(for: CrashTestBundleToken.self).bundleURL)
+        func kill(_ point: CrashPoint) async throws {
+            let result = try await SystemProcessRunner().run(executable,
+                arguments: [fixtures.url.path, root.url.path, point.rawValue], environment: [:], currentDirectory: nil)
+            #expect(result.exitCode == 137)
+        }
+        try await kill(.afterCommitStartedBeforeFirstRename)
+        let fs = try ContainedFileSystem(root: root.url)
+        try fs.removeFile(at: opStaged(plan, plan.files[0].path))
+        try await kill(.afterFileStagedBeforeJournal) // Recovery has to restage.
+        let staged = try opStaged(plan, plan.files[0].path)
+        #expect(try fs.size(at: staged) == plan.files[0].size)
+        // A second interrupted write leaves same-sized bad output. Recovery
+        // must never turn this into a replacement merely because length agrees.
+        try fs.writeAtomically(Data(repeating: 0x42, count: Int(plan.files[0].size)), to: staged)
+        try await kill(.afterRenameBeforeJournal)
+        try await finishFixture(plan, fixtures: fixtures.url, root: root.url)
+        try assertFixture(plan, root: root.url)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func objectHintAfterProcessDeathReverifiesUnsyncedPart() async throws {
+        let fixtures = try TempDir(), root = try TempDir(), plan = try crashFixture(fixtures.url, root: root.url)
+        let executable = try crashHarnessURL(in: Bundle(for: CrashTestBundleToken.self).bundleURL)
+        let result = try await SystemProcessRunner().run(executable,
+            arguments: [fixtures.url.path, root.url.path, CrashPoint.afterObjectVerified.rawValue], environment: [:], currentDirectory: nil)
+        #expect(result.exitCode == 137)
+        let fs = try ContainedFileSystem(root: root.url)
+        let state = try OperationJournal.replay(fs: fs, path: opJournal(plan))
+        let id = try #require(state.verifiedObjects.first)
+        let object = try #require(plan.objects[id])
+        // Simulate a drive losing/reordering disposable data while its hint
+        // survives. Same size deliberately defeats a size-only cache check.
+        try fs.writeAtomically(Data(repeating: 0x42, count: Int(object.transferSize)), to: objectPath(plan, object))
+        let cdn = MockCDN()
+        cdn.serve(object.id, data: try Data(contentsOf: fixtures.url.appendingPathComponent(object.id)))
+        let ops = ThroughputFileOps(requireFetch: cdn)
+        let events = try await opCollect(InstallOperation(plan: plan, installRoot: root.url,
+            fetcher: stagingFetcher(cdn), fileOps: ops).run())
+        #expect(events.last == .phase(.completed) && cdn.requestLog.count == 1)
+        try assertFixture(plan, root: root.url)
+    }
+
     @Test(arguments: [CrashPoint.afterObjectVerified, .afterFileStagedBeforeJournal, .afterRenameBeforeJournal,
         .midJournalWrite, .afterCommitStartedBeforeFirstRename, .beforeCompleted])
     func processDeathIsRecoverable(point: CrashPoint) async throws {
@@ -39,7 +83,7 @@ struct CrashRecoveryTests {
             #expect(state.stagedFiles.isEmpty)
         case .afterFileStagedBeforeJournal:
             #expect(state.stagedFiles.isEmpty)
-            #expect(try fs.size(at: opStaged(plan, plan.files[0].path)) == plan.files[0].size)
+            #expect(try plan.files.contains { try fs.size(at: opStaged(plan, $0.path)) == $0.size })
         case .afterCommitStartedBeforeFirstRename:
             #expect(!state.commitStartedBatches.isEmpty)
             #expect(try fs.readFile(at: plan.files[0].path, maxBytes: 100) == Data("old-a".utf8))

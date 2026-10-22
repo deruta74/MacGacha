@@ -6,9 +6,43 @@ import Testing
 import LauncherCore
 @testable import DownloadEngine
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct URLSessionHTTPClientTests {
-    @Test
+    @Test(.timeLimit(.minutes(1))) func shardedSessionsDoNotSerializeDataCallbacks() async throws {
+        let first = HTTPFixture(.response(200, ["Content-Length": "1"], [Data([1])]))
+        let second = HTTPFixture(.response(200, ["Content-Length": "2"], [Data([2, 2])]))
+        defer { first.close(); second.close() }
+        let blocked = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let release = DispatchSemaphore(value: 0), timedOut = Mutex(false)
+        let client = URLSessionHTTPClient(configuration: first.session.configuration, sessionCount: 2)
+            .observingDataCallbacks { bytes, _ in
+                if bytes == 1 { blocked.continuation.yield(()); if release.wait(timeout: .now() + 10) == .timedOut { timedOut.withLock { $0 = true } } }
+            }
+        defer { release.signal(); client.invalidate() }
+        let firstTask = Task { let (_, body) = try await client.get(first.url, byteRangeFrom: nil); for try await _ in body {} }
+        defer { firstTask.cancel() }
+        var iterator = blocked.stream.makeAsyncIterator(); _ = await iterator.next()
+        let (_, body) = try await client.get(second.url, byteRangeFrom: nil)
+        var data = Data(); for try await bytes in body { data.append(bytes) }
+        #expect(data == Data([2, 2]) && !timedOut.withLock { $0 })
+        release.signal(); try await firstTask.value
+    }
+
+    @Test(.timeLimit(.minutes(1))) func shardedInvalidationCancelsEverySessionAndAllCopies() async throws {
+        let fixtures = (0..<4).map { _ in HTTPFixture(.stallAfterResponse) }
+        defer { for fixture in fixtures { fixture.close() } }
+        let client = URLSessionHTTPClient(configuration: fixtures[0].session.configuration, sessionCount: 4)
+        let copy = client
+        let tasks = fixtures.map { fixture in Task { let (_, body) = try await client.get(fixture.url, byteRangeFrom: nil); for try await _ in body {} } }
+        defer { client.invalidate(); for task in tasks { task.cancel() } }
+        for fixture in fixtures { try await waitForHTTPCondition { fixture.control.started } }
+        copy.invalidate(); client.invalidate()
+        for task in tasks { await #expect(throws: LauncherError.cancelled) { try await task.value } }
+        await #expect(throws: LauncherError.cancelled) { _ = try await copy.get(fixtures[0].url, byteRangeFrom: nil) }
+        for fixture in fixtures { try await waitForHTTPCondition { fixture.control.stopped } }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionStreamsAndParsesResponseHeaders() async throws {
         let fixture = HTTPFixture(.response(206, [
             "Content-Length": "6", "Content-Range": "bytes 10-15/100", "Retry-After": "7",
@@ -28,7 +62,7 @@ struct URLSessionHTTPClientTests {
         #expect(fixture.control.request?.cachePolicy == .reloadIgnoringLocalCacheData)
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func negativeResumeOffsetIsRejected() async throws {
         let fixture = HTTPFixture(.response(206, [:], []))
         defer { fixture.close() }
@@ -39,7 +73,7 @@ struct URLSessionHTTPClientTests {
         #expect(fixture.control.request == nil)
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionReturnsHTTPStatusesAndRejectsMalformedRanges() async throws {
         let fixture = HTTPFixture(.response(404, ["Content-Range": "bytes 9-2/10"], []))
         defer { fixture.close() }
@@ -51,7 +85,7 @@ struct URLSessionHTTPClientTests {
         for try await _ in stream { Issue.record("An empty response must have no body") }
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionMapsTransportFailures() async throws {
         for mode in [HTTPStubMode.failBeforeResponse, .failAfterResponse] {
             let fixture = HTTPFixture(mode)
@@ -64,7 +98,7 @@ struct URLSessionHTTPClientTests {
         }
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionCancellationBeforeHeadersCancelsTask() async throws {
         let fixture = HTTPFixture(.stallBeforeResponse)
         defer { fixture.close() }
@@ -81,7 +115,7 @@ struct URLSessionHTTPClientTests {
         #expect(cancelledAt.duration(to: clock.now) < .seconds(3))
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionConsumerCancellationStopsStalledStream() async throws {
         let fixture = HTTPFixture(.stallAfterResponse)
         defer { fixture.close() }
@@ -104,7 +138,7 @@ struct URLSessionHTTPClientTests {
         #expect(cancelledAt.duration(to: clock.now) < .seconds(3))
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionDiscardedStreamCancelsTask() async throws {
         let fixture = HTTPFixture(.stallAfterResponse)
         defer { fixture.close() }
@@ -118,7 +152,7 @@ struct URLSessionHTTPClientTests {
         #expect(fixture.control.stopReason != .timeout)
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionImmediateCompletionAndCancellationRaces() async throws {
         for iteration in 0..<20 {
             let fixture = HTTPFixture(.response(200, ["Content-Length": "0"], []))
@@ -132,7 +166,7 @@ struct URLSessionHTTPClientTests {
         }
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionRejectsNonHTTPResponse() async throws {
         let fixture = HTTPFixture(.nonHTTP)
         defer { fixture.close() }
@@ -142,7 +176,7 @@ struct URLSessionHTTPClientTests {
         } catch LauncherError.transport {}
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionCancellationRacesWithResponseDelivery() async throws {
         for _ in 0..<20 {
             let fixture = HTTPFixture(.stallAfterResponse)
@@ -162,7 +196,7 @@ struct URLSessionHTTPClientTests {
         }
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionParsesUnknownTotalsAndRetryAfterDates() async throws {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -189,11 +223,10 @@ struct URLSessionHTTPClientTests {
         for try await _ in rangeBody {}
     }
 
-    @Test
-    func urlSessionSlowConsumerHasLosslessBoundedBuffering() async throws {
-        // Do not divide the high-water mark evenly: the producer must deliver
-        // strictly more than it before native task suspension can pause delivery.
-        let pieceSize = 48 * 1024
+    @Test(.timeLimit(.minutes(1)), arguments: [48 * 1024, 64 * 1024])
+    func urlSessionSlowConsumerHasLosslessBoundedBuffering(pieceSize: Int) async throws {
+        // Exercise both an exact-watermark callback boundary and overshoot.
+        // URLSession may split/coalesce the stub's chunks before delivery.
         let highWaterMark = 256 * 1024
         let lowWaterMark = 64 * 1024
         let pieces = (0..<96).map { Data(repeating: UInt8($0), count: pieceSize) }
@@ -205,14 +238,10 @@ struct URLSessionHTTPClientTests {
         defer { fixture.close() }
         let (head, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
         #expect(head.status == 200)
-        // Hold the consumer until enough data has been delivered and URLSession
-        // has processed it. Starting reads earlier can bypass backpressure entirely.
-        try await waitForHTTPCondition(timeout: .seconds(10)) {
-            fixture.control.deliveredBytes > highWaterMark
-        }
-        try await waitForHTTPCondition(timeout: .seconds(10)) {
-            metrics.snapshot.suspensions > 0
-        }
+        // Native suspension can happen at exactly the high-water mark. Waiting
+        // for the producer to exceed it can deadlock a correctly paused producer.
+        await metrics.waitForSuspension()
+        try #require(metrics.snapshot.suspensions > 0)
         var received = Data()
         var largestPiece = 0
         for try await piece in body {
@@ -227,7 +256,7 @@ struct URLSessionHTTPClientTests {
         #expect(metrics.snapshot.bytes == 0)
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionCancellationWhileBackpressuredStopsTask() async throws {
         let pieces = (0..<64).map { Data(repeating: UInt8($0), count: 65_536) }
         let metrics = HTTPBufferMetrics()
@@ -250,7 +279,7 @@ struct URLSessionHTTPClientTests {
         try await waitForHTTPCondition { fixture.control.stopped }
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionBackpressureHandlesAnOversizedCallback() async throws {
         let data = Data((0..<(1 << 20)).map { UInt8($0 % 251) })
         let metrics = HTTPBufferMetrics()
@@ -272,7 +301,7 @@ struct URLSessionHTTPClientTests {
         if metrics.snapshot.peak >= 65_536 { #expect(metrics.snapshot.suspensions > 0) }
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func backpressuredBodyDoesNotBlockOtherRequests() async throws {
         let data = Data((0..<(4 << 20)).map { UInt8($0 % 251) })
         let metrics = HTTPBufferMetrics()
@@ -321,7 +350,7 @@ struct URLSessionHTTPClientTests {
         #expect(received == data)
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionExternalCancellationIsRetryableTransport() async throws {
         for mode in [HTTPStubMode.externallyCancelled, .externallyCancelledAfterResponse] {
             let fixture = HTTPFixture(mode)
@@ -340,7 +369,7 @@ struct URLSessionHTTPClientTests {
         }
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func bufferObserverCanCancelBodyReentrantly() async throws {
         let iterator = Mutex<HTTPBody.Iterator?>(nil)
         let fixture = HTTPFixture(.stallAfterResponse, highWaterMark: 1024, lowWaterMark: 256,
@@ -364,7 +393,7 @@ struct URLSessionHTTPClientTests {
         #expect(iterator.withLock { $0 == nil })
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func getAfterInvalidateThrowsCancelled() async throws {
         let fixture = HTTPFixture(.response(200, ["Content-Length": "0"], []))
         defer { fixture.close() }
@@ -376,7 +405,7 @@ struct URLSessionHTTPClientTests {
         #expect(!fixture.control.started)
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func urlSessionInvalidationStopsPendingRequests() async throws {
         let fixture = HTTPFixture(.stallBeforeResponse)
         defer { fixture.close() }
@@ -391,7 +420,7 @@ struct URLSessionHTTPClientTests {
         #expect(fixture.control.stopReason != .timeout)
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func httpStubRecordsTimeoutStopReason() async throws {
         let fixture = HTTPFixture(.stallBeforeResponse)
         defer { fixture.close() }
@@ -415,7 +444,9 @@ private final class HTTPBufferMetrics: Sendable {
         var suspensions = 0
         var resumptions = 0
     }
+    private let suspension = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private let state = Mutex(Snapshot())
+    func waitForSuspension() async { for await _ in suspension.stream { return } }
     var snapshot: Snapshot { state.withLock { $0 } }
     func record(bytes: Int, suspended: Bool) {
         state.withLock {
@@ -425,6 +456,7 @@ private final class HTTPBufferMetrics: Sendable {
             if !suspended && $0.suspended { $0.resumptions += 1 }
             $0.suspended = suspended
         }
+        if suspended { suspension.continuation.yield(()) }
     }
 }
 

@@ -53,7 +53,7 @@ func retryClassification() {
     #expect(!policy.isRetryable(CancellationError()))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func sleepersRecordAndRespectCancellation() async throws {
     let instant = InstantSleeper()
     try await instant.sleep(for: .seconds(7))
@@ -71,7 +71,7 @@ func sleepersRecordAndRespectCancellation() async throws {
     #expect(instant.delays == [.seconds(7)])
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func continuousSleeperMapsCancellationDuringSleep() async throws {
     let task = Task { try await ContinuousSleeper().sleep(for: .seconds(30)) }
     try await Task.sleep(for: .milliseconds(20))

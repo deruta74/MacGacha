@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Darwin
+import Dispatch
 import Foundation
 import LauncherCore
 import DownloadEngine
 
 public enum RunOutcome: Sendable, Equatable { case completed, paused }
 
-/// Persists exact plans before pending records. Streams are pull-driven: no
-/// detached producer can keep installing after the consumer pauses or cancels.
+/// Persists exact plans before pending records. Dropping a stream cancels its
+/// bounded pipeline; operation ownership is retained until all workers join.
 public actor OperationRunner {
+    // Synchronous filesystem/cache work must not occupy a cooperative worker.
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.operation-runner")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     private let store: GameRecordStore
     private let fetcher: ChunkFetcher
     private let disk: any DiskSpaceProbe
@@ -54,14 +59,14 @@ public actor OperationRunner {
     }
 
     public func reconcile(_ game: String) async throws -> GameRecord? {
-        let lease = try await store.acquireOperationLease()
+        let lease = try await store.acquireOperationLease(waitForPipelineDrain: true)
         defer { withExtendedLifetime(lease) {} }
         guard let record = try await store.load(game) else {
             try await store.cleanupOrphanGameDirectory(game)
             return nil
         }
         if record.uninstalling { return record }
-        let fs = try ContainedFileSystem(root: record.installPath, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
+        let fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
         try CompletionReceipt.discardInterruptedWrites(fs: fs)
         if let pending = record.pending {
             for receipt in try CompletionReceipt.unacknowledged(fs: fs) where receipt.planID != pending.planID {
@@ -70,7 +75,7 @@ public actor OperationRunner {
             }
             if let receipt = try CompletionReceipt.load(fs: fs, planID: pending.planID) {
                 try GameCompletion.requireMatch(receipt, pending)
-                return try await GameCompletion.save(game, record: record, receipt: receipt, store: store, hooks: crashHooks, log: log, identityProvider: identityProvider)
+                return try await GameCompletion.save(game, record: record, receipt: receipt, store: store, hooks: crashHooks, log: log, identityProvider: identityProvider, fileOps: fileOps)
             }
             // Paused before engine setup or with staging: resume owns validation
             // and execution of the stored plan; reconciliation never rebuilds it.
@@ -105,6 +110,10 @@ private enum RunnerRecordProposal: Sendable {
 }
 
 private actor RunnerSession {
+    // Synchronous filesystem/cache work must not occupy a cooperative worker.
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.runner-session")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     private let game: String
     private let request: RunnerRequest
     private let approved: Bool
@@ -139,7 +148,7 @@ private actor RunnerSession {
         do {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             if !prepared {
-                if lease == nil { lease = try await store.acquireOperationLease() }
+                if lease == nil { lease = try await store.acquireOperationLease(waitForPipelineDrain: true) }
                 if try await prepare() {
                     finish()
                     return .phase(.completed) // An earlier durable receipt was reconciled.
@@ -166,7 +175,7 @@ private actor RunnerSession {
                 guard let current = try await store.load(game), current == original else {
                     throw LauncherError.journalCorrupt("Game record changed during operation")
                 }
-                _ = try await GameCompletion.save(game, record: current, receipt: receipt, store: store, hooks: hooks, log: log, identityProvider: identityProvider)
+                _ = try await GameCompletion.save(game, record: current, receipt: receipt, store: store, hooks: hooks, log: log, identityProvider: identityProvider, fileOps: fileOps)
                 finish()
             }
             return event
@@ -224,7 +233,7 @@ private actor RunnerSession {
             try requireGameLocationAvailable(saved.installPath)
             if let receipt = try CompletionReceipt.load(fs: ContainedFileSystem(root: saved.installPath, expectedRootIdentity: saved.installIdentity, identityProvider: identityProvider), planID: pending.planID) {
                 try GameCompletion.requireMatch(receipt, pending)
-                _ = try await GameCompletion.save(game, record: saved, receipt: receipt, store: store, hooks: hooks, log: log, identityProvider: identityProvider)
+                _ = try await GameCompletion.save(game, record: saved, receipt: receipt, store: store, hooks: hooks, log: log, identityProvider: identityProvider, fileOps: fileOps)
                 return true
             }
             guard let stored = try await store.loadPlan(for: game), stored.id == pending.planID,
@@ -237,7 +246,7 @@ private actor RunnerSession {
         let engine = try InstallOperation(plan: plan, installRoot: current.installPath, fetcher: fetcher, disk: disk,
             mode: .batched(approved: approved), fileOps: fileOps, crashHooks: hooks, writesCompletionReceipt: true,
             requireRequestedPlan: true, expectedRootIdentity: current.installIdentity, identityProvider: identityProvider)
-        iterator = engine.run().makeAsyncIterator()
+        iterator = engine.run(retaining: lease).makeAsyncIterator()
         return false
     }
 
@@ -252,10 +261,23 @@ private enum GameCompletion {
     }
 
     static func save(_ game: String, record: GameRecord, receipt: CompletionReceipt, store: GameRecordStore,
-        hooks: CrashHooks, log: EventLog?, identityProvider: any FileSystemIdentityProvider) async throws -> GameRecord {
+        hooks: CrashHooks, log: EventLog?, identityProvider: any FileSystemIdentityProvider, fileOps: any FileOps) async throws -> GameRecord {
+        do {
+            return try await BlockingIO.run {
+                try await saveOnIO(game, record: record, receipt: receipt, store: store,
+                    hooks: hooks, log: log, identityProvider: identityProvider, fileOps: fileOps)
+            }
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
+            throw error
+        }
+    }
+
+    private static func saveOnIO(_ game: String, record: GameRecord, receipt: CompletionReceipt, store: GameRecordStore,
+        hooks: CrashHooks, log: EventLog?, identityProvider: any FileSystemIdentityProvider, fileOps: any FileOps) async throws -> GameRecord {
         guard let pending = record.pending else { throw LauncherError.journalCorrupt("Missing pending operation") }
         try requireMatch(receipt, pending)
-        let fs = try ContainedFileSystem(root: record.installPath, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
+        let fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
         if pending.kind == .adopt {
             guard try fs.itemType(at: record.executable) == .regularFile else {
                 throw LauncherError.io("game executable missing")

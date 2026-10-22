@@ -215,34 +215,76 @@ private func makeInstaller(root: URL, cdn: MockCDN, runner: any ProcessRunner = 
         extractor: ArchiveExtractor(runner: runner), disk: disk, fileOps: fileOps, failurePoint: failurePoint)
 }
 
-@Test
-func cancellingInstallerCancelsNetworkAndReleasesStoreLock() async throws {
-    let temp = try TempDir(); let paths = AppPaths(root: temp.url); let http = InstallerStalledHTTP()
+@Test(.timeLimit(.minutes(1)), arguments: ["beforePull", "betweenPulls"])
+func installerCancellationAtPullBoundaryThrowsAndCleansDownloads(point: String) async throws {
+    let temp = try TempDir(), paths = AppPaths(root: temp.url), cdn = MockCDN()
     let bytes = archiveTestData([ArchiveTestEntry("file", body: "ok")], format: .tarGZ)
+    let component = try installerComponent(bytes)
+    cdn.serve("archive", data: bytes)
+    let installer = try makeInstaller(root: temp.url, cdn: cdn)
+    let task = Task {
+        if point == "beforePull" { withUnsafeCurrentTask { $0?.cancel() } }
+        for try await event in installer.install(component) {
+            if point == "betweenPulls", event == .phase(.staging) { withUnsafeCurrentTask { $0?.cancel() } }
+        }
+    }
+    await #expect(throws: LauncherError.cancelled) { try await task.value }
+    #expect(!FileManager.default.fileExists(atPath: paths.runtimes.appendingPathComponent(".downloads/\(component.id)").path))
+    try probeRuntimeLock(ContainedFileSystem(root: temp.url))
+}
+
+@Test(.timeLimit(.minutes(1)), arguments: ["headers", "body"])
+func cancellingInstallerCancelsNetworkAndReleasesStoreLock(point: String) async throws {
+    let temp = try TempDir(), paths = AppPaths(root: temp.url)
+    let bytes = Data(repeating: 0x61, count: 131_072)
+    let http = InstallerStalledHTTP(body: point == "body" ? bytes : nil)
     let c = try installerComponent(bytes)
     let installer = ComponentInstaller(store: RuntimeStore(paths: paths), consent: ConsentStore(url: paths.consent, root: paths.root),
         fetcher: ChunkFetcher(http: http, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()),
         extractor: ArchiveExtractor(runner: SystemProcessRunner()), disk: FixedDiskSpace(bytes: 10 << 30))
     let task = Task { for try await _ in installer.install(c) { } }
     defer { task.cancel() }
-    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-    while !(await http.started) && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
-    try #require(await http.started)
-    let start = ContinuousClock.now
+    await http.waitUntilStarted()
     task.cancel()
     await #expect(throws: LauncherError.cancelled) { try await task.value }
-    #expect(start.duration(to: .now) < .seconds(3))
+    #expect(http.cancelled)
     #expect(!FileManager.default.fileExists(atPath: paths.runtimes.appendingPathComponent(".downloads/\(c.id)").path))
     #expect(try RuntimeStore(paths: paths).installed().isEmpty)
-    let cdn = MockCDN(); cdn.serve("archive", data: bytes)
-    for try await _ in try makeInstaller(root: temp.url, cdn: cdn).install(c) { }
+    // A valid archive then installs, proving cancellation released the store lock.
+    let archive = archiveTestData([ArchiveTestEntry("file", body: "ok")], format: .tarGZ)
+    let cdn = MockCDN(); cdn.serve("archive", data: archive)
+    for try await _ in try makeInstaller(root: temp.url, cdn: cdn).install(installerComponent(archive)) { }
     #expect(try RuntimeStore(paths: paths).installed().count == 1)
 }
 
-private actor InstallerStalledHTTP: HTTPClient {
-    var started = false
+private final class InstallerStalledHTTP: HTTPClient {
+    private let body: Data?
+    private let started = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private let cancellation = Mutex(false)
+    var cancelled: Bool { cancellation.withLock { $0 } }
+    init(body: Data?) { self.body = body }
+    func waitUntilStarted() async { for await _ in started.stream { return } }
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
-        started = true
+        if let body {
+            let state = InstallerStalledBody(prefix: Data(body.prefix(65_536)), started: { self.started.continuation.yield(()) })
+            return (HTTPResponseHead(status: 200, contentLength: Int64(body.count)),
+                HTTPBody(next: { try await state.next() }, onCancel: { self.cancellation.withLock { $0 = true } }))
+        }
+        started.continuation.yield(())
+        do { try await Task.sleep(for: .seconds(30)) }
+        catch { cancellation.withLock { $0 = true }; throw error }
+        throw LauncherError.transport("test watchdog reached")
+    }
+}
+
+private actor InstallerStalledBody {
+    let prefix: Data
+    let started: @Sendable () -> Void
+    var sent = false
+    init(prefix: Data, started: @escaping @Sendable () -> Void) { self.prefix = prefix; self.started = started }
+    func next() async throws -> Data? {
+        if !sent { sent = true; return prefix }
+        started() // The fetcher has written the prefix before it asks for more.
         try await Task.sleep(for: .seconds(30))
         throw LauncherError.transport("test watchdog reached")
     }

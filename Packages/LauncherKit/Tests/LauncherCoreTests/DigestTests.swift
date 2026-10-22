@@ -4,6 +4,31 @@ import Foundation
 import Testing
 import LauncherCore
 
+@Test func borrowedDigestBuffersPreserveVectorsAndValueCopies() {
+    let bytes = Data("abc".utf8)
+    var hash = StreamingHasher(.md5)
+    bytes.withUnsafeBytes { hash.update(buffer: $0) }
+    #expect(hash.finalize().hex == "900150983cd24fb0d6963f7d28e17f72")
+    let copy = hash
+    Data("d".utf8).withUnsafeBytes { hash.update(buffer: $0) }
+    #expect(copy.finalize().hex == "900150983cd24fb0d6963f7d28e17f72")
+    #expect(hash.finalize().hex == "e2fc714c4727ee9395f324cd2e7f331f")
+    var sha = StreamingHasher(.sha256)
+    bytes.withUnsafeBytes { sha.update(buffer: $0) }
+    #expect(sha.finalize().hex == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+}
+
+@Test func digestByteParsingPreservesWhitespaceAndRejectsNonASCII() throws {
+    let valid = "D41D8CD98F00B204E9800998ECF8427E"
+    for raw in [valid, "\t\r\n" + valid + " ", "\u{00a0}" + valid + "\u{2003}"] {
+        #expect(try Digest(algorithm: .md5, hex: raw).hex == valid.lowercased())
+    }
+    for raw in ["é" + String(repeating: "0", count: 30), "Ｆ" + String(repeating: "0", count: 31),
+        "0 " + String(repeating: "0", count: 30), String(repeating: "G", count: 32)] {
+        #expect(throws: LauncherError.invalidDigest(raw)) { try Digest(algorithm: .md5, hex: raw) }
+    }
+}
+
 @Test
 func digestNormalizesCaseAndWhitespace() throws {
     let digest = try Digest(algorithm: .md5, hex: "  D41D8CD98F00B204E9800998ECF8427E\n")

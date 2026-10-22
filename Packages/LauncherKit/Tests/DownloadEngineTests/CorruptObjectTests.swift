@@ -9,7 +9,7 @@ import DownloadEngine
 import TestSupport
 
 @Suite struct CorruptObjectTests {
-    @Test func eachObjectGetsItsOwnCorruptionRetryBudget() async throws {
+    @Test(.timeLimit(.minutes(1))) func eachObjectGetsItsOwnCorruptionRetryBudget() async throws {
         let temp = try TempDir()
         let fs = try ContainedFileSystem(root: temp.url)
         let good = try zstdVector("good")
@@ -38,7 +38,7 @@ import TestSupport
         }
     }
 
-    @Test(arguments: [false, true])
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
     func refetchesCorruptObjectWithoutTransferDigest(validFrameWrongContent: Bool) async throws {
         let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
         let good = try zstdVector("good"); let bad = try corruptedZstd(validFrameWrongContent)
@@ -56,7 +56,7 @@ import TestSupport
         #expect(try fs.readFile(at: file.path, maxBytes: 4096) == Data(repeating: 65, count: 4096))
     }
 
-    @Test(arguments: [false, true])
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
     func resumeAfterCorruptionDoesNotReuseBadPart(validFrameWrongContent: Bool) async throws {
         let temp = try TempDir(); let good = try zstdVector("good")
         let object = compressedObject(good); let file = try compressedFile(object)
@@ -86,7 +86,7 @@ import TestSupport
         #expect(try fs.readFile(at: file.path, maxBytes: 4096) == Data(repeating: 65, count: 4096))
     }
 
-    @Test func refetchStartsAfterTheMirrorActuallyUsedByTransferRetries() async throws {
+    @Test(.timeLimit(.minutes(1))) func refetchStartsAfterTheMirrorActuallyUsedByTransferRetries() async throws {
         let temp = try TempDir(); let good = try zstdVector("good")
         let object = compressedObject(good, mirrors: ["https://first.test/missing/object",
             "https://second.test/corrupt/object", "https://third.test/good/object"])
@@ -106,7 +106,7 @@ import TestSupport
             .objectVerified(id: object.id), .fileStaged(path: file.path)])
     }
 
-    @Test func resumeWithVerifiedCorruptPartReachesHealthyLaterMirror() async throws {
+    @Test(.timeLimit(.minutes(1))) func resumeWithVerifiedCorruptPartReachesHealthyLaterMirror() async throws {
         let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
         let good = try zstdVector("good"); let bad = try corruptedZstd(false)
         let object = compressedObject(good, mirrors: ["https://first.test/missing/object",
@@ -127,7 +127,7 @@ import TestSupport
         #expect(try fs.readFile(at: stagedPath(plan, file.path), maxBytes: 4096) == Data(repeating: 65, count: 4096))
     }
 
-    @Test func corruptCachedObjectExhaustionIsBoundedAndLeavesNoPart() async throws {
+    @Test(.timeLimit(.minutes(1))) func corruptCachedObjectExhaustionIsBoundedAndLeavesNoPart() async throws {
         let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
         let bad = try corruptedZstd(false)
         let object = compressedObject(try zstdVector("good"), mirrors: ["https://cdn.test/first",
@@ -145,7 +145,7 @@ import TestSupport
         #expect(try fs.size(at: objectPath(plan, object)) == nil)
     }
 
-    @Test func resumedUnverifiedFullPartAlsoCanReachHealthyMirror() async throws {
+    @Test(.timeLimit(.minutes(1))) func resumedUnverifiedFullPartAlsoCanReachHealthyMirror() async throws {
         let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
         let good = try zstdVector("good"); let bad = try corruptedZstd(false)
         let object = compressedObject(good, mirrors: ["https://cdn.test/first",
@@ -163,7 +163,7 @@ import TestSupport
         #expect(try fs.readFile(at: stagedPath(plan, file.path), maxBytes: 4096) == Data(repeating: 65, count: 4096))
     }
 
-    @Test(arguments: [LauncherError.cancelled, LauncherError.io("No space left on device (errno 28)")])
+    @Test(.timeLimit(.minutes(1)), arguments: [LauncherError.cancelled, LauncherError.io("No space left on device (errno 28)")])
     func cancellationAndENOSPCAreNotCorruption(failure: LauncherError) async throws {
         let temp = try TempDir(); let good = try zstdVector("good")
         let object = compressedObject(good); let file = try compressedFile(object)

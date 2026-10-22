@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Dispatch
 import Foundation
 import LauncherCore
 import DownloadEngine
@@ -20,6 +21,10 @@ public struct GameEstimate: Sendable, Equatable {
 }
 
 public actor GameLibrary {
+    // Synchronous filesystem/cache work must not occupy a cooperative worker.
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.game-library")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     private let paths: AppPaths
     private let api: DeliveryAPI
     private let runner: OperationRunner
@@ -156,7 +161,8 @@ public actor GameLibrary {
     }
 
     fileprivate func prepare(_ game: GameDefinition, request: LibraryRequest) async throws -> LibraryPrepared {
-        let lease = try await store.acquireOperationLease()
+        let resumes = if case .resume = request { true } else { false }
+        let lease = try await store.acquireOperationLease(waitForPipelineDrain: resumes)
         let records = try await store.records(); let record = records[game.id]
         try GameRecordRules.check(request.action, record: record, others: others(records, game))
         if let record { try requireGameLocationAvailable(record.installPath) }

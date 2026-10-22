@@ -46,6 +46,18 @@ public struct ZstdDecoder: ChunkDecoder {
 }
 
 public enum Zstd {
+    /// Recovery verification needs no decoded temporary or large allocation.
+    package static func decodedDigest(_ input: FileHandle, encodedSize: Int64, decodedSize: Int64, algorithm: DigestAlgorithm) throws -> Digest {
+        var remaining = encodedSize, hasher = StreamingHasher(algorithm)
+        try ZstdStream().decode(expectedSize: decodedSize, read: {
+            guard remaining > 0 else { return Data() }
+            let piece = try input.read(upToCount: Int(min(65_536, remaining))) ?? Data()
+            guard !piece.isEmpty else { throw CorruptObjectError(reason: "Truncated zstd object") }
+            remaining -= Int64(piece.count); return piece
+        }, write: { hasher.update($0) })
+        return hasher.finalize()
+    }
+
     /// Output grows only as bytes are decoded; an untrusted expected size never causes a large reservation.
     public static func decode(_ data: Data, expectedSize: Int) throws -> Data {
         guard expectedSize >= 0 else { throw LauncherError.io("Invalid decode range") }

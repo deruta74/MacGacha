@@ -8,7 +8,7 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
-@Test(arguments: [false, true], ["missing", "wrong-size", "no-staged-record"])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true], ["missing", "wrong-size", "no-staged-record"])
 func committedBatchIsDoneForBudgetProgressAndObjectCleanup(includeCommittedInBatch: Bool, stagedState: String) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let object = stagingObject("shared", "abc")
@@ -44,7 +44,7 @@ func committedBatchIsDoneForBudgetProgressAndObjectCleanup(includeCommittedInBat
     #expect(try SpaceBudget.required(plan: plan, state: doneState, fs: fs).disk == SpaceBudget.margin)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func matchingLocalRangeWithFallbackNeedsNoNetwork() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let installed = try SafeRelativePath("installed")
@@ -68,7 +68,7 @@ func matchingLocalRangeWithFallbackNeedsNoNetwork() async throws {
     #expect(try fs.readFile(at: stagedPath(plan, file.path), maxBytes: 4) == Data("GOOD".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func stagesFilesFromSharedObjectOnce() async throws {
     let temp = try TempDir()
     let fs = try ContainedFileSystem(root: temp.url)
@@ -92,7 +92,7 @@ func stagesFilesFromSharedObjectOnce() async throws {
     #expect(!(try OperationJournal.replay(fs: fs, path: journalPath(plan)).completed))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func localExtentReusedWhenDigestMatches() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let installed = try SafeRelativePath("installed")
@@ -107,7 +107,7 @@ func localExtentReusedWhenDigestMatches() async throws {
     #expect(try fs.readFile(at: installed, maxBytes: 8) == Data("xxGOODyy".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func localExtentFallsBackToChunkOnMismatch() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let installed = try SafeRelativePath("installed")
@@ -124,7 +124,7 @@ func localExtentFallsBackToChunkOnMismatch() async throws {
     #expect(try fs.readFile(at: installed, maxBytes: 8) == Data("xxBAD!yy".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func stagedFileDigestMismatchRetriesOnceThenFails() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let object = stagingObject("object", "abc")
@@ -142,7 +142,7 @@ func stagedFileDigestMismatchRetriesOnceThenFails() async throws {
     #expect(try fs.size(at: objectPath(plan, object)) == 3)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func objectPartDeletedOnlyAfterAllReferrersStaged() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let object = stagingObject("object", "abc")
@@ -157,7 +157,7 @@ func objectPartDeletedOnlyAfterAllReferrersStaged() async throws {
     #expect(cdn.requestLog.count == 1)
 }
 
-@Test(arguments: [false, true])
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func staleVerifiedObjectWithMissingPartIsRefetched(wrongSize: Bool) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let object = stagingObject("object", "abc")
@@ -175,7 +175,7 @@ func staleVerifiedObjectWithMissingPartIsRefetched(wrongSize: Bool) async throws
     #expect(try fs.readFile(at: stagedPath(plan, file.path), maxBytes: 3) == Data("abc".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func symlinkInInstallRootRejected() async throws {
     let temp = try TempDir(); let outside = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let source = try SafeRelativePath("Data/local")
@@ -190,7 +190,7 @@ func symlinkInInstallRootRejected() async throws {
     #expect(try Data(contentsOf: outside.url.appendingPathComponent("local")) == Data("abc".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func insufficientStagingSpaceFailsBeforeNetwork() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let object = stagingObject("object", "abc")
@@ -203,7 +203,7 @@ func insufficientStagingSpaceFailsBeforeNetwork() async throws {
     #expect(cdn.requestLog.isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func decodedObjectMismatchRefetchesAndSupportsSHA256Files() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let reference = stagingObject("object", "abc")
@@ -219,7 +219,7 @@ func decodedObjectMismatchRefetchesAndSupportsSHA256Files() async throws {
     #expect(try fs.readFile(at: stagedPath(plan, file.path), maxBytes: 3) == Data("abc".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func corruptPreviouslyVerifiedPartUpdatesNetworkBudgetWhenRefetched() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let object = stagingObject("object", "abc")
@@ -233,7 +233,7 @@ func corruptPreviouslyVerifiedPartUpdatesNetworkBudgetWhenRefetched() async thro
     #expect(events.contains(.progress(downloaded: 3, totalNetwork: 3, staged: 3, totalStaged: 3)))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func stagingBoundsConcurrentObjectFetches() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let objects = (0..<12).map { stagingObject("object-\($0)", "abc") }
@@ -246,7 +246,7 @@ func stagingBoundsConcurrentObjectFetches() async throws {
     #expect(client.peak > 0 && client.peak <= 3)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func localRangeOutsideInstalledFileFallsBackWithoutReadingPastEOF() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let source = try SafeRelativePath("old")
@@ -262,7 +262,7 @@ func localRangeOutsideInstalledFileFallsBackWithoutReadingPastEOF() async throws
     #expect(try fs.readFile(at: stagedPath(plan, plan.files[0].path), maxBytes: 3) == Data("abc".utf8))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func symlinkInStagingDestinationCannotRedirectWrites() async throws {
     let temp = try TempDir(); let outside = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let object = stagingObject("object", "abc")
@@ -279,24 +279,29 @@ func symlinkInStagingDestinationCannotRedirectWrites() async throws {
     #expect(try Data(contentsOf: control) == Data("preserved".utf8))
 }
 
-@Test
-func pausedAndDiscardedStagingStreamDoesNotRunAheadOrLeakItsLease() async throws {
+@Test(.timeLimit(.minutes(1)))
+func pausedAndDiscardedStagingStreamKeepsBoundedWorkAndReleasesLease() async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let objects = [stagingObject("a", "abc"), stagingObject("b", "def")]
     let files = try [stagingFile("a", "abc", [stagingChunk("a", "abc")]), stagingFile("b", "def", [stagingChunk("b", "def")])]
     let plan = try stagingPlan(objects, files); let journal = try stagingJournal(fs, plan)
     let cdn = MockCDN(); cdn.serve("a", data: Data("abc".utf8)); cdn.serve("b", data: Data("def".utf8))
     let stager = try stagingEngine(plan, fs, cdn, journal)
-    do {
-        var iterator = stager.stage(files: files).makeAsyncIterator()
-        _ = try await iterator.next()
-        #expect(cdn.requestLog.isEmpty)
-        #expect(try await iterator.next() == .fileVerified(files[0].path))
-        #expect(cdn.requestLog.count == 1)
-        await #expect(throws: LauncherError.busy("staging already in use")) { _ = try await collectStaging(stager.stage(files: files)) }
-        withExtendedLifetime(iterator) {}
+    let released = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    try await OperationWork.$observer.withValue({ if $0 == .stagingLeaseReleased { released.continuation.yield(()) } }) {
+        do {
+            var iterator = stager.stage(files: files).makeAsyncIterator()
+            _ = try await iterator.next()
+            #expect(cdn.requestLog.isEmpty)
+            while let event = try await iterator.next() { if case .fileVerified = event { break } }
+            #expect(cdn.requestLog.count <= 2) // Both fit in this bounded window.
+            await #expect(throws: LauncherError.busy("staging already in use")) { _ = try await collectStaging(stager.stage(files: files)) }
+            withExtendedLifetime(iterator) {}
+        }
+        var release = released.stream.makeAsyncIterator()
+        _ = await release.next() // Discard cancels and joins owned workers.
+        _ = try await collectStaging(stager.stage(files: files))
     }
-    _ = try await collectStaging(stager.stage(files: files))
     #expect(cdn.requestLog.count == 2)
 }
 
@@ -310,13 +315,21 @@ func cancellationKeepsPartsAndStaged() async throws {
     let journal = try stagingJournal(fs, plan)
     let stager = try stagingEngine(plan, fs, client, journal)
     let clock = ContinuousClock(), started = clock.now, work = EngineWorkCounter()
+    let firstStaged = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     let task = Task {
         try await OperationWork.$observer.withValue({ work.record($0) }) {
-            try await collectStaging(stager.stage(files: files))
+            var events: [OperationEvent] = []
+            for try await event in stager.stage(files: files) {
+                events.append(event)
+                if event == .fileVerified(files[0].path) { firstStaged.continuation.yield(()) }
+            }
+            return events
         }
     }
     defer { task.cancel() }
     try await client.waitUntilStalled()
+    var stagedEvent = firstStaged.stream.makeAsyncIterator()
+    _ = await stagedEvent.next()
     print("Stager cancellation reached stalled body after \(started.duration(to: clock.now))")
     #expect(work.snapshot[.referrerIndexBuild] == 1)
     #expect(work.snapshot[.predictionFile] == 2)

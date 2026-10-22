@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Dispatch
 import Foundation
 import Synchronization
 import LauncherCore
@@ -8,6 +9,10 @@ import DownloadEngine
 /// Actor-isolated, bounded JSON persistence. All access below directory uses
 /// descriptor-relative ContainedFileSystem operations, including cache creation.
 public actor GameRecordStore {
+    // Synchronous filesystem/cache work must not occupy a cooperative worker.
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.game-store")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     public static let maximumRecordBytes = 4 << 20
     /// Shared by normal sweeping and orphan recovery. Younger cache siblings
     /// may belong to a lease-free writer, even while an operation owns the store.
@@ -23,8 +28,9 @@ public actor GameRecordStore {
     /// The store directory's identity excludes other runners, including runners
     /// using another store instance or another pathname for the same directory.
     /// Retain the lease through record advancement and receipt acknowledgement.
-    package func acquireOperationLease() throws -> GameOperationLease {
+    package func acquireOperationLease(waitForPipelineDrain: Bool = false) async throws -> GameOperationLease {
         let fs = try writableFilesystem()
+        if waitForPipelineDrain { try await GameOperationLease.waitForPipelineDrain(fs: fs) }
         let lease = try GameOperationLease.acquire(fs: fs)
         do {
             for game in try gameDirectories() { try sweepInterruptedWrites(for: game, fs: fs) }
@@ -295,26 +301,41 @@ public actor GameRecordStore {
 }
 
 /// Only active leases occupy the registry; filesystem work never holds its mutex.
-package final class GameOperationLease: Sendable {
-    private static let active = Mutex<Set<FileSystemIdentity>>([])
+package final class GameOperationLease: PipelineDrainOwner {
+    private struct Registry {
+        var active = Set<FileSystemIdentity>()
+        var drains: [FileSystemIdentity: @Sendable () async throws -> Void] = [:]
+    }
+    private static let registry = Mutex(Registry())
     private let key: FileSystemIdentity
     private let lock: InstallLock
     private init(key: FileSystemIdentity, lock: InstallLock) { self.key = key; self.lock = lock }
+    package func pipelineWillDrain(wait: @escaping @Sendable () async throws -> Void) {
+        Self.registry.withLock { $0.drains[key] = wait }
+    }
+    fileprivate static func waitForPipelineDrain(fs: ContainedFileSystem) async throws {
+        let key = try fs.rootIdentity()
+        if let wait = registry.withLock({ $0.drains[key] }) { try await wait() }
+    }
     fileprivate static func acquire(fs: ContainedFileSystem) throws -> GameOperationLease {
         let key = try fs.rootIdentity()
-        guard active.withLock({ $0.insert(key).inserted }) else {
+        guard registry.withLock({ $0.active.insert(key).inserted }) else {
             throw LauncherError.busy("another game operation is running")
         }
         do {
             let lock = try InstallLock(fs: fs, path: SafeRelativePath(".operation.lock"))
             return GameOperationLease(key: key, lock: lock)
         } catch {
-            _ = active.withLock { $0.remove(key) }
+            _ = registry.withLock { $0.active.remove(key) }
             if case LauncherError.busy = error { throw LauncherError.busy("another game operation is running") }
             throw error
         }
     }
-    deinit { _ = Self.active.withLock { $0.remove(key) } }
+    deinit {
+        Self.registry.withLock { state in
+            state.drains.removeValue(forKey: key); state.active.remove(key)
+        }
+    }
 }
 
 private struct ManagedPathEntry: Codable {

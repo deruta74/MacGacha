@@ -205,7 +205,8 @@ public actor OperationJournal {
         currentState = recoveredState
     }
 
-    /// Batch/commit boundaries and completion always use F_FULLFSYNC; other records use fsync.
+    /// Batch/commit boundaries and completion use F_FULLFSYNC; file records use
+    /// fsync. Disposable object hints join the next file/boundary flush.
     /// Once writing starts cancellation is deferred until the record has been synchronized.
     /// If append throws after writing any bytes, the record is possibly written: reopen
     /// and use recoveredState as the source of truth before proceeding.
@@ -231,7 +232,12 @@ public actor OperationJournal {
                 crashHooks.reach(.midJournalWrite)
                 try fs.append(Data(bytes.dropFirst(split)), to: path, durable: durable, synchronize: synchronize, didWrite: { written += $0 })
             } else {
-                try fs.append(bytes, to: path, durable: durable, synchronize: synchronize, didWrite: { written += $0 })
+                // Object records are recovery hints for disposable bytes. A
+                // later staged-file or boundary flush groups these appends.
+                let sync: ContainedFileSystem.FileSynchronizer?
+                if case .objectVerified = record { sync = { _, _ in } }
+                else { sync = synchronize }
+                try fs.append(bytes, to: path, durable: durable, synchronize: sync, didWrite: { written += $0 })
             }
         } catch {
             needsRecovery = written > 0

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Dispatch
 import Foundation
 import LauncherCore
 
@@ -13,6 +14,8 @@ public struct InstallOperation: Sendable {
     private let fs: ContainedFileSystem
     private let fetcher: ChunkFetcher
     private let disk: any DiskSpaceProbe
+    private let maxConcurrentObjects: Int
+    private let pipeline: PipelineConfiguration
     private let mode: Mode
     private let crashHooks: CrashHooks
     private let writesCompletionReceipt: Bool
@@ -22,7 +25,11 @@ public struct InstallOperation: Sendable {
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), mode: Mode = .automatic,
         fileOps: any FileOps = SystemFileOps(), crashHooks: CrashHooks = .none,
         writesCompletionReceipt: Bool = false, requireRequestedPlan: Bool = false,
-        expectedRootIdentity: FileSystemIdentity? = nil, identityProvider: any FileSystemIdentityProvider = SystemFileSystemIdentityProvider()) throws {
+        expectedRootIdentity: FileSystemIdentity? = nil, identityProvider: any FileSystemIdentityProvider = SystemFileSystemIdentityProvider(),
+        maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, pipeline: PipelineConfiguration = .default) throws {
+        try pipeline.validate()
+        guard maxConcurrentObjects > 0 else { throw LauncherError.io("Invalid object concurrency limit") }
+        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline
         try plan.validate(supportedCodecs: ChunkCodec.supportedCodecs)
         self.plan = plan; fs = try ContainedFileSystem(root: installRoot, fileOps: fileOps, expectedRootIdentity: expectedRootIdentity, identityProvider: identityProvider)
         self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks
@@ -32,9 +39,13 @@ public struct InstallOperation: Sendable {
 
     /// Pull-driven events: cancellation follows the consumer task, and discarding the
     /// stream releases the root lock without leaving a producer running in the background.
-    public func run() -> AsyncThrowingStream<OperationEvent, any Error> {
+    public func run() -> AsyncThrowingStream<OperationEvent, any Error> { run(retaining: nil) }
+
+    /// Keep the caller's operation ownership alive until cancelled pipeline
+    /// workers join, even if the caller discards its iterator between events.
+    package func run(retaining owner: (any Sendable)?) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = CommitSession(requested: plan, fs: fs, fetcher: fetcher, disk: disk, mode: mode, crashHooks: crashHooks,
-            writesCompletionReceipt: writesCompletionReceipt, requireRequestedPlan: requireRequestedPlan)
+            writesCompletionReceipt: writesCompletionReceipt, requireRequestedPlan: requireRequestedPlan, maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, retainedOwner: owner)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
 }
@@ -49,6 +60,11 @@ private struct CommitPaths: Sendable {
 }
 
 private actor CommitSession {
+    // Capacity snapshots and metadata mutations can wait for filesystem I/O.
+    // Actor serialization must not occupy a cooperative worker while they do.
+    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.install")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
+
     private enum Step { case start, space, staging, commit, delete, cleanup, done }
     private struct Stored: Sendable {
         let plan: InstallPlan
@@ -63,6 +79,9 @@ private actor CommitSession {
     private let fs: ContainedFileSystem
     private let fetcher: ChunkFetcher
     private let disk: any DiskSpaceProbe
+    private let maxConcurrentObjects: Int
+    private let pipeline: PipelineConfiguration
+    private let retainedOwner: (any Sendable)?
     private let mode: InstallOperation.Mode
     private let crashHooks: CrashHooks
     private let writesCompletionReceipt: Bool
@@ -75,6 +94,7 @@ private actor CommitSession {
     private var nextBatch = 0
     private var nextCommitIndex = 0
     private var batchingPrepared = false
+    private var recoveringCommit = false
     private var operationStager: OperationStager?
     private var batchIndex = 0
     private var staging: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
@@ -85,10 +105,11 @@ private actor CommitSession {
 
     init(requested: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe, mode: InstallOperation.Mode, crashHooks: CrashHooks, writesCompletionReceipt: Bool,
-        requireRequestedPlan: Bool) {
+        requireRequestedPlan: Bool, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, retainedOwner: (any Sendable)?) {
         self.requested = requested; self.fs = fs; self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks
         self.writesCompletionReceipt = writesCompletionReceipt
         self.requireRequestedPlan = requireRequestedPlan
+        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline; self.retainedOwner = retainedOwner
     }
 
     func next() async throws -> OperationEvent? {
@@ -102,6 +123,7 @@ private actor CommitSession {
             switch step {
             case .start:
                 // Dot-prefixed control files cannot collide with a SafeIdentifier plan ID.
+                try await PipelineRootRetention.waitIfDraining(fs.caseFoldedPathKey(for: SafeRelativePath(".macgacha-staging/.lock")))
                 lock = try InstallLock(fs: fs, path: SafeRelativePath(".macgacha-staging/.lock"))
                 try await selectStoredOrRequested()
                 return try activate()
@@ -140,12 +162,12 @@ private actor CommitSession {
                     try await createRequested()
                     return try activate()
                 }
-                step = .done; lock = nil
+                step = .done; operationStager = nil; lock = nil
                 return .phase(.completed)
             case .done: return nil
             }
         } catch {
-            step = .done; staging = nil; lock = nil
+            step = .done; staging = nil; operationStager = nil; lock = nil
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
             throw error
         }
@@ -272,6 +294,7 @@ private actor CommitSession {
             batch = plan.files.filter { state.batchFiles.contains($0.path) }
             batchIndex = current
             try ensureMarker(plan.id)
+            recoveringCommit = true
             step = .commit
             return .phase(.committing)
         }
@@ -300,6 +323,16 @@ private actor CommitSession {
             for file in plan.files where !state.stagedFiles.contains(file.path) && !state.committedFiles.contains(file.path) {
                 try fs.removeFile(at: paths.staged(file.path))
             }
+            // A crash/cancellation may follow fileStaged but precede part
+            // cleanup. Reclaim consumed parts before the engine preflight,
+            // rather than waiting until Stager has already accepted space.
+            let outstanding = Set(plan.files.filter {
+                !state.stagedFiles.contains($0.path) && !state.committedFiles.contains($0.path)
+            }.flatMap { SpaceBudget.references($0) })
+            for (id, object) in plan.objects where !outstanding.contains(id) {
+                let part = try paths.object(object)
+                if try fs.size(at: part) != nil { try fs.removeFile(at: part) }
+            }
             let pending = try pendingPlan()
             if pending.files.isEmpty {
                 if state.commitStartedBatches.isEmpty, plan.deletions.contains(where: { !state.deletedFiles.contains($0) }) {
@@ -310,7 +343,7 @@ private actor CommitSession {
                 step = .delete; return .phase(.deleting)
             }
             let available = try fs.availableBytes(using: disk)
-            let required = try SpaceBudget.required(plan: pending, state: state, fs: fs).disk
+            let required = try SpaceBudget.required(plan: pending, state: state, fs: fs, maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline).disk
             if required <= available { plannedBatches = [pending.files] }
             else {
                 plannedBatches = try partitionAll(pending, available: available)
@@ -320,7 +353,7 @@ private actor CommitSession {
                 }
             }
             operationStager = try Stager(plan: plan, fs: fs, fetcher: fetcher,
-                journal: context().journal, disk: disk, crashHooks: crashHooks).forOperation()
+                journal: context().journal, disk: disk, maxConcurrentObjects: maxConcurrentObjects, crashHooks: crashHooks, pipeline: pipeline).forOperation()
             let previous = max(state.currentBatch ?? -1, state.commitStartedBatches.max() ?? -1)
             guard previous < Int.max else { throw LauncherError.journalCorrupt("Batch index overflow") }
             nextCommitIndex = previous + 1
@@ -334,28 +367,28 @@ private actor CommitSession {
             batchIndex = nextCommitIndex; nextCommitIndex += 1
         }
         guard let operationStager else { throw LauncherError.io("Missing operation stager") }
-        staging = operationStager.stage(files: batch).makeAsyncIterator()
+        staging = operationStager.stage(files: batch, holding: lock, retaining: retainedOwner).makeAsyncIterator()
         step = .staging
         return .phase(.staging)
     }
 
     private func invalidateStaleStagedFiles(_ plan: InstallPlan) async throws {
-        let paths = CommitPaths(id: plan.id)
         for file in plan.files where state.stagedFiles.contains(file.path) && !state.committedFiles.contains(file.path) {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
-            if try fs.size(at: paths.staged(file.path)) != file.size {
+            if try await !FileAssembler.matches(file, plan: plan, fs: fs) {
                 try await record(.fileUnstaged(path: file.path))
             }
         }
     }
 
     private func partitionAll(_ pending: InstallPlan, available: Int64) throws -> [[FileTask]] {
-        let result = try SpaceBudget.batchedPreflight(plan: pending, state: state, fs: fs, available: available)
+        let result = try SpaceBudget.batchedPreflight(plan: pending, state: state, fs: fs, available: available, maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline)
         guard result.required <= available else { throw LauncherError.insufficientSpace(required: result.required, available: available) }
         return result.batches
     }
 
     private func beginCommit() async throws {
+        recoveringCommit = false
         let selected = Set(batch.map(\.path))
         guard selected == state.uncommittedStagedFiles,
             selected == (try await context().journal.stagedForCommit()) else {
@@ -383,7 +416,13 @@ private actor CommitSession {
             if state.committedFiles.contains(file.path) { continue }
             let staged = try paths.staged(file.path)
             let stagedSize = try fs.size(at: staged)
-            if state.stagedFiles.contains(file.path), stagedSize == file.size {
+            let verifiedStaging = state.stagedFiles.contains(file.path) && stagedSize == file.size
+            var usableStaging = verifiedStaging
+            if recoveringCommit, verifiedStaging { usableStaging = try await FileAssembler.matches(file, plan: plan, fs: fs) }
+            if usableStaging {
+                // Recovery may see data left in the kernel cache by an earlier
+                // interrupted restage. Re-establish the barrier before rename.
+                if recoveringCommit { try fs.fullSync(at: staged) }
                 try fs.rename(from: staged, to: file.path)
                 crashHooks.reach(.afterRenameBeforeJournal)
             } else if stagedSize == nil, try destinationMatches(file) {
@@ -391,8 +430,9 @@ private actor CommitSession {
                 try fs.fullSync(at: file.path)
             } else {
                 try await record(.fileUnstaged(path: file.path))
-                let stager = try Stager(plan: plan, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, crashHooks: crashHooks)
-                for try await _ in stager.stage(files: [file]) {}
+                let stager = try Stager(plan: plan, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, maxConcurrentObjects: maxConcurrentObjects, crashHooks: crashHooks, pipeline: pipeline).forRecovery()
+                let recovery = try stager.forOperation()
+                for try await _ in recovery.stage(files: [file], holding: lock, retaining: retainedOwner) {}
                 try await refresh()
                 guard state.stagedFiles.contains(file.path), try fs.size(at: staged) == file.size else {
                     throw LauncherError.journalCorrupt("Restaged file is missing")
