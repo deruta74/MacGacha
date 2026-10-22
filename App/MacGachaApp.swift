@@ -13,6 +13,17 @@ struct MacGachaApp: App {
         if let name = UserDefaults.standard.string(forKey: "MacGachaDebugGameState"), let state = debugGameState(name) {
             return AppModel.preview(rows: [], logLines: [], games: Dictionary(uniqueKeysWithValues: LauncherGame.all.map { ($0.id, state) }))
         }
+        // `-MacGachaDebugGameState busy` (or `busy-<game>`): one game downloads at full speed while the others wait.
+        if let name = UserDefaults.standard.string(forKey: "MacGachaDebugGameState"), name.hasPrefix("busy") {
+            let busy = name == "busy" ? "genshin" : String(name.dropFirst(5))
+            let downloading = GameState(status: .notInstalled, activity: .working(.staging, fraction: 0.12, bytesPerSecond: 215_500_000,
+                downloaded: 18_100_000_000, total: 146_480_000_000))
+            let model = AppModel.preview(rows: [], logLines: [], games: Dictionary(uniqueKeysWithValues: LauncherGame.all.map {
+                ($0.id, $0.id == busy ? downloading : GameState(status: .notInstalled))
+            }))
+            model.gameOperation = GameOperationToken(id: busy, generation: UUID())
+            return model
+        }
         #endif
         return AppModel.forCurrentProcess()
     }
