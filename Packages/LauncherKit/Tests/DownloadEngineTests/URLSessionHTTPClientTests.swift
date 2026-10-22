@@ -225,34 +225,106 @@ struct URLSessionHTTPClientTests {
 
     @Test(.timeLimit(.minutes(1)), arguments: [48 * 1024, 64 * 1024])
     func urlSessionSlowConsumerHasLosslessBoundedBuffering(pieceSize: Int) async throws {
-        // Exercise both an exact-watermark callback boundary and overshoot.
-        // URLSession may split/coalesce the stub's chunks before delivery.
-        let highWaterMark = 256 * 1024
-        let lowWaterMark = 64 * 1024
+        // A handshake drives each producer callback. No wall-clock pacing or
+        // scheduler latency decides whether suspension is reached or released.
+        let highWaterMark = 256 * 1024, lowWaterMark = 64 * 1024
         let pieces = (0..<96).map { Data(repeating: UInt8($0), count: pieceSize) }
-        var expected = Data()
-        for piece in pieces { expected.append(piece) }
+        let expected = pieces.reduce(into: Data()) { $0.append($1) }
         let metrics = HTTPBufferMetrics()
-        let fixture = HTTPFixture(.pacedResponse(pieces), highWaterMark: highWaterMark, lowWaterMark: lowWaterMark,
-            bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
+        let fixture = HTTPFixture(.controlledResponse(expected.count), highWaterMark: highWaterMark,
+            lowWaterMark: lowWaterMark, bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
         defer { fixture.close() }
         let (head, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
         #expect(head.status == 200)
-        // Native suspension can happen at exactly the high-water mark. Waiting
-        // for the producer to exceed it can deadlock a correctly paused producer.
-        await metrics.waitForSuspension()
-        try #require(metrics.snapshot.suspensions > 0)
-        var received = Data()
-        var largestPiece = 0
-        for try await piece in body {
-            received.append(piece)
-            largestPiece = max(largestPiece, piece.count)
-            try await Task.sleep(for: .milliseconds(5))
+        var iterator = body.makeAsyncIterator()
+        var received = Data(), sent = 0, largestPiece = 0
+        var completed = false
+        defer {
+            if !completed { print("HTTP diagnostic sent=\(sent) received=\(received.count) metrics=\(metrics.snapshot) control=\(fixture.control.diagnostic)") }
+        }
+        for piece in pieces {
+            fixture.control.send(piece); sent += piece.count
+            while true {
+                let state = try await metrics.waitForSnapshot { $0.received >= sent || $0.suspended }
+                if state.suspended {
+                    try await fixture.control.waitForTaskState(.suspended)
+                    // Hold the producer until consuming down to the low watermark
+                    // has actually resumed the native task. This also handles a
+                    // callback split that suspends halfway through a sent piece.
+                    while metrics.snapshot.bytes > lowWaterMark {
+                        let data = try #require(try await iterator.next())
+                        received.append(data); largestPiece = max(largestPiece, data.count)
+                    }
+                    #expect(!metrics.snapshot.suspended)
+                    try await fixture.control.waitForTaskState(.running)
+                }
+                if metrics.snapshot.received >= sent { break }
+            }
+        }
+        fixture.control.finish()
+        while let data = try await iterator.next() {
+            received.append(data); largestPiece = max(largestPiece, data.count)
         }
         #expect(received == expected)
         #expect(metrics.snapshot.peak <= highWaterMark + largestPiece)
-        #expect(metrics.snapshot.suspensions > 0)
-        #expect(metrics.snapshot.resumptions > 0)
+        #expect(metrics.snapshot.suspensions > 1)
+        #expect(metrics.snapshot.resumptions == metrics.snapshot.suspensions)
+        #expect(metrics.snapshot.bytes == 0)
+        #expect(fixture.control.stopReason != .timeout)
+        completed = true
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func requestIdleTimerExpiresStalledHeaders() async throws {
+        let fixture = HTTPFixture(.stallBeforeResponse, timeout: 0.05)
+        defer { fixture.close() }
+        await #expect(throws: LauncherError.transport("HTTP request timed out")) {
+            _ = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func requestIdleTimeoutPausesForBackpressureAndRearmsAfterResume() async throws {
+        let timer = ManualHTTPRequestTimer(), metrics = HTTPBufferMetrics()
+        let data = Data(repeating: 42, count: 256 * 1024)
+        let fixture = HTTPFixture(.controlledResponse(data.count + 1), highWaterMark: data.count,
+            lowWaterMark: 64 * 1024, timer: timer,
+            bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
+        defer { fixture.close() }
+        let (_, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+        #expect(try #require(fixture.control.request).timeoutInterval > 3600)
+        fixture.control.send(data)
+        _ = try await metrics.waitForSnapshot { $0.suspended }
+        #expect(timer.deadline == nil)
+        timer.advance(by: 3600) // Also simulate a queued callback from before suspension.
+        #expect(timer.deadline == nil && !timer.cancelled)
+        var iterator = body.makeAsyncIterator(), received = Data()
+        while received.count < data.count { received.append(try #require(try await iterator.next())) }
+        #expect(received == data)
+        #expect(timer.deadline == timer.now + 15)
+        timer.advance(by: 14)
+        #expect(!timer.cancelled)
+        timer.advance(by: 2) // A genuine network stall after resuming still times out.
+        await #expect(throws: LauncherError.transport("HTTP request timed out")) { _ = try await iterator.next() }
+        #expect(timer.cancelled)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func requestIdleTimeoutResetsOnDataAndIgnoresStaleCallbacksAfterCompletion() async throws {
+        let timer = ManualHTTPRequestTimer(), metrics = HTTPBufferMetrics()
+        let fixture = HTTPFixture(.controlledResponse(2), timer: timer,
+            bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
+        defer { fixture.close() }
+        let (_, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+        timer.advance(by: 14)
+        fixture.control.send(Data([1]))
+        _ = try await metrics.waitForSnapshot { $0.received == 1 }
+        timer.advance(by: 2) // Old deadline expired, but the received byte refreshed it.
+        #expect(timer.deadline == 29 && !timer.cancelled)
+        fixture.control.send(Data([2])); fixture.control.finish()
+        var received = Data(); for try await data in body { received.append(data) }
+        #expect(received == Data([1, 2]) && timer.cancelled)
+        timer.advance(by: 3600)
         #expect(metrics.snapshot.bytes == 0)
     }
 
@@ -437,7 +509,8 @@ struct URLSessionHTTPClientTests {
 }
 
 private final class HTTPBufferMetrics: Sendable {
-    struct Snapshot {
+    struct Snapshot: Sendable {
+        var received = 0
         var bytes = 0
         var peak = 0
         var suspended = false
@@ -446,16 +519,25 @@ private final class HTTPBufferMetrics: Sendable {
     }
     private let suspension = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private let state = Mutex(Snapshot())
+    private let changes = AsyncStream<Snapshot>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    func waitForSnapshot(_ predicate: (Snapshot) -> Bool) async throws -> Snapshot {
+        if predicate(snapshot) { return snapshot }
+        for await value in changes.stream where predicate(value) { return value }
+        throw LauncherError.cancelled
+    }
     func waitForSuspension() async { for await _ in suspension.stream { return } }
     var snapshot: Snapshot { state.withLock { $0 } }
     func record(bytes: Int, suspended: Bool) {
-        state.withLock {
+        let snapshot = state.withLock {
+            $0.received += max(0, bytes - $0.bytes)
             $0.bytes = bytes
             $0.peak = max($0.peak, bytes)
             if suspended && !$0.suspended { $0.suspensions += 1 }
             if !suspended && $0.suspended { $0.resumptions += 1 }
             $0.suspended = suspended
+            return $0
         }
+        changes.continuation.yield(snapshot)
         if suspended { suspension.continuation.yield(()) }
     }
 }
@@ -463,6 +545,7 @@ private final class HTTPBufferMetrics: Sendable {
 private enum HTTPStubMode: Sendable {
     case response(Int, [String: String], [Data])
     case pacedResponse([Data])
+    case controlledResponse(Int)
     case failBeforeResponse, failAfterResponse, externallyCancelled, externallyCancelledAfterResponse
     case stallBeforeResponse, stallAfterResponse, nonHTTP
 }
@@ -478,6 +561,7 @@ private struct HTTPFixture: Sendable {
         highWaterMark: Int = 16 << 20,
         lowWaterMark: Int = 4 << 20,
         timeout: TimeInterval = 15,
+        timer: (any HTTPRequestTimer)? = nil,
         bufferObserver: (@Sendable (Int, Bool) -> Void)? = nil
     ) {
         let url = URL(string: "https://http.test/\(UUID().uuidString)")!
@@ -488,10 +572,12 @@ private struct HTTPFixture: Sendable {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HTTPStubProtocol.self]
         configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout
+        // A resource deadline counts consumer pauses and scheduler delays too.
+        // Leave the default whole-transfer limit; Swift Testing bounds the test.
         session = URLSession(configuration: configuration)
         client = URLSessionHTTPClient(session: session, highWaterMark: highWaterMark,
-            lowWaterMark: lowWaterMark, bufferObserver: bufferObserver)
+            lowWaterMark: lowWaterMark, bufferObserver: bufferObserver,
+            timerFactory: { timer ?? DispatchHTTPRequestTimer() })
     }
 
     func close() {
@@ -507,6 +593,8 @@ private final class HTTPStubControl: Sendable {
 
     struct State {
         var started = false
+        var starts = 0
+        var stops = 0
         var stopped = false
         var deliveredBytes = 0
         var request: URLRequest?
@@ -514,11 +602,31 @@ private final class HTTPStubControl: Sendable {
         var stopReason: StopReason?
     }
     let state = Mutex(State())
+    var diagnostic: String { state.withLock { "starts=\($0.starts) stops=\($0.stops) stopped=\($0.stopped) reason=\(String(describing: $0.stopReason)) task=\(String(describing: $0.loader?.task?.state))" } }
     var started: Bool { state.withLock { $0.started } }
     var stopped: Bool { state.withLock { $0.stopped } }
     var deliveredBytes: Int { state.withLock { $0.deliveredBytes } }
     var stopReason: StopReason? { state.withLock { $0.stopReason } }
     var request: URLRequest? { state.withLock { $0.request } }
+
+    func waitForTaskState(_ expected: URLSessionTask.State) async throws {
+        guard let task = state.withLock({ $0.loader?.task }) else { throw LauncherError.io("Missing stub task") }
+        let changes = AsyncStream<URLSessionTask.State>.makeStream()
+        let observation = task.observe(\.state, options: [.initial, .new]) { task, _ in
+            changes.continuation.yield(task.state)
+        }
+        defer { observation.invalidate(); changes.continuation.finish() }
+        for await value in changes.stream {
+            if value == expected { return }
+            if value == .canceling || value == .completed { throw LauncherError.io("Stub task ended before transition") }
+        }
+        throw LauncherError.cancelled
+    }
+
+    func finish() {
+        let loader = state.withLock { $0.stopped ? nil : $0.loader }
+        if let loader { loader.client?.urlProtocolDidFinishLoading(loader) }
+    }
 
     func send(_ data: Data) {
         let loader = state.withLock { $0.stopped ? nil : $0.loader }
@@ -547,8 +655,10 @@ private final class HTTPStubProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
             return
         }
-        control.state.withLock { $0.started = true; $0.request = request; $0.loader = self }
+        control.state.withLock { $0.starts += 1; $0.started = true; $0.request = request; $0.loader = self }
         switch mode {
+        case .controlledResponse(let count):
+            respond(200, headers: ["Content-Type": "application/octet-stream", "Content-Length": "\(count)"])
         case .pacedResponse(let chunks):
             respond(200, headers: ["Content-Type": "application/octet-stream",
                 "Content-Length": "\(chunks.reduce(0) { $0 + $1.count })"])
@@ -597,6 +707,7 @@ private final class HTTPStubProtocol: URLProtocol, @unchecked Sendable {
         let error = task?.error as NSError?
         let timedOut = error?.domain == NSURLErrorDomain && error?.code == NSURLErrorTimedOut
         control.state.withLock {
+            $0.stops += 1
             $0.stopped = true
             $0.loader = nil
             if timedOut { $0.stopReason = .timeout }
@@ -624,5 +735,27 @@ private func stallWatchdog(_ control: HTTPStubControl, timeout: Duration = .seco
     Task {
         try await Task.sleep(for: timeout)
         control.expire()
+    }
+}
+
+/// Explicit time advancement exercises queued/stale deadline callbacks without
+/// races against CI scheduling or sleeps. Callbacks always run outside the lock.
+private final class ManualHTTPRequestTimer: HTTPRequestTimer {
+    private struct State {
+        var now: TimeInterval = 0
+        var deadline: TimeInterval?
+        var cancelled = false
+        var handler: (@Sendable () -> Void)?
+    }
+    private let state = Mutex(State())
+    var now: TimeInterval { state.withLock { $0.now } }
+    var deadline: TimeInterval? { state.withLock { $0.deadline } }
+    var cancelled: Bool { state.withLock { $0.cancelled } }
+    func setHandler(_ handler: @escaping @Sendable () -> Void) { state.withLock { $0.handler = handler } }
+    func schedule(at deadline: TimeInterval?) { state.withLock { $0.deadline = deadline } }
+    func cancel() { state.withLock { $0.cancelled = true; $0.deadline = nil } }
+    func advance(by duration: TimeInterval) {
+        let handler = state.withLock { $0.now += duration; return $0.handler }
+        handler?() // Deliberately allow a previously queued callback after cancel.
     }
 }

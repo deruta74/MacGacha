@@ -7,6 +7,8 @@ import LauncherCore
 /// Create once and share; call invalidate() when done.
 public struct URLSessionHTTPClient: HTTPClient {
     private let sessions: [URLSession]
+    private let requestTimeout: TimeInterval
+    private var timerFactory: @Sendable () -> any HTTPRequestTimer = { DispatchHTTPRequestTimer() }
     private var callbackObserver: (@Sendable (Int, Duration) -> Void)?
     private let lifecycle: HTTPSessionLifecycle
     private let highWaterMark: Int
@@ -40,6 +42,7 @@ public struct URLSessionHTTPClient: HTTPClient {
             queue.qualityOfService = .userInitiated
             return URLSession(configuration: configuration, delegate: nil, delegateQueue: queue)
         }
+        requestTimeout = configuration.timeoutIntervalForRequest
         lifecycle = HTTPSessionLifecycle(); self.highWaterMark = highWaterMark; self.lowWaterMark = lowWaterMark
         bufferObserver = nil; self.redirectPolicy = redirectPolicy
     }
@@ -54,9 +57,12 @@ public struct URLSessionHTTPClient: HTTPClient {
     }
 
     init(session: URLSession, highWaterMark: Int, lowWaterMark: Int,
-        bufferObserver: (@Sendable (Int, Bool) -> Void)?, redirectPolicy: @escaping @Sendable (URL) -> Bool = { _ in true }) {
+        bufferObserver: (@Sendable (Int, Bool) -> Void)?, redirectPolicy: @escaping @Sendable (URL) -> Bool = { _ in true },
+        timerFactory: @escaping @Sendable () -> any HTTPRequestTimer = { DispatchHTTPRequestTimer() }) {
         precondition(highWaterMark > 0 && lowWaterMark >= 0 && lowWaterMark < highWaterMark)
         self.sessions = [session]
+        requestTimeout = session.configuration.timeoutIntervalForRequest
+        self.timerFactory = timerFactory
         self.lifecycle = HTTPSessionLifecycle()
         self.highWaterMark = highWaterMark
         self.lowWaterMark = lowWaterMark
@@ -68,10 +74,15 @@ public struct URLSessionHTTPClient: HTTPClient {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         if let offset, offset < 0 { throw LauncherError.io("Invalid resume offset \(offset)") }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        // CFNetwork's idle timer keeps running while a task is suspended for
+        // consumer backpressure. Own that timer instead, pausing it at the high
+        // watermark. An explicitly configured whole-resource deadline still applies.
+        request.timeoutInterval = .greatestFiniteMagnitude
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let offset { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
         let delegate = HTTPStreamDelegate(highWaterMark: highWaterMark, lowWaterMark: lowWaterMark,
-            bufferObserver: bufferObserver, lifecycle: lifecycle, redirectPolicy: redirectPolicy, callbackObserver: callbackObserver)
+            bufferObserver: bufferObserver, lifecycle: lifecycle, redirectPolicy: redirectPolicy, callbackObserver: callbackObserver,
+            requestTimeout: requestTimeout, timer: timerFactory())
         try lifecycle.invalidated.withLock { invalidated in
             guard !invalidated else { throw LauncherError.cancelled }
             let index = lifecycle.cursor.withLock { cursor in let index = cursor; cursor = (cursor + 1) % sessions.count; return index }
@@ -122,6 +133,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         var bufferedBytes = 0
         var suspended = false
         var finished = false
+        var idleDeadline: TimeInterval?
         var terminalError: LauncherError?
         var cancelledByUs = false
         var effects: [Effect] = []
@@ -135,21 +147,31 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
     private let lifecycle: HTTPSessionLifecycle
     private let redirectPolicy: @Sendable (URL) -> Bool
     private let callbackObserver: (@Sendable (Int, Duration) -> Void)?
+    private let requestTimeout: TimeInterval
+    private let timer: any HTTPRequestTimer
 
     init(highWaterMark: Int, lowWaterMark: Int, bufferObserver: (@Sendable (Int, Bool) -> Void)?,
         lifecycle: HTTPSessionLifecycle, redirectPolicy: @escaping @Sendable (URL) -> Bool,
-        callbackObserver: (@Sendable (Int, Duration) -> Void)?) {
+        callbackObserver: (@Sendable (Int, Duration) -> Void)?, requestTimeout: TimeInterval,
+        timer: any HTTPRequestTimer) {
         self.highWaterMark = highWaterMark
         self.lowWaterMark = lowWaterMark
         self.bufferObserver = bufferObserver
         self.lifecycle = lifecycle
         self.redirectPolicy = redirectPolicy
         self.callbackObserver = callbackObserver
+        self.requestTimeout = requestTimeout; self.timer = timer
         super.init()
+        timer.setHandler { [weak self] in
+            self?.finish(.transport("HTTP request timed out"), cancelTask: true, onlyIfIdle: true)
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
         newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        var request = request
+        request.timeoutInterval = .greatestFiniteMagnitude
+        state.withLock { if !$0.finished { receivedActivity(&$0) } }
         completionHandler(request.url.map(redirectPolicy) == true ? request : nil)
     }
 
@@ -163,6 +185,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
                 return state.terminalError ?? .transport("HTTP request already finished")
             }
             state.head = continuation
+            restartIdleTimer(&state)
             state.effects.append(.resume(task))
             return nil
         }
@@ -193,6 +216,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
                     }
                     if state.suspended && state.bufferedBytes <= lowWaterMark {
                         state.suspended = false
+                        restartIdleTimer(&state)
                         if let task = state.task { state.effects.append(.resume(task)) }
                     }
                     return .success(data)
@@ -221,6 +245,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         }
         let continuation = state.withLock { state in
             guard !state.finished else { return nil as CheckedContinuation<HTTPResponseHead, any Error>? }
+            receivedActivity(&state)
             let continuation = state.head
             state.head = nil
             return continuation
@@ -240,6 +265,7 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         let waiter = state.withLock { state -> CheckedContinuation<Data?, any Error>? in
             guard !state.finished else { return nil }
             defer { observe(&state) }
+            receivedActivity(&state)
             if let waiter = state.waiter {
                 state.waiter = nil
                 return waiter
@@ -250,12 +276,23 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
             state.bufferedBytes += data.count
             if state.bufferedBytes >= highWaterMark && !state.suspended {
                 state.suspended = true
+                state.idleDeadline = nil
+                timer.schedule(at: nil)
                 if let task = state.task { state.effects.append(.suspend(task)) }
             }
             return nil
         }
         performEffects()
         waiter?.resume(returning: data)
+    }
+
+    private func receivedActivity(_ state: inout State) {
+        if !state.suspended { state.idleDeadline = timer.now + requestTimeout }
+    }
+
+    private func restartIdleTimer(_ state: inout State) {
+        receivedActivity(&state)
+        timer.schedule(at: state.idleDeadline)
     }
 
     private func observe(_ state: inout State) {
@@ -306,9 +343,18 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         finish(failure)
     }
 
-    private func finish(_ error: LauncherError?, cancelTask: Bool = false, cancelledByUs: Bool = false) {
+    private func finish(_ error: LauncherError?, cancelTask: Bool = false, cancelledByUs: Bool = false,
+        onlyIfIdle: Bool = false) {
         let completed = state.withLock { state -> State? in
+            if onlyIfIdle {
+                guard !state.finished, let deadline = state.idleDeadline else { return nil }
+                // Data can arrive concurrently with a queued timer callback. Check
+                // and finish under the same lock; a stale callback only rearms.
+                guard deadline <= timer.now else { timer.schedule(at: deadline); return nil }
+            }
             guard !state.finished || cancelTask else { return nil }
+            timer.cancel()
+            state.idleDeadline = nil
             state.cancelledByUs = state.cancelledByUs || cancelledByUs
             state.finished = true
             state.terminalError = error ?? (state.head == nil ? nil : .transport("HTTP transfer ended before response headers"))
