@@ -72,7 +72,7 @@ public actor EventLog {
             }
         }
         data.append(10)
-        let logger = Logger(subsystem: "com.deruta.macgacha", category: record.category)
+        let logger = Logger(subsystem: "com.lo7ted.macgacha", category: record.category)
         logger.log(level: level.osType, "\(String(decoding: data, as: UTF8.self), privacy: .public)")
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

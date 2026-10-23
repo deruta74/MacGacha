@@ -123,7 +123,7 @@ private final class ProcessPipeReader: Sendable {
             throw LauncherError.io("Configuring process output: \(String(cString: strerror(error)))")
         }
         self.handle = handle
-        queue = DispatchQueue(label: "com.deruta.macgacha.process-output")
+        queue = DispatchQueue(label: "com.lo7ted.macgacha.process-output")
         source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: queue)
         source.setEventHandler { [weak self] in self?.drain() }
         source.setCancelHandler { [weak self, handle] in

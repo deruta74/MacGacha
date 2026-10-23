@@ -14,8 +14,8 @@ import HoYoPlayAPI
 struct AppModelTests {
     @Test func gameArtCacheUsesBundleNamespaceAndFallback() {
         let caches = URL(fileURLWithPath: "/test/Library/Caches", isDirectory: true)
-        #expect(AppModel.gameArtCacheDirectory(in: caches, bundleIdentifier: "com.deruta.macgacha").path
-            == "/test/Library/Caches/com.deruta.macgacha/GameArt")
+        #expect(AppModel.gameArtCacheDirectory(in: caches, bundleIdentifier: "com.lo7ted.macgacha").path
+            == "/test/Library/Caches/com.lo7ted.macgacha/GameArt")
         for identifier in [nil, ""] as [String?] {
             #expect(AppModel.gameArtCacheDirectory(in: caches, bundleIdentifier: identifier).path
                 == "/test/Library/Caches/MacGacha/GameArt")

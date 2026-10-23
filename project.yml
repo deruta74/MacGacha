@@ -32,7 +32,7 @@ targets:
         product: GameLibrary
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.deruta.macgacha
+        PRODUCT_BUNDLE_IDENTIFIER: com.lo7ted.macgacha
         ARCHS: arm64
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_IDENTITY: "-"
@@ -70,7 +70,7 @@ targets:
         product: GameLibrary
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.deruta.macgacha.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.lo7ted.macgacha.tests
         ARCHS: arm64
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_IDENTITY: "-"
