@@ -1,6 +1,6 @@
 # MacGacha — universal launcher for HoYoverse games on Apple Silicon
 
-> 🚧 **Work in progress.** Games can already be installed, updated and verified, but they can't be launched yet. There are no releases yet.
+> 🚧 **Work in progress.** Games can already be installed, updated and verified. All three games have been run by hand under Wine on an M5 Pro; one-click launching from the app is being built now. There are no releases yet.
 
 A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenless Zone Zero** on Apple Silicon. It aims to provide reliable resumable downloads, file verification, and managed Wine / DXMT / D3DMetal runtimes.
 
@@ -21,21 +21,34 @@ Code and documentation in this repository may be written or modified with assist
 ## Roadmap
 
 **Done**
-- **Download engine.** Resumable, verified downloads with a crash-safe journal. A file reaches the game folder only after its hash matches.
-- **Runtimes.** Wine, DXMT and D3DMetal are downloaded and kept side by side, so an update never breaks a working version. D3DMetal is installed only after you accept Apple's terms, or imported from an existing Game Porting Toolkit.
+- **Download engine.** Resumable, verified downloads with a crash-safe journal. A file reaches the game folder only after its hash matches. Files are downloaded and assembled in parallel, close to the full speed of a 2.5 Gbit link.
+- **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space".
+- **Runtimes.** Wine, DXMT and D3DMetal are downloaded and kept side by side, so an update never breaks a working version. D3DMetal is installed only after you accept Apple's terms, or imported from an existing Game Porting Toolkit. The default DXMT build now uses CrossOver's Wine, which needs about 2.5× less CPU than the previous one.
+- **Compatibility components.** jadeite and a Steam launcher shim are installed and removed from the Runtimes window. We build the shim ourselves, reproducibly, from Valve's Proton source ([release](https://github.com/deruta74/MacGacha/releases/tag/steam-shim-proton-10.0-4)).
 - **Launcher.** One window for all three games with the official banners and background art, plus a diagnostics bundle for bug reports.
-- **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts, and free space is checked before and during the download.
 
-**In progress**
-- **Faster downloads.** The engine downloads and assembles many files in parallel. In early tests it is about twice as fast as before and comes close to the full speed of a 2.5 Gbit link.
-- **Compatibility testing.** Each game is run by hand under D3DMetal and DXMT, to choose the graphics backend for each one.
-  - **Honkai: Star Rail 4.6: launch verified.** It runs at 60 fps on Ultra on an M5 Pro, under both D3DMetal and DXMT. D3DMetal needs about half the CPU and less GPU time per frame (about 6.5 ms against 9 ms), so it will be the default.
-  - **Zenless Zone Zero:** testing next.
-  - **Genshin Impact 7.1:** doesn't start yet; a different workaround is being tested.
+**Verified by hand on an M5 Pro (macOS 27)**
+
+All three games start and play with a community anti-cheat workaround. None of them needs `/etc/hosts` changes or administrator rights.
+
+| Game | Default backend | Result |
+|---|---|---|
+| Honkai: Star Rail 4.6 | D3DMetal, 60 fps cap | 60 fps on Ultra. About half the CPU of DXMT, GPU time about 6.5 ms against 9 ms. |
+| Zenless Zone Zero | D3DMetal, DirectX 12 | 120 fps on High, battle dips stay above 115. Full ray tracing holds 116–120 fps. |
+| Genshin Impact 7.1 | D3DMetal, 60 fps cap | Steady 60 fps on Ultra with an even frame time. |
+
+DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin; it can be changed per game.
+
+**In progress: one-click Play**
+- Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game, and minimizes itself. When the game closes, the launcher returns and puts back any game files it hid.
+- Per-game settings: graphics backend, frame limit, Retina mode, DirectX 12 for Zenless Zone Zero, and a switch for the compatibility workaround.
+- Recovery: if the launcher crashes while a game is running, it finds the game again on restart and restores everything once the game exits.
 
 **Next**
-- **Launching games:** a graphics backend and runtime version per game, voice-pack settings the game reads, and opt-in compatibility patches that can be reverted.
-- **Updates:** pre-downloading the next version before release, and smaller patch-based updates.
+- **Rotating banners and news** like HoYoPlay: several background arts per game, event cards, and Events / Notices / News tabs.
+- **Languages:** a translated interface, and game news and art in your language.
+- **Downloads:** estimated time remaining; pre-downloading the next version before release; smaller patch-based updates.
+- **Audio:** surround output from the games, including Spatial Audio on AirPods.
 - **Releases:** signed and notarized builds with automatic updates.
 
 ## Disclaimer
@@ -43,7 +56,7 @@ Code and documentation in this repository may be written or modified with assist
 MacGacha is an unofficial, community project. It is not affiliated with, endorsed by, or supported by HoYoverse (COGNOSPHERE) or Apple Inc. All game names and trademarks belong to their respective owners.
 
 - Using third-party launchers may conflict with HoYoverse's Terms of Service. Use at your own risk.
-- Under Wine, the games' anti-cheat stops them from starting. To launch them, MacGacha will use community workarounds: for example, [jadeite](https://codeberg.org/mkrsym1/jadeite) for Star Rail and blocking one game server while the game runs. These workarounds may conflict with the Terms of Service and could lead to an account ban. MacGacha doesn't inject cheats, FPS unlockers or other mods into the game. Any future option that changes the game process will be off by default and will warn you about the ban risk first.
+- Under Wine, the games' anti-cheat stops them from starting. To launch them, MacGacha uses community workarounds: [jadeite](https://codeberg.org/mkrsym1/jadeite) for Star Rail, which also blocks one game server through a local proxy while the game runs, and a Steam launcher shim for Genshin Impact and Zenless Zone Zero. These workarounds may conflict with the Terms of Service and could lead to an account ban. MacGacha doesn't inject cheats, FPS unlockers or other mods into the game. Any future option that changes the game process will be off by default and will warn you about the ban risk first.
 - The software is provided as is. The authors aren't responsible for account bans, data loss or any other damage.
 - D3DMetal and the Game Porting Toolkit are © Apple Inc. and licensed under Apple's terms. The launcher will ask you to accept those terms before it downloads the component.
 
@@ -51,4 +64,4 @@ MacGacha is an unofficial, community project. It is not affiliated with, endorse
 
 Copyright (C) 2026 deruta74. MacGacha is free software under the [GNU General Public License v3.0](LICENSE), with one additional term under GPL section 7(b) (see [NOTICE](NOTICE)): the link to the original project, https://github.com/deruta74/MacGacha, must be kept by every conveyed (distributed) copy and every distributed work based on MacGacha, both in its source and in its About screen. Private modifications that aren't distributed aren't affected. Any distributed version, modified or paid, must stay under GPL-3.0 with its source available.
 
-Components the launcher downloads at runtime (Wine, DXMT, D3DMetal) and the games themselves are under their own licenses and terms.
+Components the launcher downloads at runtime (Wine, DXMT, D3DMetal, jadeite, the Steam shim) and the games themselves are under their own licenses and terms.
