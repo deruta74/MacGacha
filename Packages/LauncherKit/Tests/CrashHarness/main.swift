@@ -7,12 +7,64 @@ import DownloadEngine
 import TestSupport
 import GameLibrary
 import Sophon
+import Launch
+import Synchronization
+
+private final class LaunchJournalCrashOps: FileOps {
+    let point: String
+    let renamed = Mutex(false)
+    let base = SystemFileOps()
+    init(point: String) { self.point = point }
+    private func reach(_ name: String) { if point == name { _exit(137) } }
+    func write(_ fd: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        reach("afterTempCreate")
+        let count = try base.write(fd, bytes: bytes)
+        reach("afterTempWrite")
+        return count
+    }
+    func synchronize(_ fd: Int32, durable: Bool) throws {
+        var bytes = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard bytes.withUnsafeMutableBufferPointer({ fcntl(fd, F_GETPATH, $0.baseAddress!) }) == 0 else { throw LauncherError.io("Missing journal descriptor path") }
+        let path = bytes.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+        let temporary = path.contains(".macgacha-write-")
+        if temporary { reach("beforeTempSync") }
+        else if renamed.withLock({ $0 }) { reach("beforeDirectorySync") }
+        try base.synchronize(fd, durable: durable)
+        if temporary { reach("afterTempSync") }
+        else if renamed.withLock({ $0 }) { reach("afterDirectorySync") }
+    }
+    func rename(from source: String, in src: Int32, to target: String, in dst: Int32, exclusive: Bool) throws {
+        if target == "launch-session.json" { reach("beforeRename") }
+        try base.rename(from: source, in: src, to: target, in: dst, exclusive: exclusive)
+        if target == "launch-session.json" { renamed.withLock { $0 = true }; reach("afterRename") }
+    }
+    func unlink(_ name: String, in dir: Int32, isDirectory: Bool) throws { try base.unlink(name, in: dir, isDirectory: isDirectory) }
+}
 
 @main
 struct CrashHarness {
     static func main() async {
         do {
             let args = CommandLine.arguments
+            if args.count == 4, args[1] == "launch-journal-write" {
+                try await BlockingIO.run {
+                    let paths = AppPaths(root: URL(fileURLWithPath: args[2]))
+                    guard var session = try LaunchJournal(paths: paths).read(game: "starrail") else { throw LauncherError.io("Missing launch fixture") }
+                    session.state = .running
+                    try LaunchJournal(paths: paths, fileOps: LaunchJournalCrashOps(point: args[3])).write(session)
+                    _exit(1)
+                }
+            }
+            if args.count == 5, args[1] == "launch-files", let point = LaunchFileStep(rawValue: args[3]) {
+                try await BlockingIO.run {
+                    let journal = LaunchJournal(paths: AppPaths(root: URL(fileURLWithPath: args[2])))
+                    guard var session = try journal.read(game: "starrail") else { throw LauncherError.io("Missing launch fixture") }
+                    let files = HiddenFiles(hooks: LaunchFileHooks(at: point, action: { _exit(137) }))
+                    if args[4] == "hide" { try files.hide([SafeRelativePath("data/vulkan-1.dll")], session: &session, journal: journal) }
+                    else { _ = try files.restore(session: &session, journal: journal) }
+                    _exit(1)
+                }
+            }
             if args.count == 4, args[1] == "spawn-inherited-signals", let signalNumber = Int32(args[2]) {
                 try await BlockingIO.run {
                     var blocked = sigset_t()

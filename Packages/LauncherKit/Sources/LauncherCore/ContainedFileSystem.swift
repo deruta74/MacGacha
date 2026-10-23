@@ -469,6 +469,74 @@ public struct ContainedFileSystem: Sendable, Hashable {
         try synchronize(target)
     }
 
+    /// Moves a regular file between contained roots without replacing anything.
+    /// Both roots/ancestors are checked, and both parents are durably synchronized.
+    /// EXDEV propagates; callers must not emulate this with copy-and-delete.
+    package func moveRegularFile(at source: SafeRelativePath, to destination: SafeRelativePath,
+        in destinationFileSystem: ContainedFileSystem) throws {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard let parent = try directory(Array(source.components.dropLast()), create: false) else {
+            throw LauncherError.io("Move source is missing")
+        }
+        defer { close(parent) }
+        let name = source.components.last!
+        guard let info = try entry(name, parent: parent), info.st_mode & S_IFMT == S_IFREG else {
+            throw LauncherError.unsafePath(display(source.components))
+        }
+        let destinationParents = Array(destination.components.dropLast())
+        if !destinationParents.isEmpty {
+            try destinationFileSystem.createDirectoryDurably(at: SafeRelativePath(destinationParents.joined(separator: "/")))
+        }
+        guard let target = try destinationFileSystem.directory(destinationParents, create: false) else {
+            throw LauncherError.io("Move destination is missing")
+        }
+        defer { close(target) }
+        guard try destinationFileSystem.entry(destination.components.last!, parent: target) == nil else {
+            throw LauncherError.io("Move destination already exists")
+        }
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
+        try fileOps.rename(from: name, in: parent, to: destination.components.last!, in: target, exclusive: true)
+        try synchronize(parent)
+        try destinationFileSystem.synchronize(target)
+    }
+
+    /// Launch metadata/recovery uses an explicit durable directory chain rather
+    /// than making every hot-path traversal repeat ancestor synchronization.
+    package func createDirectoryDurably(at path: SafeRelativePath) throws {
+        try synchronizeDirectories(path.components, createMissing: true)
+    }
+
+    /// Heals both the leaf-parent barrier and interrupted ancestor creation.
+    /// Never creates missing directories or follows links.
+    package func synchronizeAncestors(of path: SafeRelativePath) throws {
+        try synchronizeDirectories(Array(path.components.dropLast()), createMissing: false)
+    }
+
+    private func synchronizeDirectories(_ components: [String], createMissing: Bool) throws {
+        guard components.count <= 128, let root = try directory([], create: false) else {
+            throw LauncherError.io("Cannot synchronize missing directory chain")
+        }
+        var parent = root
+        defer { close(parent) }
+        for component in components {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            var info = try entry(component, parent: parent)
+            if info == nil, createMissing {
+                guard mkdirat(parent, component, 0o700) == 0 || errno == EEXIST else { throw LauncherError.fileSystemFailure("Cannot create durable directory") }
+                info = try entry(component, parent: parent)
+            }
+            guard let info, info.st_mode & S_IFMT == S_IFDIR else { throw LauncherError.unsafePath(component) }
+            let child = openat(parent, component, Self.directoryFlags)
+            guard child >= 0 else { throw accessError(component) }
+            // Repeat this even for an existing child: a previous mkdir may
+            // have succeeded immediately before this barrier failed.
+            do { try synchronize(parent) }
+            catch { close(child); throw error }
+            close(parent); parent = child
+        }
+        try synchronize(parent)
+    }
+
     /// Publishes a directory atomically. Returns true if a prior destination was swapped
     /// into source (the caller then removes it). Missing destinations use an exclusive rename.
     /// Both leaves must be directories; symlinks at either leaf or in ancestors are refused.
@@ -952,6 +1020,167 @@ public struct ContainedFileSystem: Sendable, Hashable {
 
     private func accessError(_ path: String) -> LauncherError {
         errno == ELOOP || errno == ENOTDIR ? .unsafePath(path) : .fileSystemFailure("Cannot access contained path")
+    }
+}
+
+extension ContainedFileSystem {
+    /// A scoped, borrowed claim. The descriptor remains open through the caller's
+    /// move and post-check; the noncopyable borrow cannot escape this scope.
+    package func withClaimedFile<T>(at source: SafeRelativePath, permitHardLinks: Bool = false,
+        _ body: (borrowing RegularFileClaim) throws -> T) throws -> T {
+        guard let parent = try directory(Array(source.components.dropLast()), create: false) else {
+            throw LauncherError.io("Claim source is missing")
+        }
+        defer { close(parent) }
+        // NONBLOCK also makes a substituted FIFO fail its type check without
+        // blocking. It has no effect on reads from the required regular file.
+        let fd = openat(parent, source.components.last!, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        guard fd >= 0 else { throw accessError(source.description) }
+        defer { close(fd) }
+        let verified = try Self.hashClaimDescriptor(fd)
+        guard let named = try entry(source.components.last!, parent: parent), ClaimStamp(named) == verified.stamp else {
+            throw LauncherError.io("Claim name changed during verification")
+        }
+        guard permitHardLinks || verified.stamp.links == 1 else { throw LauncherError.io("Claim source is hard-linked") }
+        let claim = RegularFileClaim(fileSystem: self, parent: parent, descriptor: fd, source: source,
+            stamp: verified.stamp, sha256: verified.sha256)
+        return try body(claim)
+    }
+
+    package struct ClaimStamp: Codable, Equatable, Sendable {
+        package let device: Int64
+        package let inode: UInt64
+        package let size: Int64
+        package let mtimeSeconds: Int64
+        package let mtimeNanos: Int64
+        package let ctimeSeconds: Int64
+        package let ctimeNanos: Int64
+        package let links: UInt64
+        package let kind: UInt32
+        fileprivate init(_ value: stat) {
+            device = Int64(value.st_dev); inode = UInt64(value.st_ino); size = value.st_size
+            mtimeSeconds = Int64(value.st_mtimespec.tv_sec); mtimeNanos = Int64(value.st_mtimespec.tv_nsec)
+            ctimeSeconds = Int64(value.st_ctimespec.tv_sec); ctimeNanos = Int64(value.st_ctimespec.tv_nsec)
+            links = UInt64(value.st_nlink); kind = UInt32(value.st_mode & S_IFMT)
+        }
+        package func sameObject(as other: Self) -> Bool { device == other.device && inode == other.inode && kind == other.kind }
+        package func sameContentMetadata(as other: Self) -> Bool {
+            sameObject(as: other) && size == other.size && mtimeSeconds == other.mtimeSeconds && mtimeNanos == other.mtimeNanos
+        }
+    }
+
+    package struct RegularFileClaim: ~Copyable {
+        fileprivate let fileSystem: ContainedFileSystem
+        fileprivate let parent: Int32
+        fileprivate let descriptor: Int32
+        package let source: SafeRelativePath
+        package let stamp: ClaimStamp
+        package let sha256: Digest
+
+        /// Exclusive publication keeps the claim open until the destination and
+        /// content have both been checked. A false result never resolves ownership:
+        /// the caller must retain its durable intent and quarantine only an inode
+        /// that still matches it; an unrelated replacement is left untouched.
+        package func move(to destination: SafeRelativePath, in targetFS: ContainedFileSystem,
+            afterRename: () -> Void = {}) throws -> Bool {
+            let parents = Array(destination.components.dropLast())
+            if !parents.isEmpty { try targetFS.createDirectoryDurably(at: SafeRelativePath(parents.joined(separator: "/"))) }
+            guard let target = try targetFS.directory(parents, create: false) else { throw LauncherError.io("Move destination missing") }
+            defer { close(target) }
+            var current = stat()
+            guard fstat(descriptor, &current) == 0, ClaimStamp(current) == stamp,
+                let named = try fileSystem.entry(source.components.last!, parent: parent),
+                ClaimStamp(named) == stamp else { throw LauncherError.io("Claim source changed before rename") }
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            try fileSystem.fileOps.rename(from: source.components.last!, in: parent,
+                to: destination.components.last!, in: target, exclusive: true)
+            afterRename()
+            let verified = try verifiesPublication(at: destination, in: targetFS)
+            if !verified { return false }
+            try fileSystem.synchronize(parent)
+            try targetFS.synchronize(target)
+            return verified
+        }
+
+        /// Rename may change ctime. Bind the destination to this inode, then
+        /// rehash the still-open fd, checking stable size/mtime/nlink around it.
+        package func verifiesPublication(at destination: SafeRelativePath, in targetFS: ContainedFileSystem) throws -> Bool {
+            guard let target = try targetFS.directory(Array(destination.components.dropLast()), create: false) else { return false }
+            defer { close(target) }
+            guard let named = try targetFS.entry(destination.components.last!, parent: target),
+                stamp.sameObject(as: ClaimStamp(named)) else { return false }
+            var current = stat()
+            guard fstat(descriptor, &current) == 0, stamp.sameContentMetadata(as: ClaimStamp(current)),
+                current.st_nlink == 1 else { return false }
+            let verified: (stamp: ClaimStamp, sha256: Digest)
+            do { verified = try reverify() }
+            catch LauncherError.cancelled { throw LauncherError.cancelled }
+            catch { return false }
+            guard verified.sha256 == sha256, stamp.sameContentMetadata(as: verified.stamp), verified.stamp.links == 1,
+                fstat(descriptor, &current) == 0, verified.stamp.sameContentMetadata(as: ClaimStamp(current)), current.st_nlink == 1,
+                let finalName = try targetFS.entry(destination.components.last!, parent: target),
+                stamp.sameObject(as: ClaimStamp(finalName)) else { return false }
+            return true
+        }
+
+        /// Rehash the same descriptor, with before/after metadata stability.
+        package func reverify() throws -> (stamp: ClaimStamp, sha256: Digest) {
+            try ContainedFileSystem.hashClaimDescriptor(descriptor)
+        }
+    }
+
+    /// A non-following identity observation, never an ownership grant by itself.
+    package func entryStamp(at path: SafeRelativePath) throws -> ClaimStamp? {
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else { return nil }
+        defer { close(parent) }
+        return try entry(path.components.last!, parent: parent).map(ClaimStamp.init)
+    }
+
+    /// Move only the recorded inode. The caller durably records this intent
+    /// before calling, and records the actual destination identity in didMove
+    /// before any subsequent rename (including returning a raced-in user file).
+    /// A false result leaves an unrelated source untouched. The post-rename
+    /// identity can differ because RENAME_EXCL protects only the destination.
+    package func quarantineEntry(at source: SafeRelativePath, to destination: SafeRelativePath,
+        in targetFS: ContainedFileSystem, matching expected: ClaimStamp,
+        afterRename: () -> Void = {}, didMove: (ClaimStamp) throws -> Void) throws -> Bool {
+        guard let parent = try directory(Array(source.components.dropLast()), create: false) else { return false }
+        defer { close(parent) }
+        let parents = Array(destination.components.dropLast())
+        if !parents.isEmpty { try targetFS.createDirectoryDurably(at: SafeRelativePath(parents.joined(separator: "/"))) }
+        guard let target = try targetFS.directory(parents, create: false) else { throw LauncherError.io("Quarantine destination missing") }
+        defer { close(target) }
+        guard let item = try entry(source.components.last!, parent: parent), item.st_mode & S_IFMT != S_IFDIR,
+            expected.sameObject(as: ClaimStamp(item)) else { return false }
+        try fileOps.rename(from: source.components.last!, in: parent, to: destination.components.last!, in: target, exclusive: true)
+        afterRename()
+        guard let moved = try targetFS.entry(destination.components.last!, parent: target) else {
+            throw LauncherError.io("Quarantine destination changed after rename")
+        }
+        try didMove(ClaimStamp(moved))
+        try synchronize(parent)
+        try targetFS.synchronize(target)
+        return true
+    }
+
+    private static func hashClaimDescriptor(_ fd: Int32) throws -> (stamp: ClaimStamp, sha256: Digest) {
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size >= 0, info.st_nlink > 0 else {
+            throw LauncherError.io("Claim source must be a linked regular file")
+        }
+        let before = ClaimStamp(info)
+        guard lseek(fd, 0, SEEK_SET) == 0 else { throw LauncherError.io("Cannot seek claimed file") }
+        var remaining = before.size, bytes = [UInt8](repeating: 0, count: 65_536), hash = StreamingHasher(.sha256)
+        while remaining > 0 {
+            guard !Task.isCancelled else { throw LauncherError.cancelled }
+            let count = bytes.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, Int(min(remaining, Int64($0.count)))) }
+            if count < 0 && errno == EINTR { continue }
+            guard count > 0 else { throw LauncherError.io("Claimed file changed while reading") }
+            bytes.withUnsafeBytes { hash.update(buffer: UnsafeRawBufferPointer(rebasing: $0[..<count])) }
+            remaining -= Int64(count)
+        }
+        guard fstat(fd, &info) == 0, ClaimStamp(info) == before else { throw LauncherError.io("Claimed file changed during verification") }
+        return (before, hash.finalize())
     }
 }
 
