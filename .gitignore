@@ -5,3 +5,10 @@ DerivedData/
 .swiftpm/
 docs/
 spike/
+
+# Steam shim build output (sources default to the ignored .build directory).
+/out-a/
+/out-b/
+/compat/steam-shim/out*/
+/compat/steam-shim/*.exe
+/compat/steam-shim/*.dll

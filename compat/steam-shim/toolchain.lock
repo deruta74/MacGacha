@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+# Formula, active package version, arm64_golden_gate bottle SHA-256.
+# Topological runtime order; no unlisted dependency may be resolved/installed.
+gmp 6.3.0 5116a8201d8e044aef7d486da7e57f1e4dd2d8554ea6b540b44e45c0804f8f6f
+isl 0.28 35c8c6f314483e70651cd9d5192defb067a95a334659e357cfdf02d3d2077d58
+mpfr 4.2.2 9275968023b1def4b1e0ff2a19e86f053a01bf383570945c9d36218c4c17493a
+libmpc 1.4.1 49301161f91eb2cea57695a69c8060d6a6c41fa97e98643bf3ef6507f97a5bbd
+lz4 1.10.0 53ea7532077fe43abfe3d6e0d9991ebc8370e9edcc508f997c92902d60c8b151
+xz 5.8.4 b2b5d6523153be05c20bcc51cd358ea3dd1f4bf893748fdedb779ab508ea63ce
+zstd 1.5.7_1 7fb4af03304cc4897326168cdcd53290311c5543150f5502a61c3e84b6d62765
+mingw-w64 14.0.0_3 de39e7069ae35357ab142a1b004c2e4060100ab50d25d9ed500f0ab24b87ee8f
