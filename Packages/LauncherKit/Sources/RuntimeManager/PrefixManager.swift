@@ -7,7 +7,7 @@ import DownloadEngine
 public struct PrefixManager: Sendable {
     private let paths: AppPaths
     private let runner: any ProcessRunner
-    private static let markerLimit = 16_384
+    static let markerLimit = 16_384
 
     public init(paths: AppPaths, runner: any ProcessRunner) {
         self.paths = paths
@@ -52,7 +52,7 @@ public struct PrefixManager: Sendable {
                 throw LauncherError.unsafePath(wineBinary.path)
             }
             let fs = try ContainedFileSystem(root: paths.root)
-            let lock = try await acquireLock(fs: fs, prefix: prefix)
+            let lock = try await Self.acquireLock(fs: fs, prefix: prefix)
             defer { withExtendedLifetime(lock) {} }
             try fs.createDirectory(at: prefix)
             // Validate every Prefixes ancestor immediately before crossing the process boundary.
@@ -74,7 +74,7 @@ public struct PrefixManager: Sendable {
                 // Failed/cancelled upgrades remain upgrading for every runtime request.
                 let upgrading = PrefixMarker(schemaVersion: PrefixMarker.schema, game: game, backend: identifier,
                     state: .upgrading, wineBinaryPath: binary.path, wineBinaryIdentity: identity, createdAt: existing.createdAt, bundleID: runtimeDigest == nil ? nil : identifier, runtimeDigest: runtimeDigest)
-                try writeMarker(upgrading, fs: fs, to: marker, pending: pending)
+                try Self.writeMarker(upgrading, fs: fs, to: marker, pending: pending)
                 arguments = ["wineboot", "-u"]
             } else {
                 // Wine writes by path, so an incomplete prefix must not retain links
@@ -104,7 +104,7 @@ public struct PrefixManager: Sendable {
             }
             let readiness = PrefixMarker(schemaVersion: PrefixMarker.schema, game: game, backend: identifier,
                 state: .ready, wineBinaryPath: binary.path, wineBinaryIdentity: identity, createdAt: existing?.createdAt ?? Date(), bundleID: runtimeDigest == nil ? nil : identifier, runtimeDigest: runtimeDigest)
-            try writeMarker(readiness, fs: fs, to: marker, pending: pending)
+            try Self.writeMarker(readiness, fs: fs, to: marker, pending: pending)
             return url
         } catch {
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
@@ -118,7 +118,7 @@ public struct PrefixManager: Sendable {
         return try SafeRelativePath("Prefixes/\(game)-\(backend)")
     }
 
-    private func acquireLock(fs: ContainedFileSystem, prefix: SafeRelativePath) async throws -> InstallLock {
+    static func acquireLock(fs: ContainedFileSystem, prefix: SafeRelativePath) async throws -> InstallLock {
         let path = try SafeRelativePath("Prefixes/.macgacha-prefix-\(prefix.components.last!).lock")
         while true {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -129,7 +129,7 @@ public struct PrefixManager: Sendable {
         }
     }
 
-    private func writeMarker(_ value: PrefixMarker, fs: ContainedFileSystem, to path: SafeRelativePath,
+    static func writeMarker(_ value: PrefixMarker, fs: ContainedFileSystem, to path: SafeRelativePath,
         pending: SafeRelativePath) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -172,7 +172,7 @@ public struct PrefixManager: Sendable {
 }
 
 private struct BackendHeader: Decodable { let backend: String }
-private struct PrefixMarker: Codable {
+struct PrefixMarker: Codable {
     enum State: String, Codable { case ready, upgrading }
     static let schema = 1
     let schemaVersion: Int
@@ -184,13 +184,14 @@ private struct PrefixMarker: Codable {
     let createdAt: Date
     let bundleID: String?
     let runtimeDigest: Digest?
+    var provisioningRevision: Int? = nil
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, game, backend, state, wineBinaryPath, wineBinaryIdentity, createdAt, bundleID, runtimeDigest
+        case schemaVersion, game, backend, state, wineBinaryPath, wineBinaryIdentity, createdAt, bundleID, runtimeDigest, provisioningRevision
     }
 }
 
-private extension PrefixMarker {
+extension PrefixMarker {
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
@@ -204,5 +205,6 @@ private extension PrefixMarker {
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         bundleID = try container.decodeIfPresent(String.self, forKey: .bundleID)
         runtimeDigest = try container.decodeIfPresent(Digest.self, forKey: .runtimeDigest)
+        provisioningRevision = try container.decodeIfPresent(Int.self, forKey: .provisioningRevision)
     }
 }

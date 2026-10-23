@@ -26,6 +26,27 @@ public protocol ProcessRunner: Sendable {
     ) async throws -> ProcessResult
 }
 
+extension ProcessRunner {
+    /// Cancels and joins the runner on timeout, including its process cleanup.
+    /// The injected deadline keeps callers' timeout tests independent of pacing.
+    package func run(_ executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, timeout: Duration,
+        timeoutWait: @escaping @Sendable (Duration) async throws -> Void) async throws -> ProcessResult {
+        guard timeout > .zero else { throw LauncherError.io("Process timed out") }
+        return try await withThrowingTaskGroup(of: ProcessResult.self) { group in
+            group.addTask { try await self.run(executable, arguments: arguments, environment: environment, currentDirectory: currentDirectory) }
+            group.addTask {
+                try await timeoutWait(timeout)
+                try Task.checkCancellation()
+                throw LauncherError.io("Process timed out")
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else { throw LauncherError.cancelled }
+            return result
+        }
+    }
+}
+
 public struct SystemProcessRunner: ProcessRunner {
     private let terminationGracePeriod: Duration
     private let pipeDrainGracePeriod: Duration
