@@ -18,6 +18,9 @@ struct RootView: View {
     @AppStorage("animatedBackgrounds") private var animatedSetting = true
     @AppStorage("animatedBackgroundsChosen") private var animatedChosen = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #if DEBUG
+    @Environment(\.openSettings) private var openSettings
+    #endif
 
     private var game: LauncherGame {
         LauncherGame.all.first { $0.id == selectedID } ?? LauncherGame.all[0]
@@ -76,8 +79,8 @@ struct RootView: View {
     }
 
     #if DEBUG
-    /// Debug builds only: `-MacGachaDebugGame starrail -MacGachaDebugPanel runtimes` (or `-MacGachaDebugSheet install`)
-    /// opens a state directly, for screenshots without clicking through the UI.
+    /// Debug builds only: `-MacGachaDebugGame starrail -MacGachaDebugPanel runtimes` (or `-MacGachaDebugSheet install`,
+    /// or `-MacGachaDebugSettings YES`) opens a state directly, for screenshots without clicking through the UI.
     private func applyDebugLaunchArguments() {
         let defaults = UserDefaults.standard
         if let id = defaults.string(forKey: "MacGachaDebugGame"), LauncherGame.all.contains(where: { $0.id == id }) {
@@ -86,6 +89,7 @@ struct RootView: View {
         if let name = defaults.string(forKey: "MacGachaDebugPanel") {
             panel = Panel(rawValue: name)
         }
+        if defaults.bool(forKey: "MacGachaDebugSettings") { openSettings() }
         switch defaults.string(forKey: "MacGachaDebugSheet") {
         case "install": gameSheet = .install(selectedID)
         case "voices": gameSheet = .voices(selectedID)

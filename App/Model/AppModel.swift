@@ -113,7 +113,9 @@ final class AppModel {
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artService: GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
-                bundleIdentifier: Bundle.main.bundleIdentifier), log: log), gameServices: LiveGameServices(paths: paths, log: log))
+                bundleIdentifier: Bundle.main.bundleIdentifier),
+                // English until the app ships translations; then HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations).
+                language: .enUS, log: log), gameServices: LiveGameServices(paths: paths, log: log))
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -467,11 +469,11 @@ final class AppModel {
         for component in installed where !covered.contains(where: { $0.rawValue == Self.id(component) }) && !result.contains(where: { $0.id == Self.id(component) }) {
             let id = Self.id(component)
             result.append(RuntimeRow(id: id, kindName: Self.kindName(component.kind), version: component.version,
-                licenseName: "Installed runtime", state: working[id] ?? .installed(source: component.source), canImportGPTK: false, needsConsent: false))
+                licenseName: String(localized: "Installed runtime"), state: working[id] ?? .installed(source: component.source), canImportGPTK: false, needsConsent: false))
         }
         for (id, entry) in invalid.sorted(by: { $0.key < $1.key }) {
-            result.append(RuntimeRow(id: id, kindName: entry.kind.map(Self.kindName) ?? "Unknown runtime", version: entry.rawName,
-                licenseName: "Local runtime", state: working[id] ?? .invalid(reason: entry.reason, removable: entry.removable),
+            result.append(RuntimeRow(id: id, kindName: entry.kind.map(Self.kindName) ?? String(localized: "Unknown runtime"), version: entry.rawName,
+                licenseName: String(localized: "Local runtime"), state: working[id] ?? .invalid(reason: entry.reason, removable: entry.removable),
                 canImportGPTK: false, needsConsent: false))
         }
         rows = result
@@ -485,7 +487,7 @@ final class AppModel {
     private static func kindName(_ kind: ComponentKind) -> String {
         switch kind {
         case .wine: "Wine"; case .dxmt: "DXMT"; case .d3dmetal: "D3DMetal"
-        case .jadeite: "Jadeite"; case .steamShim: "Steam shim"
+        case .jadeite: "Jadeite"; case .steamShim: String(localized: "Steam shim", comment: "Runtime component name")
         }
     }
 }

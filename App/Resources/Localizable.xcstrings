@@ -1,0 +1,510 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ can't be played until the install finishes." : {
+
+    },
+    "%@ is downloading — pause it to start this one" : {
+      "comment" : "The argument is another game's name"
+    },
+    "%@ of %@" : {
+      "comment" : "Downloaded so far of the total, e.g. 18.3 of 136.5 GB",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ of %2$@"
+          }
+        }
+      }
+    },
+    "%@ of the free space Finder shows is held by macOS (Time Machine snapshots and caches) and can't be used yet. macOS frees it over time, or you can free it in System Settings › General › Storage." : {
+
+    },
+    "%@ · %@" : {
+      "comment" : "Joins two parts of a status line",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "%@/s" : {
+      "comment" : "Download speed, e.g. 47 MB/s"
+    },
+    "A file exceeds the supported size limit. Choose another source." : {
+
+    },
+    "A required tool could not finish. Check Diagnostics for details." : {
+
+    },
+    "About %@ to download" : {
+
+    },
+    "Accept and Download" : {
+
+    },
+    "Accept and Import" : {
+
+    },
+    "Accept the license terms before installing this component." : {
+
+    },
+    "Added packs are downloaded; removed ones free their space. Keep at least one." : {
+
+    },
+    "Animated backgrounds" : {
+
+    },
+    "Another game is busy — this one can start when it finishes" : {
+
+    },
+    "Another operation is already running. Wait for it to finish and try again." : {
+
+    },
+    "Apple license" : {
+
+    },
+    "Apply" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Cancelled" : {
+
+    },
+    "Change…" : {
+
+    },
+    "Check Again" : {
+
+    },
+    "Check installed runtimes again" : {
+
+    },
+    "Checking for updates…" : {
+
+    },
+    "Checking free space…" : {
+
+    },
+    "Checking installed runtimes…" : {
+
+    },
+    "Checking size and free space…" : {
+
+    },
+    "Chinese" : {
+      "comment" : "Voice pack language"
+    },
+    "Choose Folder…" : {
+
+    },
+    "Choose a folder that already has %@. MacGacha checks it and downloads only what's missing." : {
+
+    },
+    "Choose a voice pack to see the size." : {
+
+    },
+    "Choose another location to see the size." : {
+
+    },
+    "Choose at least one. You can change voice packs later." : {
+
+    },
+    "Choose…" : {
+
+    },
+    "Continue in Parts" : {
+
+    },
+    "Continue in Parts…" : {
+
+    },
+    "Continue in parts?" : {
+
+    },
+    "Couldn't reach HoYoverse to check the size." : {
+
+    },
+    "D3DMetal %@" : {
+      "comment" : "The argument is a version"
+    },
+    "D3DMetal, unknown version" : {
+
+    },
+    "Damaged: %@" : {
+
+    },
+    "Decline" : {
+
+    },
+    "Diagnostics" : {
+
+    },
+    "Done" : {
+
+    },
+    "Download" : {
+
+    },
+    "Downloading" : {
+
+    },
+    "Downloading %@" : {
+      "comment" : "The argument is a percentage, e.g. 42%"
+    },
+    "English" : {
+      "comment" : "Voice pack language"
+    },
+    "Error" : {
+      "comment" : "Diagnostics event level"
+    },
+    "Export Diagnostic Bundle…" : {
+
+    },
+    "Failed" : {
+
+    },
+    "Finish Uninstall" : {
+
+    },
+    "Finishing up — this can't be paused" : {
+
+    },
+    "Finishing…" : {
+
+    },
+    "Free on this volume" : {
+
+    },
+    "Free up %@ more to install." : {
+
+    },
+    "Games need a lot of space. Pick a drive with at least 100 GB free." : {
+
+    },
+    "Games that use this version won't start until you install it again." : {
+
+    },
+    "Get Game Porting Toolkit from Apple" : {
+
+    },
+    "Import" : {
+
+    },
+    "Import D3DMetal" : {
+
+    },
+    "Import D3DMetal from Apple's Game Porting Toolkit" : {
+
+    },
+    "Imported from Game Porting Toolkit" : {
+
+    },
+    "Import…" : {
+
+    },
+    "Info" : {
+      "comment" : "Diagnostics event level"
+    },
+    "Install" : {
+
+    },
+    "Install %@" : {
+
+    },
+    "Install games in" : {
+
+    },
+    "Install in Parts" : {
+
+    },
+    "Install in Parts…" : {
+
+    },
+    "Install in parts?" : {
+
+    },
+    "Install location unavailable — connect the drive it's on" : {
+
+    },
+    "Installed" : {
+
+    },
+    "Installed runtime" : {
+
+    },
+    "Installing…" : {
+
+    },
+    "Installs, updates and errors are recorded here." : {
+
+    },
+    "Japanese" : {
+      "comment" : "Voice pack language"
+    },
+    "Keep MacGacha open — you can pause and resume any time" : {
+
+    },
+    "Korean" : {
+      "comment" : "Voice pack language"
+    },
+    "Launching arrives after the compatibility check" : {
+
+    },
+    "Local runtime" : {
+
+    },
+    "Location" : {
+
+    },
+    "Location Unavailable" : {
+
+    },
+    "Looking for Game Porting Toolkit…" : {
+
+    },
+    "MacGacha" : {
+
+    },
+    "MacGacha removes the game files it manages from %@. Other files in that folder are kept." : {
+      "comment" : "The argument is the game's folder"
+    },
+    "More for %@" : {
+
+    },
+    "Needs on disk" : {
+
+    },
+    "No Game Porting Toolkit found" : {
+
+    },
+    "No events yet" : {
+
+    },
+    "Not installed" : {
+
+    },
+    "OK" : {
+
+    },
+    "Open the Game Porting Toolkit disk image from Apple, then rescan, or choose the folder that contains it." : {
+
+    },
+    "Pause" : {
+
+    },
+    "Paused" : {
+
+    },
+    "Paused — Not enough free disk space" : {
+
+    },
+    "Play" : {
+
+    },
+    "Plays the game's animated art when HoYoPlay provides it. Still images use less power." : {
+
+    },
+    "Preparing…" : {
+
+    },
+    "Read Apple's license terms" : {
+
+    },
+    "Recent MacGacha events. Tokens and account details are removed before anything is written here." : {
+
+    },
+    "Refresh" : {
+
+    },
+    "Reload recent events" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove %@ %@?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Remove %1$@ %2$@?"
+          }
+        }
+      }
+    },
+    "Rescan" : {
+
+    },
+    "Resume" : {
+
+    },
+    "Runtime bundles combine Wine with a graphics layer. Jadeite and the Steam shim are separate compatibility components. Each version is kept on its own, so an update never breaks a working one." : {
+
+    },
+    "Runtimes" : {
+
+    },
+    "Save a zip with system details and redacted logs to share in a bug report" : {
+
+    },
+    "Set Up Runtimes" : {
+
+    },
+    "Settings" : {
+
+    },
+    "Show a still background" : {
+
+    },
+    "Show in Finder" : {
+
+    },
+    "Show the animated background" : {
+
+    },
+    "Something went wrong" : {
+
+    },
+    "Steam shim" : {
+      "comment" : "Runtime component name"
+    },
+    "The download could not finish. Check your connection and try again." : {
+
+    },
+    "The download information is invalid. Try again after updating MacGacha." : {
+
+    },
+    "The download server could not complete the request. Please try again later." : {
+
+    },
+    "The downloaded files failed verification. Please try again." : {
+
+    },
+    "The folder %@ and everything in it will be removed." : {
+      "comment" : "The argument is the game's folder"
+    },
+    "The operation could not finish. Check access to the selected folder and try again." : {
+
+    },
+    "The operation was cancelled." : {
+
+    },
+    "The paused operation is discarded. %@" : {
+      "comment" : "The argument is the sentence about what is removed"
+    },
+    "The saved operation could not be recovered. Check Diagnostics for details." : {
+
+    },
+    "The selected files contain an unsafe path or link. Choose another source." : {
+
+    },
+    "There is not enough free disk space. Free some space and try again." : {
+
+    },
+    "There isn't room to install in one go, so MacGacha will install in parts. The game can't be played until it's done." : {
+
+    },
+    "This finishes the uninstall that was interrupted. %@" : {
+      "comment" : "The argument is the sentence about what is removed"
+    },
+    "This folder can't be used: it overlaps another game or a protected location, or it's a link." : {
+
+    },
+    "This folder isn't empty. Choose an empty folder, or use an existing installation." : {
+
+    },
+    "This needs %@ at once, but only %@ is free. MacGacha can finish it in parts instead. %@ can't be played until it's done." : {
+      "comment" : "Sizes needed and free, then the game's name",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This needs %1$@ at once, but only %2$@ is free. MacGacha can finish it in parts instead. %3$@ can't be played until it's done."
+          }
+        }
+      }
+    },
+    "Try Again" : {
+
+    },
+    "Uninstall" : {
+
+    },
+    "Uninstall %@?" : {
+
+    },
+    "Uninstall didn't finish" : {
+
+    },
+    "Uninstall…" : {
+
+    },
+    "Unknown" : {
+
+    },
+    "Unknown runtime" : {
+
+    },
+    "Update to %@" : {
+
+    },
+    "Use an Existing Installation…" : {
+
+    },
+    "Verify Files" : {
+
+    },
+    "Verifying" : {
+
+    },
+    "Verifying %@" : {
+      "comment" : "The argument is a percentage, e.g. 42%"
+    },
+    "Version %@ · Installed" : {
+      "comment" : "Game status; the argument is the game version"
+    },
+    "Version %@ · Version %@ is available" : {
+      "comment" : "Game status: installed version, then the newer one",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Version %1$@ · Version %2$@ is available"
+          }
+        }
+      }
+    },
+    "Voice Packs" : {
+
+    },
+    "Voice Packs…" : {
+
+    },
+    "Wait for the current download to finish or pause it" : {
+
+    },
+    "Wait for the other game's download to finish or pause it" : {
+
+    },
+    "Waiting for %@ to finish" : {
+      "comment" : "The argument is another game's name"
+    },
+    "Warning" : {
+      "comment" : "Diagnostics event level"
+    },
+    "about %@" : {
+      "comment" : "An estimated size"
+    },
+    "its folder" : {
+      "comment" : "Stands in for a folder path"
+    }
+  },
+  "version" : "1.0"
+}

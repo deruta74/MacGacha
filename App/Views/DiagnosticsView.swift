@@ -135,7 +135,7 @@ private struct LogRow: View {
             Image(systemName: symbol)
                 .foregroundStyle(tint)
                 .frame(width: 14)
-                .accessibilityLabel(entry.level)
+                .accessibilityLabel(levelName)
             Text(entry.category)
                 .foregroundStyle(.secondary)
                 .frame(width: 84, alignment: .leading)
@@ -156,6 +156,15 @@ private struct LogRow: View {
         case "error", "fault": "xmark.octagon.fill"
         case "warning": "exclamationmark.triangle.fill"
         default: "circle.fill"
+        }
+    }
+
+    /// The level stays English in the log itself; only its spoken name is localized.
+    private var levelName: Text {
+        switch entry.level {
+        case "error", "fault": Text("Error", comment: "Diagnostics event level")
+        case "warning": Text("Warning", comment: "Diagnostics event level")
+        default: Text("Info", comment: "Diagnostics event level")
         }
     }
 

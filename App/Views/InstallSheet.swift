@@ -69,7 +69,7 @@ struct InstallSheet: View {
                 }
                 Section {
                     ForEach(definition?.voices ?? [], id: \.code) { voice in
-                        Toggle(voice.name, isOn: binding(for: voice.code))
+                        Toggle(voice.displayName, isOn: binding(for: voice.code))
                     }
                 } header: {
                     Text("Voice Packs")
@@ -89,14 +89,17 @@ struct InstallSheet: View {
                 }
             }
             .formStyle(.grouped)
-            HStack {
-                Button("Use an Existing Installation…") { pickMode = .existing; picking = true }
-                    .disabled(voices.isEmpty || blocked)
-                    .help("Choose a folder that already has \(game.name). MacGacha checks it and downloads only what's missing.")
-                Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                installButton
+            // Longer translations push the secondary button onto its own row instead of truncating it.
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    existingButton
+                    Spacer()
+                    sheetButtons
+                }
+                VStack(alignment: .trailing, spacing: 12) {
+                    existingButton
+                    HStack { sheetButtons }
+                }
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
@@ -146,8 +149,8 @@ struct InstallSheet: View {
 
     @ViewBuilder private var summary: some View {
         if let estimate {
-            LabeledContent("Download", value: "about " + ByteSize.text(estimate.download))
-            LabeledContent("Needs on disk", value: "about " + ByteSize.text(estimate.diskWhole))
+            LabeledContent("Download", value: String(localized: "about \(ByteSize.text(estimate.download))", comment: "An estimated size"))
+            LabeledContent("Needs on disk", value: String(localized: "about \(ByteSize.text(estimate.diskWhole))", comment: "An estimated size"))
             LabeledContent("Free on this volume") {
                 if let available = estimate.available {
                     Text(ByteSize.text(available))
@@ -184,6 +187,18 @@ struct InstallSheet: View {
         }
     }
 
+    private var existingButton: some View {
+        Button("Use an Existing Installation…") { pickMode = .existing; picking = true }
+            .disabled(voices.isEmpty || blocked)
+            .help("Choose a folder that already has \(game.name). MacGacha checks it and downloads only what's missing.")
+    }
+
+    @ViewBuilder private var sheetButtons: some View {
+        Button("Cancel", role: .cancel) { dismiss() }
+            .keyboardShortcut(.cancelAction)
+        installButton
+    }
+
     @ViewBuilder private var installButton: some View {
         if immediateVerdict == .batchedOnly {
             Button("Install in Parts…") { confirmingParts = true }
@@ -207,11 +222,11 @@ struct InstallSheet: View {
     private static func failure(_ error: LauncherError) -> SizeCheck {
         switch error {
         case .unsafePath:
-            .failed("This folder can't be used: it overlaps another game or a protected location, or it's a link.", retryable: false)
+            .failed(String(localized: "This folder can't be used: it overlaps another game or a protected location, or it's a link."), retryable: false)
         case .io(let detail) where detail.contains("not empty"):
-            .failed("This folder isn't empty. Choose an empty folder, or use an existing installation.", retryable: false)
+            .failed(String(localized: "This folder isn't empty. Choose an empty folder, or use an existing installation."), retryable: false)
         case .http, .transport:
-            .failed("Couldn't reach HoYoverse to check the size.", retryable: true)
+            .failed(String(localized: "Couldn't reach HoYoverse to check the size."), retryable: true)
         default:
             .failed(error.userMessage, retryable: true)
         }
@@ -249,7 +264,7 @@ struct VoicePacksSheet: View {
                     ForEach(definition?.voices ?? [], id: \.code) { voice in
                         Toggle(isOn: binding(for: voice.code)) {
                             HStack {
-                                Text(voice.name)
+                                Text(voice.displayName)
                                 if installed.contains(voice.code) {
                                     Text("Installed").font(.caption).foregroundStyle(.secondary)
                                 }
@@ -274,7 +289,7 @@ struct VoicePacksSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(voices.isEmpty || voices == installed || model.isGameOperationRunning)
-                .help(model.isGameOperationRunning ? "Wait for the current download to finish or pause it" : "")
+                .help(model.isGameOperationRunning ? Text("Wait for the current download to finish or pause it") : Text(verbatim: ""))
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
@@ -293,5 +308,18 @@ struct VoicePacksSheet: View {
                 if on { voices.insert(code) } else { voices.remove(code) }
             }
         )
+    }
+}
+
+extension VoiceOption {
+    /// The voice's language in the UI language; `name` is GameLibrary's fixed English label.
+    var displayName: String {
+        switch code {
+        case "zh-cn": String(localized: "Chinese", comment: "Voice pack language")
+        case "en-us": String(localized: "English", comment: "Voice pack language")
+        case "ja-jp": String(localized: "Japanese", comment: "Voice pack language")
+        case "ko-kr": String(localized: "Korean", comment: "Voice pack language")
+        default: name
+        }
     }
 }
