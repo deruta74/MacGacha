@@ -245,7 +245,7 @@ struct URLSessionHTTPClientTests {
         }
         let (head, body) = try await client.get(fixture.url, byteRangeFrom: nil)
         let task = try #require(nativeTask.withLock { $0 })
-        try await waitForNativeTaskState(task, .running)
+        try await waitForNativeTaskState(.running, state: { task.state })
         #expect(head.status == 200)
         var iterator = body.makeAsyncIterator()
         var received = Data(), sent = 0, largestPiece = 0
@@ -260,7 +260,8 @@ struct URLSessionHTTPClientTests {
                 phase = "buffer event"
                 let state = try await metrics.waitForSnapshot { $0.received >= sent || $0.suspended }
                 if state.suspended {
-                    try await waitForNativeTaskState(task, .suspended)
+                    phase = "native suspend acknowledgement"
+                    try await waitForNativeTaskState(.suspended, state: { task.state })
                     // Buffer acknowledgements account for callback splits within
                     // a sent piece; native state is verified independently above
                     // and after the low-watermark resumption below.
@@ -274,9 +275,10 @@ struct URLSessionHTTPClientTests {
                         phase = "consumption acknowledgement"
                         _ = try await metrics.waitForSnapshot { $0.consumed >= received.count }
                     }
-                    phase = "resume acknowledgement"
+                    phase = "buffer resume acknowledgement"
                     _ = try await metrics.waitForSnapshot { !$0.suspended }
-                    try await waitForNativeTaskState(task, .running)
+                    phase = "native resume acknowledgement"
+                    try await waitForNativeTaskState(.running, state: { task.state })
                 }
                 if metrics.snapshot.received >= sent { break }
             }
@@ -517,6 +519,24 @@ struct URLSessionHTTPClientTests {
         await #expect(throws: LauncherError.cancelled) { try await task.value }
         try await fixture.control.didStop.wait()
         #expect(fixture.control.stopReason != .timeout)
+    }
+
+    @Test func nativeStateWaitHandlesAnUnnotifiedTransition() async throws {
+        let task = UnnotifiedNativeTask()
+        let waiting = Task { try await waitForNativeTaskState(.running, state: { task.state }) }
+        defer { waiting.cancel() }
+        try await task.didReadSuspended.wait()
+        task.becomeRunning()
+        try await waiting.value
+    }
+
+    @Test func nativeStateWaitRespectsCancellation() async throws {
+        let task = UnnotifiedNativeTask()
+        let waiting = Task { try await waitForNativeTaskState(.running, state: { task.state }) }
+        defer { waiting.cancel() }
+        try await task.didReadSuspended.wait()
+        waiting.cancel()
+        await #expect(throws: CancellationError.self) { try await waiting.value }
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -766,22 +786,27 @@ private final class ManualHTTPRequestTimer: HTTPRequestTimer {
     }
 }
 
-// Native state changes may complete after suspend/resume returns. Subscribe to
-// the actual client task, not URLProtocol.task; .initial closes the subscription
-// race. Handshakes hold each phase until its native transition is observed.
-private func waitForNativeTaskState(_ task: URLSessionTask, _ expected: URLSessionTask.State) async throws {
-    let reached = TestEvent()
-    let observed = Mutex<URLSessionTask.State?>(nil)
-    let observation = task.observe(\.state, options: [.initial, .new]) { task, _ in
-        let nativeState = task.state
-        if nativeState == expected {
-            observed.withLock { $0 = nativeState }
-            reached.signal()
-        }
+// Model the observed CFNetwork behavior: a getter changes its value without
+// emitting KVO. The event makes the check/transition order deterministic.
+private final class UnnotifiedNativeTask: Sendable {
+    private let nativeState = Mutex(URLSessionTask.State.suspended)
+    let didReadSuspended = TestEvent()
+    var state: URLSessionTask.State {
+        let value = nativeState.withLock { $0 }
+        if value == .suspended { didReadSuspended.signal() }
+        return value
     }
-    defer { observation.invalidate() }
-    try await reached.wait()
-    // Assert the native observation, not a later read after the waiter is
-    // scheduled: CFNetwork can change its state again in the meantime.
-    #expect(observed.withLock { $0 } == expected)
+    func becomeRunning() { nativeState.withLock { $0 = .running } }
+}
+
+// CFNetwork can update task.state asynchronously without a KVO notification.
+// The handshake holds this phase fixed; yield until the actual native property
+// matches, rather than depending on KVO delivery or a guessed delay. The test's
+// time limit bounds failure, and cancellation must release this wait too.
+private func waitForNativeTaskState(_ expected: URLSessionTask.State, state: @Sendable () -> URLSessionTask.State) async throws {
+    try Task.checkCancellation()
+    while state() != expected {
+        await Task.yield()
+        try Task.checkCancellation()
+    }
 }
