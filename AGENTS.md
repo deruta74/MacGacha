@@ -96,7 +96,6 @@ These protect users' games, accounts and machines.
 
 - One PR per task. Branch from `main`, and use a separate git worktree for parallel work.
 - Merge with `gh pr merge <N> --squash`, only after CI is green on the PR's head commit. Never use `--auto` (the repo has no branch protection, so `--auto` merges immediately).
-- **Commit identity:** author only as `deruta74 <208198331+deruta74@users.noreply.github.com>`. No `Co-Authored-By` lines and no AI or tool attribution in commits or PR descriptions. Never write a real name anywhere.
 - Never commit `docs/`, `spike/`, build output, `.xcodeproj` or secrets.
 - PR descriptions: plain English, short bullets on what changed and why, then test results.
 - Code and docs here may be written with AI assistance; the README says so. That doesn't change the rules above.
