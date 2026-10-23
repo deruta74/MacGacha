@@ -118,7 +118,7 @@ func cacheTTLAndOfflineFallbackSurviveReinitialization() async throws {
 func pruningKeepsPagesExactlyWithTheirVideos() async throws {
     let temp = try TempDir(); let cdn = MockCDN(); try artFixtures(cdn, video: true)
     let time = Mutex(Date(timeIntervalSince1970: 1_800_000_000))
-    let directory = temp.url.appendingPathComponent("com.deruta.macgacha/GameArt")
+    let directory = temp.url.appendingPathComponent("com.lo7ted.macgacha/GameArt")
     let outside = temp.url.appendingPathComponent("another-app.webp")
     try webp.write(to: outside)
     let service = GameArtService(cacheDirectory: directory, http: cdn, now: { time.withLock { $0 } })
