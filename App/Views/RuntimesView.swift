@@ -20,7 +20,7 @@ struct RuntimesView: View {
                             RuntimeRowView(row: row)
                         }
                     } footer: {
-                        Text("Each runtime is Wine with a graphics layer. DXMT is open source; D3DMetal is Apple's and comes with Apple's license. Each version is kept on its own, so an update never breaks a working one.")
+                        Text("Runtime bundles combine Wine with a graphics layer. Jadeite and the Steam shim are separate compatibility components. Each version is kept on its own, so an update never breaks a working one.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -161,6 +161,8 @@ struct RuntimeRowView: View {
         case let id where id.hasPrefix("wine"): "wineglass"
         case let id where id.hasPrefix("dxmt"): "cube.transparent"
         case let id where id.hasPrefix("d3dmetal"): "cpu"
+        case let id where id.hasPrefix("jadeite"): "puzzlepiece.extension"
+        case let id where id.hasPrefix("steam-shim"): "puzzlepiece.extension"
         default: "shippingbox"
         }
     }

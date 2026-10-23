@@ -52,7 +52,6 @@ public struct ArchiveExtractor: Sendable {
         let entries = try Self.scan(handle, format: format, limit: limit, maxEntries: maxEntries)
         try ArchivePolicy.validate(entries)
         if let rootPath {
-            guard format != .zip else { throw LauncherError.io("Rooted ZIP runtimes are unsupported") }
             try ArchivePolicy.validateRoot(rootPath)
             let selected = try entries.compactMap { try ArchivePolicy.project($0, under: rootPath) }
             guard !selected.isEmpty else { throw LauncherError.io("Runtime archive root is missing") }

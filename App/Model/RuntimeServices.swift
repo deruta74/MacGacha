@@ -152,7 +152,7 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
     @concurrent private func writeDiagnosticBundle(to url: URL) async throws {
         let scan = try store.scan()
         let runtimes = Dictionary(uniqueKeysWithValues: scan.components.map {
-            ("\($0.kind.rawValue)-\($0.version)", $0.source.rawValue)
+            ("\($0.kind.idPrefix)-\($0.version)", $0.source.rawValue)
         })
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
         try await DiagnosticBundle(logDirectory: paths.logs, runner: SystemProcessRunner())
