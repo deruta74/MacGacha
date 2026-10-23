@@ -7,27 +7,53 @@ import LauncherCore
 public struct DiagnosticBundle: Sendable {
     private let logDirectory: URL
     private let runner: any ProcessRunner
-    private let openLog: @Sendable (URL) -> (fd: Int32, error: Int32)
+    private let beforeEventOpen: @Sendable (URL) -> Void
     private let logByteLimit: Int
+    private let sessionLogURLs: [URL]
+    private let gameLogRoot: URL?
+    private let gameLogCandidates: [String: [SafeRelativePath]]
+    private let sessionLogsEnabled: Bool
+    private let logDiscoveryFailures: [String]
+    private let beforeOptionalOpen: @Sendable (URL) -> Void
 
-    public init(logDirectory: URL, runner: any ProcessRunner) {
-        self.init(logDirectory: logDirectory, runner: runner, openLog: {
-            let fd = open($0.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-            let openError = errno
-            return (fd, openError)
-        })
+    /// Optional launch logs are selected by the caller, without a dependency on Launch.
+    /// Game candidates are relative to gameLogRoot and opened through containment.
+    /// Failed discovery scopes are redacted and included in the bounded skip report.
+    public init(logDirectory: URL, runner: any ProcessRunner, sessionLogURLs: [URL] = [],
+        gameLogRoot: URL? = nil, gameLogCandidates: [String: [SafeRelativePath]] = [:], sessionLogsEnabled: Bool = true,
+        logDiscoveryFailures: [String] = []) {
+        self.init(logDirectory: logDirectory, runner: runner, logByteLimit: nil,
+            sessionLogURLs: sessionLogURLs, gameLogRoot: gameLogRoot, gameLogCandidates: gameLogCandidates,
+            sessionLogsEnabled: sessionLogsEnabled, logDiscoveryFailures: logDiscoveryFailures)
     }
 
-    init(logDirectory: URL, runner: any ProcessRunner, openLog: @escaping @Sendable (URL) -> (fd: Int32, error: Int32),
-        logByteLimit: Int? = nil) {
+    init(logDirectory: URL, runner: any ProcessRunner, logByteLimit: Int?,
+        sessionLogURLs: [URL] = [], gameLogRoot: URL? = nil,
+        gameLogCandidates: [String: [SafeRelativePath]] = [:], sessionLogsEnabled: Bool = true,
+        logDiscoveryFailures: [String] = [], beforeEventOpen: @escaping @Sendable (URL) -> Void = { _ in },
+        beforeOptionalOpen: @escaping @Sendable (URL) -> Void = { _ in }) {
+        self.beforeOptionalOpen = beforeOptionalOpen
+        self.sessionLogURLs = sessionLogURLs
+        self.gameLogRoot = gameLogRoot
+        self.gameLogCandidates = gameLogCandidates
+        self.sessionLogsEnabled = sessionLogsEnabled
+        self.logDiscoveryFailures = logDiscoveryFailures
         self.logDirectory = logDirectory
         self.runner = runner
-        self.openLog = openLog
+        self.beforeEventOpen = beforeEventOpen
         let maximum = Self.totalLimit - Self.reportLimit
         self.logByteLimit = min(maximum, max(0, logByteLimit ?? maximum))
     }
 
-    @concurrent public func export(to zipURL: URL, systemInfo: SystemInfo, runtimes: [String: String],
+    public func export(to zipURL: URL, systemInfo: SystemInfo, runtimes: [String: String], failureStage: FailureStage?) async throws {
+        do { try await BlockingIO.run { try await exportOnIO(to: zipURL, systemInfo: systemInfo, runtimes: runtimes, failureStage: failureStage) } }
+        catch {
+            if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
+            throw error
+        }
+    }
+
+    private func exportOnIO(to zipURL: URL, systemInfo: SystemInfo, runtimes: [String: String],
         failureStage: FailureStage?) async throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         let fm = FileManager.default
@@ -46,6 +72,9 @@ public struct DiagnosticBundle: Sendable {
             try write(String(decoding: encoder.encode(Redactor.redact(metadata: runtimes)), as: UTF8.self),
                 to: staging.appendingPathComponent("runtimes.json"))
             try write((failureStage?.rawValue ?? "none") + "\n", to: staging.appendingPathComponent("failure.txt"))
+            if !sessionLogsEnabled {
+                try write("session logs disabled\n", to: staging.appendingPathComponent("session-logs.txt"))
+            }
             try copyLogs(to: staging.appendingPathComponent("logs", isDirectory: true))
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let result = try await runner.run(URL(fileURLWithPath: "/usr/bin/ditto"),
@@ -117,7 +146,7 @@ public struct DiagnosticBundle: Sendable {
             notices += 1
             guard names.count < 50 else { return }
             // JSON quoting keeps malicious filename newlines/control characters on a single report line.
-            let safeName = Redactor.redact(name)
+            let safeName = Redactor.redactLog(name)
             let encoded = (try? String(decoding: JSONEncoder().encode(safeName), as: UTF8.self)) ?? "<omitted>"
             let line = "file: \(reason): \(encoded)"
             var bounded = ""
@@ -166,27 +195,33 @@ public struct DiagnosticBundle: Sendable {
         let fm = FileManager.default
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
         var report = CopyReport()
-        if fm.fileExists(atPath: logDirectory.path) {
-            guard let enumerator = fm.enumerator(at: logDirectory, includingPropertiesForKeys: nil,
-                options: [.skipsSubdirectoryDescendants]) else { throw LauncherError.io("Cannot enumerate diagnostic logs") }
-            var files: [URL] = []
-            while report.entries < Self.entryLimit, let file = enumerator.nextObject() as? URL {
-                guard !Task.isCancelled else { throw LauncherError.cancelled }
-                files.append(file)
-                report.entries += 1
-            }
-            report.enumerationStopped = report.entries == Self.entryLimit && enumerator.nextObject() != nil
-            var count = 0
-            var totalBytes = 0
+        for scope in logDiscoveryFailures.prefix(50) {
+            report.skippedFiles += 1
+            report.note(scope, reason: "discovery unavailable")
+        }
+        var count = 0, totalBytes = 0
+        let sessions = try suppliedSessionNames(report: &report)
+        let pinnedLogs = try pinnedLogSource(report: &report)
+        if let (source, paths) = pinnedLogs {
+            report.entries = min(paths.count, Self.entryLimit)
+            report.enumerationStopped = paths.count > Self.entryLimit
+            var files = paths.prefix(Self.entryLimit).map { $0.resolved(against: logDirectory) }
             let logsLimit = logByteLimit
+            let existingNames = Set(files.map(\.lastPathComponent))
+            files += sessions.filter { !existingNames.contains($0) }.map { logDirectory.appendingPathComponent($0) }
             let decoder = JSONDecoder()
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             let timestamp = ISO8601DateFormatter()
-            for file in files.sorted(by: logPrecedes) {
+            for file in files.sorted(by: { left, right in
+                let l = sessions.contains(left.lastPathComponent), r = sessions.contains(right.lastPathComponent)
+                if l != r { return l }
+                return logPrecedes(left, right)
+            }) {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 let name = file.lastPathComponent
-                guard isEventLog(name) else {
+                let isSession = sessions.contains(name)
+                guard isEventLog(name) || isSession else {
                     report.skippedFiles += 1
                     report.note(name, reason: "not a MacGacha event log")
                     continue
@@ -196,41 +231,44 @@ public struct DiagnosticBundle: Sendable {
                     report.note(name, reason: "export budget")
                     continue
                 }
-                let (fd, openError) = openLog(file)
-                guard fd >= 0 else {
-                    if openError == ENOENT || openError == ELOOP {
-                        report.skippedFiles += 1
-                        report.note(name, reason: "missing or symlink")
-                        continue
-                    }
-                    throw LauncherError.io("Cannot open diagnostic log")
-                }
-                let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-                defer { try? handle.close() }
-                var info = stat()
-                guard fstat(fd, &info) == 0 else { throw LauncherError.io("Cannot inspect diagnostic log") }
-                guard info.st_mode & S_IFMT == S_IFREG, info.st_size >= 0 else {
-                    report.skippedFiles += 1
-                    report.note(name, reason: "not a regular file")
+                if isSession {
+                    let allowance = min(Self.fileLimit, logsLimit - totalBytes)
+                    guard let (output, truncated) = try optionalRead(name, report: &report, body: {
+                        self.beforeOptionalOpen(file)
+                        let handle = try source.openForReading(at: SafeRelativePath(name))
+                        defer { try? handle.close() }
+                        return try self.readSessionLog(handle, allowance: allowance)
+                    }) else { continue }
+                    if truncated { report.truncatedFiles += 1; report.note(name, reason: "truncated for export budget") }
+                    try ContainedFileSystem(root: destination).writeAtomically(output, to: SafeRelativePath(name))
+                    count += 1; totalBytes += output.count
                     continue
                 }
+                guard let handle = try optionalRead(name, report: &report, body: {
+                    self.beforeEventOpen(file)
+                    return try source.openForReading(at: SafeRelativePath(name))
+                }) else { continue }
+                defer { try? handle.close() }
                 count += 1
                 let allowance = min(Self.fileLimit, logsLimit - totalBytes)
-                let (data, tailTruncated) = try readTail(handle, size: info.st_size, allowance: allowance)
-                var truncated = tailTruncated
+                guard let complete = try optionalRead(name, report: &report, body: { try self.readCompleteEventLog(handle) }) else { continue }
+                let data = safeTail(complete, allowance: allowance)
+                var truncated = complete.count > data.count
                 var output = Data()
                 var invalid = 0
-                // Each retained line is decoded independently; a discarded prefix cannot supply a key
-                // for a value in the retained tail. Unknown fields are dropped by the shared schema.
+                // Redact complete content before selecting records, including an
+                // unexpected sensitive outer wrapper. Then enforce the event schema.
                 let lines = data.split(separator: 10, omittingEmptySubsequences: false)
                 for (index, line) in lines.enumerated() {
                     guard !Task.isCancelled else { throw LauncherError.cancelled }
                     if index == lines.count - 1 && line.isEmpty { continue }
                     guard var record = try? decoder.decode(EventLog.Record.self, from: Data(line)),
                           timestamp.date(from: record.ts) != nil else { invalid += 1; continue }
-                    record.category = Redactor.redact(record.category)
-                    record.message = Redactor.redact(record.message)
-                    record.metadata = Redactor.redact(metadata: record.metadata)
+                    // Already sanitized before selection. Foreign/multiline fallback
+                    // still needs the event schema's bounded metadata-key policy.
+                    if record.metadata.keys.contains(where: { $0.utf8.count > 256 }) {
+                        record.metadata = Redactor.redact(metadata: record.metadata)
+                    }
                     var encoded = try encoder.encode(record)
                     encoded.append(10)
                     guard encoded.count <= allowance - output.count else {
@@ -250,32 +288,175 @@ public struct DiagnosticBundle: Sendable {
                 try output.write(to: destination.appendingPathComponent(name), options: .atomic)
             }
         }
+        if pinnedLogs == nil {
+            for name in sessions { report.skippedFiles += 1; report.note(name, reason: "missing optional log") }
+        }
+        try copyGameLogs(to: destination.deletingLastPathComponent().appendingPathComponent("game-logs"), remainingBytes: logByteLimit - totalBytes, remainingFiles: Self.logLimit - count, report: &report)
         let reportData = Data(report.text.utf8)
         guard reportData.count <= Self.reportLimit else { throw LauncherError.io("Diagnostic report exceeds export budget") }
         try reportData.write(to: destination.deletingLastPathComponent().appendingPathComponent("skipped.txt"), options: .atomic)
     }
 
-    private func readTail(_ handle: FileHandle, size: Int64, allowance: Int) throws -> (Data, Bool) {
-        let length = Int(min(size, Int64(allowance)))
-        let offset = UInt64(size) - UInt64(length)
-        var startsAtBoundary = true
-        if offset > 0 {
-            try handle.seek(toOffset: offset - 1)
-            startsAtBoundary = try handle.read(upToCount: 1)?.first == 10
-        } else { try handle.seek(toOffset: 0) }
-        var remaining = length
-        var data = Data()
-        while remaining > 0 {
-            guard !Task.isCancelled else { throw LauncherError.cancelled }
-            let piece = try autoreleasepool { try handle.read(upToCount: min(65_536, remaining)) ?? Data() }
-            guard !piece.isEmpty else { break }
-            data.append(piece)
-            remaining -= piece.count
+    private func pinnedLogSource(report: inout CopyReport) throws -> (ContainedFileSystem, [SafeRelativePath])? {
+        do {
+            try Task.checkCancellation()
+            // Anchor traversal at app data, then retain the actual Logs directory.
+            // URLs below are labels only: all enumeration and reads use this pin.
+            guard let app = try ContainedFileSystem(root: logDirectory.deletingLastPathComponent()).pinRootIfPresent(),
+                  let source = try app.pinDirectoryIfPresent(at: SafeRelativePath(logDirectory.lastPathComponent)) else { return nil }
+            return (source, try source.contentsOfRootDirectory(maximumEntries: Self.entryLimit + 1))
+        } catch {
+            if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled {
+                throw LauncherError.cancelled
+            }
+            report.skippedFiles += 1
+            report.note("Logs", reason: "unsafe or unavailable log directory")
+            return nil
         }
-        if !startsAtBoundary {
-            if let newline = data.firstIndex(of: 10) { data = Data(data[data.index(after: newline)...]) }
-            else { data.removeAll() }
-        }
-        return (data, offset > 0)
     }
+
+    private func suppliedSessionNames(report: inout CopyReport) throws -> Set<String> {
+        guard sessionLogsEnabled else { return [] }
+        var result = Set<String>()
+        for url in sessionLogURLs {
+            if let name = try optionalRead(url.lastPathComponent, report: &report, body: {
+                guard url.isFileURL, url.deletingLastPathComponent().standardizedFileURL == self.logDirectory.standardizedFileURL else {
+                    throw LauncherError.unsafePath("Session log is outside log directory")
+                }
+                let path = try SafeRelativePath(url.lastPathComponent)
+                guard path.components.count == 1 else { throw LauncherError.unsafePath(path.description) }
+                return path.description
+            }) { result.insert(name) }
+        }
+        return result
+    }
+
+    private func optionalRead<T>(_ name: String, report: inout CopyReport, body: () throws -> T) throws -> T? {
+        do { try Task.checkCancellation(); return try body() }
+        catch {
+            if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
+            if let launcher = error as? LauncherError, case .cancelled = launcher { throw launcher }
+            report.skippedFiles += 1
+            report.note(name, reason: "missing, unsafe or oversized optional log")
+            return nil
+        }
+    }
+
+    /// Never start redaction in the middle of a record. A larger file is omitted
+    /// rather than exporting an untrusted tail without its sensitive-key context.
+    /// The bounded full snapshot includes incomplete final records for redaction.
+    private func readCompleteLog(_ handle: FileHandle) throws -> Data {
+        var info = stat()
+        guard fstat(handle.fileDescriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+            info.st_size >= 0, info.st_size <= 64 << 20 else { throw LauncherError.io("Optional log exceeds safe redaction limit") }
+        try handle.seek(toOffset: 0)
+        var data = Data(), remaining = Int(info.st_size)
+        while remaining > 0 {
+            try Task.checkCancellation()
+            let piece = try autoreleasepool { try handle.read(upToCount: min(65_536, remaining)) ?? Data() }
+            guard !piece.isEmpty else { throw LauncherError.io("Optional log changed during read") }
+            data.append(piece); remaining -= piece.count
+        }
+        try Task.checkCancellation()
+        return data
+    }
+
+    private func redactComplete(_ data: Data) throws -> Data {
+        try Task.checkCancellation()
+        let safe = autoreleasepool { Data(Redactor.redactLog(String(decoding: data, as: UTF8.self)).utf8) }
+        try Task.checkCancellation()
+        return safe
+    }
+    private func readCompleteRedactedLog(_ handle: FileHandle) throws -> Data { try redactComplete(readCompleteLog(handle)) }
+
+    private func readCompleteEventLog(_ handle: FileHandle) throws -> Data {
+        let raw = try readCompleteLog(handle)
+        // Only after EVERY line validates as a complete event can we rule out
+        // sensitive context carried across lines. Multiline/foreign input takes
+        // the whole-content redactor instead. No selection happens in either pass.
+        if raw.count <= 8 << 20 {
+            let decoder = JSONDecoder(), timestamp = ISO8601DateFormatter()
+            var records: [EventLog.Record] = []
+            var valid = true
+            let lines = raw.split(separator: 10, omittingEmptySubsequences: false)
+            for (index, line) in lines.enumerated() {
+                try Task.checkCancellation()
+                if index == lines.count - 1 && line.isEmpty { continue }
+                guard let record = try? decoder.decode(EventLog.Record.self, from: Data(line)), timestamp.date(from: record.ts) != nil else { valid = false; break }
+                records.append(record)
+            }
+            if valid {
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+                var output = Data()
+                for var record in records {
+                    try Task.checkCancellation()
+                    let encoded = try autoreleasepool {
+                        record.category = Redactor.redact(record.category)
+                        record.message = Redactor.redact(record.message)
+                        record.metadata = Redactor.redact(metadata: record.metadata)
+                        return try encoder.encode(record)
+                    }
+                    output.append(encoded); output.append(10)
+                }
+                return output
+            }
+        }
+        return try redactComplete(raw)
+    }
+
+    private func readSessionLog(_ handle: FileHandle, allowance: Int) throws -> (Data, Bool) {
+        let safe = try readCompleteRedactedLog(handle)
+        guard safe.count > allowance else { return (safe, false) }
+        var head = Data(safe.prefix(min(32 << 10, allowance / 2)))
+        if head.last != 10 {
+            if let end = head.lastIndex(of: 10) { head = Data(head[...end]) } else { head.removeAll() }
+        }
+        let notice = Data("[session log middle omitted]\n".utf8)
+        let marker = notice.count <= allowance - head.count ? notice : Data()
+        return (head + marker + safeTail(safe, allowance: max(0, allowance - head.count - marker.count)), true)
+    }
+
+    /// Select only after redaction; retained data can no longer lose a secret's key.
+    private func safeTail(_ data: Data, allowance: Int) -> Data {
+        guard data.count > allowance else { return data }
+        guard allowance > 0 else { return Data() }
+        let start = data.count - allowance
+        if data[start - 1] == 10 { return Data(data[start...]) }
+        guard let newline = data[start...].firstIndex(of: 10) else { return Data() }
+        return Data(data[data.index(after: newline)...])
+    }
+
+    private func copyGameLogs(to destination: URL, remainingBytes: Int, remainingFiles: Int, report: inout CopyReport) throws {
+        var remaining = remainingBytes, filesLeft = remainingFiles
+        guard sessionLogsEnabled, let gameLogRoot, !gameLogCandidates.isEmpty else { return }
+        guard let fs = try optionalRead("game logs", report: &report, body: { try ContainedFileSystem(root: gameLogRoot) }) else { return }
+        for game in gameLogCandidates.keys.sorted() {
+            guard try optionalRead(game, report: &report, body: { try SafeIdentifier(game) }) != nil else { continue }
+            var newest: (path: SafeRelativePath, date: Date)?
+            for path in gameLogCandidates[game] ?? [] {
+                if let date = try optionalRead(path.components.last!, report: &report, body: {
+                    guard try fs.itemType(at: path, allowingLeafSymlink: true) == .regularFile,
+                        let date = try fs.modificationDate(at: path) else { throw LauncherError.io("Missing optional game log") }
+                    return date
+                }), newest == nil || date > newest!.date { newest = (path, date) }
+            }
+            guard let newest else { continue }
+            guard remaining > 0, filesLeft > 0 else { report.skippedFiles += 1; report.note(game, reason: "export budget"); continue }
+            let name = game + "-" + newest.path.components.last!
+            guard let safe = try optionalRead(name, report: &report, body: {
+                self.beforeOptionalOpen(newest.path.resolved(against: gameLogRoot))
+                let handle = try fs.openForReading(at: newest.path)
+                defer { try? handle.close() }
+                return try self.readCompleteRedactedLog(handle)
+            }) else { continue }
+            var lines = safe.split(separator: 10, omittingEmptySubsequences: false)
+            if lines.last?.isEmpty == true { lines.removeLast() }
+            var tail = Data(lines.suffix(200).joined(separator: [10])); if !tail.isEmpty { tail.append(10) }
+            let bounded = safeTail(tail, allowance: min(1 << 20, remaining))
+            try ContainedFileSystem(root: destination).writeAtomically(bounded, to: SafeRelativePath(name))
+            remaining -= bounded.count; filesLeft -= 1
+            if lines.count > 200 || bounded.count < tail.count { report.truncatedFiles += 1; report.note(name, reason: "last 200 game-log lines") }
+        }
+    }
+
 }

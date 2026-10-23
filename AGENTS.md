@@ -34,15 +34,15 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 
 | Target | Responsibility |
 |---|---|
-| `LauncherCore` | Shared foundations: `AppPaths`, `ContainedFileSystem` (all file access confined to a root, no symlink escape), `SafeRelativePath`, `Digest`, `BlockingIO`, `EventLog`, `ProcessRunner` (cancellable command deadlines), `ProcessSpawner` / `ProcessInspector` (long-running game processes, identity = PID + kernel start time). |
+| `LauncherCore` | Shared foundations: `AppPaths`, `ContainedFileSystem` (all file access confined to a root, no symlink escape), `SafeRelativePath`, `Digest`, `BlockingIO`, `EventLog`, `ProcessRunner` (cancellable command deadlines), `ProcessSpawner` / `ProcessInspector` (long-running game processes, identity = PID + kernel start time), global launch preferences and plain log-location data. |
 | `CZstd` | Vendored zstd decoder (decompression only). Don't edit upstream files. |
 | `DownloadEngine` | Resumable, verified downloads: plans, crash-safe journal, staging, disk-space budget, parallel fetch pipeline, `URLSessionHTTPClient` with bounded buffering. |
 | `Sophon` | HoYoverse delivery API client, host policy, protobuf manifest reader, install/update/voice planner. |
 | `GameLibrary` | Game records, operation lease (one game operation at a time), install/update/verify/adopt/uninstall bridge to the engine. |
 | `RuntimeManager` | Runtime manifest (schema 3), components (Wine, DXMT, D3DMetal, jadeite, Steam shim), bundles, safe archive extraction, Wine prefixes and revisioned launch preparation (WinINet, Retina and NVIDIA registry settings, a wineserver/registry persistence barrier and verified prefix-only copies; no third-party certificates), GPTK import, Apple consent. |
 | `HoYoPlayAPI` | HoYoPlay game list and art (banners, backgrounds), with the content language as a parameter. |
-| `Launch` | Per-game launch recipes, `LaunchSettings` and its store, `LaunchResolver` (exact Wine command and environment), `LaunchSession` and `LaunchJournal`, `HiddenFiles` (inode-bound hiding and restoring of game files, with recovery for conflicts), and `SessionProxy` (loopback HTTP/CONNECT proxy that blocks a recipe's hosts by exact name, with bounded buffers and deadlines). |
-| `Diagnostics` | Diagnostics bundle for bug reports. |
+| `Launch` | Per-game launch recipes, `LaunchSettings` and its store, `LaunchResolver` (exact Wine command and environment), `LaunchSession` and `LaunchJournal`, `HiddenFiles` (inode-bound hiding and restoring of game files, with recovery for conflicts), `SessionLog` (optional private Wine output, retained inode ownership, a five-second cap ticker and per-game retention), `LaunchCopies` (verified per-launch prefix copies), and `SessionProxy` (loopback HTTP/CONNECT proxy that blocks a recipe's hosts by exact name, with bounded buffers and deadlines). |
+| `Diagnostics` | Diagnostics bundles with redacted event logs and caller-supplied session/game-log inputs; no dependency on Launch. Event and session logs are enumerated and opened through a Logs descriptor pinned from the app-data root; unsafe Logs roots are reported and skipped. Optional log discovery is best-effort and passes fixed-scope skip notices to the bundle. Optional logs are read completely within a 64 MiB safety limit and redacted before any tail/head selection; oversized, missing or unsafe inputs are reported and skipped. |
 | `TestSupport`, `CrashHarness`, `ThroughputBenchmark` | Test helpers (`TestEvent`, fault injection), a child process for crash and kill tests, a benchmark. |
 
 App data lives in `~/Library/Application Support/MacGacha/`: `Games/`, `Runtimes/`, `Prefixes/`, `Logs/`, `consent.json`. The bundle ID is `com.lo7ted.macgacha`.
@@ -87,6 +87,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
 - **No game data, game binaries or Apple D3DMetal/GPTK files in the repository or the app bundle.** D3DMetal is downloaded only after the user accepts Apple's terms, or imported from their own GPTK.
 - **Anti-cheat workarounds** (jadeite, the Steam shim, the blocked host) are compatibility patches the user can turn off. Anything that injects code into the game process (FPS unlockers, mods) must be off by default and show a ban-risk warning before it's enabled.
 - **Launched processes** get exactly the environment we build, a fresh process group, no inherited descriptors and default signal handling. Tests kill and reap every process they start.
+- **Session logs** can be disabled globally with `sessionLogsEnabled` in the root `launch-settings.json` (default true, separate from per-game settings). Callers pass that snapshot to log creation, proxy logging and diagnostics, and use `ProcessOutput.discard` for child stdout/stderr. Enabled sessions spawn with `SessionLog.processOutput`, never by reopening the log URL. `finish()` performs the final cap; `recover(at:)` verifies the ownership sidecar, caps stale output and resumes supervision. Retention removes only recorded inodes. Periodic truncation permits growth between ticks, and an exited launcher cannot cap a surviving child's output. Disabling logs preserves existing logs, journals, prefix markers and file-recovery state. The UI toggle lands with app integration.
 - **New third-party components** in `runtime-manifest.json` need a pinned HTTPS URL, size, SHA-256 and license, with redistribution checked. Call them out in the PR description.
 
 ## Pull requests
@@ -108,7 +109,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
   - diagnostics;
   - localization groundwork (English only so far).
 - **In progress:** one-click Play.
-  - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy, prefix launch preparation.
+  - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy, prefix launch preparation, session logs with a global off setting and per-launch copies.
   - Next: session lock, launch manager state machine, then app integration.
 - **Planned:** HoYoPlay-style rotating banners and news, translations and content language, download ETA, surround and Spatial Audio, signed and notarized releases with Sparkle updates.
 

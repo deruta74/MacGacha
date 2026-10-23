@@ -8,6 +8,28 @@ import TestSupport
 @testable import LauncherCore
 
 @Suite(.timeLimit(.minutes(1))) struct ProcessSpawnerTests {
+    @Test func discardOutputRunsChildWithoutLogsOrInheritedDescriptors() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir()
+            let fd = open(temp.url.appendingPathComponent("private").path, O_RDWR | O_CREAT, 0o600)
+            try #require(fd >= 0); defer { close(fd) }
+            let inherited = fcntl(fd, F_DUPFD, 200)
+            try #require(inherited >= 200); defer { close(inherited) }
+            let script = "[ -c /dev/fd/1 ] && [ -c /dev/fd/2 ] || exit 2; [ ! -e /dev/fd/\(inherited) ] || exit 3; printf output; printf error >&2; printf done > proof"
+            let child = try SystemProcessSpawner().spawn(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script],
+                environment: [:], currentDirectory: temp.url, output: .discard)
+            var pid = child.pid
+            defer { if pid > 0 { killAndReap(pid) } }
+            var status: Int32 = 0
+            var result: Int32
+            repeat { result = waitpid(pid, &status, 0) } while result < 0 && errno == EINTR
+            try #require(result == pid); pid = 0
+            #expect(status == 0)
+            #expect(try String(contentsOf: temp.url.appendingPathComponent("proof"), encoding: .utf8) == "done")
+            #expect(Set(try FileManager.default.contentsOfDirectory(atPath: temp.url.path)) == ["private", "proof"])
+        }
+    }
+
     @Test func spawnWritesOutputToFile() async throws {
         try await BlockingIO.run {
             let temp = try TempDir(); let output = temp.url.appendingPathComponent("session.log")

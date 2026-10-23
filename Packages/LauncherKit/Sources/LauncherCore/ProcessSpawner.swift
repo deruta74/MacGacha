@@ -3,6 +3,19 @@
 import Darwin
 import Foundation
 
+/// Child output is either a private regular log file or direct /dev/null descriptors.
+public enum ProcessOutput: Sendable {
+    case file(URL)
+    case ownedFile(ProcessOutputFile)
+    case discard
+}
+
+/// An opaque, retained inode. Only contained exclusive creation can supply it.
+public struct ProcessOutputFile: Sendable {
+    package let file: ContainedFileSystem.OwnedRegularFile
+    package init(file: ContainedFileSystem.OwnedRegularFile) { self.file = file }
+}
+
 /// Synchronous file/process I/O: async callers must use BlockingIO.run.
 /// Returning an identity transfers child lifecycle/reaping to the session watcher:
 /// a handed-off child is never signalled or waited on by the spawner.
@@ -11,7 +24,14 @@ import Foundation
 /// SIGKILLs its process group (falling back to its PID), reaps it, then throws.
 public protocol ProcessSpawner: Sendable {
     func spawn(_ executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL, outputFile: URL) throws -> ProcessIdentity
+        currentDirectory: URL, output: ProcessOutput) throws -> ProcessIdentity
+}
+
+public extension ProcessSpawner {
+    func spawn(_ executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL, outputFile: URL) throws -> ProcessIdentity {
+        try spawn(executable, arguments: arguments, environment: environment, currentDirectory: currentDirectory, output: .file(outputFile))
+    }
 }
 
 public struct SystemProcessSpawner: ProcessSpawner {
@@ -20,8 +40,9 @@ public struct SystemProcessSpawner: ProcessSpawner {
     init(readIdentity: @escaping @Sendable (Int32) -> ProcessIdentity?) { self.readIdentity = readIdentity }
 
     public func spawn(_ executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL, outputFile: URL) throws -> ProcessIdentity {
-        for url in [executable, currentDirectory, outputFile] {
+        currentDirectory: URL, output: ProcessOutput) throws -> ProcessIdentity {
+        let outputURLs: [URL] = if case .file(let url) = output { [url] } else { [] }
+        for url in [executable, currentDirectory] + outputURLs {
             guard url.isFileURL, url.host == nil || url.host == "" || url.host == "localhost",
                 url.path.hasPrefix("/"), !url.path.utf8.contains(0) else { throw LauncherError.unsafePath(url.absoluteString) }
         }
@@ -29,8 +50,12 @@ public struct SystemProcessSpawner: ProcessSpawner {
             !key.isEmpty && !key.contains("=") && !key.utf8.contains(0) && !value.utf8.contains(0)
         }) else { throw LauncherError.io("Invalid process arguments or environment") }
 
-        let log = try openProcessLog(outputFile)
-        defer { close(log) }
+        let log: Int32? = switch output {
+        case .file(let url): try openProcessLog(url)
+        case .ownedFile(let owned): try owned.file.duplicateForSpawning()
+        case .discard: nil
+        }
+        defer { if let log { close(log) } }
 
         var attributes: posix_spawnattr_t?
         try checkSpawn(posix_spawnattr_init(&attributes))
@@ -52,15 +77,21 @@ public struct SystemProcessSpawner: ProcessSpawner {
         try checkSpawn(posix_spawnattr_setsigdefault(&attributes, &defaults))
         try checkSpawn(posix_spawn_file_actions_addchdir(&actions, currentDirectory.path))
         try checkSpawn(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0))
-        try checkSpawn(posix_spawn_file_actions_adddup2(&actions, log, STDOUT_FILENO))
-        try checkSpawn(posix_spawn_file_actions_adddup2(&actions, log, STDERR_FILENO))
-        try checkSpawn(posix_spawn_file_actions_addclose(&actions, log))
+        if let log {
+            try checkSpawn(posix_spawn_file_actions_adddup2(&actions, log, STDOUT_FILENO))
+            try checkSpawn(posix_spawn_file_actions_adddup2(&actions, log, STDERR_FILENO))
+        } else {
+            // /dev/null is intentionally not passed through the regular-file log check.
+            try checkSpawn(posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0))
+            try checkSpawn(posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0))
+        }
+        if let log { try checkSpawn(posix_spawn_file_actions_addclose(&actions, log)) }
 
         return try withProcessStrings([executable.path] + arguments) { argv in
             try withProcessStrings(environment.keys.sorted().map { $0 + "=" + environment[$0]! }) { envp in
                 var pid: pid_t = 0
-                // Only the three explicit standard streams survive. Their regular
-                // log file is independent of the parent's descriptor and lifetime.
+                // Only the three explicit standard streams survive; none depends
+                // on the parent's descriptors or lifetime.
                 try checkSpawn(posix_spawn(&pid, executable.path, &actions, &attributes, argv, envp))
                 // Even a child that exits immediately retains its kernel identity
                 // as a zombie until the watcher reaps it after successful handoff.

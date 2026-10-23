@@ -266,3 +266,36 @@ func diagnosticLabelsAndNonHeaderSensitiveValuesKeepTheirContext() {
     #expect(Redactor.redact(metadata: ["Session": "opaque"])["Session"] == "<redacted>")
     #expect(Redactor.redact(#"{"Session":"opaque"}"#) == #"{"Session":"<redacted>"}"#)
 }
+
+@Test func wineLogRedactsHomeEmailAndAccountData() {
+    let text = "path=/Users/alice/Games\\file alice@example.test token=planted-secret uid=123456789\n"
+    let result = Redactor.redactLog(text)
+    for secret in ["/Users/alice", "alice@example.test", "planted-secret", "123456789"] { #expect(!result.contains(secret)) }
+    #expect(result.contains("~/Games"))
+    #expect(result.hasSuffix("\n"))
+}
+
+@Test func wineLogRedactsWindowsHomePaths() {
+    let result = Redactor.redactLog(#"wine opened Z:\Users\alice\Games\game.exe and C:\users\bob\AppData\log"#)
+    #expect(!result.contains("alice"))
+    #expect(!result.contains("bob"))
+}
+
+@Test func redactsEscapedHomesAndEmailsInJSONLogs() throws {
+    let json = #"{"path":"\/Users\/alice\/Games","message":"alice\u0040example.test","nested":{"path":"C:\\Users\\bob\\Games"}}"#
+    for input in [json, json + "\n" + json + "\n"] {
+        let result = Redactor.redactLog(input)
+        for secret in ["alice", "bob", "example.test"] { #expect(!result.contains(secret)) }
+        for line in result.split(separator: "\n") {
+            let object = try #require(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+            #expect(object["path"] as? String == "~/Games")
+            #expect(object["message"] as? String == "<redacted>")
+        }
+    }
+}
+
+@Test func longNonEmailLogFieldsRemainIntact() {
+    let field = String(repeating: "a", count: 1 << 20)
+    #expect(Redactor.redactLog(field) == field)
+    #expect(Redactor.redactLog(field + " @ invalid alice@example.test") == field + " @ invalid <redacted>")
+}

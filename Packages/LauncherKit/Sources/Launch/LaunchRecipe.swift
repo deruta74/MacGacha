@@ -14,13 +14,15 @@ public struct LaunchRecipe: Sendable {
     public let copyIfPresent: [(source: SafeRelativePath, toSystem32: String)]
     public let timeoutFix: Bool
     public let supportsDirectX12: Bool
+    /// Candidates relative to each Wine user profile (drive_c/users/<profile>).
+    public let gameLogPaths: [SafeRelativePath]
 
     public init(game: String, recipeVersion: Int, verifiedBuilds: Set<String>, executable: SafeRelativePath,
         wrapper: Wrapper, blockedHosts: [String], hidden: [SafeRelativePath],
-        copyIfPresent: [(source: SafeRelativePath, toSystem32: String)], timeoutFix: Bool, supportsDirectX12: Bool) {
+        copyIfPresent: [(source: SafeRelativePath, toSystem32: String)], timeoutFix: Bool, supportsDirectX12: Bool, gameLogPaths: [SafeRelativePath] = []) {
         self.game = game; self.recipeVersion = recipeVersion; self.verifiedBuilds = verifiedBuilds
         self.executable = executable; self.wrapper = wrapper; self.blockedHosts = blockedHosts
         self.hidden = hidden; self.copyIfPresent = copyIfPresent; self.timeoutFix = timeoutFix
-        self.supportsDirectX12 = supportsDirectX12
+        self.supportsDirectX12 = supportsDirectX12; self.gameLogPaths = gameLogPaths
     }
 }
