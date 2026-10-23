@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+name: Steam shim (manual build)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    # macOS runs-on labels cannot take VM image digests. Keep the explicit image
+    # label; locked toolchain versions and artifact hashes reject image drift.
+    runs-on: xcode-27
+    timeout-minutes: 20
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_UPGRADE: '1'
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install and verify locked Homebrew runtime closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          [[ "$(sw_vers -productVersion)" == 27.* ]]
+          while read -r formula version digest; do
+            [[ -n "$formula" && "$formula" != \#* ]] || continue
+            installed=$(brew list --versions "$formula" 2>/dev/null || true)
+            if [[ -z "$installed" ]]; then
+              bottle="$RUNNER_TEMP/$formula--$version.arm64_golden_gate.bottle.tar.gz"
+              curl --fail --location --retry 3 -H 'Authorization: Bearer QQ==' \
+                "https://ghcr.io/v2/homebrew/core/$formula/blobs/sha256:$digest" -o "$bottle"
+              printf '%s  %s\n' "$digest" "$bottle" | shasum -a 256 -c -
+              # Only the locked bottles may be installed, never current dependencies
+              # or source-build fallbacks. Existing formulas are never upgraded.
+              brew install --ignore-dependencies --force-bottle "$bottle"
+            fi
+          done < compat/steam-shim/toolchain.lock
+          python3 scripts/check-steam-shim-toolchain.py
+      - name: Fetch pinned sources for two independent builds
+        run: |
+          STEAM_SHIM_CACHE_DIR="$RUNNER_TEMP/cache-a" scripts/build-steam-shim.sh out-a --fetch-only
+          STEAM_SHIM_CACHE_DIR="$RUNNER_TEMP/cache-b" scripts/build-steam-shim.sh out-b --fetch-only
+      - name: Build without network and compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          STEAM_SHIM_CACHE_DIR="$RUNNER_TEMP/cache-a" sandbox-exec -p '(version 1) (allow default) (deny network*)' scripts/build-steam-shim.sh out-a --offline --verify
+          STEAM_SHIM_CACHE_DIR="$RUNNER_TEMP/cache-b" sandbox-exec -p '(version 1) (allow default) (deny network*)' scripts/build-steam-shim.sh out-b --offline --verify
+          (cd out-a && shasum -a 256 -c "$GITHUB_WORKSPACE/compat/steam-shim/SHA256SUMS")
+          (cd out-b && shasum -a 256 -c "$GITHUB_WORKSPACE/compat/steam-shim/SHA256SUMS")
+          cmp out-a/steam32.exe out-b/steam32.exe
+          cmp out-a/steam64.exe out-b/steam64.exe
+          diff -u out-a/SHA256SUMS out-b/SHA256SUMS
+      - name: Upload build artifacts for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: steam-shim-proton-10.0-4
+          path: |
+            out-a/
+            out-b/
+          if-no-files-found: error
+          retention-days: 14
