@@ -28,7 +28,7 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 | `scripts/` | Build, test and check scripts (see below). |
 | `project.yml` | XcodeGen spec. `MacGacha.xcodeproj` is generated and ignored. Never edit it by hand. |
 | `assets/` | README screenshots. |
-| `docs/`, `spike/` | **Local only, gitignored.** Design notes and experiments. Read them if present; never commit or link them. |
+| `docs/`, `spike/` | Gitignored local scratch folders. They aren't part of the project. |
 
 ### LauncherKit targets
 
@@ -55,7 +55,7 @@ scripts/test.sh               # everything CI runs locally: headers, package tes
 swift test --package-path Packages/LauncherKit --filter <Suite>   # one package suite
 ```
 
-- **Run `scripts/test.sh` with `MACGACHA_DERIVED_DATA_PATH` pointing outside `~/Documents`**, for example `MACGACHA_DERIVED_DATA_PATH=/tmp/macgacha-dd scripts/test.sh`. Derived data inside `~/Documents` triggers a macOS privacy (TCC) prompt that hangs the test runner. Never click TCC dialogs on the user's behalf.
+- **Run `scripts/test.sh` with `MACGACHA_DERIVED_DATA_PATH` pointing outside `~/Documents`**, for example `MACGACHA_DERIVED_DATA_PATH=/tmp/macgacha-dd scripts/test.sh`. Derived data inside `~/Documents` triggers a macOS privacy (TCC) prompt that hangs the test runner.
 - CI (`.github/workflows/ci.yml`) also runs the `DownloadEngineTests` with one cooperative thread (`LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`). Run that step locally when you touch concurrency:
   ```bash
   LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 python3 scripts/test-package.py --events /tmp/strict.jsonl --timeout-seconds 240 --skip-build --test-product DownloadEngineTests --skip PlanScaleTests --skip operationStagesOneThousandBatchesWithLinearWork --parallel --num-workers 2
@@ -75,30 +75,28 @@ swift test --package-path Packages/LauncherKit --filter <Suite>   # one package 
 - **User-visible text is localizable.** SwiftUI literals are automatic. Text built in code uses `String(localized:)` or `LocalizedStringResource` with format arguments, never concatenation. Sizes, dates and percentages go through formatters. Log and diagnostic text stays plain English.
 - Errors shown to users go through `LauncherError` and `LauncherError+UserMessage.swift`, never raw payloads, URLs with tokens or paths with personal data.
 
-## Safety rules (hard requirements)
+## Product rules (hard requirements)
 
-These protect users' games, accounts and machines.
+Code must keep these guarantees. A PR that weakens one won't be merged.
 
 - **Game files are the user's data.**
   - Hide them only with non-replacing renames (`RENAME_EXCL`), recorded in the launch journal: "planned" before the rename, "done" after.
   - Never delete or overwrite a game file.
   - When unsure, keep the journal and report pending or conflict.
-- **Never modify `/etc/hosts`, never require or run `sudo`**, never change system or security settings. The Star Rail dispatch host is blocked by a per-session local proxy passed through `HTTP(S)_PROXY`.
-- **Never bundle or commit game data, game binaries, or Apple's D3DMetal/GPTK files.** D3DMetal is downloaded only after the user accepts Apple's terms, or imported from their own GPTK.
-- **Anti-cheat workarounds** (jadeite, the Steam shim, the blocked host) are opt-out compatibility patches. Never add anything that injects code into the game process (FPS unlockers, mods) without the user turning it on and a ban-risk warning shown first.
-- **Process hygiene.**
-  - Launched game processes get exactly the environment we build, a fresh process group, no inherited descriptors and default signal handling.
-  - Tests must kill and reap every process they start.
-  - Never kill a MacGacha or Wine process you didn't start.
-- **Downloading new third-party binaries** (a new runtime, a tool) needs the maintainer's approval first: name, source, size, license.
+- **No `/etc/hosts` edits, no `sudo`, no system or security setting changes.** The Star Rail dispatch host is blocked by a per-session local proxy passed through `HTTP(S)_PROXY`.
+- **No game data, game binaries or Apple D3DMetal/GPTK files in the repository or the app bundle.** D3DMetal is downloaded only after the user accepts Apple's terms, or imported from their own GPTK.
+- **Anti-cheat workarounds** (jadeite, the Steam shim, the blocked host) are compatibility patches the user can turn off. Anything that injects code into the game process (FPS unlockers, mods) must be off by default and show a ban-risk warning before it's enabled.
+- **Launched processes** get exactly the environment we build, a fresh process group, no inherited descriptors and default signal handling. Tests kill and reap every process they start.
+- **New third-party components** in `runtime-manifest.json` need a pinned HTTPS URL, size, SHA-256 and license, with redistribution checked. Call them out in the PR description.
 
-## Git and PR workflow
+## Pull requests
 
-- One PR per task. Branch from `main`, and use a separate git worktree for parallel work.
-- Merge with `gh pr merge <N> --squash`, only after CI is green on the PR's head commit. Never use `--auto` (the repo has no branch protection, so `--auto` merges immediately).
-- Never commit `docs/`, `spike/`, build output, `.xcodeproj` or secrets.
-- PR descriptions: plain English, short bullets on what changed and why, then test results.
-- Code and docs here may be written with AI assistance; the README says so. That doesn't change the rules above.
+1. Branch from `main`. Keep one change per PR: a feature, a fix or a refactor, not a mix.
+2. Run `scripts/test.sh` (see Build and test) and make sure it passes with no warnings.
+3. Don't commit build output, `MacGacha.xcodeproj`, `docs/`, `spike/`, secrets or downloaded binaries.
+4. Write commit messages and PR descriptions in plain English: a short title, then bullets on what changed and why, then how it was tested.
+5. If the change adds a module, script, feature or rule, update this file in the same PR, and the README roadmap when a user-visible feature lands.
+6. CI (`.github/workflows/ci.yml`) must pass on the PR's latest commit. PRs are squash-merged.
 
 ## Current state
 
@@ -109,7 +107,7 @@ These protect users' games, accounts and machines.
   - HoYoPlay art;
   - diagnostics;
   - localization groundwork (English only so far).
-- **In progress:** milestone M2b, one-click Play.
+- **In progress:** one-click Play.
   - Done so far: process spawner and inspector, recipes and resolver.
   - Being built: the session journal with file hiding.
   - Next: session proxy, prefix preparation, session lock, launch manager state machine, then app integration.
