@@ -36,6 +36,7 @@ public struct InvalidRuntimeEntry: Sendable, Equatable {
     public let kind: ComponentKind?
     /// A single filesystem name, retained verbatim for reporting even when unsafe.
     public let rawName: String
+    /// Why the entry is invalid, localized: the Runtimes list shows it to the user.
     public let reason: String
     /// Inspection failures are report-only; true requires a positively identified invalid entry.
     public let removable: Bool
@@ -60,7 +61,7 @@ public struct RuntimeScan: Sendable, Equatable {
 
 public struct RuntimeStore: Sendable {
     let paths: AppPaths
-    private static let invalidPathReason = "Invalid runtime path component"
+    private static let invalidPathReason = String(localized: "Invalid runtime path component", bundle: .module)
 
     public init(paths: AppPaths) { self.paths = paths }
 
@@ -92,19 +93,19 @@ public struct RuntimeStore: Sendable {
             guard rawName.utf8.first != 0x2e else { continue }
             if rawName == "bundles" { continue }
             guard let kind = ComponentKind(rawValue: rawName) else {
-                invalid.append(InvalidRuntimeEntry(kind: nil, rawName: rawName, reason: "Unknown runtime kind"))
+                invalid.append(InvalidRuntimeEntry(kind: nil, rawName: rawName, reason: String(localized: "Unknown runtime kind", bundle: .module)))
                 continue
             }
             do {
                 guard let type = try fs.itemType(at: kindPath, allowingLeafSymlink: true) else { continue }
                 guard type == .directory else {
                     invalid.append(InvalidRuntimeEntry(kind: nil, rawName: kind.rawValue,
-                        reason: "Runtime kind path is not a directory", removable: true))
+                        reason: String(localized: "Runtime kind path is not a directory", bundle: .module), removable: true))
                     continue
                 }
                 let entries = try fs.contentsOfDirectoryReportingInvalid(at: kindPath)
                 guard entries.paths.count + entries.invalid.count <= 1024 else {
-                    throw LauncherError.io("Too many runtime directory entries")
+                    throw LauncherError.io(String(localized: "Too many runtime directory entries", bundle: .module))
                 }
                 let prefixBytes = (kindPath.description + "/").utf8.count
                 for rawPath in entries.invalid {
@@ -241,22 +242,22 @@ public struct RuntimeStore: Sendable {
     private func inspectVersion(at path: SafeRelativePath, kind: ComponentKind, version: String,
         in fs: ContainedFileSystem) throws -> InstalledComponent {
         do { _ = try SafeIdentifier(version) }
-        catch { throw BadVersion(reason: "Invalid runtime version identifier") }
+        catch { throw BadVersion(reason: String(localized: "Invalid runtime version identifier", bundle: .module)) }
         guard let type = try fs.itemType(at: path, allowingLeafSymlink: true) else {
-            throw LauncherError.io("Runtime entry disappeared during inspection")
+            throw LauncherError.io(String(localized: "Runtime entry disappeared during inspection", bundle: .module))
         }
-        guard type == .directory else { throw BadVersion(reason: "Runtime path is not a directory") }
+        guard type == .directory else { throw BadVersion(reason: String(localized: "Runtime path is not a directory", bundle: .module)) }
         let marker = try SafeRelativePath(path.description + "/.macgacha-component.json")
         let data: Data?
         do { data = try RuntimeJSONFile.read(marker, in: fs, limit: 65_536) }
-        catch LauncherError.fileTooLarge { throw BadVersion(reason: "Runtime marker exceeds size limit") }
-        catch LauncherError.unsafePath { throw BadVersion(reason: "Unsafe runtime marker path") }
-        guard let data else { throw BadVersion(reason: "Runtime marker is missing") }
+        catch LauncherError.fileTooLarge { throw BadVersion(reason: String(localized: "Runtime marker exceeds size limit", bundle: .module)) }
+        catch LauncherError.unsafePath { throw BadVersion(reason: String(localized: "Unsafe runtime marker path", bundle: .module)) }
+        guard let data else { throw BadVersion(reason: String(localized: "Runtime marker is missing", bundle: .module)) }
         let record: InstalledComponent
         do { record = try JSONDecoder().decode(InstalledComponent.self, from: data) }
-        catch { throw BadVersion(reason: "Invalid runtime marker JSON") }
+        catch { throw BadVersion(reason: String(localized: "Invalid runtime marker JSON", bundle: .module)) }
         guard record.kind == kind, record.version == version else {
-            throw BadVersion(reason: "Runtime marker does not match its directory")
+            throw BadVersion(reason: String(localized: "Runtime marker does not match its directory", bundle: .module))
         }
         return record
     }
@@ -270,11 +271,11 @@ public struct RuntimeStore: Sendable {
 
     private static func reason(for error: any Error) -> String {
         switch error {
-        case LauncherError.fileTooLarge: return "Runtime marker exceeds size limit"
-        case LauncherError.unsafePath: return "Unsafe path or symbolic link"
+        case LauncherError.fileTooLarge: return String(localized: "Runtime marker exceeds size limit", bundle: .module)
+        case LauncherError.unsafePath: return String(localized: "Unsafe path or symbolic link", bundle: .module)
         case LauncherError.io(let message): return message
-        case is DecodingError: return "Invalid runtime marker JSON"
-        default: return "Cannot inspect runtime entry"
+        case is DecodingError: return String(localized: "Invalid runtime marker JSON", bundle: .module)
+        default: return String(localized: "Cannot inspect runtime entry", bundle: .module)
         }
     }
 }

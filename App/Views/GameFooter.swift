@@ -93,8 +93,13 @@ struct GameFooter: View {
         .buttonStyle(.glass)
         .buttonBorderShape(.circle)
         .foregroundStyle(.white)
-        .help(animated ? "Show a still background" : "Show the animated background")
-        .accessibilityLabel(animated ? "Show a still background" : "Show the animated background")
+        .help(backgroundToggleLabel)
+        .accessibilityLabel(backgroundToggleLabel)
+    }
+
+    // A ternary of two literals is a String, which SwiftUI shows verbatim, so each branch is a Text.
+    private var backgroundToggleLabel: Text {
+        animated ? Text("Show a still background") : Text("Show the animated background")
     }
 
     /// HoYoPlay's art already carries the game's logo and event title, so the name
@@ -125,20 +130,22 @@ struct GameFooter: View {
     private var statusLine: String {
         if case .working(let phase, _, _, _, _) = state.activity {
             switch phase {
-            case .committing, .deleting, .cleaningUp: return "Finishing up — this can't be paused"
-            default: return "Keep MacGacha open — you can pause and resume any time"
+            case .committing, .deleting, .cleaningUp: return String(localized: "Finishing up — this can't be paused")
+            default: return String(localized: "Keep MacGacha open — you can pause and resume any time")
             }
         }
         // A disabled button shows no tooltip on macOS, so the reason it waits goes here.
         if let busy = busyElsewhere { return busy }
         switch state.status {
-        case .unknown: return "Checking for updates…"
-        case .notInstalled: return "Not installed"
-        case .installed(let tag): return "Version \(tag) · Installed"
-        case .updateAvailable(let from, let to): return "Version \(from) · Version \(to) is available"
-        case .paused: return state.spaceShortage == nil ? "Paused" : "Paused — Not enough free disk space"
-        case .uninstallPaused: return "Uninstall didn't finish"
-        case .locationUnavailable: return "Install location unavailable — connect the drive it's on"
+        case .unknown: return String(localized: "Checking for updates…")
+        case .notInstalled: return String(localized: "Not installed")
+        case .installed(let tag): return String(localized: "Version \(tag) · Installed", comment: "Game status; the argument is the game version")
+        case .updateAvailable(let from, let to):
+            return String(localized: "Version \(from) · Version \(to) is available", comment: "Game status: installed version, then the newer one")
+        case .paused:
+            return state.spaceShortage == nil ? String(localized: "Paused") : String(localized: "Paused — Not enough free disk space")
+        case .uninstallPaused: return String(localized: "Uninstall didn't finish")
+        case .locationUnavailable: return String(localized: "Install location unavailable — connect the drive it's on")
         }
     }
 
@@ -147,33 +154,37 @@ struct GameFooter: View {
         guard model.isGameOperationRunning, state.activity == nil else { return nil }
         let other = LauncherGame.all.first { $0.id != game.id && model.games[$0.id]?.activity != nil }
         guard let other, case .working(let phase, _, _, _, _) = model.games[other.id]?.activity else {
-            return "Another game is busy — this one can start when it finishes"
+            return String(localized: "Another game is busy — this one can start when it finishes")
         }
         return phase == .staging
-            ? "\(other.name) is downloading — pause it to start this one"
-            : "Waiting for \(other.name) to finish"
+            ? String(localized: "\(other.name) is downloading — pause it to start this one", comment: "The argument is another game's name")
+            : String(localized: "Waiting for \(other.name) to finish", comment: "The argument is another game's name")
     }
 
     private var partsMessage: String {
         guard case .needsApproval(let required, let available) = state.activity else { return "" }
-        return "This needs \(ByteSize.text(required)) at once, but only \(ByteSize.text(available)) is free. "
-            + "MacGacha can finish it in parts instead. \(game.name) can't be played until it's done."
+        return String(localized: """
+            This needs \(ByteSize.text(required)) at once, but only \(ByteSize.text(available)) is free. \
+            MacGacha can finish it in parts instead. \(game.name) can't be played until it's done.
+            """, comment: "Sizes needed and free, then the game's name")
     }
 
     private var uninstallMessage: String {
         let record = model.gameRecord(game.id)
-        var path = record?.installPath.path(percentEncoded: false) ?? "its folder"
+        var path = record?.installPath.path(percentEncoded: false) ?? String(localized: "its folder", comment: "Stands in for a folder path")
         if path.count > 1, path.hasSuffix("/") { path.removeLast() }
-        let paused: String
+        let removal = record?.ownership == .adopted
+            ? String(localized: "MacGacha removes the game files it manages from \(path). Other files in that folder are kept.",
+                comment: "The argument is the game's folder")
+            : String(localized: "The folder \(path) and everything in it will be removed.", comment: "The argument is the game's folder")
         switch state.status {
-        case .paused: paused = "The paused operation is discarded. "
-        case .uninstallPaused: paused = "This finishes the uninstall that was interrupted. "
-        default: paused = ""
+        case .paused:
+            return String(localized: "The paused operation is discarded. \(removal)", comment: "The argument is the sentence about what is removed")
+        case .uninstallPaused:
+            return String(localized: "This finishes the uninstall that was interrupted. \(removal)",
+                comment: "The argument is the sentence about what is removed")
+        default: return removal
         }
-        if record?.ownership == .adopted {
-            return paused + "MacGacha removes the game files it manages from \(path). Other files in that folder are kept."
-        }
-        return paused + "The folder \(path) and everything in it will be removed."
     }
 }
 
@@ -226,7 +237,7 @@ struct PrimaryActionButton: View {
     /// gives every footer control one height.
     private let labelHeight: CGFloat = 44
 
-    private func prominent(_ title: String, alwaysEnabled: Bool = false, perform: @escaping () -> Void) -> some View {
+    private func prominent(_ title: LocalizedStringKey, alwaysEnabled: Bool = false, perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
             // Game tints are light, so the label takes the game's dark tone for contrast.
             Text(title)
@@ -239,10 +250,10 @@ struct PrimaryActionButton: View {
         .font(.title3)
         .keyboardShortcut(.defaultAction)
         .disabled(blocked && !alwaysEnabled)
-        .help(blocked && !alwaysEnabled ? "Wait for the other game's download to finish or pause it" : "")
+        .help(blocked && !alwaysEnabled ? Text("Wait for the other game's download to finish or pause it") : Text(verbatim: ""))
     }
 
-    private func waiting(_ title: String, spinner: Bool = false) -> some View {
+    private func waiting(_ title: LocalizedStringKey, spinner: Bool = false) -> some View {
         Button {} label: {
             HStack(spacing: 8) {
                 if spinner { ProgressView().controlSize(.small) }
@@ -316,12 +327,16 @@ struct PrimaryActionButton: View {
 
     private var progressLabel: String {
         guard case .working(let phase, let fraction, let speed, let downloaded, let total) = state.activity else { return "" }
-        var parts = [RuntimeRowView.label(for: phase, fraction: fraction)]
+        var label = RuntimeRowView.label(for: phase, fraction: fraction)
         if phase == .staging, let downloaded, let total, total > 0 {
-            parts.append("\(ByteSize.number(downloaded, unitOf: total)) of \(ByteSize.text(total))")
+            let amount = String(localized: "\(ByteSize.number(downloaded, unitOf: total)) of \(ByteSize.text(total))",
+                comment: "Downloaded so far of the total, e.g. 18.3 of 136.5 GB")
+            label = StatusText.joined(label, amount)
         }
-        if phase == .staging, let speed, speed > 0 { parts.append(ByteSize.text(speed) + "/s") }
-        return parts.joined(separator: " · ")
+        if phase == .staging, let speed, speed > 0 {
+            label = StatusText.joined(label, String(localized: "\(ByteSize.text(speed))/s", comment: "Download speed, e.g. 47 MB/s"))
+        }
+        return label
     }
 
     private var unavailablePath: String {
@@ -379,6 +394,13 @@ struct GameMenu: View {
         case .installed, .updateAvailable: true
         default: false
         }
+    }
+}
+
+/// Status lines built from parts read as one localized phrase each, never as fragments.
+enum StatusText {
+    static func joined(_ first: String, _ second: String) -> String {
+        String(localized: "\(first) · \(second)", comment: "Joins two parts of a status line")
     }
 }
 

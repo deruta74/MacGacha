@@ -1,5 +1,6 @@
 name: MacGacha
 options:
+  developmentLanguage: en
   deploymentTarget:
     macOS: "27.0"
 packages:
@@ -46,6 +47,9 @@ targets:
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        # New user-facing strings land in App/Resources/Localizable.xcstrings at build time.
+        SWIFT_EMIT_LOC_STRINGS: YES
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
   MacGachaTests:
     type: bundle.unit-test
     platform: macOS

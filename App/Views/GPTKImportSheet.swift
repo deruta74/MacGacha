@@ -56,7 +56,8 @@ struct GPTKImportSheet: View {
         case .choose(let candidates):
             List(candidates, id: \.root, selection: $selection) { candidate in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(candidate.version.map { "D3DMetal \($0)" } ?? "D3DMetal, unknown version")
+                    Text(candidate.version.map { String(localized: "D3DMetal \($0)", comment: "The argument is a version") }
+                    ?? String(localized: "D3DMetal, unknown version"))
                         .font(.headline)
                     Text(candidate.root.path(percentEncoded: false))
                         .font(.caption)

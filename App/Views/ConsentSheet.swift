@@ -44,7 +44,7 @@ struct ConsentSheet: View {
                 Spacer()
                 Button("Decline", role: .cancel) { model.respondToConsent(accept: false) }
                     .keyboardShortcut(.cancelAction)
-                Button(request.mode == .importGPTK ? "Accept and Import" : "Accept and Download") {
+                Button(request.mode == .importGPTK ? String(localized: "Accept and Import") : String(localized: "Accept and Download")) {
                     model.respondToConsent(accept: true)
                 }
                 .keyboardShortcut(.defaultAction)

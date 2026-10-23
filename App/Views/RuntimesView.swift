@@ -102,7 +102,8 @@ struct RuntimeRowView: View {
             .accessibilityLabel(Self.label(for: phase, fraction: fraction))
         case .installed(let source):
             Label(
-                source == .importFromGPTK ? "\(row.licenseName) · Imported from Game Porting Toolkit" : "\(row.licenseName) · Installed",
+                StatusText.joined(row.licenseName, source == .importFromGPTK
+                    ? String(localized: "Imported from Game Porting Toolkit") : String(localized: "Installed")),
                 systemImage: "checkmark.circle.fill"
             )
             .font(.caption)
@@ -132,7 +133,7 @@ struct RuntimeRowView: View {
                     Button("Import…") { model.importGPTK(row.id) }
                         .help("Import D3DMetal from Apple's Game Porting Toolkit")
                 }
-                Button(row.state == .notInstalled ? "Install" : "Try Again") { model.install(row.id) }
+                Button(row.state == .notInstalled ? String(localized: "Install") : String(localized: "Try Again")) { model.install(row.id) }
             case .working(let phase, _):
                 // Removing files and final cleanup always run to the end.
                 if phase != .deleting && phase != .cleaningUp {
@@ -150,10 +151,9 @@ struct RuntimeRowView: View {
     }
 
     private var notInstalledDetail: String {
-        var parts: [String] = []
-        if let size = row.downloadSize, size > 0 { parts.append("About \(ByteSize.text(size)) to download") }
-        parts.append(row.needsConsent ? "Apple license" : row.licenseName)
-        return parts.joined(separator: " · ")
+        let license = row.needsConsent ? String(localized: "Apple license") : row.licenseName
+        guard let size = row.downloadSize, size > 0 else { return license }
+        return StatusText.joined(String(localized: "About \(ByteSize.text(size)) to download"), license)
     }
 
     private var symbol: String {
@@ -168,16 +168,20 @@ struct RuntimeRowView: View {
     }
 
     static func label(for phase: OperationPhase, fraction: Double?) -> String {
-        let percent = fraction.map { " \(Int(($0 * 100).rounded()))%" } ?? ""
+        let percent = fraction.map { $0.formatted(.percent.precision(.fractionLength(0))) }
         switch phase {
-        case .checkingSpace: return "Checking free space…"
-        case .staging: return "Downloading\(percent)"
-        case .verifying: return "Verifying\(percent)"
-        case .committing: return "Installing…"
-        case .deleting, .cleaningUp: return "Finishing…"
-        case .completed: return "Done"
-        case .failed: return "Failed"
-        case .cancelled: return "Cancelled"
+        case .checkingSpace: return String(localized: "Checking free space…")
+        case .staging:
+            guard let percent else { return String(localized: "Downloading") }
+            return String(localized: "Downloading \(percent)", comment: "The argument is a percentage, e.g. 42%")
+        case .verifying:
+            guard let percent else { return String(localized: "Verifying") }
+            return String(localized: "Verifying \(percent)", comment: "The argument is a percentage, e.g. 42%")
+        case .committing: return String(localized: "Installing…")
+        case .deleting, .cleaningUp: return String(localized: "Finishing…")
+        case .completed: return String(localized: "Done")
+        case .failed: return String(localized: "Failed")
+        case .cancelled: return String(localized: "Cancelled")
         }
     }
 }

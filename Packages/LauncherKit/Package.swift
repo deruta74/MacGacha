@@ -5,6 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "LauncherKit",
+    defaultLocalization: "en",
     platforms: [.macOS("27.0")],
     products: [
         .library(name: "LauncherCore", targets: ["LauncherCore"]),
@@ -25,7 +26,8 @@ let package = Package(
         ]),
         .target(name: "DownloadEngine", dependencies: ["LauncherCore", "CZstd"]),
         .systemLibrary(name: "CArchive"),
-        .target(name: "RuntimeManager", dependencies: ["LauncherCore", "DownloadEngine", "CArchive"]),
+        .target(name: "RuntimeManager", dependencies: ["LauncherCore", "DownloadEngine", "CArchive"],
+            resources: [.process("Localizable.xcstrings")]),
         .target(name: "Diagnostics", dependencies: ["LauncherCore"]),
         .target(name: "HoYoPlayAPI", dependencies: ["LauncherCore", "DownloadEngine"]),
         .target(name: "Sophon", dependencies: ["LauncherCore", "DownloadEngine"]),

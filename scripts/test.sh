@@ -13,6 +13,7 @@ xcodebuild \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$derived_data_path" \
   test
+python3 scripts/check-strings.py "$derived_data_path"
 xcodebuild \
   -project MacGacha.xcodeproj \
   -scheme MacGacha \

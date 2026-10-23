@@ -62,6 +62,9 @@ jobs:
           CODE_SIGN_IDENTITY=-
           test
 
+      - name: Check string catalog
+        run: python3 scripts/check-strings.py .build/xcode
+
       - name: Build app
         run: >-
           xcodebuild

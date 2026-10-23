@@ -10,11 +10,10 @@ import DownloadEngine
 public actor GameArtService {
     private static let ttl: TimeInterval = 6 * 3600
     private static let indexLimit = 512 << 10
-    private static let gamesURL = URL(string: "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/getGames?launcher_id=VYTpXlbWo8&language=en-us")!
-    private static let basicURL = URL(string: "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/getAllGameBasicInfo?launcher_id=VYTpXlbWo8&language=en-us")!
     private static let gameIDs = ["hk4e_global": "genshin", "hkrpg_global": "starrail", "nap_global": "zzz"]
     private nonisolated let snapshot = Mutex<[String: GameArt]>([:])
     private let directory: URL
+    private let language: HoYoPlayLanguage
     private let http: any HTTPClient
     private let ownedHTTP: ArtHTTPSession?
     private let now: @Sendable () -> Date
@@ -24,9 +23,9 @@ public actor GameArtService {
     private var hydrated = false
     private var flight: (id: UUID, task: Task<[String: GameArt], Never>)?
 
-    public init(cacheDirectory: URL, http: (any HTTPClient)? = nil, log: EventLog? = nil,
+    public init(cacheDirectory: URL, language: HoYoPlayLanguage = .enUS, http: (any HTTPClient)? = nil, log: EventLog? = nil,
         now: @escaping @Sendable () -> Date = Date.init, requestTimeout: Duration = .seconds(30)) {
-        self.directory = cacheDirectory; self.log = log; self.now = now; self.requestTimeout = requestTimeout
+        self.directory = cacheDirectory; self.language = language; self.log = log; self.now = now; self.requestTimeout = requestTimeout
         if let http { self.http = http; ownedHTTP = nil }
         else { let session = ArtHTTPSession(); ownedHTTP = session; self.http = session.client }
     }
@@ -72,10 +71,12 @@ public actor GameArtService {
             try fs.createDirectory(at: root)
             hydrate(fs, root: root)
             let age = now().timeIntervalSince(index.fetchedAt)
-            if age >= 0 && age < Self.ttl { return cached() }
+            // Art fetched in another language is stale however fresh it is.
+            if age >= 0 && age < Self.ttl && (index.language ?? .enUS) == language { return cached() }
             let http = http; let log = log; let timeout = requestTimeout
-            let gamesData = try await Self.deadline(timeout) { try await Self.json(Self.gamesURL, http: http, log: log) }
-            let basicData = try await Self.deadline(timeout) { try await Self.json(Self.basicURL, http: http, log: log) }
+            let urls = Self.apiURLs(language: language)
+            let gamesData = try await Self.deadline(timeout) { try await Self.json(urls.games, http: http, log: log) }
+            let basicData = try await Self.deadline(timeout) { try await Self.json(urls.basic, http: http, log: log) }
             let requested: [String: RemoteArt]
             do { requested = try Self.parse(gamesData, basicData) }
             catch { throw ArtFailure.invalidAPIResponse }
@@ -103,7 +104,7 @@ public actor GameArtService {
             }
             try Task.checkCancellation()
             let retained = Set(selected.values.flatMap(\.urls).map(\.absoluteString))
-            let next = ArtIndex(fetchedAt: now(), games: selected, assets: files.filter { retained.contains($0.key) })
+            let next = ArtIndex(fetchedAt: now(), language: language, games: selected, assets: files.filter { retained.contains($0.key) })
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let bytes = try encoder.encode(next)
             guard bytes.count <= Self.indexLimit else { return cached() }
@@ -249,6 +250,16 @@ public actor GameArtService {
         if (try? fs.readFile(at: page, maxBytes: 1024)) != bytes { try fs.writeAtomically(bytes, to: page) }
     }
 
+    /// The two HoYoPlay endpoints art comes from, in `language`.
+    public static func apiURLs(language: HoYoPlayLanguage) -> (games: URL, basic: URL) {
+        func endpoint(_ name: String) -> URL {
+            var components = URLComponents(string: "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/\(name)")!
+            components.queryItems = [URLQueryItem(name: "launcher_id", value: "VYTpXlbWo8"), URLQueryItem(name: "language", value: language.rawValue)]
+            return components.url!
+        }
+        return (endpoint("getGames"), endpoint("getAllGameBasicInfo"))
+    }
+
     private static func hash(_ url: URL) -> String { var h = StreamingHasher(.sha256); h.update(Data(url.absoluteString.utf8)); return h.finalize().hex }
 
     // Never log arbitrary error descriptions: they may contain URLs, query secrets or paths.
@@ -293,6 +304,8 @@ public actor GameArtService {
 private struct AssetRecord: Codable, Sendable { let file: String; let fetchedAt: Date }
 private struct ArtIndex: Codable, Sendable {
     var fetchedAt = Date.distantPast
+    /// Nil in indexes written before the language was recorded, which were all en-us.
+    var language: HoYoPlayLanguage? = nil
     var games: [String: RemoteArt] = [:]
     var assets: [String: AssetRecord] = [:]
 }

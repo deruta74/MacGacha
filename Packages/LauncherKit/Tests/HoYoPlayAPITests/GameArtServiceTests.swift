@@ -249,3 +249,35 @@ private final class StallingArtHTTP: HTTPClient, Sendable {
         }))
     }
 }
+
+@Test
+func refreshRequestsTheInjectedLanguageAndRefetchesWhenItChanges() async throws {
+    let temp = try TempDir(); let cdn = MockCDN(); try artFixtures(cdn)
+    let http = QueryRecordingHTTP(cdn: cdn)
+    let directory = temp.url.appendingPathComponent("GameArt")
+    let time = Mutex(Date(timeIntervalSince1970: 1_800_000_000))
+    _ = await GameArtService(cacheDirectory: directory, http: http, now: { time.withLock { $0 } }).refresh()
+    #expect(http.apiLanguages() == ["en-us", "en-us"])
+    // Within the TTL the same language is served from the cache, another language is fetched.
+    _ = await GameArtService(cacheDirectory: directory, language: .enUS, http: http, now: { time.withLock { $0 } }).refresh()
+    #expect(http.apiLanguages() == ["en-us", "en-us"])
+    let russian = await GameArtService(cacheDirectory: directory, language: .ruRU, http: http, now: { time.withLock { $0 } }).refresh()
+    #expect(http.apiLanguages() == ["en-us", "en-us", "ru-ru", "ru-ru"])
+    #expect(!russian.isEmpty)
+}
+
+private final class QueryRecordingHTTP: HTTPClient, Sendable {
+    let cdn: MockCDN
+    private let urls = Mutex<[URL]>([])
+    init(cdn: MockCDN) { self.cdn = cdn }
+    func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
+        urls.withLock { $0.append(url) }
+        return try await cdn.get(url, byteRangeFrom: offset)
+    }
+    /// The `language=` value of every API request so far, in order.
+    func apiLanguages() -> [String] {
+        urls.withLock { $0 }.filter { $0.host == "sg-hyp-api.hoyoverse.com" }.compactMap {
+            URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "language" }?.value
+        }
+    }
+}
