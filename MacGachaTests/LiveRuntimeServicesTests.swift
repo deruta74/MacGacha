@@ -89,6 +89,125 @@ struct LiveRuntimeServicesTests {
         #expect(try await live.scanBundles(manifest)[bundle.id.rawValue] != nil)
     }
 
+    @Test func liveDiagnosticsReadGlobalSessionLogsPreference() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacGachaLogsOff-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppPaths(root: root)
+        try await BlockingIO.run { try GlobalLaunchSettingsStore(paths: paths).save(GlobalLaunchSettings(sessionLogsEnabled: false)) }
+        let bundle = try await LiveRuntimeServices(paths: paths, http: FailedHTTP()).makeDiagnosticBundle()
+        defer { try? FileManager.default.removeItem(at: bundle) }
+        let result = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/unzip"),
+            arguments: ["-p", bundle.path, "session-logs.txt"], environment: [:], currentDirectory: nil)
+        #expect(result.exitCode == 0)
+        #expect(String(decoding: result.stdout, as: UTF8.self) == "session logs disabled\n")
+    }
+
+    @Test(arguments: ["symlink", "unreadable"], [false, true])
+    func liveDiagnosticsSkipFailedGameLogDiscovery(failure: String, directExport: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacGachaDiscovery-\(UUID().uuidString)")
+        let paths = AppPaths(root: root)
+        let unreadable = paths.prefixes.appendingPathComponent("genshin-fixture/drive_c/users")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unreadable.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        try await BlockingIO.run {
+            if failure == "symlink" {
+                let target = root.appendingPathComponent("private-token=planted-secret")
+                try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+                try FileManager.default.createSymbolicLink(at: paths.prefixes, withDestinationURL: target)
+            } else {
+                try FileManager.default.createDirectory(at: unreadable, withIntermediateDirectories: true)
+                try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadable.path)
+            }
+            // Ensure the fixture actually exercises the discovery failure, rather than
+            // relying on an absent log or a permission change ignored by the OS.
+            #expect(throws: (any Error).self) { try LaunchLogFiles.gameLogCandidates(in: paths.prefixes) }
+        }
+        let live = LiveRuntimeServices(paths: paths, http: FailedHTTP())
+        let bundle: URL
+        if directExport {
+            bundle = root.appendingPathComponent("diagnostics.zip")
+            try await live.exportDiagnostics(to: bundle)
+        } else {
+            bundle = try await live.makeDiagnosticBundle()
+        }
+        defer { try? FileManager.default.removeItem(at: bundle) }
+        let check = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/unzip"),
+            arguments: ["-tq", bundle.path], environment: [:], currentDirectory: nil)
+        #expect(check.exitCode == 0)
+        let report = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/unzip"),
+            arguments: ["-p", bundle.path, "skipped.txt"], environment: [:], currentDirectory: nil)
+        #expect(report.exitCode == 0)
+        let text = String(decoding: report.stdout, as: UTF8.self)
+        #expect(text.contains("discovery unavailable: \"game logs\""))
+        for forbidden in [root.path, "planted-secret", "private-token", "drive_c"] {
+            #expect(!text.contains(forbidden))
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func liveDiagnosticsSkipSymlinkedLogsRoot(directExport: Bool) async throws {
+        let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("MacGachaForeignLogs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let paths = AppPaths(root: fixture.appendingPathComponent("app"))
+        try await BlockingIO.run {
+            let foreign = fixture.appendingPathComponent("foreign")
+            try FileManager.default.createDirectory(at: foreign, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
+            var event = try JSONSerialization.data(withJSONObject: ["ts": "2026-10-20T12:00:00Z", "level": "info",
+                "category": "test", "message": "foreign-event-must-stay-out", "metadata": [:]])
+            event.append(10)
+            #expect(try JSONDecoder().decode(EventLog.Record.self, from: event).message == "foreign-event-must-stay-out")
+            try event.write(to: foreign.appendingPathComponent("macgacha.log"))
+            try FileManager.default.createSymbolicLink(at: paths.logs, withDestinationURL: foreign)
+        }
+        let live = LiveRuntimeServices(paths: paths, http: FailedHTTP())
+        let bundle: URL
+        if directExport {
+            bundle = fixture.appendingPathComponent("diagnostics.zip")
+            try await live.exportDiagnostics(to: bundle)
+        } else {
+            bundle = try await live.makeDiagnosticBundle()
+        }
+        defer { try? FileManager.default.removeItem(at: bundle) }
+        let listing = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/unzip"),
+            arguments: ["-Z1", bundle.path], environment: [:], currentDirectory: nil)
+        #expect(listing.exitCode == 0)
+        #expect(!String(decoding: listing.stdout, as: UTF8.self).contains("logs/macgacha.log"))
+        let contents = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/unzip"),
+            arguments: ["-p", bundle.path], environment: [:], currentDirectory: nil)
+        #expect(contents.exitCode == 0)
+        #expect(!String(decoding: contents.stdout, as: UTF8.self).contains("foreign-event-must-stay-out"))
+        let report = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/unzip"),
+            arguments: ["-p", bundle.path, "skipped.txt"], environment: [:], currentDirectory: nil)
+        #expect(report.exitCode == 0)
+        let text = String(decoding: report.stdout, as: UTF8.self)
+        #expect(text.contains("unsafe or unavailable log directory"))
+        #expect(!text.contains(fixture.path))
+    }
+
+    @Test(arguments: [false, true])
+    func liveDiagnosticsPreserveCancellationWithUnsafeDiscovery(directExport: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacGachaCancelledDiscovery-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppPaths(root: root)
+        try await BlockingIO.run {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(at: paths.prefixes, withDestinationURL: root)
+        }
+        let live = LiveRuntimeServices(paths: paths, http: FailedHTTP())
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            if directExport {
+                try await live.exportDiagnostics(to: root.appendingPathComponent("cancelled.zip"))
+            } else {
+                _ = try await live.makeDiagnosticBundle()
+            }
+        }
+        await #expect(throws: LauncherError.cancelled) { try await task.value }
+    }
+
     @Test func liveDiagnosticBundleIsACompleteTemporaryZip() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacGachaBundleTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

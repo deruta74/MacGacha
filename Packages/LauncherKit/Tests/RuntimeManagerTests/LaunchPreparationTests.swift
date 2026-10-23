@@ -9,6 +9,17 @@ import TestSupport
 @testable import RuntimeManager
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchPreparationTests {
+    @Test func disabledSessionLogsStillPublishPrefixMarker() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            try GlobalLaunchSettingsStore(paths: fixture.paths).save(GlobalLaunchSettings(sessionLogsEnabled: false))
+            try await fixture.preparer(FakeProcessRunner()).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: fixture.request())
+            #expect(try fixture.revision() == LaunchPreparation.provisioningRevision)
+            #expect(try !GlobalLaunchSettingsStore(paths: fixture.paths).load().sessionLogsEnabled)
+        }
+    }
+
     @Test(arguments: [["system.reg", "user.reg", "userdef.reg"], ["user.reg"], []])
     func registryWaitAndSyncPrecedeMarker(registryFiles: [String]) async throws {
         try await BlockingIO.run {

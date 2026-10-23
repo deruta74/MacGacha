@@ -5,6 +5,8 @@ import LauncherCore
 public enum Recipes {
     public static func recipe(for game: String) -> LaunchRecipe? { all[game] }
 
+    package static var games: [String] { all.keys.sorted() }
+
     // All paths are fixed recipe literals, not manifest or user input.
     private static let all: [String: LaunchRecipe] = [
         "genshin": LaunchRecipe(game: "genshin", recipeVersion: 1, verifiedBuilds: ["7.1"],
@@ -12,16 +14,16 @@ public enum Recipes {
             hidden: ["GenshinImpact_Data/upload_crash.exe", "GenshinImpact_Data/Plugins/crashreport.exe",
                 "GenshinImpact_Data/Plugins/vulkan-1.dll"].map { try! SafeRelativePath($0) },
             copyIfPresent: [(try! SafeRelativePath("HoYoKProtect.sys"), "HoYoKProtect.sys")],
-            timeoutFix: true, supportsDirectX12: false),
+            timeoutFix: true, supportsDirectX12: false, gameLogPaths: LaunchLogFiles.gameLogPaths(for: "genshin")),
         "starrail": LaunchRecipe(game: "starrail", recipeVersion: 1, verifiedBuilds: ["4.6.0"],
             executable: try! SafeRelativePath("StarRail.exe"), wrapper: .jadeite,
             blockedHosts: ["globaldp-prod-os01.starrails.com"],
             hidden: ["StarRail_Data/Plugins/x86_64/crashreport.exe", "StarRail_Data/Plugins/x86_64/vulkan-1.dll"].map { try! SafeRelativePath($0) },
-            copyIfPresent: [], timeoutFix: false, supportsDirectX12: false),
+            copyIfPresent: [], timeoutFix: false, supportsDirectX12: false, gameLogPaths: LaunchLogFiles.gameLogPaths(for: "starrail")),
         "zzz": LaunchRecipe(game: "zzz", recipeVersion: 1, verifiedBuilds: ["Phase 0 install of 2026-10-23"],
             executable: try! SafeRelativePath("ZenlessZoneZero.exe"), wrapper: .steamShim, blockedHosts: [],
             hidden: [try! SafeRelativePath("ZenlessZoneZero_Data/Plugins/x86_64/vulkan-1.dll")],
             copyIfPresent: [(try! SafeRelativePath("HoYoKProtect.sys"), "HoYoKProtect.sys")],
-            timeoutFix: true, supportsDirectX12: true),
+            timeoutFix: true, supportsDirectX12: true, gameLogPaths: LaunchLogFiles.gameLogPaths(for: "zzz")),
     ]
 }

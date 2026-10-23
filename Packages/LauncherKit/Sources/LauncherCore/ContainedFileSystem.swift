@@ -64,11 +64,13 @@ public struct ContainedFileSystem: Sendable, Hashable {
         close(fd)
     }
 
-    package func contentsOfRootDirectory() throws -> [SafeRelativePath] {
+    /// A bounded listing stops without visiting the rest of a large directory.
+    package func contentsOfRootDirectory(maximumEntries: Int? = nil) throws -> [SafeRelativePath] {
         guard let fd = try directory([], create: false) else { return [] }
         defer { close(fd) }
         var budget = Self.entryLimit
-        return try names(in: fd, budget: &budget).map { try SafeRelativePath($0) }
+        let maximum = maximumEntries.map { min(Self.entryLimit, max(1, $0)) }
+        return try names(in: fd, budget: &budget, maximumEntries: maximum).map { try SafeRelativePath($0) }
     }
 
     /// Removes directories only. Foreign files, symlinks and special entries are
@@ -144,6 +146,15 @@ public struct ContainedFileSystem: Sendable, Hashable {
         var pinned = self
         pinned.pinnedRoot = RootDescriptor(fd)
         return pinned
+    }
+
+    /// Pins a descendant reached through the contained root. Neither traversal nor
+    /// later operations can be redirected by replacing the descendant's pathname.
+    package func pinDirectoryIfPresent(at path: SafeRelativePath) throws -> Self? {
+        var child = try Self(root: path.resolved(against: root), fileOps: fileOps, identityProvider: identityProvider)
+        guard let fd = try directory(path.components, create: false) else { return nil }
+        child.pinnedRoot = RootDescriptor(fd)
+        return child
     }
 
     /// Removes the pinned tree and unlinks its leaf only while it still names
@@ -976,8 +987,8 @@ public struct ContainedFileSystem: Sendable, Hashable {
         }
     }
 
-    private func names(in fd: Int32, budget: inout Int) throws -> [String] {
-        try rawNames(in: fd, budget: &budget).map {
+    private func names(in fd: Int32, budget: inout Int, maximumEntries: Int? = nil) throws -> [String] {
+        try rawNames(in: fd, budget: &budget, maximumEntries: maximumEntries).map {
             guard let name = String(bytes: $0, encoding: .utf8) else {
                 throw LauncherError.unsafePath("Invalid UTF-8 directory entry")
             }
@@ -985,7 +996,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
         }
     }
 
-    private func rawNames(in fd: Int32, budget: inout Int) throws -> [[UInt8]] {
+    private func rawNames(in fd: Int32, budget: inout Int, maximumEntries: Int? = nil) throws -> [[UInt8]] {
         let duplicate = dup(fd)
         guard duplicate >= 0 else { throw LauncherError.io("Cannot duplicate directory descriptor") }
         guard let stream = fdopendir(duplicate) else {
@@ -1006,6 +1017,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
             guard budget > 0 else { throw LauncherError.io("Directory entry limit exceeded") }
             budget -= 1
             result.append(name)
+            if let maximumEntries, result.count >= maximumEntries { break }
         }
         return result
     }
@@ -1026,7 +1038,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
 extension ContainedFileSystem {
     /// A scoped, borrowed claim. The descriptor remains open through the caller's
     /// move and post-check; the noncopyable borrow cannot escape this scope.
-    package func withClaimedFile<T>(at source: SafeRelativePath, permitHardLinks: Bool = false,
+    package func withClaimedFile<T>(at source: SafeRelativePath, permitHardLinks: Bool = false, maximumBytes: Int64 = .max,
         _ body: (borrowing RegularFileClaim) throws -> T) throws -> T {
         guard let parent = try directory(Array(source.components.dropLast()), create: false) else {
             throw LauncherError.io("Claim source is missing")
@@ -1037,6 +1049,8 @@ extension ContainedFileSystem {
         let fd = openat(parent, source.components.last!, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         guard fd >= 0 else { throw accessError(source.description) }
         defer { close(fd) }
+        var initial = stat()
+        guard fstat(fd, &initial) == 0, initial.st_size <= maximumBytes else { throw LauncherError.io("Claim exceeds read limit") }
         let verified = try Self.hashClaimDescriptor(fd)
         guard let named = try entry(source.components.last!, parent: parent), ClaimStamp(named) == verified.stamp else {
             throw LauncherError.io("Claim name changed during verification")
@@ -1189,4 +1203,182 @@ private final class RootDescriptor: Sendable {
     let fd: Int32
     init(_ fd: Int32) { self.fd = fd }
     deinit { close(fd) }
+}
+
+extension ContainedFileSystem {
+    /// Birth time also excludes reuse of a formerly owned inode after its unlink.
+    package struct OwnedFileIdentity: Codable, Equatable, Sendable {
+        package let device: Int64, inode: UInt64, birthSeconds: Int64, birthNanos: Int64
+        fileprivate init(_ info: stat) {
+            device = Int64(info.st_dev); inode = UInt64(info.st_ino)
+            birthSeconds = Int64(info.st_birthtimespec.tv_sec); birthNanos = Int64(info.st_birthtimespec.tv_nsec)
+        }
+        fileprivate func matches(_ info: stat) -> Bool {
+            info.st_mode & S_IFMT == S_IFREG && self == Self(info)
+        }
+    }
+
+    package func createOwnedFile(at path: SafeRelativePath) throws -> OwnedRegularFile? {
+        guard let parent = try directory(Array(path.components.dropLast()), create: true) else { throw LauncherError.io("Owned-file parent is missing") }
+        let fd = openat(parent, path.components.last!, O_RDWR | O_APPEND | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else {
+            let code = errno; close(parent)
+            if code == EEXIST { return nil }
+            throw LauncherError.fileSystemFailure("Cannot create owned file", code: code)
+        }
+        do {
+            var info = stat()
+            guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, fchmod(fd, 0o600) == 0 else { throw LauncherError.io("Cannot inspect owned file") }
+            try synchronize(parent)
+            return OwnedRegularFile(fs: self, path: path, parent: parent, fd: fd, identity: OwnedFileIdentity(info))
+        } catch { close(fd); close(parent); throw error }
+    }
+
+    package func openOwnedFile(at path: SafeRelativePath, matching identity: OwnedFileIdentity) throws -> OwnedRegularFile? {
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else { return nil }
+        let fd = openat(parent, path.components.last!, O_RDWR | O_APPEND | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        guard fd >= 0 else { close(parent); return nil }
+        var info = stat()
+        guard fstat(fd, &info) == 0, identity.matches(info) else { close(fd); close(parent); return nil }
+        return OwnedRegularFile(fs: self, path: path, parent: parent, fd: fd, identity: identity)
+    }
+
+    /// Mutable descriptor operations are serialized by the caller. No mutation
+    /// reopens the public name, including after that name is exchanged or unlinked.
+    package final class OwnedRegularFile: Sendable {
+        fileprivate let fs: ContainedFileSystem
+        fileprivate let path: SafeRelativePath
+        fileprivate let parent: Int32
+        fileprivate let fd: Int32
+        package let identity: OwnedFileIdentity
+        fileprivate init(fs: ContainedFileSystem, path: SafeRelativePath, parent: Int32, fd: Int32, identity: OwnedFileIdentity) {
+            self.fs = fs; self.path = path; self.parent = parent; self.fd = fd; self.identity = identity
+        }
+        deinit { close(fd); close(parent) }
+        package func duplicateForSpawning() throws -> Int32 {
+            _ = try size()
+            let copy = fcntl(fd, F_DUPFD_CLOEXEC, 3)
+            guard copy >= 0 else { throw LauncherError.io("Cannot duplicate owned output") }
+            return copy
+        }
+        package func size() throws -> Int64 {
+            var info = stat()
+            guard fstat(fd, &info) == 0, identity.matches(info) else { throw LauncherError.io("Owned file identity changed") }
+            return info.st_size
+        }
+        @discardableResult package func append(_ data: Data) throws -> Int64 {
+            let count = try data.withUnsafeBytes { try fs.fileOps.write(fd, bytes: $0) }
+            guard count == data.count else { throw LauncherError.io("Short owned-file append") }
+            return try size()
+        }
+        package func fullSync() throws { try fs.fileOps.synchronize(fd, durable: true) }
+        package func cap(bytes limit: Int64, marker: Data) throws {
+            guard limit >= marker.count else { throw LauncherError.io("Log cap is too small") }
+            guard try size() >= limit else { return }
+            // Darwin pwrite honors its offset even with O_APPEND. Never toggle
+            // that flag: the child may share this open description through dup2.
+            // Shrink even if a full volume prevents the marker's COW write.
+            guard ftruncate(fd, off_t(limit)) == 0 else { throw LauncherError.fileSystemFailure("Cannot shrink owned log") }
+            let written = marker.withUnsafeBytes { bytes in
+                var count: Int
+                repeat { count = Darwin.pwrite(fd, bytes.baseAddress, bytes.count, off_t(limit - Int64(bytes.count))) } while count < 0 && errno == EINTR
+                return count
+            }
+            let shrunk = ftruncate(fd, off_t(limit)) == 0
+            guard written == marker.count, shrunk else { throw LauncherError.fileSystemFailure("Cannot cap owned log") }
+        }
+        package func withClaim<T>(_ body: (borrowing RegularFileClaim) throws -> T) throws -> T {
+            let verified = try ContainedFileSystem.hashClaimDescriptor(fd)
+            guard verified.stamp.links == 1, let named = try fs.entry(path.components.last!, parent: parent),
+                identity.matches(named), ClaimStamp(named) == verified.stamp else { throw LauncherError.io("Owned copy changed before claim") }
+            let claim = RegularFileClaim(fileSystem: fs, parent: parent, descriptor: fd, source: path, stamp: verified.stamp, sha256: verified.sha256)
+            return try body(claim)
+        }
+        package func removeIfNamed() throws -> Bool { try fs.removeOwnedFile(at: path, matching: identity) }
+    }
+
+}
+
+extension ContainedFileSystem.RegularFileClaim {
+    package func copyBytes(to output: ContainedFileSystem.OwnedRegularFile) throws {
+        guard lseek(descriptor, 0, SEEK_SET) == 0 else { throw LauncherError.io("Cannot seek copy source") }
+        var remaining = stamp.size, hash = StreamingHasher(.sha256)
+        var bytes = [UInt8](repeating: 0, count: 65_536)
+        while remaining > 0 {
+            try Task.checkCancellation()
+            let count = bytes.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress, min($0.count, Int(remaining))) }
+            if count < 0 && errno == EINTR { continue }
+            guard count > 0 else { throw LauncherError.io("Copy source changed") }
+            let data = Data(bytes.prefix(count)); hash.update(data)
+            try output.fs.fileOps.writeAll(data, to: output.fd)
+            remaining -= Int64(count)
+        }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, ContainedFileSystem.ClaimStamp(info) == stamp, hash.finalize() == sha256 else {
+            throw LauncherError.io("Copy source changed during read")
+        }
+    }
+    package func readData(maxBytes: Int) throws -> Data {
+        guard stamp.size <= maxBytes, lseek(descriptor, 0, SEEK_SET) == 0 else { throw LauncherError.io("Claim exceeds read limit") }
+        var data = Data(), bytes = [UInt8](repeating: 0, count: 65_536)
+        while data.count < stamp.size {
+            try Task.checkCancellation()
+            let count = bytes.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress, min($0.count, Int(stamp.size) - data.count)) }
+            if count < 0 && errno == EINTR { continue }
+            guard count > 0 else { throw LauncherError.io("Claim changed during read") }
+            data.append(contentsOf: bytes.prefix(count))
+        }
+        var hash = StreamingHasher(.sha256); hash.update(data)
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, ContainedFileSystem.ClaimStamp(info) == stamp, hash.finalize() == sha256 else { throw LauncherError.io("Claim changed during read") }
+        return data
+    }
+    package func fullSync() throws { try fileSystem.fileOps.synchronize(descriptor, durable: true) }
+    package func ownedIdentity() throws -> ContainedFileSystem.OwnedFileIdentity {
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { throw LauncherError.io("Cannot inspect claimed inode") }
+        return ContainedFileSystem.OwnedFileIdentity(info)
+    }
+}
+
+extension ContainedFileSystem {
+    /// Claim a known inode into a private, pinned namespace before unlinking it.
+    /// A replacement raced into the public name is returned with RENAME_EXCL,
+    /// or left durably identified in the private claim if the public name is busy.
+    @discardableResult package func removeOwnedFile(at source: SafeRelativePath, matching expected: OwnedFileIdentity) throws -> Bool {
+        guard let parent = try directory(Array(source.components.dropLast()), create: false) else { return false }
+        defer { close(parent) }
+        guard let info = try entry(source.components.last!, parent: parent), expected.matches(info) else { return false }
+        let folder = try SafeRelativePath((Array(source.components.dropLast()) + [".macgacha-remove-\(UUID().uuidString)"]).joined(separator: "/"))
+        try createDirectoryDurably(at: folder)
+        let claimed = try SafeRelativePath(folder.description + "/file")
+        let note = try SafeRelativePath(folder.description + "/ownership.json")
+        struct Removal: Codable { let source: SafeRelativePath; let expected: OwnedFileIdentity; var moved: ClaimStamp? }
+        var record = Removal(source: source, expected: expected)
+        try writeAtomically(JSONEncoder().encode(record), to: note)
+        var observed: ClaimStamp?
+        guard try quarantineEntry(at: source, to: claimed, in: self, matching: ClaimStamp(info), didMove: { moved in
+            observed = moved; record.moved = moved
+            try writeAtomically(JSONEncoder().encode(record), to: note)
+        }) else { return false }
+        guard let observed, let privateFD = try directory(folder.components, create: false) else { return false }
+        defer { close(privateFD) }
+        guard let movedInfo = try entry("file", parent: privateFD) else { return false }
+        if !expected.matches(movedInfo) {
+            if try entryStamp(at: source) == nil {
+                _ = try quarantineEntry(at: claimed, to: source, in: self, matching: observed, didMove: { moved in
+                    record.moved = moved; try writeAtomically(JSONEncoder().encode(record), to: note)
+                })
+            }
+            return false
+        }
+        // Only the claimed inode enters this private namespace. The directory fd
+        // stays pinned; replacing its public name cannot redirect the final unlink.
+        guard let item = try entry("file", parent: privateFD), expected.matches(item) else { return false }
+        try fileOps.unlink("file", in: privateFD, isDirectory: false)
+        try synchronize(privateFD)
+        try removeFile(at: note)
+        try removeEmptyDirectory(at: folder)
+        return true
+    }
 }

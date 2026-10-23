@@ -10,12 +10,13 @@ public final class SessionProxy: Sendable {
     public let port: UInt16
     private let core: ProxyCore
     private init(port: UInt16, core: ProxyCore) { self.port = port; self.core = core }
-    public static func start(blockedHosts: [String], log: @escaping @Sendable (String) -> Void) async throws -> SessionProxy {
-        try await start(blockedHosts: blockedHosts, log: log, options: SessionProxyOptions())
+    public static func start(blockedHosts: [String], sessionLogsEnabled: Bool = true, log: @escaping @Sendable (String) -> Void) async throws -> SessionProxy {
+        try await start(blockedHosts: blockedHosts, sessionLogsEnabled: sessionLogsEnabled, log: log, options: SessionProxyOptions())
     }
-    package static func start(blockedHosts: [String], log: @escaping @Sendable (String) -> Void,
+    package static func start(blockedHosts: [String], sessionLogsEnabled: Bool = true, log: @escaping @Sendable (String) -> Void,
         options: SessionProxyOptions) async throws -> SessionProxy {
-        let core = ProxyCore(blocked: Set(blockedHosts.map(normalize)), log: log, options: options)
+        let logger: @Sendable (String) -> Void = { line in if sessionLogsEnabled { log(line) } }
+        let core = ProxyCore(blocked: Set(blockedHosts.map(normalize)), log: logger, options: options)
         let port: UInt16 = try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { c in core.queue.async { core.start(c) } }

@@ -51,6 +51,60 @@ func bundleContainsExpectedFiles() async throws {
 }
 
 @Test
+func bundleIncludesBoundedRedactedDiscoveryFailures() async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let runner = DiagnosticTestRunner { arguments in
+        let reportURL = URL(fileURLWithPath: arguments[3]).appendingPathComponent("skipped.txt")
+        let text = try String(contentsOf: reportURL, encoding: .utf8)
+        #expect(text.contains("discovery unavailable"))
+        for forbidden in ["/Users/alice", "planted-secret", "alice@example.com"] {
+            #expect(!text.contains(forbidden))
+        }
+        #expect(text.utf8.count <= 32 << 10)
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    try await DiagnosticBundle(logDirectory: root.appendingPathComponent("missing"), runner: runner,
+        logDiscoveryFailures: Array(repeating: "/Users/alice/private token=planted-secret email=alice@example.com", count: 100))
+        .export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+}
+
+@Test(arguments: ["logs", "app"])
+func eventLogsStayPinnedWhenDirectoryIsReplaced(replaced: String) async throws {
+    let root = try diagnosticTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let app = root.appendingPathComponent("app")
+    let logs = app.appendingPathComponent("Logs")
+    let foreign = root.appendingPathComponent("foreign")
+    let foreignLogs = replaced == "app" ? foreign.appendingPathComponent("Logs") : foreign
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: foreignLogs, withIntermediateDirectories: true)
+    let ownedRecord = try diagnosticRecord(message: "owned event")
+    try ownedRecord.write(to: logs.appendingPathComponent("macgacha.log"))
+    try diagnosticRecord(message: "foreign event").write(to: foreignLogs.appendingPathComponent("macgacha.log"))
+    let swapped = Mutex(false)
+    let runner = DiagnosticTestRunner { arguments in
+        let file = URL(fileURLWithPath: arguments[3]).appendingPathComponent("logs/macgacha.log")
+        #expect(try Data(contentsOf: file) == ownedRecord)
+        try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+    let bundle = DiagnosticBundle(logDirectory: logs, runner: runner, logByteLimit: nil, beforeEventOpen: { file in
+        swapped.withLock { value in
+            if !value {
+                value = true
+                let original = replaced == "app" ? app : logs
+                try! FileManager.default.moveItem(at: original, to: root.appendingPathComponent("owned"))
+                try! FileManager.default.createSymbolicLink(at: original, withDestinationURL: foreign)
+            }
+        }
+    })
+    try await bundle.export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+    #expect(swapped.withLock { $0 })
+}
+
+@Test
 func bundleSkipsLogRotatedAwayBeforeOpen() async throws {
     let root = try diagnosticTempDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -66,14 +120,10 @@ func bundleSkipsLogRotatedAwayBeforeOpen() async throws {
         try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
         return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
-    let bundle = DiagnosticBundle(logDirectory: logs, runner: runner, openLog: { file in
+    let bundle = DiagnosticBundle(logDirectory: logs, runner: runner, logByteLimit: nil, beforeEventOpen: { file in
         if file.lastPathComponent == "macgacha.1.log" {
             removed.withLock { $0 = unlink(file.path) == 0 }
         }
-        let fd = open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        let openError = errno
-        errno = EACCES // The caller must use the captured errno, not thread-local state after return.
-        return (fd, openError)
     })
     try await bundle.export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(),
         runtimes: [:], failureStage: nil)
@@ -496,12 +546,8 @@ func bundlePrioritizesActiveThenNumericRotationsWithinBudget(fileBudget: Int) as
         try Data("archive".utf8).write(to: URL(fileURLWithPath: arguments[4]))
         return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
-    let bundle = DiagnosticBundle(logDirectory: logs, runner: runner, openLog: { file in
-        opened.withLock { $0.append(file.lastPathComponent) }
-        let fd = open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        let openError = errno
-        return (fd, openError)
-    }, logByteLimit: fileBudget * record.count)
+    let bundle = DiagnosticBundle(logDirectory: logs, runner: runner, logByteLimit: fileBudget * record.count,
+        beforeEventOpen: { file in opened.withLock { $0.append(file.lastPathComponent) } })
     try await bundle.export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(),
         runtimes: [:], failureStage: nil)
     #expect(opened.withLock { $0 } == Array(expectedOrder.prefix(fileBudget)))
@@ -539,5 +585,190 @@ private func diagnosticRegularFiles(under directory: URL) throws -> [URL] {
     return try files.compactMap { entry in
         guard let url = entry as? URL, try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { return nil }
         return url
+    }
+}
+
+@Test func diagnosticBundleRedactsWineOutputAndKeepsNewestPerGame() async throws {
+    try await BlockingIO.run {
+        let root = try diagnosticTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fs = try ContainedFileSystem(root: root)
+        let planted = "wine /Users/alice/Games v2_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 alice@example.test uid=123456789\n"
+        try fs.writeAtomically(Data("older\n".utf8), to: SafeRelativePath("logs/genshin-20261022-120000.log"))
+        try fs.writeAtomically(Data(planted.utf8), to: SafeRelativePath("logs/genshin-20261023-120000.log"))
+        try fs.writeAtomically(Data(planted.utf8), to: SafeRelativePath("logs/starrail-20261023-120000.log"))
+        let runner = DiagnosticTestRunner { arguments in
+            let staged = try ContainedFileSystem(root: URL(fileURLWithPath: arguments[3]))
+            for name in ["genshin-20261023-120000.log", "starrail-20261023-120000.log"] {
+                let text = String(decoding: try staged.readFile(at: SafeRelativePath("logs/" + name), maxBytes: 10000), as: UTF8.self)
+                #expect(text.contains("wine "))
+                for secret in ["/Users/alice", "v2_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", "alice@example.test", "123456789"] { #expect(!text.contains(secret)) }
+            }
+            #expect(try staged.itemType(at: SafeRelativePath("logs/genshin-20261022-120000.log")) == nil)
+            let archive = URL(fileURLWithPath: arguments[4])
+            try ContainedFileSystem(root: archive.deletingLastPathComponent()).writeAtomically(Data("archive".utf8), to: SafeRelativePath(archive.lastPathComponent))
+            return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        try await DiagnosticBundle(logDirectory: root.appendingPathComponent("logs"), runner: runner,
+            sessionLogURLs: LaunchLogFiles.latestSessionLogURLs(in: root.appendingPathComponent("logs")))
+            .export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+    }
+}
+
+@Test func diagnosticGameLogTailsAreBoundedAndRedactedForEveryRecipe() async throws {
+    try await BlockingIO.run {
+        let root = try diagnosticTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fs = try ContainedFileSystem(root: root)
+        for game in ["genshin", "starrail", "zzz"] {
+            let candidate = try #require(LaunchLogFiles.gameLogPaths(for: game).first)
+            let text = (1...250).map { "line \($0) /Users/alice/Games alice@example.test token=planted-secret uid=123456789" }.joined(separator: "\n") + "\n"
+            try fs.writeAtomically(Data(text.utf8), to: SafeRelativePath("Prefixes/\(game)-fixture/drive_c/users/test-user/\(candidate)"))
+        }
+        let runner = DiagnosticTestRunner { arguments in
+            let stage = try ContainedFileSystem(root: URL(fileURLWithPath: arguments[3]))
+            let files = try stage.contentsOfDirectory(at: SafeRelativePath("game-logs"))
+            #expect(files.count == 3)
+            for path in files {
+                let text = String(decoding: try stage.readFile(at: path, maxBytes: 1 << 20), as: UTF8.self)
+                #expect(text.split(separator: "\n").count == 200)
+                #expect(text.hasPrefix("line 51 "))
+                #expect(text.contains("line 250 "))
+                for secret in ["/Users/alice", "alice@example.test", "planted-secret", "123456789"] { #expect(!text.contains(secret)) }
+            }
+            let archive = URL(fileURLWithPath: arguments[4])
+            try ContainedFileSystem(root: archive.deletingLastPathComponent()).writeAtomically(Data("archive".utf8), to: SafeRelativePath(archive.lastPathComponent))
+            return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        try await DiagnosticBundle(logDirectory: root.appendingPathComponent("Logs"), runner: runner, gameLogRoot: root.appendingPathComponent("Prefixes"),
+            gameLogCandidates: LaunchLogFiles.gameLogCandidates(in: root.appendingPathComponent("Prefixes"))).export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+    }
+}
+
+@Test(.timeLimit(.minutes(1))) func sessionHeaderAndTailShareBudgetWithGameLogs() async throws {
+    try await BlockingIO.run {
+        let root = try diagnosticTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fs = try ContainedFileSystem(root: root)
+        let wine = "recipe: genshin\nrecipeVersion: 1\nbuildVerification: unverified build\n" + String(repeating: "wine output line\n", count: 200) + "last Wine line\n"
+        try fs.writeAtomically(Data(wine.utf8), to: SafeRelativePath("Logs/genshin-20261023-120000.log"))
+        let candidate = try #require(LaunchLogFiles.gameLogPaths(for: "genshin").first)
+        try fs.writeAtomically(Data(String(repeating: "game line\n", count: 300).utf8), to: SafeRelativePath("Prefixes/genshin-fixture/drive_c/users/user/\(candidate)"))
+        let runner = DiagnosticTestRunner { arguments in
+            let stage = try ContainedFileSystem(root: URL(fileURLWithPath: arguments[3]))
+            let exported = try stage.readFile(at: SafeRelativePath("logs/genshin-20261023-120000.log"), maxBytes: 256)
+            let text = String(decoding: exported, as: UTF8.self)
+            #expect(text.hasPrefix("recipe: genshin\n"))
+            #expect(text.contains("last Wine line"))
+            var total = exported.count
+            if try stage.itemType(at: SafeRelativePath("game-logs")) == .directory {
+                for path in try stage.contentsOfDirectory(at: SafeRelativePath("game-logs")) { total += Int(try stage.size(at: path) ?? 0) }
+            }
+            #expect(total <= 256)
+            let archive = URL(fileURLWithPath: arguments[4])
+            try ContainedFileSystem(root: archive.deletingLastPathComponent()).writeAtomically(Data("archive".utf8), to: SafeRelativePath(archive.lastPathComponent))
+            return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let bundle = try DiagnosticBundle(logDirectory: root.appendingPathComponent("Logs"), runner: runner, logByteLimit: 256,
+            sessionLogURLs: LaunchLogFiles.latestSessionLogURLs(in: root.appendingPathComponent("Logs")),
+            gameLogRoot: root.appendingPathComponent("Prefixes"), gameLogCandidates: LaunchLogFiles.gameLogCandidates(in: root.appendingPathComponent("Prefixes")),
+            beforeEventOpen: { _ in Issue.record("Session log entered event-log read") })
+        try await bundle.export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+    }
+}
+
+@Test func disabledSessionLogsAreNotExportedAndHaveExplicitNotice() async throws {
+    try await BlockingIO.run {
+        let root = try diagnosticTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fs = try ContainedFileSystem(root: root)
+        try fs.writeAtomically(Data("existing secret".utf8), to: SafeRelativePath("logs/genshin-20261023-120000.log"))
+        let runner = DiagnosticTestRunner { arguments in
+            let stage = try ContainedFileSystem(root: URL(fileURLWithPath: arguments[3]))
+            #expect(String(decoding: try stage.readFile(at: SafeRelativePath("session-logs.txt"), maxBytes: 100), as: UTF8.self) == "session logs disabled\n")
+            #expect(try stage.contentsOfDirectory(at: SafeRelativePath("logs")).isEmpty)
+            let archive = URL(fileURLWithPath: arguments[4])
+            try ContainedFileSystem(root: archive.deletingLastPathComponent()).writeAtomically(Data("archive".utf8), to: SafeRelativePath(archive.lastPathComponent))
+            return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        try await DiagnosticBundle(logDirectory: root.appendingPathComponent("logs"), runner: runner,
+            sessionLogURLs: [root.appendingPathComponent("logs/genshin-20261023-120000.log")],
+            gameLogRoot: root.appendingPathComponent("missing"), gameLogCandidates: ["genshin": [SafeRelativePath("missing.log")]],
+            sessionLogsEnabled: false).export(to: root.appendingPathComponent("bundle.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+        #expect(try fs.readFile(at: SafeRelativePath("logs/genshin-20261023-120000.log"), maxBytes: 100) == Data("existing secret".utf8))
+        #expect(try fs.itemType(at: SafeRelativePath("missing")) == nil)
+    }
+}
+
+@Test(arguments: ["game-lines", "game-bytes", "session-splice", "event-bytes"])
+func redactionPrecedesEveryRetainedBoundary(boundary: String) async throws {
+    try await BlockingIO.run {
+        let root = try diagnosticTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fs = try ContainedFileSystem(root: root)
+        let secret = "boundary-private-value"
+        let contents: String
+        switch boundary {
+        case "event-bytes":
+            contents = "{\"token\":[\n\"" + String(repeating: "p", count: 2048) + "\",\n" + String(decoding: try diagnosticRecord(message: secret), as: UTF8.self) + "]}\n"
+        case "game-lines":
+            contents = "{\"token\":{\n\"detail\":\"\(secret)\",\n" + (0..<197).map { "\"x\($0)\":0,\n" }.joined() + "\"last\":0\n}}\n"
+        case "game-bytes":
+            contents = "{\"token\":{\n\"padding\":\"" + String(repeating: "p", count: 1 << 20) + "\",\n\"detail\":\"\(secret)\"\n}}\n"
+        default:
+            contents = "recipe: genshin\n" + String(repeating: "header line\n", count: 50) + "{\"token\":{\n\"padding\":\"" + String(repeating: "p", count: 2048) + "\",\n\"detail\":\"\(secret)\"\n}}\n"
+        }
+        let session = boundary == "session-splice", event = boundary == "event-bytes"
+        let input = try SafeRelativePath(event ? "logs/macgacha.log" : session ? "logs/genshin-20261023-120000.log" : "prefix/Player.log")
+        try fs.writeAtomically(Data(contents.utf8), to: input)
+        let runner = DiagnosticTestRunner { arguments in
+            let stage = URL(fileURLWithPath: arguments[3])
+            for file in try diagnosticRegularFiles(under: stage) {
+                #expect(!String(decoding: try Data(contentsOf: file), as: UTF8.self).contains(secret))
+            }
+            let output = URL(fileURLWithPath: arguments[4])
+            try ContainedFileSystem(root: output.deletingLastPathComponent()).writeAtomically(Data("archive".utf8), to: SafeRelativePath(output.lastPathComponent))
+            return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let bundle = DiagnosticBundle(logDirectory: root.appendingPathComponent("logs"), runner: runner,
+            logByteLimit: session || event ? 256 : nil,
+            sessionLogURLs: session ? [input.resolved(against: root)] : [],
+            gameLogRoot: root, gameLogCandidates: session || event ? [:] : ["genshin": [input]])
+        try await bundle.export(to: root.appendingPathComponent("out.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+    }
+}
+
+@Test(arguments: ["session", "game", "unsafe-session", "unsafe-game", "cancel-session", "cancel-game"])
+func optionalLogsCanVanishOrBecomeUnsafeAfterSelection(kind: String) async throws {
+    try await BlockingIO.run {
+        let root = try diagnosticTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fs = try ContainedFileSystem(root: root)
+        let session = kind.hasSuffix("session")
+        let path = try SafeRelativePath(session ? "logs/genshin-20261023-120000.log" : "prefix/Player.log")
+        try fs.writeAtomically(Data("optional\n".utf8), to: path)
+        try fs.writeAtomically(Data("untouched".utf8), to: SafeRelativePath("outside.log"))
+        let runner = DiagnosticTestRunner { arguments in
+            let stage = try ContainedFileSystem(root: URL(fileURLWithPath: arguments[3]))
+            let report = String(decoding: try stage.readFile(at: SafeRelativePath("skipped.txt"), maxBytes: 32768), as: UTF8.self)
+            #expect(report.contains(path.components.last!))
+            #expect(report.contains("optional log"))
+            let archive = URL(fileURLWithPath: arguments[4])
+            try ContainedFileSystem(root: archive.deletingLastPathComponent()).writeAtomically(Data("archive".utf8), to: SafeRelativePath(archive.lastPathComponent))
+            return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let bundle = DiagnosticBundle(logDirectory: root.appendingPathComponent("logs"), runner: runner, logByteLimit: nil,
+            sessionLogURLs: session ? [path.resolved(against: root)] : [], gameLogRoot: root,
+            gameLogCandidates: session ? [:] : ["genshin": [path]], beforeOptionalOpen: { _ in
+                if kind.hasPrefix("cancel") { withUnsafeCurrentTask { $0?.cancel() }; return }
+                try! fs.removeFile(at: path)
+                if kind.hasPrefix("unsafe") { try! fs.createSymbolicLink(at: path, target: "../outside.log") }
+            })
+        if kind.hasPrefix("cancel") {
+            await #expect(throws: LauncherError.cancelled) { try await bundle.export(to: root.appendingPathComponent("out.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil) }
+        } else {
+            try await bundle.export(to: root.appendingPathComponent("out.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+        }
+        #expect(try fs.readFile(at: SafeRelativePath("outside.log"), maxBytes: 100) == Data("untouched".utf8))
     }
 }

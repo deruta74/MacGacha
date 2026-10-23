@@ -19,6 +19,10 @@ public enum Redactor {
     private static let colonValues = try! NSRegularExpression(
         pattern: #"(?i)(?<![a-z0-9_-])([a-z0-9_-]+)[\t ]*:[\t ]*"#)
 
+    private static let homePaths = try! NSRegularExpression(pattern: #"/Users/[^/\\\s"'<>]+|/home/[^/\\\s"'<>]+"#)
+    private static let windowsHomes = try! NSRegularExpression(pattern: #"(?i)(?:[a-z]:)?\\{1,2}Users\\{1,2}[^\\\s"'<>]+"#)
+    private static let emails = try! NSRegularExpression(pattern: #"(?i)(?<![a-z0-9.!#$%&'*+/=?^_`{|}~-])[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}"#)
+
     public static func redact(_ s: String) -> String {
         redact(s, depth: 0)
     }
@@ -31,7 +35,7 @@ public enum Redactor {
                options: [.sortedKeys, .withoutEscapingSlashes]) {
             return String(decoding: sanitized, as: UTF8.self)
         }
-        return redactText(redactEscapedStrings(s, depth: depth))
+        return redactPrivateText(redactText(redactEscapedStrings(s, depth: depth)))
     }
 
     /// Redacts mixed text/JSON logs across line boundaries, retaining their trailing line endings.
@@ -47,6 +51,15 @@ public enum Redactor {
         return multiline.components(separatedBy: "\n").map { redact($0) }.joined(separator: "\n") + suffix
     }
 
+    // Apply after JSON decoding too: escaped private text must not bypass log sanitization.
+    private static func redactPrivateText(_ text: String) -> String {
+        let range = NSRange(text.startIndex..., in: text)
+        let homes = homePaths.stringByReplacingMatches(in: text, range: range, withTemplate: "~")
+        let windows = windowsHomes.stringByReplacingMatches(in: homes, range: NSRange(homes.startIndex..., in: homes), withTemplate: "~")
+        guard windows.contains("@") else { return windows }
+        return emails.stringByReplacingMatches(in: windows, range: NSRange(windows.startIndex..., in: windows), withTemplate: "<redacted>")
+    }
+
     public static func redact(metadata: [String: String]) -> [String: String] {
         var result: [String: String] = [:]
         for key in metadata.keys.sorted() {
@@ -55,7 +68,7 @@ public enum Redactor {
                 result[safeKey] = "<redacted>"
                 continue
             }
-            let processedKey = redactText(key)
+            let processedKey = redactPrivateText(redactText(key))
             let baseKey = processedKey.utf8.count > 256 ? "<omitted \(processedKey.utf8.count) byte key>" : processedKey
             let safeKey = uniqueKey(baseKey, in: result, maxBytes: 256)
             result[safeKey] = isSensitive(key) ? "<redacted>" : redact(metadata[key] ?? "")
@@ -136,7 +149,7 @@ public enum Redactor {
         if let dictionary = object as? [String: Any] {
             var result: [String: Any] = [:]
             for key in dictionary.keys.sorted() {
-                let safeKey = uniqueKey(redactText(key), in: result)
+                let safeKey = uniqueKey(redactPrivateText(redactText(key)), in: result)
                 result[safeKey] = isSensitive(key) ? "<redacted>" : redactJSON(dictionary[key]!, depth: depth + 1)
             }
             return result

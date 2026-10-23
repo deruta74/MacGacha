@@ -10,6 +10,19 @@ import Darwin
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct SessionProxyTests {
+    @Test func disabledLogsDoNotDisableHostBlocking() async throws {
+        let logs = ProxyTestBox<[String]>([])
+        let proxy = try await SessionProxy.start(blockedHosts: ["blocked.test"], sessionLogsEnabled: false,
+            log: { line in logs.withLock { $0.append(line) } })
+        do {
+            let client = try await ProxyTestPeer.connect(proxy.port); defer { client.cancel() }
+            try await client.send("CONNECT blocked.test:443 HTTP/1.1\r\n\r\n")
+            #expect(String(decoding: try await client.all(), as: UTF8.self).hasPrefix("HTTP/1.1 403"))
+            #expect(logs.withLock { $0 }.isEmpty)
+        } catch { await proxy.stop(); throw error }
+        await proxy.stop()
+    }
+
     @Test(arguments: [("Blocked.Test.:443", "blocked.test"), ("[::1]:443", "::1"), ("[0:0:0:0:0:0:0:1]", "::1"), ("::1", "::1")])
     func normalizedHost(value: String, expected: String) { #expect(SessionProxy.normalize(host: value) == expected) }
 

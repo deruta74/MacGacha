@@ -155,7 +155,33 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
             ("\($0.kind.idPrefix)-\($0.version)", $0.source.rawValue)
         })
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
-        try await DiagnosticBundle(logDirectory: paths.logs, runner: SystemProcessRunner())
+        let logsEnabled = try GlobalLaunchSettingsStore(paths: paths).load().sessionLogsEnabled
+        var discoveryFailures: [String] = []
+        func discover<Value>(_ scope: String, _ body: () throws -> Value) throws -> Value? {
+            do {
+                try Task.checkCancellation()
+                let value = try body()
+                try Task.checkCancellation()
+                return value
+            } catch {
+                if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled {
+                    throw LauncherError.cancelled
+                }
+                // Optional discovery must not prevent diagnostics. Use a fixed scope,
+                // never an error payload that could contain paths or account data.
+                discoveryFailures.append(scope)
+                return nil
+            }
+        }
+        let sessionLogs = logsEnabled ? try discover("session logs") {
+            try LaunchLogFiles.latestSessionLogURLs(in: paths.logs)
+        } ?? [] : []
+        let gameLogs = logsEnabled ? try discover("game logs") {
+            try LaunchLogFiles.gameLogCandidates(in: paths.prefixes)
+        } ?? [:] : [:]
+        try await DiagnosticBundle(logDirectory: paths.logs, runner: SystemProcessRunner(), sessionLogURLs: sessionLogs,
+            gameLogRoot: paths.prefixes, gameLogCandidates: gameLogs, sessionLogsEnabled: logsEnabled,
+            logDiscoveryFailures: discoveryFailures)
             .export(to: url, systemInfo: .current(appVersion: version), runtimes: runtimes, failureStage: nil)
     }
 
