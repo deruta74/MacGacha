@@ -34,7 +34,7 @@ let package = Package(
         .target(name: "GameLibrary", dependencies: ["LauncherCore", "DownloadEngine", "Sophon"]),
         .target(name: "Launch", dependencies: ["LauncherCore", "RuntimeManager", "GameLibrary"]),
         .target(name: "TestSupport", dependencies: ["LauncherCore", "DownloadEngine"]),
-        .executableTarget(name: "CrashHarness", dependencies: ["DownloadEngine", "GameLibrary", "Sophon", "TestSupport"], path: "Tests/CrashHarness"),
+        .executableTarget(name: "CrashHarness", dependencies: ["DownloadEngine", "GameLibrary", "Sophon", "TestSupport", "Launch"], path: "Tests/CrashHarness"),
         .executableTarget(name: "ThroughputBenchmark", dependencies: ["LauncherCore", "DownloadEngine"], path: "Benchmarks/ThroughputBenchmark", exclude: ["README.md"]),
         .testTarget(name: "LauncherCoreTests", dependencies: ["LauncherCore", "TestSupport", "CrashHarness"]),
         .testTarget(name: "DownloadEngineTests", dependencies: ["DownloadEngine", "TestSupport", "CrashHarness"],
@@ -44,7 +44,7 @@ let package = Package(
         .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"]),
         .testTarget(name: "SophonTests", dependencies: ["Sophon", "TestSupport"]),
         .testTarget(name: "GameLibraryTests", dependencies: ["GameLibrary", "TestSupport", "CrashHarness"]),
-        .testTarget(name: "LaunchTests", dependencies: ["Launch", "TestSupport"]),
+        .testTarget(name: "LaunchTests", dependencies: ["Launch", "TestSupport", "CrashHarness"]),
     ],
     swiftLanguageModes: [.v6]
 )

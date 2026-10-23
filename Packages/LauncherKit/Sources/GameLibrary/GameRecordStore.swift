@@ -181,6 +181,10 @@ public actor GameRecordStore {
             // Launch preferences outlive installations and may be saved before
             // the first record. They are persistent user data, not orphan state.
             if path.components.last == "launch-settings.json", try fs.itemType(at: path) == .regularFile { continue }
+            // Session recovery is owned by Launch, including after uninstall or
+            // before a game record exists. Never retire user recovery copies.
+            if path.components.last == "launch-session.json", try fs.itemType(at: path) == .regularFile { continue }
+            if path.components.last == "recovery", try fs.itemType(at: path) == .directory { continue }
             if Self.isTemporary(path, prefix: Self.cacheTemporaryPrefix) {
                 if try cacheTemporaryIsExpired(path, fs: fs, cutoff: cutoff) { removable.append(path) }
                 continue
