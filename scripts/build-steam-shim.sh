@@ -83,7 +83,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/macgacha-steam-shim.XXXXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/include/wine" "$output/audit"
 if [[ "$verify" == 1 ]]; then
-    python3 "$repo_root/scripts/check-steam-shim-toolchain.py" | tee "$output/audit/toolchain-versions.txt"
+    python3 -I "$repo_root/scripts/check-steam-shim-toolchain.py" | tee "$output/audit/toolchain-versions.txt"
 fi
 cp "$cache/steam.c" "$work/steam.c"
 # This generated compatibility header is independently licensed BSD-3-Clause;
