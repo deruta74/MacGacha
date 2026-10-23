@@ -41,7 +41,7 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 | `GameLibrary` | Game records, operation lease (one game operation at a time), install/update/verify/adopt/uninstall bridge to the engine. |
 | `RuntimeManager` | Runtime manifest (schema 3), components (Wine, DXMT, D3DMetal, jadeite, Steam shim), bundles, safe archive extraction, Wine prefixes, GPTK import, Apple consent. |
 | `HoYoPlayAPI` | HoYoPlay game list and art (banners, backgrounds), with the content language as a parameter. |
-| `Launch` | Per-game launch recipes, `LaunchSettings` and its store, `LaunchResolver` (exact Wine command and environment), `LaunchSession` and `LaunchJournal`, and `HiddenFiles` (inode-bound hiding and restoring of game files, with recovery for conflicts). |
+| `Launch` | Per-game launch recipes, `LaunchSettings` and its store, `LaunchResolver` (exact Wine command and environment), `LaunchSession` and `LaunchJournal`, `HiddenFiles` (inode-bound hiding and restoring of game files, with recovery for conflicts), and `SessionProxy` (loopback HTTP/CONNECT proxy that blocks a recipe's hosts by exact name, with bounded buffers and deadlines). |
 | `Diagnostics` | Diagnostics bundle for bug reports. |
 | `TestSupport`, `CrashHarness`, `ThroughputBenchmark` | Test helpers (`TestEvent`, fault injection), a child process for crash and kill tests, a benchmark. |
 
@@ -108,8 +108,8 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
   - diagnostics;
   - localization groundwork (English only so far).
 - **In progress:** one-click Play.
-  - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding.
-  - Next: session proxy, prefix preparation, session lock, launch manager state machine, then app integration.
+  - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy.
+  - Next: prefix preparation, session lock, launch manager state machine, then app integration.
 - **Planned:** HoYoPlay-style rotating banners and news, translations and content language, download ETA, surround and Spatial Audio, signed and notarized releases with Sparkle updates.
 
 Update this section when a milestone task lands.
