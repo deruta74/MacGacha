@@ -143,7 +143,27 @@ private struct GameSnapshot: Sendable {
             if !completed, failure == nil, let approval { activity = .needsApproval(required: approval.required, available: approval.available) }
             else { activity = nil }
             self.applyGame(snapshot, id: id, activity: activity, reportError: failure == nil)
+            if case .insufficientSpace(let required, let available) = failure, case .paused = snapshot.status {
+                var state = self.games[id] ?? GameState(status: snapshot.status)
+                state.spaceShortage = GameSpaceShortage(required: required, available: available)
+                self.setGameState(id, state)
+            } else if !completed, failure == nil, let approval, case .paused = snapshot.status {
+                var state = self.games[id] ?? GameState(status: snapshot.status)
+                state.spaceShortage = GameSpaceShortage(required: approval.required, available: approval.available)
+                self.setGameState(id, state)
+            }
             self.releaseGame(token, activity: activity)
+            // CacheDelete is advisory and potentially slow. Query only this pause,
+            // after releasing the operation slot, never from the progress stream.
+            if let shortage = self.games[id]?.spaceShortage, shortage.isMeasured,
+                let location = snapshot.record?.installPath {
+                let probe = self.purgeableSpace
+                let important = try? await BlockingIO.run { probe.importantUsageBytes(at: location) }
+                guard self.gameRevisions[id] == token.generation,
+                    var state = self.games[id], state.activity == activity, state.spaceShortage == shortage else { return }
+                state.spaceShortage?.purgeable = important.map { max(0, max(0, $0) - max(0, shortage.available)) }
+                self.setGameState(id, state)
+            }
         }
         gameTask = task
         return task
@@ -151,12 +171,16 @@ private struct GameSnapshot: Sendable {
 
     private func applyGame(_ snapshot: GameSnapshot, id: String, activity: GameActivity?, reportError: Bool = true) {
         setGameRecord(id, snapshot.record)
-        setGameState(id, GameState(status: snapshot.status, activity: activity))
+        let shortage: GameSpaceShortage?
+        if case .paused = snapshot.status { shortage = games[id]?.spaceShortage } else { shortage = nil }
+        setGameState(id, GameState(status: snapshot.status, activity: activity, spaceShortage: shortage))
         if reportError, let error = snapshot.error { show(error) }
     }
     private func releaseGame(_ token: GameOperationToken, activity: GameActivity?) {
         guard gameOperation == token else { return }
-        setGameState(token.id, GameState(status: games[token.id]?.status ?? .unknown, activity: activity))
+        var state = games[token.id] ?? GameState(status: .unknown)
+        state.activity = activity
+        setGameState(token.id, state)
         gameOperation = nil; gameTask = nil; gameProgress = GameProgress()
     }
     private func updateGameProgress(_ id: String, downloaded: Int64, network: Int64, staged: Int64, totalStaged: Int64) {

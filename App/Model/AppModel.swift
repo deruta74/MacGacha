@@ -57,6 +57,7 @@ final class AppModel {
     @ObservationIgnored private let services: any RuntimeServices
     @ObservationIgnored private let artService: any GameArtProviding
     @ObservationIgnored private let defaults: UserDefaults?
+    @ObservationIgnored let purgeableSpace: any PurgeableSpaceProbe
     @ObservationIgnored let gameServices: any GameServices
     @ObservationIgnored var gameTask: Task<Void, Never>?
     @ObservationIgnored var gameStartupTask: Task<Void, Never>?
@@ -88,8 +89,9 @@ final class AppModel {
         services: (any RuntimeServices)? = nil, defaults: UserDefaults? = .standard,
         artService: any GameArtProviding = EmptyGameArtProvider(),
         gameServices: any GameServices = PreviewGameServices(),
+        purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(),
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }) {
-        self.paths = paths; self.manifest = manifest; self.gameServices = gameServices
+        self.paths = paths; self.manifest = manifest; self.gameServices = gameServices; self.purgeableSpace = purgeable
         self.services = services ?? LiveRuntimeServices(paths: paths)
         self.defaults = defaults; self.now = now; self.artService = artService; self.gameArt = artService.cached()
         let stored = defaults?.string(forKey: "installRoot")

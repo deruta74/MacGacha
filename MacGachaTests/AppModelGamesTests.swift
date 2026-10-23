@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import AppKit
+import Darwin
 import Foundation
 import Observation
 import Synchronization
@@ -49,7 +50,8 @@ struct AppModelGamesTests {
         fake.emit(.needsBatchApproval(required: 200, available: 100))
         if throwsAfterApproval { fake.fail(.insufficientSpace(required: 200, available: 100)) } else { fake.finish() }
         try await gamesEventually {
-            model.games["genshin"] == GameState(status: .paused(.install), activity: .needsApproval(required: 200, available: 100))
+            model.games["genshin"] == GameState(status: .paused(.install), activity: .needsApproval(required: 200, available: 100),
+                spaceShortage: GameSpaceShortage(required: 200, available: 100))
         }
         #expect(model.lastError == nil)
         model.approveBatches("genshin")
@@ -79,7 +81,8 @@ struct AppModelGamesTests {
 
         snapshot.release()
         try await gamesEventually {
-            model.games["genshin"] == GameState(status: .paused(.install), activity: .needsApproval(required: 200, available: 100))
+            model.games["genshin"] == GameState(status: .paused(.install), activity: .needsApproval(required: 200, available: 100),
+                spaceShortage: GameSpaceShortage(required: 200, available: 100))
         }
         model.approveBatches("genshin")
         try await gamesEventually { fake.calls.count == 2 }
@@ -318,6 +321,71 @@ struct AppModelGamesTests {
         for forbidden in ["planted-secret", "/private", "password=", "https://"] { #expect(!log.contains(forbidden)) }
     }
 
+    @Test func partsApprovalShowsHeldSpaceWithoutLosingApproval() async throws {
+        let probe = GamePurgeableProbe(bytes: 300)
+        let (model, fake, _) = try gameFixture(purgeable: probe); defer { fake.finish() }
+        model.installGame("genshin", voices: ["en-us"], at: gameLocation, approved: false)
+        try await gamesEventually { fake.calls.count == 1 }
+        fake.emit(.needsBatchApproval(required: 200, available: 100))
+        fake.fail(.insufficientSpace(required: 200, available: 100))
+        try await gamesEventually { !model.isGameOperationRunning }
+        try await gamesEventually { model.games["genshin"]?.spaceShortage?.heldByMacOS == 200 }
+        #expect(probe.calls == 1)
+        let state = try #require(model.games["genshin"])
+        #expect(PrimaryAction.resolve(state, runtimesReady: false) == .continueInParts)
+        #expect(model.lastError == nil)
+    }
+
+    @Test(arguments: [EDQUOT, ENOSPC]) func allocationFailureDoesNotDiagnoseSpaceHeldByMacOS(code: Int32) async throws {
+        // Exercise the real FileOps normalization: both errors lose their errno
+        // and reach the app with an unmeasured (1, 0) placeholder.
+        let failure = try await BlockingIO.run {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let fs = try ContainedFileSystem(root: root, fileOps: GameAllocationFailureOps(code: code))
+            do { try fs.writeAtomically(Data("partial output".utf8), to: SafeRelativePath("output")) }
+            catch { return try #require(error as? LauncherError) }
+            throw LauncherError.io("Expected an allocation failure")
+        }
+        #expect(failure == .insufficientSpace(required: 1, available: 0))
+        let probe = GamePurgeableProbe(bytes: 300)
+        let (model, fake, _) = try gameFixture(purgeable: probe); defer { fake.finish() }
+        model.installGame("genshin", voices: ["en-us"], at: gameLocation, approved: false)
+        let worker = try #require(model.gameTask)
+        try await gamesEventually { fake.calls.count == 1 }
+        fake.fail(failure)
+        await worker.value // Includes any advisory query and its main-actor publication.
+        #expect(!model.isGameOperationRunning)
+        #expect(model.games["genshin"]?.status == .paused(.install))
+        let shortage = try #require(model.games["genshin"]?.spaceShortage)
+        #expect(shortage.heldByMacOS == nil)
+        #expect(probe.calls == 0)
+        #expect(model.lastError == failure.userMessage)
+    }
+
+    @Test func insufficientSpaceQueriesPurgeableOnlyAfterPause() async throws {
+        let probe = GamePurgeableProbe(bytes: 300)
+        let (model, fake, _) = try gameFixture(purgeable: probe); defer { fake.finish() }
+        model.installGame("genshin", voices: ["en-us"], at: gameLocation, approved: false)
+        try await gamesEventually { fake.calls.count == 1 }
+        fake.emit(.phase(.staging))
+        for _ in 0..<10 { fake.progress(1) }
+        #expect(probe.calls == 0)
+        fake.fail(.insufficientSpace(required: 200, available: 80))
+        try await gamesEventually { model.games["genshin"]?.spaceShortage?.heldByMacOS == 220 }
+        #expect(!model.isGameOperationRunning)
+        #expect(probe.calls == 1)
+        #expect(model.games["genshin"]?.status == .paused(.install))
+        await model.refreshGames()
+        #expect(probe.calls == 1)
+        model.resumeGame("genshin")
+        #expect(model.games["genshin"]?.spaceShortage == nil)
+        try await gamesEventually { fake.calls.count == 2 }
+        fake.fail(.cancelled)
+        try await gamesEventually { !model.isGameOperationRunning }
+        #expect(probe.calls == 1)
+    }
+
     @Test func hostedModelAndPreviewUseInertGameServices() async {
         let model = AppModel.forCurrentProcess()
         #expect(model.games.isEmpty)
@@ -330,11 +398,11 @@ struct AppModelGamesTests {
 }
 
 private let gameLocation = URL(fileURLWithPath: "/inert/Games/Genshin")
-@MainActor private func gameFixture(fake: FakeGameServices = FakeGameServices()) throws -> (AppModel, FakeGameServices, GameTestClock) {
+@MainActor private func gameFixture(fake: FakeGameServices = FakeGameServices(), purgeable: any PurgeableSpaceProbe = GamePurgeableProbe(bytes: nil)) throws -> (AppModel, FakeGameServices, GameTestClock) {
     let clock = GameTestClock()
     let model = AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/AppSupport")),
         manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(), defaults: nil,
-        gameServices: fake, now: { clock.time })
+        gameServices: fake, purgeable: purgeable, now: { clock.time })
     return (model, fake, clock)
 }
 @MainActor private func gamesEventually(_ condition: () -> Bool) async throws {
@@ -485,5 +553,31 @@ private final class GameFailingHTTP: HTTPClient, Sendable {
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         urls.withLock { $0.append(url) }
         throw error
+    }
+}
+
+private final class GamePurgeableProbe: PurgeableSpaceProbe, Sendable {
+    private let count = Mutex(0)
+    let bytes: Int64?
+    init(bytes: Int64?) { self.bytes = bytes }
+    var calls: Int { count.withLock { $0 } }
+    func importantUsageBytes(at url: URL) -> Int64? { count.withLock { $0 += 1 }; return bytes }
+}
+
+private struct GameAllocationFailureOps: FileOps {
+    let code: Int32
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+    }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws {
+        try SystemFileOps().synchronize(descriptor, durable: durable)
+    }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String,
+        in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination,
+            in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
+        try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
     }
 }

@@ -33,6 +33,7 @@ struct InstallSheet: View {
     private var definition: GameDefinition? { GameDefinition.all.first { $0.id == game.id } }
     private var estimate: GameEstimate? { if case .ready(let value) = check { value } else { nil } }
     private var verdict: SpaceVerdict? { estimate.map(SpaceVerdict.of) }
+    private var immediateVerdict: SpaceVerdict? { estimate.map(SpaceVerdict.immediate) }
     /// Another game's operation holds the one slot; starting here would only fail as busy.
     private var blocked: Bool { model.isGameOperationRunning }
     private var displayPath: String {
@@ -80,7 +81,7 @@ struct InstallSheet: View {
                 Section {
                     summary
                 } footer: {
-                    if verdict == .batchedOnly {
+                    if immediateVerdict == .batchedOnly {
                         Text("There isn't room to install in one go, so MacGacha will install in parts. The game can't be played until it's done.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -124,7 +125,17 @@ struct InstallSheet: View {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
             do {
-                let value = try await model.estimate(game.id, voices: voices, at: location)
+                let value: GameEstimate
+                #if DEBUG
+                if UserDefaults.standard.string(forKey: "MacGachaDebugSpace") == "held" {
+                    value = GameEstimate(download: 146_000_000_000, diskWhole: 151_000_000_000,
+                        diskMinimum: 150_000_000_000, available: 88_000_000_000, purgeable: 221_000_000_000)
+                } else {
+                    value = try await model.estimate(game.id, voices: voices, at: location)
+                }
+                #else
+                value = try await model.estimate(game.id, voices: voices, at: location)
+                #endif
                 if !Task.isCancelled { check = .ready(value) }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -145,7 +156,10 @@ struct InstallSheet: View {
                     Text("Unknown").foregroundStyle(.secondary)
                 }
             }
-            if verdict == .insufficient, let available = estimate.available {
+            if case .heldByMacOS(let bytes) = verdict {
+                PurgeableSpaceHint(bytes: bytes)
+                Button("Check Again") { attempt += 1 }
+            } else if verdict == .insufficient, let available = estimate.available {
                 Label("Free up \(ByteSize.text(estimate.diskMinimum - available)) more to install.",
                     systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
@@ -171,20 +185,20 @@ struct InstallSheet: View {
     }
 
     @ViewBuilder private var installButton: some View {
-        if verdict == .batchedOnly {
+        if immediateVerdict == .batchedOnly {
             Button("Install in Parts…") { confirmingParts = true }
                 .keyboardShortcut(.defaultAction)
                 .disabled(blocked)
         } else {
             Button("Install") { start(approved: false) }
                 .keyboardShortcut(.defaultAction)
-                .disabled(estimate == nil || verdict == .insufficient || blocked)
+                .disabled(immediateVerdict != .whole || blocked)
         }
     }
 
     private func start(approved: Bool) {
         // The estimate the user agreed to must still describe this location and these voices.
-        guard estimate != nil, !blocked else { return }
+        guard !blocked, immediateVerdict == .whole || (approved && immediateVerdict == .batchedOnly) else { return }
         model.installGame(game.id, voices: voices, at: location, approved: approved)
         dismiss()
     }
