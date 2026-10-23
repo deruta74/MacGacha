@@ -178,6 +178,9 @@ public actor GameRecordStore {
         let files: Set<String> = ["pending-plan.json", "branch.json", "managed-paths.json", "uninstall-cleaned.json"]
         var removable: [SafeRelativePath] = []
         for path in paths {
+            // Launch preferences outlive installations and may be saved before
+            // the first record. They are persistent user data, not orphan state.
+            if path.components.last == "launch-settings.json", try fs.itemType(at: path) == .regularFile { continue }
             if Self.isTemporary(path, prefix: Self.cacheTemporaryPrefix) {
                 if try cacheTemporaryIsExpired(path, fs: fs, cutoff: cutoff) { removable.append(path) }
                 continue
@@ -317,7 +320,7 @@ package final class GameOperationLease: PipelineDrainOwner {
         let key = try fs.rootIdentity()
         if let wait = registry.withLock({ $0.drains[key] }) { try await wait() }
     }
-    fileprivate static func acquire(fs: ContainedFileSystem) throws -> GameOperationLease {
+    package static func acquire(fs: ContainedFileSystem) throws -> GameOperationLease {
         let key = try fs.rootIdentity()
         guard registry.withLock({ $0.active.insert(key).inserted }) else {
             throw LauncherError.busy("another game operation is running")
