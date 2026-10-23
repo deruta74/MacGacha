@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "components": [
     {
       "id": "wine-11.0-yaagl",
@@ -80,9 +80,83 @@
       },
       "wineBinary": "bin/wine",
       "consent": "appleGPTK"
+    },
+    {
+      "id": "wine-11.0-1-crossover",
+      "kind": "wine",
+      "version": "11.0-1-crossover",
+      "sourceMode": "download",
+      "url": "https://github.com/yaagl/anime-game-wine/releases/download/wine-crossover-11.0-1-signed/wine-crossover-11.0-1-osx64-signed.tar.xz",
+      "size": 456021524,
+      "installedSize": 2148383548,
+      "sha256": {
+        "algorithm": "sha256",
+        "hex": "89fa7e90fb626523a90d5867a03c6be785d017176739c6320a3b86c7838c3a35"
+      },
+      "archive": "tar.xz",
+      "rootPath": "wine",
+      "license": {
+        "name": "LGPL-2.1",
+        "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
+        "redistributable": true,
+        "termsRevision": "LGPL-2.1"
+      },
+      "wineBinary": "bin/wine"
+    },
+    {
+      "id": "jadeite-4.1.0",
+      "kind": "jadeite",
+      "version": "4.1.0",
+      "sourceMode": "download",
+      "url": "https://codeberg.org/mkrsym1/jadeite/releases/download/v4.1.0/v4.1.0.zip",
+      "size": 48115,
+      "installedSize": 100434,
+      "sha256": {
+        "algorithm": "sha256",
+        "hex": "12d4c37b09d3e81640536fd68c2c62913fc4b4a90c0183e4dec845e4934a9858"
+      },
+      "archive": "zip",
+      "license": {
+        "name": "MIT",
+        "url": "https://codeberg.org/mkrsym1/jadeite/src/tag/v4.1.0/LICENSE.txt",
+        "redistributable": true,
+        "termsRevision": "jadeite-4.1.0"
+      }
+    },
+    {
+      "id": "steam-shim-proton-10.0-4",
+      "kind": "steamShim",
+      "version": "proton-10.0-4",
+      "sourceMode": "download",
+      "url": "https://github.com/deruta74/MacGacha/releases/download/steam-shim-proton-10.0-4/steam-shim-proton-10.0-4.zip",
+      "size": 44476,
+      "installedSize": 111116,
+      "sha256": {
+        "algorithm": "sha256",
+        "hex": "eddf914ec42e5386edac2ec6bd84fcb46c3dd2fb03e8b3008d5586bfacb3e8f4"
+      },
+      "archive": "zip",
+      "license": {
+        "name": "BSD-3-Clause",
+        "url": "https://github.com/deruta74/MacGacha/blob/main/compat/steam-shim/NOTICE.md",
+        "redistributable": true,
+        "termsRevision": "steam-shim-proton-10.0-4"
+      },
+      "rootPath": "steam-shim-proton-10.0-4"
     }
   ],
   "bundles": [
+    {
+      "id": "dxmt-wine11.0cx-dxmt0.80",
+      "displayName": "DXMT",
+      "summary": "CrossOver Wine 11.0 · DXMT 0.80",
+      "backend": "dxmt",
+      "components": [
+        "wine-11.0-1-crossover",
+        "dxmt-0.80"
+      ],
+      "environment": {}
+    },
     {
       "id": "dxmt-wine11.0-dxmt0.80",
       "displayName": "DXMT",

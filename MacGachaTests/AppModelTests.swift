@@ -306,9 +306,10 @@ struct AppModelTests {
     @Test func bundledManifestDecodesPinnedBundles() throws {
         let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: url))
-        #expect(manifest.components.count == 3)
+        #expect(manifest.schemaVersion == 3)
+        #expect(manifest.components.count == 6)
         for c in manifest.components {
-            #expect(c.url?.host == "github.com")
+            #expect(["github.com", "codeberg.org"].contains(c.url?.host ?? ""))
             #expect(c.sha256?.hex != String(repeating: "0", count: 64))
             #expect(c.installedSize != nil)
         }
@@ -321,7 +322,9 @@ struct AppModelTests {
         let manifest = try RuntimeManifest.load(from: url)
         let model = AppModel(paths: testPaths(), manifest: manifest, services: PreviewRuntimeServices(), defaults: nil)
         await model.start()
-        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue })
+        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + ["jadeite-4.1.0", "steam-shim-proton-10.0-4"])
+        #expect(manifest.bundles.first?.id.rawValue == "dxmt-wine11.0cx-dxmt0.80")
+        #expect(model.rows.contains { $0.id == "dxmt-wine11.0-dxmt0.80" })
         let dxmt = manifest.bundles[0].id.rawValue
         model.install(dxmt)
         try await eventually { model.rows.first?.state == .installed(source: .download) }
@@ -329,11 +332,33 @@ struct AppModelTests {
         await model.remove(dxmt)
         #expect(model.rows.first?.state == .notInstalled)
         #expect(!model.runtimesReady)
-        model.install(manifest.bundles[1].id.rawValue)
+        let metal = try #require(manifest.bundles.first { $0.backend == .d3dmetal })
+        model.install(metal.id.rawValue)
         try await eventually { model.consentRequest != nil }
         #expect(model.consentRequest?.body == AppleNotice.body)
         model.respondToConsent(accept: false)
-        #expect(model.rows.last?.state == .notInstalled)
+        #expect(model.rows.first { $0.id == metal.id.rawValue }?.state == .notInstalled)
+    }
+
+    @Test func compatibilityRowsInstallRemoveAndSurviveRefresh() async throws {
+        let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
+        let manifest = try RuntimeManifest.load(from: url)
+        let services = PreviewRuntimeServices()
+        let model = AppModel(paths: testPaths(), manifest: manifest, services: services, defaults: nil)
+        await model.start()
+        for (id, name, license, size) in [("jadeite-4.1.0", "Jadeite", "MIT", Int64(48115)),
+            ("steam-shim-proton-10.0-4", "Steam shim", "BSD-3-Clause", Int64(44476))] {
+            let row = try #require(model.rows.first { $0.id == id })
+            #expect(row.kindName == name && row.licenseName == license && row.downloadSize == size)
+            #expect(!row.needsConsent && !row.canImportGPTK)
+            model.install(id)
+            try await eventually { model.rows.first { $0.id == id }?.state == .installed(source: .download) }
+            await model.refreshRuntimes()
+            #expect(model.rows.filter { $0.id == id }.count == 1)
+            #expect(model.rows.first { $0.id == id }?.state == .installed(source: .download))
+            await model.remove(id)
+            #expect(model.rows.first { $0.id == id }?.state == .notInstalled)
+        }
     }
 
     @Test func progressIsThrottledAndPreviewHasNoLiveDependencies() async throws {

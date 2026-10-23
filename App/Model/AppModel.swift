@@ -34,7 +34,7 @@ final class AppModel {
         var state: RowState
         let canImportGPTK: Bool
         let needsConsent: Bool
-        /// Bundles only: what is inside, and the total download.
+        /// Optional bundle summary and download size for bundles or standalone components.
         var summary: String? = nil
         var downloadSize: Int64? = nil
     }
@@ -462,7 +462,7 @@ final class AppModel {
             result.append(RuntimeRow(id: id, kindName: Self.kindName(component.kind), version: component.version.rawValue,
                 licenseName: component.license.name,
                 state: working[id] ?? errors[id].map { .failed(message: $0) } ?? existing.map { .installed(source: $0.source) } ?? .notInstalled,
-                canImportGPTK: component.kind == .d3dmetal, needsConsent: component.consent != nil))
+                canImportGPTK: component.kind == .d3dmetal, needsConsent: component.consent != nil, downloadSize: component.size))
         }
         for component in installed where !covered.contains(where: { $0.rawValue == Self.id(component) }) && !result.contains(where: { $0.id == Self.id(component) }) {
             let id = Self.id(component)
@@ -481,9 +481,12 @@ final class AppModel {
         let error = launcherError(error)
         if error != .cancelled { lastError = error.userMessage }
     }
-    private static func id(_ component: InstalledComponent) -> String { "\(component.kind.rawValue)-\(component.version)" }
+    private static func id(_ component: InstalledComponent) -> String { "\(component.kind.idPrefix)-\(component.version)" }
     private static func kindName(_ kind: ComponentKind) -> String {
-        switch kind { case .wine: "Wine"; case .dxmt: "DXMT"; case .d3dmetal: "D3DMetal" }
+        switch kind {
+        case .wine: "Wine"; case .dxmt: "DXMT"; case .d3dmetal: "D3DMetal"
+        case .jadeite: "Jadeite"; case .steamShim: "Steam shim"
+        }
     }
 }
 
@@ -533,7 +536,7 @@ extension AppModel {
         model.rows = rows; model.consentRequest = consent; model.importState = importState
         model.installed = rows.compactMap { row in
             guard case .installed(let source) = row.state,
-                let kind = ComponentKind.allCases.first(where: { row.id.hasPrefix($0.rawValue + "-") }) else { return nil }
+                let kind = ComponentKind.allCases.first(where: { row.id.hasPrefix($0.idPrefix + "-") }) else { return nil }
             return try? InstalledComponent(kind: kind, version: row.version, installedAt: Date(), source: source)
         }
         model.lastError = lastError; model.logLines = Array(logLines.suffix(200))

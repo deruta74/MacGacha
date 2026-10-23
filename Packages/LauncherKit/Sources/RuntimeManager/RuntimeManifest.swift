@@ -4,7 +4,10 @@ import Foundation
 import LauncherCore
 
 public enum ComponentKind: String, Codable, Sendable, CaseIterable {
-    case wine, dxmt, d3dmetal
+    case wine, dxmt, d3dmetal, jadeite, steamShim
+
+    /// Component IDs use release-facing names; store directories use the Codable kind.
+    public var idPrefix: String { self == .steamShim ? "steam-shim" : rawValue }
 }
 
 public enum SourceMode: String, Codable, Sendable {
@@ -65,7 +68,7 @@ public struct RuntimeComponent: Codable, Sendable, Identifiable {
         url: URL? = nil, size: Int64? = nil, installedSize: Int64? = nil, sha256: Digest? = nil,
         archive: ArchiveFormat? = nil, license: ComponentLicense, consent: ConsentKind? = nil,
         rootPath: SafeRelativePath? = nil, wineBinary: SafeRelativePath? = nil, overlay: [RuntimeOverlay] = []) throws {
-        guard id.rawValue == "\(kind.rawValue)-\(version.rawValue)" else {
+        guard id.rawValue == "\(kind.idPrefix)-\(version.rawValue)" else {
             throw LauncherError.io("Runtime component ID must be <kind>-<version>")
         }
         if let url { try validateRuntimeURL(url) }
@@ -99,7 +102,8 @@ public struct RuntimeComponent: Codable, Sendable, Identifiable {
         self.sha256 = sha256
         self.archive = archive
         self.license = license
-        guard overlay.count <= 16, kind == .dxmt || overlay.isEmpty, kind != .dxmt || wineBinary == nil else {
+        guard overlay.count <= 16, kind == .dxmt || overlay.isEmpty,
+            kind == .wine || kind == .d3dmetal || wineBinary == nil else {
             throw LauncherError.io("Invalid runtime layout")
         }
         self.consent = consent
@@ -130,8 +134,8 @@ public struct RuntimeManifest: Codable, Sendable {
     public let components: [RuntimeComponent]
     public let bundles: [RuntimeBundle]
 
-    public init(schemaVersion: Int = 2, components: [RuntimeComponent], bundles: [RuntimeBundle] = []) throws {
-        guard schemaVersion == 2 else { throw LauncherError.io("Unsupported runtime manifest schema") }
+    public init(schemaVersion: Int = 3, components: [RuntimeComponent], bundles: [RuntimeBundle] = []) throws {
+        guard schemaVersion == 2 || schemaVersion == 3 else { throw LauncherError.io("Unsupported runtime manifest schema") }
         guard components.count <= 256 else { throw LauncherError.io("Too many runtime components") }
         guard Set(components.map(\.id)).count == components.count else { throw LauncherError.io("Duplicate runtime component ID") }
         let destinations = components.map { $0.kind.rawValue + "/" + $0.version.rawValue.lowercased() }
@@ -150,7 +154,7 @@ public struct RuntimeManifest: Codable, Sendable {
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let schema = try c.decode(Int.self, forKey: .schemaVersion)
-        guard schema == 2 else { throw LauncherError.io("Unsupported runtime manifest schema") }
+        guard schema == 2 || schema == 3 else { throw LauncherError.io("Unsupported runtime manifest schema") }
         var array = try c.nestedUnkeyedContainer(forKey: .components)
         var components: [RuntimeComponent] = []
         while !array.isAtEnd {
@@ -166,6 +170,11 @@ public struct RuntimeManifest: Codable, Sendable {
         }
         return try JSONDecoder().decode(RuntimeManifest.self, from: data)
     }
+
+    public func component(id: SafeIdentifier) -> RuntimeComponent? { components.first { $0.id == id } }
+
+    /// Manifest order selects the preferred bundle while keeping older versions installable.
+    public func defaultBundle(for backend: RuntimeBackend) -> RuntimeBundle? { bundles.first { $0.backend == backend } }
 }
 
 func validateRuntimeText(_ value: String, field: String) throws {
