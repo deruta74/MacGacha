@@ -57,22 +57,75 @@ The complete active Homebrew runtime closure is pinned in
 | zstd | 1.5.7_1 |
 | mingw-w64 | 14.0.0_3 |
 
-The lock also pins each `arm64_golden_gate` bottle by SHA-256, in installation
-order. Missing formulas are installed from those exact bottles with
-`--ignore-dependencies --force-bottle`: Homebrew cannot resolve extra current
-packages or fall back to a source build. Existing formulas are never installed
-again or upgraded. Auto-update, install-upgrade, dependent checks and cleanup
-are disabled for the entire job.
+The lock also pins each `arm64_golden_gate` bottle SHA-256, in installation
+order. CI uses `scripts/install-steam-shim-toolchain.py` to download and verify
+**all eight bottles**, then extract them into a new isolated `Cellar`/`opt` prefix.
+It never invokes Homebrew, resolves formulas, builds packages from source, or
+writes to `/opt/homebrew`. Existing nonempty destinations are refused.
 
-After installation, `scripts/check-steam-shim-toolchain.py` prints
-`brew list --versions` for every formula in the closure. It traverses **installed
-runtime receipts**, compares the complete formula set to the lock, and verifies
-the exact active `opt/` keg version for each formula. Any missing/extra dependency
-or different active version fails. Historical unlinked kegs are printed but are
-not runtime dependencies; in particular this machine also has unlinked xz
-5.8.3, while the toolchain uses active xz 5.8.4. Nothing is relinked or upgraded
-by the checker. Receipt traversal does not consult mutable formula APIs and
-works in the network-denied build phase.
+Downloads require HTTPS on every hop and allow only `ghcr.io` and
+`pkg-containers.githubusercontent.com` (the observed GHCR bottle CDN).
+Curl configuration is disabled with `-q`; redirects are followed manually only
+after host/scheme checks, with a six-request limit and final effective-host
+validation. The registry authorization header is not forwarded to the CDN.
+Bottle SHA-256 verification remains mandatory before any archive processing.
+
+The complete archive namespace and link graph are validated before writing:
+cycles, escapes, duplicate members and non-directory ancestors are rejected.
+Graph identities and link-component lookups use Unicode NFD normalization and
+case folding, including on case-sensitive hosts. Case/normalization aliases
+are rejected for both explicit members and implicit directory prefixes; the
+single accepted original spelling is preserved during extraction.
+Files are created first, hardlinks only to resolved regular members next, and
+symlinks last. Extraction never traverses a symlink ancestor or delegates link
+handling to `tar`.
+
+Bottle host-library references are relocated to relative `@loader_path` paths,
+and modified Mach-O tools/libraries are ad-hoc signed again. Text specs and
+linker scripts have Homebrew placeholders relocated. For target COFF/archive
+files, Homebrew's placeholder substitution must be undone to the original build
+prefix to restore byte offsets; those paths are debug data, not host tool paths.
+
+The shim-specific GCC wrappers use `-B` and explicit assembler/linker specs to
+select the isolated assembler and BFD linker directly. This bypasses GCC's
+absolute build-prefix defaults and collect2's hard-coded default linker; `-B`
+alone does not override them when a system keg already exists. These wrappers
+are for this C shim build, not a general C++/LTO toolchain installation. Both PE
+artifacts remain byte-identical to the checked-in hashes. Local verification
+also denies **all reads and writes to `/opt/homebrew`** during the offline build,
+so successful compilation cannot hide fallback to the owner's toolchain.
+
+The installer records each verified bottle's version/digest and derives the
+runtime closure from its host Mach-O library references. With
+`STEAM_SHIM_TOOLCHAIN_PREFIX` set, `scripts/check-steam-shim-toolchain.py` compares
+that inventory, exact active `opt/` kegs, complete dependency closure and compiler
+selection on PATH against the lock, without requiring `brew`. Without that
+variable (or `--prefix`), the checker retains its existing Homebrew mode: print
+`brew list --versions` and traverse installed runtime receipts without consulting
+mutable formula APIs or changing the installed packages. Both modes work offline.
+Installer/checker commands and their shebangs use Python isolated mode (`-I`),
+so user-site modules, `PYTHONPATH` and environment-supplied startup code cannot
+run before verification.
+
+To install the same standalone toolchain locally on arm64 macOS 27:
+
+```sh
+export STEAM_SHIM_TOOLCHAIN_PREFIX=/private/tmp/macgacha-shim-toolchain
+python3 -I scripts/install-steam-shim-toolchain.py "$STEAM_SHIM_TOOLCHAIN_PREFIX"
+export PATH="$STEAM_SHIM_TOOLCHAIN_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+python3 -I scripts/check-steam-shim-toolchain.py
+# Then run the build commands below, retaining both exports.
+```
+
+Downloads are cached beside the prefix (`PREFIX-bottles`), or at `--cache DIR`.
+Every cached bottle is hash-checked again before extraction; a bad cache fails
+closed. Nothing in the owner's Homebrew prefix is installed, upgraded or linked.
+
+Run the offline archive/redirect security self-tests with:
+
+```sh
+python3 -I scripts/test-steam-shim-toolchain.py
+```
 
 The manual workflow uses the explicit `xcode-27` runner label, requires
 arm64/macOS 27, and pins both actions by full commit SHA. **GitHub's macOS

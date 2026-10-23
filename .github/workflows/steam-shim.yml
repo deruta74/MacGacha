@@ -18,26 +18,17 @@ jobs:
       HOMEBREW_NO_INSTALL_CLEANUP: '1'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install and verify locked Homebrew runtime closure
+      - name: Install and verify locked bottle toolchain
         shell: bash
         run: |
           set -euo pipefail
-          test "$(uname -m)" = arm64
-          [[ "$(sw_vers -productVersion)" == 27.* ]]
-          while read -r formula version digest; do
-            [[ -n "$formula" && "$formula" != \#* ]] || continue
-            installed=$(brew list --versions "$formula" 2>/dev/null || true)
-            if [[ -z "$installed" ]]; then
-              bottle="$RUNNER_TEMP/$formula--$version.arm64_golden_gate.bottle.tar.gz"
-              curl --fail --location --retry 3 -H 'Authorization: Bearer QQ==' \
-                "https://ghcr.io/v2/homebrew/core/$formula/blobs/sha256:$digest" -o "$bottle"
-              printf '%s  %s\n' "$digest" "$bottle" | shasum -a 256 -c -
-              # Only the locked bottles may be installed, never current dependencies
-              # or source-build fallbacks. Existing formulas are never upgraded.
-              brew install --ignore-dependencies --force-bottle "$bottle"
-            fi
-          done < compat/steam-shim/toolchain.lock
-          python3 scripts/check-steam-shim-toolchain.py
+          export STEAM_SHIM_TOOLCHAIN_PREFIX="$RUNNER_TEMP/steam-shim-toolchain"
+          echo "STEAM_SHIM_TOOLCHAIN_PREFIX=$STEAM_SHIM_TOOLCHAIN_PREFIX" >> "$GITHUB_ENV"
+          python3 -I scripts/test-steam-shim-toolchain.py
+          python3 -I scripts/install-steam-shim-toolchain.py "$STEAM_SHIM_TOOLCHAIN_PREFIX"
+          echo "$STEAM_SHIM_TOOLCHAIN_PREFIX/bin" >> "$GITHUB_PATH"
+          export PATH="$STEAM_SHIM_TOOLCHAIN_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          python3 -I scripts/check-steam-shim-toolchain.py
       - name: Fetch pinned sources for two independent builds
         run: |
           STEAM_SHIM_CACHE_DIR="$RUNNER_TEMP/cache-a" scripts/build-steam-shim.sh out-a --fetch-only
@@ -46,6 +37,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export PATH="$STEAM_SHIM_TOOLCHAIN_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin"
           STEAM_SHIM_CACHE_DIR="$RUNNER_TEMP/cache-a" sandbox-exec -p '(version 1) (allow default) (deny network*)' scripts/build-steam-shim.sh out-a --offline --verify
           STEAM_SHIM_CACHE_DIR="$RUNNER_TEMP/cache-b" sandbox-exec -p '(version 1) (allow default) (deny network*)' scripts/build-steam-shim.sh out-b --offline --verify
           (cd out-a && shasum -a 256 -c "$GITHUB_WORKSPACE/compat/steam-shim/SHA256SUMS")
