@@ -222,16 +222,21 @@ struct PrimaryActionButton: View {
         }
     }
 
+    /// The circle buttons beside it use a 44-point label at the regular control size; matching both
+    /// gives every footer control one height.
+    private let labelHeight: CGFloat = 44
+
     private func prominent(_ title: String, alwaysEnabled: Bool = false, perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
             // Game tints are light, so the label takes the game's dark tone for contrast.
             Text(title)
-                .frame(minWidth: 180)
+                .frame(minWidth: 180, minHeight: labelHeight)
                 .foregroundStyle(game.deepTint)
         }
         .buttonStyle(.glassProminent)
+        .buttonBorderShape(.capsule)
         .tint(game.tint)
-        .controlSize(.extraLarge)
+        .font(.title3)
         .keyboardShortcut(.defaultAction)
         .disabled(blocked && !alwaysEnabled)
         .help(blocked && !alwaysEnabled ? "Wait for the other game's download to finish or pause it" : "")
@@ -243,10 +248,11 @@ struct PrimaryActionButton: View {
                 if spinner { ProgressView().controlSize(.small) }
                 Text(title)
             }
-            .frame(minWidth: 180)
+            .frame(minWidth: 180, minHeight: labelHeight)
         }
         .buttonStyle(.glass)
-        .controlSize(.extraLarge)
+        .buttonBorderShape(.capsule)
+        .font(.title3)
         .disabled(true)
     }
 
