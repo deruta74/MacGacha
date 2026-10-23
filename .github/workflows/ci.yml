@@ -35,6 +35,8 @@ jobs:
           mkdir -p test-results
           python3 scripts/test-package.py --events test-results/package-events.jsonl \
             --parallel --xunit-output test-results/test-results.xml
+      # Scale tests hold the only cooperative thread for tens of seconds and
+      # starve timed tests; they already run in the step above.
       - name: Run engine tests with one cooperative worker
         timeout-minutes: 5
         env:
@@ -42,6 +44,7 @@ jobs:
         run: |
           python3 scripts/test-package.py --events test-results/strict-engine-events.jsonl \
             --timeout-seconds 240 --skip-build --test-product DownloadEngineTests \
+            --skip PlanScaleTests --skip operationStagesOneThousandBatchesWithLinearWork \
             --parallel --num-workers 2 --xunit-output test-results/strict-engine.xml
 
       - name: Generate Xcode project
