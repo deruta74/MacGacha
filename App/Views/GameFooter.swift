@@ -41,6 +41,11 @@ struct GameFooter: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .shadow(color: .black.opacity(0.4), radius: 3)
                     .contentTransition(.opacity)
+                if let held = state.spaceShortage?.heldByMacOS {
+                    PurgeableSpaceHint(bytes: held)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(maxWidth: 480, alignment: .trailing)
+                }
                 HStack(spacing: 10) {
                     if art?.videoPage != nil {
                         backgroundToggle
@@ -131,7 +136,7 @@ struct GameFooter: View {
         case .notInstalled: return "Not installed"
         case .installed(let tag): return "Version \(tag) · Installed"
         case .updateAvailable(let from, let to): return "Version \(from) · Version \(to) is available"
-        case .paused: return "Paused"
+        case .paused: return state.spaceShortage == nil ? "Paused" : "Paused — Not enough free disk space"
         case .uninstallPaused: return "Uninstall didn't finish"
         case .locationUnavailable: return "Install location unavailable — connect the drive it's on"
         }

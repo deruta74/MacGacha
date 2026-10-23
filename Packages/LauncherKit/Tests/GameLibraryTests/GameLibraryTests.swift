@@ -255,6 +255,16 @@ import TestSupport
         #expect(try await f.store.load(game.id) == nil)
     }
 
+    @Test(arguments: [Int64?(300), 50, nil]) func estimateSeparatesPurgeableFromUsableSpace(important: Int64?) async throws {
+        let f = try LibraryFixture(disk: FixedDiskSpace(bytes: 100), purgeable: LibraryPurgeable(bytes: important))
+        try f.advertise(1)
+        let estimate = try await f.library.estimate(game, voices: ["en-us"], at: f.install)
+        #expect(estimate.available == 100)
+        #expect(estimate.purgeable == important.map { max(0, $0 - 100) })
+        #expect(try await f.store.load(game.id) == nil)
+        #expect(!FileManager.default.fileExists(atPath: f.install.path))
+    }
+
     @Test(arguments: [false, true]) func blockedEstimateDoesNotPreventInstallOrAdopt(adopt: Bool) async throws {
         let gate = LibraryRequestGate(pathSuffix: "getGameBranches")
         let f = try LibraryFixture(requestGate: gate); try f.advertise(1)
@@ -671,7 +681,7 @@ private struct LibraryFixture: ~Copyable {
     let library: GameLibrary
     let disk: any DiskSpaceProbe
     var fs: ContainedFileSystem { get throws { try ContainedFileSystem(root: install) } }
-    init(disk: any DiskSpaceProbe = FixedDiskSpace(bytes: Int64.max), metadataGate: LibraryMetadataGate? = nil, requestGate: LibraryRequestGate? = nil,
+    init(disk: any DiskSpaceProbe = FixedDiskSpace(bytes: Int64.max), purgeable: any PurgeableSpaceProbe = LibraryPurgeable(bytes: nil), metadataGate: LibraryMetadataGate? = nil, requestGate: LibraryRequestGate? = nil,
         fileOps: any FileOps = SystemFileOps(), log: EventLog? = nil) throws {
         temp = try TempDir(); base = temp.url; paths = AppPaths(root: base.appendingPathComponent("App"))
         install = base.appendingPathComponent("Install"); store = GameRecordStore(directory: paths.games, fileOps: fileOps)
@@ -680,7 +690,7 @@ private struct LibraryFixture: ~Copyable {
         if let requestGate { http = LibraryGatedHTTP(cdn: cdn, gate: requestGate) }
         else if let metadataGate { http = LibraryDelayedHTTP(cdn: cdn, gate: metadataGate) } else { http = cdn }
         library = GameLibrary(paths: paths, api: DeliveryAPI(http: http), runner: OperationRunner(store: store,
-            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: log), store: store, disk: disk, log: log, fileOps: fileOps)
+            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: log), store: store, disk: disk, log: log, fileOps: fileOps, purgeable: purgeable)
     }
     func restarted(http: (any HTTPClient)? = nil, runnerHooks: CrashHooks = .none) -> GameLibrary {
         GameLibrary(paths: paths, api: DeliveryAPI(http: http ?? cdn), runner: OperationRunner(store: store,
@@ -866,4 +876,9 @@ private final class BranchWriteGate: FileOps {
         try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
     }
     func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
+}
+
+private struct LibraryPurgeable: PurgeableSpaceProbe {
+    let bytes: Int64?
+    func importantUsageBytes(at url: URL) -> Int64? { bytes }
 }

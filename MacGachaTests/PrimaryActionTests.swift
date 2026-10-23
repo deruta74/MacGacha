@@ -44,4 +44,22 @@ struct PrimaryActionTests {
         }
         #expect(SpaceVerdict.of(GameEstimate(download: 0, diskWhole: 100, diskMinimum: 100, available: 100)) == .whole)
     }
+    @Test func purgeableSpaceExplainsShortfallWithoutEnablingInstall() {
+        let held = GameEstimate(download: 50, diskWhole: 200, diskMinimum: 100, available: 80, purgeable: 120)
+        #expect(SpaceVerdict.of(held) == .heldByMacOS(purgeable: 120))
+        #expect(SpaceVerdict.immediate(held) == .insufficient)
+        let parts = GameEstimate(download: 50, diskWhole: 200, diskMinimum: 100, available: 100, purgeable: 100)
+        #expect(SpaceVerdict.of(parts) == .heldByMacOS(purgeable: 100))
+        #expect(SpaceVerdict.immediate(parts) == .batchedOnly)
+        #expect(SpaceVerdict.of(GameEstimate(download: 50, diskWhole: 200, diskMinimum: 100,
+            available: 80, purgeable: 119)) == .insufficient)
+        #expect(SpaceVerdict.of(GameEstimate(download: 50, diskWhole: 200, diskMinimum: 100,
+            available: 200, purgeable: 100)) == .whole)
+        #expect(SpaceVerdict.of(GameEstimate(download: 50, diskWhole: Int64.max, diskMinimum: 100,
+            available: Int64.max - 1, purgeable: 100)) == .heldByMacOS(purgeable: 100))
+    }
+    @Test func allocationPlaceholderCannotDescribeHeldSpace() {
+        #expect(GameSpaceShortage(required: 1, available: 0, purgeable: 300).heldByMacOS == nil)
+    }
+
 }

@@ -15,8 +15,11 @@ public struct GameEstimate: Sendable, Equatable {
     public let diskWhole: Int64
     public let diskMinimum: Int64
     public let available: Int64?
-    public init(download: Int64, diskWhole: Int64, diskMinimum: Int64, available: Int64?) {
+    /// Advisory only: capacity held by macOS, excluded from `available`.
+    public let purgeable: Int64?
+    public init(download: Int64, diskWhole: Int64, diskMinimum: Int64, available: Int64?, purgeable: Int64? = nil) {
         self.download = download; self.diskWhole = diskWhole; self.diskMinimum = diskMinimum; self.available = available
+        self.purgeable = purgeable
     }
 }
 
@@ -30,6 +33,7 @@ public actor GameLibrary {
     private let runner: OperationRunner
     private let store: GameRecordStore
     private let disk: any DiskSpaceProbe
+    private let purgeable: any PurgeableSpaceProbe
     private let log: EventLog?
     private let hooks: CrashHooks
     private let fileOps: any FileOps
@@ -37,9 +41,9 @@ public actor GameLibrary {
     private static let cleanupName = "uninstall-cleaned.json"
 
     public init(paths: AppPaths, api: DeliveryAPI, runner: OperationRunner, store: GameRecordStore,
-        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps()) {
+        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe()) {
         self.paths = paths; self.api = api; self.runner = runner; self.store = store
-        self.disk = disk; self.log = log; hooks = crashHooks; self.fileOps = fileOps
+        self.disk = disk; self.purgeable = purgeable; self.log = log; hooks = crashHooks; self.fileOps = fileOps
     }
 
     public func start() async {
@@ -78,9 +82,15 @@ public actor GameLibrary {
         let plan = try SophonPlanner.fullPlan(id: id, target: target.categories)
         let fs = try ContainedFileSystem(root: location)
         let whole = try SpaceBudget.required(plan: plan, state: JournalState(), fs: fs)
+        let minimum = try SpaceBudget.minimumBatchedPreflight(plan: plan, state: JournalState(), fs: fs)
+        let available = try? disk.availableBytes(at: location)
+        let probe = purgeable
+        let important = try? await BlockingIO.run { probe.importantUsageBytes(at: location) }
+        // Both capacities are nonnegative; clamp injected/unsupported values too.
+        let held = available.flatMap { free in important.map { max(0, max(0, $0) - max(0, free)) } }
         return GameEstimate(download: whole.network, diskWhole: whole.disk,
-            diskMinimum: try SpaceBudget.minimumBatchedPreflight(plan: plan, state: JournalState(), fs: fs),
-            available: try? disk.availableBytes(at: location))
+            diskMinimum: minimum,
+            available: available, purgeable: held)
     }
 
     public func install(_ game: GameDefinition, voices: Set<String>, at location: URL, approved: Bool) -> AsyncThrowingStream<OperationEvent, any Error> {
