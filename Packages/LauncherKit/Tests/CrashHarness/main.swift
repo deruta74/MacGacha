@@ -13,6 +13,70 @@ struct CrashHarness {
     static func main() async {
         do {
             let args = CommandLine.arguments
+            if args.count == 4, args[1] == "spawn-inherited-signals", let signalNumber = Int32(args[2]) {
+                try await BlockingIO.run {
+                    var blocked = sigset_t()
+                    sigemptyset(&blocked); sigaddset(&blocked, SIGTERM)
+                    guard pthread_sigmask(SIG_BLOCK, &blocked, nil) == 0 else { throw LauncherError.io("Blocking supervisor signal") }
+                    signal(SIGPIPE, SIG_IGN)
+                    // No await between the thread-local mask change and spawn.
+                    let output = URL(fileURLWithPath: args[3])
+                    let child = try SystemProcessSpawner().spawn(URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"],
+                        environment: [:], currentDirectory: output.deletingLastPathComponent(), outputFile: output)
+                    var ownsChild = true
+                    defer {
+                        if ownsChild {
+                            _ = kill(-child.pid, SIGKILL)
+                            var status: Int32 = 0
+                            while waitpid(child.pid, &status, 0) < 0 && errno == EINTR { }
+                        }
+                    }
+                    guard kill(child.pid, signalNumber) == 0 else { throw LauncherError.io("Signalling child") }
+                    let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+                    while true {
+                        var status: Int32 = 0
+                        let reaped = waitpid(child.pid, &status, WNOHANG)
+                        if reaped == child.pid {
+                            ownsChild = false
+                            guard status & 0x7f == signalNumber else { throw LauncherError.io("Wrong child termination signal") }
+                            break
+                        }
+                        guard reaped == 0 || (reaped < 0 && errno == EINTR), ContinuousClock.now < deadline else {
+                            throw LauncherError.io("Child inherited blocked or ignored signal")
+                        }
+                        usleep(10_000)
+                    }
+                }
+                return
+            }
+            if args.count == 5, args[1] == "spawn-writer" {
+                try await BlockingIO.run {
+                    let output = URL(fileURLWithPath: args[2])
+                    let stop = try FileAppearanceEvent(URL(fileURLWithPath: args[4]))
+                    let script = #"while :; do /usr/bin/head -c 65536 /dev/zero | /usr/bin/tr '\000' x; /bin/sleep 0.05; done"#
+                    let child = try SystemProcessSpawner().spawn(URL(fileURLWithPath: "/bin/sh"),
+                        arguments: ["-c", script], environment: [:], currentDirectory: output.deletingLastPathComponent(), outputFile: output)
+                    // This fixture owns/reaps its child on ordinary exit. SIGKILL
+                    // bypasses this cleanup so the parent test can verify survival.
+                    defer {
+                        _ = kill(-child.pid, SIGKILL)
+                        var status: Int32 = 0
+                        while waitpid(child.pid, &status, 0) < 0 && errno == EINTR { }
+                    }
+                    let identity = try JSONEncoder().encode(child)
+                    try FileHandle.standardOutput.write(contentsOf: identity + Data("\n".utf8))
+                    try identity.write(to: URL(fileURLWithPath: args[3]), options: .atomic)
+                    // Failsafe for a missing controller: never leave a writer
+                    // running indefinitely if the expected SIGKILL does not arrive.
+                    try await withThrowingTaskGroup(of: Void.self) { group in
+                        group.addTask { try await BlockingIO.run { try await stop.wait() } }
+                        group.addTask { try await Task.sleep(for: .seconds(45)) }
+                        defer { group.cancelAll() }
+                        _ = try await group.next()
+                    }
+                }
+                return
+            }
             if args.count == 3, args[1] == "crash-cache-write" {
                 let store = GameRecordStore(directory: URL(fileURLWithPath: args[2]), fileOps: CacheWriteCrashOps())
                 try await store.writeCacheState(Data("{\"interrupted\":true}".utf8), named: "branch.json", for: "genshin")
