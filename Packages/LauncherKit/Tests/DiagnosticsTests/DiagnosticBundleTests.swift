@@ -4,6 +4,7 @@ import Darwin
 import Foundation
 import Synchronization
 import Testing
+import TestSupport
 import LauncherCore
 @testable import Diagnostics
 
@@ -163,8 +164,12 @@ func bundleCancellationCleansUpAndPreservesDestination() async throws {
     let zip = root.appendingPathComponent("existing.zip")
     try Data("existing archive".utf8).write(to: zip)
     let staging = Mutex<URL?>(nil)
+    // A handshake, not a wall-clock deadline: on a busy CI runner the export can take
+    // longer than any fixed wait to reach the archiver.
+    let archiverStarted = TestEvent()
     let runner = DiagnosticTestRunner { arguments in
         staging.withLock { $0 = URL(fileURLWithPath: arguments[3]) }
+        archiverStarted.signal()
         try await Task.sleep(for: .seconds(30))
         return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
@@ -173,12 +178,7 @@ func bundleCancellationCleansUpAndPreservesDestination() async throws {
             to: zip, systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
     }
     defer { task.cancel() }
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(5))
-    while staging.withLock({ $0 == nil }) {
-        guard clock.now < deadline else { throw LauncherError.io("Timed out waiting for archiver") }
-        try await Task.sleep(for: .milliseconds(5))
-    }
+    try await archiverStarted.wait()
     task.cancel()
     await #expect(throws: LauncherError.cancelled) { try await task.value }
     #expect(try Data(contentsOf: zip) == Data("existing archive".utf8))
