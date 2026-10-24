@@ -21,7 +21,7 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 
 | Path | What lives there |
 |---|---|
-| `App/` | The SwiftUI app. `Model/`: `AppModel`, service adapters and launch integration (persisted region selection with three visible editions, lazy per-region remote status/art, other-region activity summaries, observable launch state, per-game/global settings, startup reattachment, recovery notices, a launch-slot reservation through preparation and recovery, guarded recovery retries (including unresolved startup journals), and verified-end window lifecycle). `Views/`. `Resources/`: `Localizable.xcstrings`, `runtime-manifest.json`, credits. |
+| `App/` | The SwiftUI app. `Model/`: `AppModel`, service adapters and launch integration (persisted region selection with three visible editions, lazy per-region remote status/art, other-region activity summaries, observable launch state, per-game/global settings, startup reattachment, recovery notices, a launch-slot reservation through preparation and recovery, guarded recovery retries (including unresolved startup journals), and verified-end window lifecycle). `Views/`. `Resources/`: `Localizable.xcstrings`, `runtime-manifest.json`, credits, `Assets.xcassets` (app icon). |
 | `MacGachaTests/` | App unit tests (Swift Testing), run through `xcodebuild test`. |
 | `Packages/LauncherKit/` | SwiftPM package with all logic. The app is a thin layer over it. |
 | `compat/steam-shim/` | Reproducible build inputs, notices and `SHA256SUMS` for the Proton `steam.exe` shim. |
