@@ -175,7 +175,8 @@ public struct RuntimeBundleManager: Sendable {
         try await BlockingIO.run {
             let components = try selected(bundle)
             let lease = try RuntimeStoreLease(store: store)
-            defer { withExtendedLifetime(lease) {} }
+            let pins = try RuntimeRemovalLease(paths: store.paths, componentIDs: components.map { $0.id.rawValue })
+            defer { withExtendedLifetime((lease, pins)) {} }
             let fs = try ContainedFileSystem(root: store.paths.root)
             let path = try bundlePath(bundle)
             if try fs.itemType(at: path) != nil {
@@ -184,7 +185,7 @@ public struct RuntimeBundleManager: Sendable {
             }
             let shared = Set(manifest.bundles.filter { $0.id != bundle.id }.flatMap(\.components))
             for c in components where !shared.contains(c.id) {
-                if let installed = try componentRecord(c) { try store.removeUnderLease(installed) }
+                if let installed = try componentRecord(c) { try store.removeUnderLease(installed, componentLease: pins) }
             }
         }
     }

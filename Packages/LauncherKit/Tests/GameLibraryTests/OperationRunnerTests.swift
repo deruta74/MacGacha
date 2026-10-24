@@ -413,6 +413,53 @@ import TestSupport
         #expect(try fs.itemType(at: directory) == ((!existingRecord && old) ? nil : .directory))
     }
 
+    @Test func recordlessReconciliationKeepsSessionLockAndCleansOrphanPlan() async throws {
+        let records = try TempDir(), fs = try ContainedFileSystem(root: records.url)
+        let path = try SafeRelativePath("genshin/.session.lock")
+        do {
+            let lock = try InstallLock(fs: fs, path: path)
+            withExtendedLifetime(lock) {}
+        }
+        let original = try fs.openForReading(at: path)
+        defer { try? original.close() }
+        var before = stat()
+        try #require(fstat(original.fileDescriptor, &before) == 0)
+        let store = GameRecordStore(directory: records.url)
+        try await store.savePlan(bridgePlan(), for: "genshin")
+        try await store.writeCacheState(Data("orphan cache".utf8), named: "branch.json", for: "genshin")
+        #expect(try await bridgeRunner(store, MockCDN()).reconcile("genshin") == nil)
+        #expect(try await store.loadPlan(for: "genshin") == nil)
+        #expect(try fs.itemType(at: SafeRelativePath("genshin/branch.json")) == nil)
+        #expect(try fs.contentsOfDirectory(at: SafeRelativePath("genshin")) == [path])
+        let retained = try fs.openForReading(at: path)
+        defer { try? retained.close() }
+        var after = stat()
+        try #require(fstat(retained.fileDescriptor, &after) == 0)
+        #expect(after.st_dev == before.st_dev && after.st_ino == before.st_ino)
+        let retry = try InstallLock(fs: fs, path: path)
+        withExtendedLifetime(retry) {}
+    }
+
+    @Test(arguments: [false, true])
+    func orphanReconciliationRejectsNonRegularSessionLock(symlink: Bool) async throws {
+        let records = try TempDir(), fs = try ContainedFileSystem(root: records.url)
+        let path = try SafeRelativePath("genshin/.session.lock")
+        let store = GameRecordStore(directory: records.url)
+        try await store.savePlan(bridgePlan(), for: "genshin")
+        try fs.writeAtomically(Data("untouched".utf8), to: SafeRelativePath("genshin/branch.json"))
+        if symlink { try fs.createSymbolicLink(at: path, target: "branch.json") }
+        else { try fs.createDirectory(at: path) }
+        do {
+            _ = try await bridgeRunner(store, MockCDN()).reconcile("genshin")
+            Issue.record("Non-regular session lock was accepted")
+        } catch LauncherError.unsafePath { #expect(symlink) }
+        catch LauncherError.journalCorrupt(let message) {
+            #expect(!symlink && message == "unexpected game metadata")
+        }
+        #expect(try await store.loadPlan(for: "genshin") != nil)
+        #expect(try fs.readFile(at: SafeRelativePath("genshin/branch.json"), maxBytes: 100) == Data("untouched".utf8))
+    }
+
     @Test func orphanRecoveryRejectsMalformedCacheTemporaryNames() async throws {
         let records = try TempDir(), fs = try ContainedFileSystem(root: records.url)
         let path = try SafeRelativePath("genshin/.macgacha-cache-write-\(UUID().uuidString)-foreign")

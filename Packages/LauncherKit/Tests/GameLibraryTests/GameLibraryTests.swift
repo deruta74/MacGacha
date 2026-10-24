@@ -11,6 +11,47 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
+    @Test(arguments: ["install", "adopt", "update", "resume", "verify", "voices", "uninstall"])
+    func verifyRefusedWhileGuardThrows(operation: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        let blocker = LibraryOperationGuard(blocked: game.id)
+        let library = f.restarted(operationGuard: blocker)
+        // A held lease must not mask the guard's refusal or allow state cleanup.
+        let lease = try await f.store.acquireOperationLease()
+        defer { withExtendedLifetime(lease) {} }
+        let before = try libraryStateFiles(at: f.paths.games)
+        let installed = try libraryStateFiles(at: f.install)
+        do {
+            if operation == "uninstall" { try await library.uninstall(game) }
+            else {
+                let stream = switch operation {
+                case "install": await library.install(game, voices: ["en-us"], at: f.install, approved: true)
+                case "adopt": await library.adopt(game, folder: f.install, voices: ["en-us"])
+                case "update": await library.update(game, approved: true)
+                case "resume": await library.resume(game, approved: true)
+                case "verify": await library.verify(game, mode: .full)
+                default: await library.setVoices(game, ["en-us"])
+                }
+                _ = try await libraryCollect(stream)
+            }
+            Issue.record("Guarded operation proceeded")
+        } catch { #expect(error as? LauncherError == .busy("guard denied operation")) }
+        #expect(blocker.calls.withLock { $0 } == [game.id])
+        #expect(try libraryStateFiles(at: f.paths.games) == before)
+        #expect(try libraryStateFiles(at: f.install) == installed)
+    }
+
+    @Test func otherGameStillInstalls() async throws {
+        let f = try LibraryFixture()
+        let other = GameDefinition.all.first { $0.id == "zzz" }!
+        try f.advertise(1, games: [other])
+        let blocker = LibraryOperationGuard(blocked: "starrail")
+        let library = f.restarted(operationGuard: blocker)
+        _ = try await libraryCollect(await library.install(other, voices: ["en-us"], at: f.install, approved: true))
+        #expect(try await f.store.load(other.id)?.installed != nil)
+        #expect(blocker.calls.withLock { $0 } == [other.id])
+    }
+
     @Test(arguments: [false, true])
     func branchCacheWriteSurvivesAnotherStoresOperationSweep(expired: Bool) async throws {
         let gate = BranchWriteGate(), f = try LibraryFixture(fileOps: gate)
@@ -692,9 +733,9 @@ private struct LibraryFixture: ~Copyable {
         library = GameLibrary(paths: paths, api: DeliveryAPI(http: http), runner: OperationRunner(store: store,
             fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: log), store: store, disk: disk, log: log, fileOps: fileOps, purgeable: purgeable)
     }
-    func restarted(http: (any HTTPClient)? = nil, runnerHooks: CrashHooks = .none) -> GameLibrary {
+    func restarted(http: (any HTTPClient)? = nil, runnerHooks: CrashHooks = .none, operationGuard: (any GameOperationGuard)? = nil) -> GameLibrary {
         GameLibrary(paths: paths, api: DeliveryAPI(http: http ?? cdn), runner: OperationRunner(store: store,
-            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil, crashHooks: runnerHooks), store: store, disk: disk, log: nil)
+            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil, crashHooks: runnerHooks), store: store, disk: disk, log: nil, guard: operationGuard)
     }
     func installGame() async throws { _ = try await libraryCollect(await library.install(game, voices: ["en-us"], at: install, approved: true)) }
     func seedExisting() throws {
@@ -881,4 +922,30 @@ private final class BranchWriteGate: FileOps {
 private struct LibraryPurgeable: PurgeableSpaceProbe {
     let bytes: Int64?
     func importantUsageBytes(at url: URL) -> Int64? { bytes }
+}
+
+private final class LibraryOperationGuard: GameOperationGuard, Sendable {
+    let blocked: String
+    let calls = Mutex<[String]>([])
+    init(blocked: String) { self.blocked = blocked }
+    func willOperate(on game: String) async throws {
+        calls.withLock { $0.append(game) }
+        if game == blocked { throw LauncherError.busy("guard denied operation") }
+    }
+}
+
+private func libraryStateFiles(at root: URL) throws -> [String: Data] {
+    let fs = try ContainedFileSystem(root: root)
+    var result: [String: Data] = [:]
+    func visit(_ paths: [SafeRelativePath]) throws {
+        for path in paths {
+            switch try fs.itemType(at: path) {
+            case .directory: try visit(fs.contentsOfDirectory(at: path))
+            case .regularFile: result[path.description] = try fs.readFile(at: path, maxBytes: 2 << 20)
+            default: break
+            }
+        }
+    }
+    try visit(fs.contentsOfRootDirectory())
+    return result
 }
