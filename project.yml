@@ -22,8 +22,6 @@ targets:
       - package: LauncherKit
         product: DownloadEngine
       - package: LauncherKit
-        product: RuntimeManager
-      - package: LauncherKit
         product: Diagnostics
       - package: LauncherKit
         product: HoYoPlayAPI
@@ -31,6 +29,8 @@ targets:
         product: Sophon
       - package: LauncherKit
         product: GameLibrary
+      - package: LauncherKit
+        product: Launch
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lo7ted.macgacha
@@ -61,8 +61,6 @@ targets:
       - package: LauncherKit
         product: LauncherCore
       - package: LauncherKit
-        product: RuntimeManager
-      - package: LauncherKit
         product: DownloadEngine
       - package: LauncherKit
         product: Diagnostics
@@ -72,6 +70,8 @@ targets:
         product: Sophon
       - package: LauncherKit
         product: GameLibrary
+      - package: LauncherKit
+        product: Launch
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lo7ted.macgacha.tests

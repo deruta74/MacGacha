@@ -38,6 +38,9 @@ public actor LaunchManager {
         let pin: RuntimePin
         var log: SessionLog?
         var proxy: (any LaunchSessionProxy)?
+        // Process lifetime is independent of file recovery and journal durability.
+        // Reattached UI observers must stop their window timers at verified end.
+        var hasEnded = false
         var ready = false
         var runningAnnounced = false
         var ownedWrapper: ProcessIdentity?
@@ -106,6 +109,17 @@ public actor LaunchManager {
     package func waitForSupervision(game: String) async { await supervision[game]?.value }
 
     public func liveSession(for game: String) -> LaunchSession? { contexts[game]?.session }
+
+    /// Atomic process/recovery observation for clients without an event stream.
+    /// An absent context alone is not completion: startup may have been unable to
+    /// read or acquire a journal. Confirm its absence before releasing UI ownership.
+    public func sessionObservation(for game: String) async throws -> (session: LaunchSession, hasEnded: Bool)? {
+        if let context = contexts[game] { return (context.session, context.hasEnded) }
+        let snapshot = try await read(game: game)
+        if let context = contexts[game] { return (context.session, context.hasEnded) }
+        guard snapshot == nil else { throw LauncherError.busy("Launch recovery is required") }
+        return nil
+    }
 
     /// Completed recoveries remain available across restarts until acknowledged.
     public func pendingRecoveryNotices() async throws -> [RecoveryNotice] {
@@ -240,6 +254,7 @@ public actor LaunchManager {
                     await pending(context, reason: "Process state could not be confirmed")
                     await watch(game: game.id, executable: executable)
                 } else {
+                    context.hasEnded = true
                     await stopProxy(context)
                     // A failed read is not evidence that the snapshot is absent.
                     var confirmedMissing = false
@@ -271,6 +286,7 @@ public actor LaunchManager {
                 try await watcher.watch(session: watching, executable: executable, ownedWrapper: context.ownedWrapper, ownedReaper: reaper) { processes in
                     try await self.observed(game: game, processes: processes)
                 }
+                context.hasEnded = true
                 context.session.state = .ending; try await persist(context.session)
                 context.continuation?.yield(.ended(normal: context.ready))
                 if !context.ready { await note(context, "failed watch: game ended before ready") }
@@ -283,6 +299,7 @@ public actor LaunchManager {
                 } else { context.continuation?.yield(.stage(.report)); context.continuation?.finish() }
                 return
             } catch SessionWatchError.startup {
+                context.hasEnded = true
                 await note(context, "failed watch: startup")
                 context.continuation?.yield(.ended(normal: false)); await stopProxy(context)
                 _ = await restore(context)
@@ -455,7 +472,7 @@ public actor LaunchManager {
                             self.finishedSupervision(game: game)
                         }
                         context.worker = task; supervision[game] = task
-                    } else { _ = await restore(context) }
+                    } else { context.hasEnded = true; _ = await restore(context) }
                 } catch {
                     await pending(context, reason: "Process state could not be confirmed")
                     if let executable = Self.executable(snapshot) {
@@ -541,6 +558,7 @@ public actor LaunchManager {
             catch { throw LauncherError.busy("The session's process state cannot be confirmed") }
             try requireGuardOwnership(game: game, context: context)
             guard !stillAlive else { throw LauncherError.busy("\(Self.name(game)) is running") }
+            context.hasEnded = true
         }
         let outcome = await restore(context)
         try requireGuardOwnership(game: game)

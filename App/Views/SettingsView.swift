@@ -22,6 +22,16 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Save session logs", isOn: Binding(
+                    get: { model.sessionLogsEnabled },
+                    set: { model.sessionLogsEnabled = $0 }
+                ))
+            } footer: {
+                Text("Logs of what the game and Wine print while you play. They stay on this Mac and help with bug reports. When off, MacGacha keeps only what it needs to put game files back.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 LabeledContent("Install games in") {
                     HStack(spacing: 8) {
                         Image(systemName: "folder")

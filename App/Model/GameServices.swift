@@ -33,7 +33,8 @@ final class LiveGameServices: GameServices, Sendable {
 
     init(paths: AppPaths = .standard(), http: (any HTTPClient)? = nil,
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), retry: RetryPolicy = RetryPolicy(),
-        sleeper: any Sleeper = ContinuousSleeper(), log: EventLog? = nil) {
+        sleeper: any Sleeper = ContinuousSleeper(), log: EventLog? = nil,
+        guard operationGuard: (any GameOperationGuard)? = nil) {
         let client: any HTTPClient
         if let http { client = http; session = nil }
         else { let owned = DeliveryHTTPSession(); session = owned; client = owned.client }
@@ -42,7 +43,7 @@ final class LiveGameServices: GameServices, Sendable {
         let fetcher = ChunkFetcher(http: client, retry: retry, sleeper: sleeper)
         library = GameLibrary(paths: paths, api: DeliveryAPI(http: client),
             runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog),
-            store: store, disk: disk, log: eventLog)
+            store: store, disk: disk, log: eventLog, guard: operationGuard)
     }
 
     func start() async { await library.start() }
