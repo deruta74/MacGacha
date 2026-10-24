@@ -491,7 +491,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无法连接 HoYoverse 获取大小。"
+            "value" : "无法连接米哈游服务器获取大小。"
           }
         }
       }
@@ -1263,7 +1263,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "HoYoPlay 提供动态画面时播放游戏动态背景。静态图片更省电。"
+            "value" : "米哈游启动器提供动态画面时播放游戏动态背景。静态图片更省电。"
           }
         }
       }
