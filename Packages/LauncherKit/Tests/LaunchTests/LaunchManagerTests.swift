@@ -66,6 +66,20 @@ import TestSupport
         #expect(try await f.journal() == nil)
     }
 
+    @Test func reattachRecognizesRewrittenImageWithUnixWineLoader() async throws {
+        let f = try await ManagerFixture.make(initialGame: false), manager = f.manager()
+        _ = try await f.saveSnapshot(state: .running, processes: [])
+        let game = InspectedProcess(identity: ProcessIdentity(pid: 23450, startTime: 200),
+            executablePath: "/runtime/lib/wine/x86_64-unix/wine", arguments: [#"C:\Games\StarRail.exe"#])
+        f.inspector.update { $0.processes = [game]; $0.alive = [game.identity] }
+        let sessions = await manager.reattachAll()
+        #expect(sessions["starrail"] != nil)
+        try await f.assertHidden()
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        try await f.end(manager); await f.waitForRestore(manager)
+        try await f.assertOriginalRestored()
+    }
+
     @Test func reattachedWrapperRetainsSpawningGraceUntilGameAppears() async throws {
         let f = try await ManagerFixture.make(initialGame: false), manager = f.manager()
         _ = try await f.saveSnapshot(state: .spawning, processes: [f.spawner.identity])

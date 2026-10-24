@@ -34,7 +34,7 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 
 | Target | Responsibility |
 |---|---|
-| `LauncherCore` | Shared foundations: `AppPaths`, `ContainedFileSystem` (all file access confined to a root, no symlink escape), `SafeRelativePath`, `Digest`, `BlockingIO`, `EventLog`, `ProcessRunner` (cancellable command deadlines), `ProcessSpawner` / `ProcessInspector` (long-running game processes, identity = PID + kernel start time), `WineServerProbe` (pinned-prefix device/inode server identity, checked private namespace, record-lock and nonblocking socket liveness), global launch preferences and plain log-location data. |
+| `LauncherCore` | Shared foundations: `AppPaths`, `ContainedFileSystem` (all file access confined to a root, no symlink escape), `SafeRelativePath`, `Digest`, `BlockingIO`, `EventLog`, `ProcessRunner` (cancellable command deadlines), `ProcessSpawner` / `ProcessInspector` (long-running game processes, identity = PID + kernel start time; one structural KERN_PROCARGS2 parser that tolerates Wine's rewritten argv padding, and environment queries limited to uppercase names so Darwin's auxiliary strings can't match), `WineServerProbe` (pinned-prefix device/inode server identity, checked private namespace, record-lock and nonblocking socket liveness), global launch preferences and plain log-location data. |
 | `CZstd` | Vendored zstd decoder (decompression only). Don't edit upstream files. |
 | `DownloadEngine` | Resumable, verified downloads: plans, crash-safe journal, staging, disk-space budget, parallel fetch pipeline, `URLSessionHTTPClient` with bounded buffering. |
 | `Sophon` | HoYoverse delivery API client, host policy, protobuf manifest reader, install/update/voice planner. |
@@ -61,6 +61,7 @@ swift test --package-path Packages/LauncherKit --filter <Suite>   # one package 
   LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 python3 scripts/test-package.py --events /tmp/strict.jsonl --timeout-seconds 240 --skip-build --test-product DownloadEngineTests --skip PlanScaleTests --skip operationStagesOneThousandBatchesWithLinearWork --parallel --num-workers 2
   ```
   Never block a cooperative thread: no semaphores, sleeps or synchronous waits in async code. Use `BlockingIO.run` for blocking syscalls.
+- The gated live Wine inspector probe runs only with `MACGACHA_LIVE_WINE=/absolute/path/to/wine`; it explicitly initializes an isolated temporary prefix with `wineboot --init`, polls the inspector for rewritten `cmd.exe` on a bounded clock deadline, then shuts down that prefix and reaps its direct child.
 - The build must have **zero Swift warnings**.
 - `scripts/check-headers.sh`: every Swift file starts with the two-line SPDX and project header (copy it from any existing file). Python and shell scripts carry it as comments.
 - `scripts/check-strings.py <derived-data>`: the string catalog must match the code. Run with `--write` to update `Localizable.xcstrings` after adding strings.
