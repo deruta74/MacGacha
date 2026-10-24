@@ -62,7 +62,8 @@ final class AppModel {
     private(set) var installRoot: URL
 
     @ObservationIgnored let paths: AppPaths
-    @ObservationIgnored var manifest: RuntimeManifest?
+    // Observed: the setup sheet can open before startup loads it and must refresh when it arrives.
+    var manifest: RuntimeManifest?
     @ObservationIgnored private let services: any RuntimeServices
     @ObservationIgnored let artServices: [Region: any GameArtProviding]
     @ObservationIgnored var artHydrationTask: Task<Void, Never>?
