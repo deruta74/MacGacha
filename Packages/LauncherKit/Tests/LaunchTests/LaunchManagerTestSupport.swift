@@ -79,14 +79,16 @@ final class ManagerInspector: ProcessInspector, Sendable {
         var failure = false
         var failuresRemaining = 0
         var prefixes: [String] = []
+        var scopes: [ProcessInspectionScope] = []
     }
     private let state = Mutex(State())
     var values: State { state.withLock { $0 } }
     func update(_ body: (inout State) -> Void) { state.withLock { body(&$0) } }
     func isAlive(_ id: ProcessIdentity) -> Bool { state.withLock { $0.alive.contains(id) } }
-    func processes(environmentContains key: String, value: String) throws -> [InspectedProcess] {
+    func processes(environmentContains key: String, value: String, scope: ProcessInspectionScope) throws -> [InspectedProcess] {
         try state.withLock { state in
             state.prefixes.append(value)
+            state.scopes.append(scope)
             if state.failure || state.failuresRemaining > 0 {
                 state.failuresRemaining = max(0, state.failuresRemaining - 1)
                 throw LauncherError.io("injected process inspection failure")
@@ -170,6 +172,8 @@ actor ManagerEvents {
 }
 
 final class ManagerFixture: Sendable {
+    static let bootSessionUUID = "D164F328-C268-4D08-B56C-547FA90745CA"
+    static let sessionStartTime: UInt64 = 1_700_000_000_000_000
     let temp: ManagerTemporaryDirectory
     let paths: AppPaths
     let installRoot: URL
@@ -211,10 +215,11 @@ final class ManagerFixture: Sendable {
         if initialGame { inspector.update { $0.processes = [gameProcess]; $0.alive = [gameProcess.identity] } }
     }
     func manager(hideHooks: LaunchFileHooks = .none, beforeJournalRead: @escaping @Sendable () throws -> Void = {},
-        beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {}) -> LaunchManager {
+        beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {}, inspector overrideInspector: (any ProcessInspector)? = nil) -> LaunchManager {
         LaunchManager(paths: paths, runtimes: runtime, prefixes: prefixes, preparation: preparation,
-            spawner: spawner, inspector: inspector, runner: runner, clock: clock,
-            proxyFactory: { [proxy] _, log in proxy.start(log: log); return proxy }, baseEnvironment: [:], journalFileOps: journalOps, hideHooks: hideHooks, beforeJournalRead: beforeJournalRead, beforeRecoveryRead: beforeRecoveryRead)
+            spawner: spawner, inspector: overrideInspector ?? inspector, runner: runner, clock: clock,
+            proxyFactory: { [proxy] _, log in proxy.start(log: log); return proxy }, baseEnvironment: [:], journalFileOps: journalOps, hideHooks: hideHooks, beforeJournalRead: beforeJournalRead, beforeRecoveryRead: beforeRecoveryRead,
+            sessionProvenance: { (Self.bootSessionUUID, Self.sessionStartTime) })
     }
     func consume(_ manager: LaunchManager, events: ManagerEvents, build: String = "4.6.0") async -> Task<Void, Never> {
         let stream = await manager.launch(game: game, installRoot: installRoot, gameBuild: build)
@@ -246,18 +251,19 @@ final class ManagerTemporaryDirectory: Sendable {
 }
 
 extension ManagerFixture {
-    func saveSnapshot(state: LaunchSession.State, processes: [ProcessIdentity], backend: RuntimeBackend = .d3dmetal, sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil) async throws -> LaunchSession {
+    func saveSnapshot(state: LaunchSession.State, processes: [ProcessIdentity], backend: RuntimeBackend = .d3dmetal, sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil, processGroupIDs: Set<Int32>? = nil) async throws -> LaunchSession {
         try await BlockingIO.run {
             let settings = LaunchSettings(backend: backend, retina: false, frameLimit: 60, directX12: false, compatibilityPatches: true)
             var snapshot = LaunchSession(sessionID: UUID(), game: "starrail", installRoot: self.installRoot,
                 installIdentity: try ContainedFileSystem(root: self.installRoot).rootIdentity(), prefix: self.prefix,
                 bundleID: self.bundle.id.rawValue, runtimeDigest: self.bundle.digest, wineBinary: self.bundle.wineBinary,
                 wineserver: self.bundle.wineBinary.deletingLastPathComponent().appendingPathComponent("wineserver"),
-                componentIDs: self.runtime.selected.componentIDs, recipeVersion: 1, settings: settings, sessionLogURL: sessionLogURL, gameExecutable: gameExecutable)
+                componentIDs: self.runtime.selected.componentIDs, recipeVersion: 1, settings: settings, sessionLogURL: sessionLogURL, gameExecutable: gameExecutable,
+                bootSessionUUID: Self.bootSessionUUID, sessionStartTime: Self.sessionStartTime)
             let journal = LaunchJournal(paths: self.paths)
             try journal.write(snapshot)
             try HiddenFiles().hide([self.hiddenPath], session: &snapshot, journal: journal)
-            snapshot.state = state; snapshot.processes = processes
+            snapshot.state = state; snapshot.processes = processes; snapshot.processGroupIDs = processGroupIDs
             try journal.write(snapshot)
             return snapshot
         }

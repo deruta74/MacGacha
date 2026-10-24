@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Darwin
 import Synchronization
 import Testing
-import LauncherCore
+@testable import LauncherCore
 import DownloadEngine
 import GameLibrary
 import RuntimeManager
@@ -30,6 +31,25 @@ import TestSupport
         #expect(try await f.journal() == nil)
         try await f.assertOriginalRestored()
     }
+    @Test func freshLaunchPersistsOnlySpawnedGroupAndScopesEveryScan() async throws {
+        let f = try await ManagerFixture.make(), manager = f.manager(), events = ManagerEvents()
+        let consumer = await f.consume(manager, events: events)
+        await events.waitForRunning()
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        #expect(try await f.journal()?.processGroupIDs == [f.spawner.identity.pid])
+        #expect(try await f.journal()?.processes.contains(f.spawner.identity) == true)
+        #expect(try await f.journal()?.bootSessionUUID == ManagerFixture.bootSessionUUID)
+        #expect(try await f.journal()?.sessionStartTime == ManagerFixture.sessionStartTime)
+        let scans = f.inspector.values.scopes
+        #expect(!scans.isEmpty)
+        #expect(scans.allSatisfy { $0.bootSessionUUID == ManagerFixture.bootSessionUUID && $0.sessionStartTime == ManagerFixture.sessionStartTime })
+        #expect(scans.allSatisfy { $0.identities.contains(f.spawner.identity) })
+        #expect(scans.allSatisfy { $0.executableRoots == [f.paths.runtimes, f.installRoot]
+            && $0.processGroupIDs == [f.spawner.identity.pid] })
+        #expect(f.gameProcess.identity.pid != f.spawner.identity.pid)
+        try await f.end(manager); await consumer.value
+    }
+
     @Test func partialHideAndFailedRecoveryReadsNeverEraseDurableEntries() async throws {
         let f = try await ManagerFixture.make(initialGame: false), reads = ManagerReadFailures()
         let manager = f.manager(hideHooks: LaunchFileHooks(at: .afterHideRename) {
@@ -81,6 +101,29 @@ import TestSupport
         await f.clock.waitForSleep(1, duration: .seconds(3))
         #expect(await manager.liveSession(for: "starrail")?.state == .running)
         try await f.end(manager); await f.waitForRestore(manager)
+        try await f.assertOriginalRestored()
+        #expect(try await f.journal() == nil)
+    }
+
+    @Test func crashBeforeIdentityWriteWithUnreadableArgumentsAndPathRetainsRecovery() async throws {
+        let f = try await ManagerFixture.make(initialGame: false)
+        let kernel = ManagerUnclassifiableKernel(prefix: f.prefix.path)
+        let manager = f.manager(inspector: SystemProcessInspector(kernel: kernel))
+        let snapshot = try await f.saveSnapshot(state: .spawning, processes: [])
+        #expect(snapshot.processGroupIDs == nil)
+        let sessions = await manager.reattachAll()
+        #expect(sessions["starrail"]?.state == .recoveryPending)
+        await f.clock.waitForSleep(1, duration: .seconds(1))
+        #expect(kernel.failedArguments > 0 && kernel.failedPaths > 0)
+        try await f.assertHidden(); try await f.assertLocksHeld()
+        #expect(try await f.journal()?.hides.count == 1)
+        kernel.set(.readable)
+        f.clock.advance(by: .seconds(1))
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        #expect(await manager.liveSession(for: "starrail")?.state == .running)
+        kernel.set(.gone)
+        f.clock.advance(by: .seconds(3))
+        await f.waitForRestore(manager)
         try await f.assertOriginalRestored()
         #expect(try await f.journal() == nil)
     }
@@ -212,6 +255,8 @@ import TestSupport
         #expect(sessions["starrail"]?.sessionID == snapshot.sessionID)
         #expect(f.proxy.starts == 0)
         await f.clock.waitForSleep(1, duration: .seconds(3))
+        #expect(f.inspector.values.scopes.allSatisfy { $0.processGroupIDs.isEmpty
+            && $0.executableRoots == [f.paths.runtimes, f.installRoot] })
         try await f.end(manager)
         await f.waitForRestore(manager)
         try await f.assertOriginalRestored()
@@ -219,12 +264,18 @@ import TestSupport
 
     @Test func reattachUsesSnapshotNotSettings() async throws {
         let f = try await ManagerFixture.make(), manager = f.manager()
-        _ = try await f.saveSnapshot(state: .spawning, processes: [f.gameProcess.identity], backend: .dxmt)
+        _ = try await f.saveSnapshot(state: .spawning, processes: [f.gameProcess.identity], backend: .dxmt, processGroupIDs: [54321])
         try await BlockingIO.run { try LaunchSettingsStore(paths: f.paths).save(.defaults(for: "starrail"), for: "starrail") }
         let sessions = await manager.reattachAll()
         #expect(sessions["starrail"]?.settings.backend == .dxmt)
         #expect(sessions["starrail"]?.bundleID == "bundle-a")
         #expect(f.inspector.values.prefixes.allSatisfy { $0 == f.prefix.path })
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        #expect(sessions["starrail"]?.processGroupIDs == [54321])
+        #expect(f.inspector.values.scopes.allSatisfy { $0.identities.contains(f.gameProcess.identity) && $0.bootSessionUUID == ManagerFixture.bootSessionUUID && $0.sessionStartTime == ManagerFixture.sessionStartTime })
+        #expect(f.inspector.values.scopes.count >= 2)
+        #expect(f.inspector.values.scopes.allSatisfy { $0.executableRoots == [f.paths.runtimes, f.installRoot]
+            && $0.processGroupIDs == [54321] })
         try await f.end(manager); await f.waitForRestore(manager)
     }
 
@@ -378,7 +429,9 @@ import TestSupport
         try await f.assertHidden(); try await f.assertLocksHeld()
         let beforeEnd = await events.values
         #expect(!beforeEnd.contains { if case .failed = $0 { true } else { false } })
-        #expect(try await f.journal() != nil)
+        #expect(try await f.journal()?.processGroupIDs == [f.spawner.identity.pid])
+        #expect(try await f.journal()?.processes.contains(f.spawner.identity) == true)
+        #expect(f.inspector.values.scopes.allSatisfy { $0.processGroupIDs == [f.spawner.identity.pid] })
         #expect(f.proxy.stops == 0)
         try await f.end(manager); await consumer.value
         let result = await events.values
@@ -649,4 +702,47 @@ import TestSupport
         }
     }
 
+}
+
+/// Both failed lookups are real inspector inputs, rather than an injected scan error.
+private final class ManagerUnclassifiableKernel: ProcessKernel, Sendable {
+    enum Mode { case unreadable, readable, gone }
+    private struct State { var mode = Mode.unreadable; var failedArguments = 0; var failedPaths = 0 }
+    private let state = Mutex(State())
+    private let prefix: String
+    init(prefix: String) { self.prefix = prefix }
+    var failedArguments: Int { state.withLock { $0.failedArguments } }
+    var failedPaths: Int { state.withLock { $0.failedPaths } }
+    func set(_ mode: Mode) { state.withLock { $0.mode = mode } }
+    func bootSessionUUID() throws -> String { ManagerFixture.bootSessionUUID }
+    func process(pid: Int32) -> kinfo_proc? { processes().first { $0.kp_proc.p_pid == pid } }
+    func processes() -> [kinfo_proc] {
+        guard state.withLock({ $0.mode != .gone }) else { return [] }
+        var info = kinfo_proc()
+        info.kp_proc.p_pid = 23456; info.kp_proc.p_stat = Int8(SRUN)
+        info.kp_eproc.e_ucred.cr_uid = geteuid(); info.kp_eproc.e_pgid = 23456
+        info.kp_proc.p_un.__p_starttime.tv_sec = 2
+        return [info]
+    }
+    func executablePath(pid: Int32) throws -> String? {
+        try state.withLock { state in
+            switch state.mode {
+            case .unreadable:
+                state.failedPaths += 1
+                throw ProcessInspectionError.incompleteScan
+            case .readable: return "/runtime/StarRail.exe"
+            case .gone: return nil
+            }
+        }
+    }
+    func arguments(pid: Int32) -> Data? {
+        guard state.withLock({ state in
+            if state.mode == .unreadable { state.failedArguments += 1; return false }
+            return state.mode == .readable
+        }) else { return nil }
+        var argc: Int32 = 1
+        var bytes = withUnsafeBytes(of: &argc) { Data($0) }
+        bytes.append(contentsOf: "/runtime/StarRail.exe\0\0StarRail.exe\0WINEPREFIX=\(prefix)\0\0".utf8)
+        return bytes
+    }
 }

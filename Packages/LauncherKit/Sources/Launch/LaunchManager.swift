@@ -23,6 +23,7 @@ public actor LaunchManager {
     private let hideHooks: LaunchFileHooks
     private let beforeJournalRead: @Sendable () throws -> Void
     private let beforeRecoveryRead: @Sendable () async throws -> Void
+    private let sessionProvenance: @Sendable () throws -> (bootSessionUUID: String, sessionStartTime: UInt64)
     private var contexts: [String: Context] = [:]
     private var reservedGame: String?
     private var recovering = false
@@ -60,6 +61,7 @@ public actor LaunchManager {
         self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock
         self.baseEnvironment = ProcessInfo.processInfo.environment; self.journalFileOps = SystemFileOps()
         self.hideHooks = .none; self.beforeJournalRead = {}; self.beforeRecoveryRead = {}
+        self.sessionProvenance = Self.currentSessionProvenance
         self.proxyFactory = { hosts, log in try await SessionProxy.start(blockedHosts: hosts, log: log) }
     }
 
@@ -68,11 +70,18 @@ public actor LaunchManager {
         runner: any ProcessRunner, clock: any Clock<Duration>, proxyFactory: @escaping ProxyFactory,
         baseEnvironment: [String: String] = [:], journalFileOps: any FileOps = SystemFileOps(),
         hideHooks: LaunchFileHooks = .none, beforeJournalRead: @escaping @Sendable () throws -> Void = {},
-        beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {}) {
+        beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {},
+        sessionProvenance: @escaping @Sendable () throws -> (bootSessionUUID: String, sessionStartTime: UInt64) = LaunchManager.currentSessionProvenance) {
         self.paths = paths; self.runtimes = runtimes; self.prefixes = prefixes; self.preparation = preparation
         self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock
         self.proxyFactory = proxyFactory; self.baseEnvironment = baseEnvironment; self.journalFileOps = journalFileOps
         self.hideHooks = hideHooks; self.beforeJournalRead = beforeJournalRead; self.beforeRecoveryRead = beforeRecoveryRead
+        self.sessionProvenance = sessionProvenance
+    }
+
+    package nonisolated static func currentSessionProvenance() throws -> (bootSessionUUID: String, sessionStartTime: UInt64) {
+        // Called on BlockingIO before the first durable snapshot and spawn.
+        (try SystemProcessInspector.bootSessionUUID(), UInt64(Date().timeIntervalSince1970 * 1_000_000))
     }
 
     public func launch(game: GameDefinition, installRoot: URL, gameBuild: String) -> AsyncStream<LaunchEvent> {
@@ -154,10 +163,13 @@ public actor LaunchManager {
                 throw LauncherError.io("The selected runtime changed before it could be pinned")
             }
             guard try await read(game: game.id) == nil else { throw LauncherError.busy("Launch recovery is required") }
+            let provenance = sessionProvenance
+            let (bootSessionUUID, sessionStartTime) = try await BlockingIO.run { try provenance() }
             let session = LaunchSession(sessionID: UUID(), game: game.id, installRoot: installRoot, installIdentity: identity,
                 prefix: prefix, bundleID: bundle.id.rawValue, runtimeDigest: bundle.digest, wineBinary: bundle.wineBinary,
                 wineserver: bundle.wineBinary.deletingLastPathComponent().appendingPathComponent("wineserver"), componentIDs: ids,
-                recipeVersion: recipe.recipeVersion, settings: settings, gameExecutable: recipe.executable)
+                recipeVersion: recipe.recipeVersion, settings: settings, gameExecutable: recipe.executable,
+                bootSessionUUID: bootSessionUUID, sessionStartTime: sessionStartTime)
             let context = Context(session: session, lock: lock, pin: pin)
             context.continuation = events; context.unverifiedBuild = unverified; contexts[game.id] = context
             stage = .snapshot; events.yield(.stage(stage))
@@ -206,7 +218,9 @@ public actor LaunchManager {
                     currentDirectory: resolved.currentDirectory, output: output)
             }
             context.ownedWrapper = process
-            context.session.processes = [process]; try await persist(context.session)
+            context.session.processes = [process]
+            context.session.processGroupIDs = [process.pid]
+            try await persist(context.session)
             stage = .watch; events.yield(.stage(stage)); await note(context, "stage watch")
             await watch(game: game.id, executable: recipe.executable.components.last!)
             return
@@ -214,7 +228,10 @@ public actor LaunchManager {
             if let context = contexts[game.id] {
                 // hide() may have durably recorded more entries before throwing.
                 if let persisted = try? await read(game: game.id), persisted.sessionID == context.session.sessionID { context.session = persisted }
-                if let owned = context.ownedWrapper, !context.session.processes.contains(owned) { context.session.processes.append(owned) }
+                if let owned = context.ownedWrapper {
+                    if !context.session.processes.contains(owned) { context.session.processes.append(owned) }
+                    context.session.processGroupIDs = (context.session.processGroupIDs ?? []).union([owned.pid])
+                }
                 await note(context, "failed \(stage.rawValue)")
                 if context.ownedWrapper != nil, let executable = Self.executable(context.session) {
                     // A successful spawn is irreversible: retain ownership and
@@ -242,7 +259,7 @@ public actor LaunchManager {
 
     private func watch(game: String, executable: String) async {
         guard let context = contexts[game] else { return }
-        let watcher = SessionWatcher(inspector: inspector, runner: runner, clock: clock)
+        let watcher = SessionWatcher(runtimesRoot: paths.runtimes, inspector: inspector, runner: runner, clock: clock)
         let reaper = context.ownedWrapper.map { OwnedWrapperReaper(identity: $0) }
         let supervisionClock = clock
         let reaperClock = AnyLaunchClock(supervisionClock)
@@ -360,7 +377,10 @@ public actor LaunchManager {
         // in-memory status; the next supervision/guard attempt reads it again.
         do {
             if var persisted = try await read(game: context.session.game), persisted.sessionID == context.session.sessionID {
-                if let owned = context.ownedWrapper, !persisted.processes.contains(owned) { persisted.processes.append(owned) }
+                if let owned = context.ownedWrapper {
+                    if !persisted.processes.contains(owned) { persisted.processes.append(owned) }
+                    persisted.processGroupIDs = (persisted.processGroupIDs ?? []).union([owned.pid])
+                }
                 persisted.state = .recoveryPending
                 try await persist(persisted)
                 context.session = persisted
@@ -457,9 +477,9 @@ public actor LaunchManager {
     }
 
     private func alive(_ session: LaunchSession) async throws -> Bool {
-        let inspector = inspector
+        let inspector = inspector, scope = session.inspectionScope(runtimesRoot: paths.runtimes)
         return try await BlockingIO.run {
-            let processes = try inspector.processes(environmentContains: "WINEPREFIX", value: session.prefix.path)
+            let processes = try inspector.processes(environmentContains: "WINEPREFIX", value: session.prefix.path, scope: scope)
             if session.processes.contains(where: { inspector.isAlive($0) }) { return true }
             guard let executable = Self.executable(session)?.lowercased() else { throw LauncherError.io("Unknown snapshot executable") }
             return processes.contains {

@@ -27,7 +27,7 @@ import TestSupport
         let reaper = OwnedWrapperReaper(identity: identity) { _ in
             calls.withLock { $0 += 1 }; return true
         }
-        let watcher = SessionWatcher(inspector: WatchInspector { throw ProcessInspectionError.incompleteScan },
+        let watcher = SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: WatchInspector { throw ProcessInspectionError.incompleteScan },
             runner: WatchRunner(), clock: WatchClock())
         for _ in 0..<2 {
             await #expect(throws: ProcessInspectionError.incompleteScan) {
@@ -43,7 +43,7 @@ import TestSupport
         let game = watchProcess(2, "C:\\Games\\StarRail.EXE")
         let inspector = WatchInspector { clock.elapsed >= .seconds(40) && clock.elapsed < .seconds(43) ? [game] : [] }
         let observations = Mutex([[ProcessIdentity]]())
-        try await SessionWatcher(inspector: inspector, runner: WatchRunner(), clock: clock)
+        try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: inspector, runner: WatchRunner(), clock: clock)
             .watch(session: watchSession(), executable: "StarRail.exe") { ids in observations.withLock { $0.append(ids) } }
         #expect(clock.elapsed == .seconds(43))
         #expect(observations.withLock { $0.first } == [game.identity])
@@ -52,7 +52,7 @@ import TestSupport
     @Test func noGameProcessFor60sIsStartupFailure() async throws {
         let clock = WatchClock()
         do {
-            try await SessionWatcher(inspector: WatchInspector { [] }, runner: WatchRunner(), clock: clock)
+            try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: WatchInspector { [] }, runner: WatchRunner(), clock: clock)
                 .watch(session: watchSession(), executable: "StarRail.exe") { _ in Issue.record("Unexpected running") }
             Issue.record("Missing startup failure")
         } catch SessionWatchError.startup { #expect(clock.elapsed == .seconds(60)) }
@@ -69,7 +69,7 @@ import TestSupport
         }
         let observed = Mutex([[ProcessIdentity]]())
         let runner = WatchRunner()
-        try await SessionWatcher(inspector: inspector, runner: runner, clock: clock)
+        try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: inspector, runner: runner, clock: clock)
             .watch(session: watchSession(), executable: "StarRail.exe") { ids in observed.withLock { $0.append(ids) } }
         #expect(clock.elapsed == .seconds(6))
         #expect(runner.calls.withLock { $0 } == 2)
@@ -81,7 +81,7 @@ import TestSupport
         let server = watchProcess(4, "/runtime/bin/wineserver")
         let inspector = WatchInspector { clock.elapsed < .seconds(9) ? [server] : [] }
         let runner = WatchRunner()
-        try await SessionWatcher(inspector: inspector, runner: runner, clock: clock)
+        try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: inspector, runner: runner, clock: clock)
             .watch(session: watchSession(state: .running), executable: "StarRail.exe") { _ in }
         #expect(clock.elapsed == .seconds(9))
         #expect(runner.calls.withLock { $0 } == 3)
@@ -92,7 +92,7 @@ import TestSupport
         let server = watchProcess(4, "/runtime/bin/wineserver")
         let inspector = WatchInspector { clock.elapsed == .seconds(59) ? [server] : [] }
         do {
-            try await SessionWatcher(inspector: inspector, runner: WatchRunner(), clock: clock)
+            try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: inspector, runner: WatchRunner(), clock: clock)
                 .watch(session: watchSession(), executable: "StarRail.exe") { _ in }
             Issue.record("Missing startup failure")
         } catch SessionWatchError.startup { #expect(clock.elapsed == .seconds(120)) }
@@ -102,7 +102,7 @@ import TestSupport
         let clock = WatchClock()
         let runner = FailedWatchRunner()
         await #expect(throws: LauncherError.processFailed(executable: "wineserver", exitCode: 7, stderrTail: "")) {
-            try await SessionWatcher(inspector: WatchInspector { [] }, runner: runner, clock: clock)
+            try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: WatchInspector { [] }, runner: runner, clock: clock)
                 .watch(session: watchSession(state: .running), executable: "StarRail.exe") { _ in }
         }
         #expect(clock.elapsed == .zero)
@@ -111,7 +111,7 @@ import TestSupport
     @Test func synchronousWineserverStartupDoesNotBlockCooperativeWorker() async throws {
         let runner = BlockingStartupWatchRunner()
         let task = Task {
-            try await SessionWatcher(inspector: WatchInspector { [] }, runner: runner, clock: WatchClock())
+            try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: WatchInspector { [] }, runner: runner, clock: WatchClock())
                 .watch(session: watchSession(state: .running), executable: "StarRail.exe") { _ in }
         }
         defer { runner.release.signal(); task.cancel() }
@@ -125,7 +125,7 @@ import TestSupport
     @Test func cancellationJoinsTheWineserverWait() async throws {
         let runner = WaitingWatchRunner()
         let task = Task {
-            try await SessionWatcher(inspector: WatchInspector { [] }, runner: runner, clock: WatchClock())
+            try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: WatchInspector { [] }, runner: runner, clock: WatchClock())
                 .watch(session: watchSession(state: .running), executable: "StarRail.exe") { _ in }
         }
         try await runner.entered.wait()
@@ -138,7 +138,7 @@ import TestSupport
         let clock = WatchClock()
         let inspector = WatchInspector { throw LauncherError.io("inspection unavailable") }
         await #expect(throws: LauncherError.io("inspection unavailable")) {
-            try await SessionWatcher(inspector: inspector, runner: WatchRunner(), clock: clock)
+            try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: inspector, runner: WatchRunner(), clock: clock)
                 .watch(session: watchSession(), executable: "StarRail.exe") { _ in }
         }
         #expect(clock.elapsed == .zero)
@@ -151,7 +151,7 @@ import TestSupport
         let other = InspectedProcess(identity: .init(pid: 3, startTime: 3), executablePath: "/runtime/bin/wine64-preloader",
             arguments: ["helper.exe", "StarRail.exe"])
         let observations = Mutex([[ProcessIdentity]]())
-        try await SessionWatcher(inspector: WatchInspector { clock.elapsed < .seconds(3) ? [game, other] : [] },
+        try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: WatchInspector { clock.elapsed < .seconds(3) ? [game, other] : [] },
             runner: WatchRunner(), clock: clock).watch(session: watchSession(), executable: "StarRail.exe") {
                 ids in observations.withLock { $0.append(ids) }
             }
@@ -163,8 +163,9 @@ private struct WatchInspector: ProcessInspector {
     var scan: @Sendable () throws -> [InspectedProcess]
     init(_ scan: @escaping @Sendable () throws -> [InspectedProcess]) { self.scan = scan }
     func isAlive(_ id: ProcessIdentity) -> Bool { false }
-    func processes(environmentContains key: String, value: String) throws -> [InspectedProcess] {
+    func processes(environmentContains key: String, value: String, scope: ProcessInspectionScope) throws -> [InspectedProcess] {
         #expect(key == "WINEPREFIX"); #expect(value == "/prefix")
+        #expect(scope.executableRoots == [URL(fileURLWithPath: "/runtime"), URL(fileURLWithPath: "/game")])
         return try scan()
     }
 }

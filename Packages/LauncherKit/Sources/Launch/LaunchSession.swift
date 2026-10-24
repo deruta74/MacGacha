@@ -22,6 +22,13 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     public let settings: LaunchSettings
     public var state: State
     public var processes: [ProcessIdentity]
+    /// Only groups created by our spawner. Observed Wine PIDs are not group IDs.
+    /// nil decodes snapshots written before group-based inspection scoping.
+    public var processGroupIDs: Set<Int32>?
+    /// Group IDs alone are reusable. Claims require this boot plus the exact
+    /// recorded leader identity or a verified surviving recorded group member.
+    public let bootSessionUUID: String?
+    public let sessionStartTime: UInt64?
     public var hides: [HideEntry]
     public var proxyPort: UInt16?
     /// Additive recovery context: never rediscover a different launch's log or executable.
@@ -33,13 +40,15 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         bundleID: String, runtimeDigest: Digest, wineBinary: URL, wineserver: URL, componentIDs: [String],
         recipeVersion: Int, settings: LaunchSettings, state: State = .preparing, processes: [ProcessIdentity] = [],
         hides: [HideEntry] = [], proxyPort: UInt16? = nil, createdAt: Date = Date(),
-        sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil) {
+        sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil, processGroupIDs: Set<Int32>? = nil,
+        bootSessionUUID: String? = nil, sessionStartTime: UInt64? = nil) {
         self.sessionID = sessionID; self.game = game; self.installRoot = installRoot; self.installIdentity = installIdentity
         self.prefix = prefix; self.bundleID = bundleID; self.runtimeDigest = runtimeDigest; self.wineBinary = wineBinary
         self.wineserver = wineserver; self.componentIDs = componentIDs; self.recipeVersion = recipeVersion
         self.settings = settings; self.state = state; self.processes = processes; self.hides = hides
         self.proxyPort = proxyPort; self.createdAt = createdAt
-        self.sessionLogURL = sessionLogURL; self.gameExecutable = gameExecutable
+        self.sessionLogURL = sessionLogURL; self.gameExecutable = gameExecutable; self.processGroupIDs = processGroupIDs
+        self.bootSessionUUID = bootSessionUUID; self.sessionStartTime = sessionStartTime
     }
 
     func validate() throws {
@@ -51,8 +60,12 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         }
         guard recipeVersion > 0, runtimeDigest.algorithm == .sha256, componentIDs.count <= 64,
             Set(componentIDs).count == componentIDs.count, processes.count <= 1024, hides.count <= 256,
-            processes.allSatisfy({ $0.pid > 0 }), createdAt.timeIntervalSinceReferenceDate.isFinite else {
+            processes.allSatisfy({ $0.pid > 0 }), (processGroupIDs?.count ?? 0) <= 1024,
+            processGroupIDs?.allSatisfy({ $0 > 0 }) ?? true, createdAt.timeIntervalSinceReferenceDate.isFinite else {
             throw LauncherError.journalCorrupt("Invalid launch snapshot")
+        }
+        if let bootSessionUUID, UUID(uuidString: bootSessionUUID) == nil {
+            throw LauncherError.journalCorrupt("Invalid launch boot session")
         }
         try settings.validate()
         var originals = Set<String>(), hidden = Set<String>()
@@ -66,6 +79,11 @@ public struct LaunchSession: Codable, Equatable, Sendable {
             }
         }
         guard originals.isDisjoint(with: hidden) else { throw LauncherError.journalCorrupt("Overlapping hide entries") }
+    }
+
+    func inspectionScope(runtimesRoot: URL) -> ProcessInspectionScope {
+        ProcessInspectionScope(executableRoots: [runtimesRoot, installRoot], processGroupIDs: processGroupIDs ?? [],
+            identities: Set(processes), bootSessionUUID: bootSessionUUID, sessionStartTime: sessionStartTime)
     }
 
     func hiddenPath(_ entry: HideEntry) throws -> SafeRelativePath {

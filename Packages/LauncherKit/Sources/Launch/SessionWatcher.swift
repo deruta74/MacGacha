@@ -26,12 +26,13 @@ enum SessionWatchError: Error { case startup }
 /// Once running, a completed wineserver wait and delayed process recheck together
 /// establish session end; inspection errors propagate instead of guessing.
 struct SessionWatcher: Sendable {
+    private let runtimesRoot: URL
     private let inspector: any ProcessInspector
     private let runner: any ProcessRunner
     private let clock: AnyLaunchClock
 
-    init(inspector: any ProcessInspector, runner: any ProcessRunner, clock: any Clock<Duration>) {
-        self.inspector = inspector; self.runner = runner; self.clock = AnyLaunchClock(clock)
+    init(runtimesRoot: URL, inspector: any ProcessInspector, runner: any ProcessRunner, clock: any Clock<Duration>) {
+        self.runtimesRoot = runtimesRoot; self.inspector = inspector; self.runner = runner; self.clock = AnyLaunchClock(clock)
     }
 
     func watch(session: LaunchSession, executable: String, ownedWrapper: ProcessIdentity? = nil,
@@ -86,7 +87,8 @@ struct SessionWatcher: Sendable {
     private func inspect(session: LaunchSession, gameName: String) async throws
         -> (games: [ProcessIdentity], serverAlive: Bool, wrapperAlive: Bool) {
         try await BlockingIO.run {
-            let processes = try inspector.processes(environmentContains: "WINEPREFIX", value: session.prefix.path)
+            let processes = try inspector.processes(environmentContains: "WINEPREFIX", value: session.prefix.path,
+                scope: session.inspectionScope(runtimesRoot: runtimesRoot))
             let games = processes.filter { Self.isGame($0, name: gameName) }.map(\.identity)
             let server = processes.contains { ["wineserver", "wineserver64"].contains(Self.basename($0.executablePath)) }
             let wrapper = session.processes.first.map { inspector.isAlive($0) } ?? false
