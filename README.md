@@ -10,13 +10,17 @@ Code and documentation in this repository may be written or modified with assist
 
 ## Screenshots
 
-![Launcher with the current Genshin Impact banner](assets/screenshots/launcher.jpg)
+![Launcher with the current Honkai: Star Rail banner, ready to play](assets/screenshots/launcher.jpg)
 
 | Install | Downloading |
 |---|---|
 | ![Install sheet with location, voice packs and a disk-space estimate](assets/screenshots/install.jpg) | ![Download in progress, with pause](assets/screenshots/progress.jpg) |
 
-![Runtimes panel with Wine, DXMT and D3DMetal](assets/screenshots/runtimes.jpg)
+| One-click setup | Runtimes |
+|---|---|
+| ![Set Up sheet listing the runtime a game needs, with its size](assets/screenshots/setup.jpg) | ![Runtimes panel with Wine, DXMT, D3DMetal and jadeite](assets/screenshots/runtimes.jpg) |
+
+![Mainland China region with the interface in Simplified Chinese](assets/screenshots/region-cn.jpg)
 
 ## Roadmap
 
