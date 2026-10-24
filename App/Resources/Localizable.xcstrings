@@ -1280,6 +1280,16 @@
         }
       }
     },
+    "MacGacha couldn't open Apple's Rosetta installer. Open Terminal and run softwareupdate --install-rosetta, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 无法打开 Apple 的 Rosetta 安装程序。请打开“终端”，运行 softwareupdate --install-rosetta，然后重试。"
+          }
+        }
+      }
+    },
     "MacGacha is putting the game's files back. You can play when it's done." : {
       "localizations" : {
         "zh-Hans" : {

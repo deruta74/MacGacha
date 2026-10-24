@@ -19,6 +19,7 @@ extension LauncherError {
         case .consentRequired: String(localized: "Accept the license terms before installing this component.")
         case .processSpawnFailed, .processFailed: String(localized: "A required tool could not finish. Check Diagnostics for details.")
         case .rosettaMissing: String(localized: "Rosetta 2 is required to run games. Install it using MacGacha, then try again.")
+        case .rosettaInstallerUnavailable: String(localized: "MacGacha couldn't open Apple's Rosetta installer. Open Terminal and run softwareupdate --install-rosetta, then try again.")
         case .gameEditionMismatch: String(localized: "This folder belongs to a different game or edition. Choose the matching game and region.")
         case .gameEditionUnknown: String(localized: "MacGacha could not identify this folder’s edition. Select an official installation with its launcher configuration.")
         case .gameDistributionUnsupported: String(localized: "This distribution, including Bilibili, is not supported yet. Use an official Global or Mainland China installation.")

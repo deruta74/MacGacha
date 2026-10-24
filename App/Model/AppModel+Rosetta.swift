@@ -46,8 +46,10 @@ struct UnknownRosettaProbe: RosettaProbing {
             do { try await prompt() }
             catch {
                 guard !Task.isCancelled, let self, self.rosettaPollGeneration == generation else { return }
-                self.cancelRosettaInstall()
-                self.show(error)
+                // Launch Services can report failure while Apple's installer
+                // handles this launch. Only the completed poll can reject it.
+                self.rosettaHelperLaunchFailed = true
+                await self.refreshRosetta()
             }
         }
     }
@@ -58,12 +60,14 @@ struct UnknownRosettaProbe: RosettaProbing {
         rosettaPollGeneration = UUID(); rosettaPromptGeneration = UUID()
         rosettaPollTask?.cancel(); rosettaPollTask = nil
         rosettaInstallTask?.cancel(); rosettaInstallTask = nil
+        rosettaHelperLaunchFailed = false
         setRosettaInstallInProgress(false)
     }
 
     private func startRosettaInstallPoll() {
         let generation = UUID(), clock = rosettaClock, interval = rosettaPollInterval, timeout = rosettaPollTimeout
         rosettaPollGeneration = generation
+        rosettaHelperLaunchFailed = false
         setRosettaInstallInProgress(true)
         rosettaPollTask = Task { [weak self] in
             defer { if self?.rosettaPollGeneration == generation { self?.cancelRosettaInstall() } }
@@ -72,6 +76,12 @@ struct UnknownRosettaProbe: RosettaProbing {
                 await self.refreshRosetta()
                 return self.rosetta == .installed
             }
+            guard !Task.isCancelled, let self, self.rosettaPollGeneration == generation,
+                self.rosettaHelperLaunchFailed else { return }
+            await self.refreshRosetta()
+            guard !Task.isCancelled, self.rosettaPollGeneration == generation, self.rosetta == .missing else { return }
+            self.cancelRosettaInstall()
+            self.show(LauncherError.rosettaInstallerUnavailable)
         }
     }
 

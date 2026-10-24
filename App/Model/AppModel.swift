@@ -102,6 +102,7 @@ final class AppModel {
     @ObservationIgnored var rosettaPollGeneration = UUID()
     @ObservationIgnored var rosettaInstallTask: Task<Void, Never>?
     @ObservationIgnored var rosettaPromptGeneration = UUID()
+    @ObservationIgnored var rosettaHelperLaunchFailed = false
     @ObservationIgnored var runtimeSetupRosettaChecks: [String: (id: UUID, task: Task<Void, Never>)] = [:]
     private(set) var runtimeSetupProgress: [String: RuntimeSetupProgress] = [:]
     var runtimeConsentAccepted: [String: Bool] = [:]

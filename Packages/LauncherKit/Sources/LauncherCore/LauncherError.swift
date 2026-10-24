@@ -20,6 +20,7 @@ public enum LauncherError: Error, Sendable, Equatable {
     case gameEditionUnknown
     case gameDistributionUnsupported
     case rosettaMissing
+    case rosettaInstallerUnavailable
     case cancelled
     case journalCorrupt(String)
 }

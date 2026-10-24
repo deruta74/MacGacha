@@ -100,20 +100,56 @@ import RuntimeManager
         #expect(!model.rosettaInstallInProgress)
     }
 
-    @Test func helperFailureEndsAttemptAndAllowsRetry() async throws {
-        let probe = ModelRosettaProbe(.missing), clock = NativeWindowClock(), opens = Mutex(0)
+    @Test(arguments: [true, false])
+    func helperFailureDoesNotAlertWhenRosettaInstalls(duringPrompt: Bool) async throws {
+        let probe = ModelRosettaProbe(.missing), clock = NativeWindowClock()
         let model = fixture(probe, clock: clock, open: {
+            await clock.waitForSleep(.seconds(2))
+            if duringPrompt { probe.set(.installed) }
+            throw LauncherError.io("Synthetic Launch Services handoff")
+        })
+        await model.refreshRosetta()
+        model.requestRosettaInstall()
+        let helper = model.rosettaInstallTask, poll = model.rosettaPollTask
+        await helper?.value
+        #expect(model.lastError == nil)
+        if !duringPrompt {
+            #expect(model.rosettaInstallInProgress)
+            probe.set(.installed); clock.advance(by: .seconds(2))
+        }
+        await poll?.value
+        #expect(model.rosetta == .installed)
+        #expect(!model.rosettaInstallInProgress)
+        #expect(model.lastError == nil)
+    }
+
+    @Test(arguments: [RosettaStatus.missing, .unknown])
+    func helperFailureIsDeferredUntilTimeoutAndAllowsRetry(status: RosettaStatus) async throws {
+        let probe = ModelRosettaProbe(.missing), clock = NativeWindowClock(), opens = Mutex(0)
+        let model = fixture(probe, clock: clock, timeout: .seconds(6), open: {
             let count = opens.withLock { $0 += 1; return $0 }
-            if count == 1 { throw LauncherError.io("Synthetic helper failure") }
+            if count == 1 {
+                await clock.waitForSleep(.seconds(2))
+                throw LauncherError.io("Synthetic helper failure")
+            }
         })
         await model.refreshRosetta()
         model.requestRosettaInstall()
         #expect(model.rosettaInstallInProgress)
         let poll = model.rosettaPollTask
-        try await rosettaWait { !model.rosettaInstallInProgress }
+        await model.rosettaInstallTask?.value
+        #expect(model.rosettaInstallInProgress)
+        #expect(model.lastError == nil)
+        probe.set(status)
+        clock.advance(by: .seconds(6))
         await poll?.value
-        #expect(model.lastError == LauncherError.io("Synthetic helper failure").userMessage)
+        #expect(!model.rosettaInstallInProgress)
+        let expected = status == .missing ? String(localized: "MacGacha couldn't open Apple's Rosetta installer. Open Terminal and run softwareupdate --install-rosetta, then try again.") : nil
+        #expect(model.lastError == expected)
         #expect(clock.activeSleeps == 0)
+        model.dismissError()
+        await model.refreshRosetta(); clock.advance(by: .seconds(60))
+        #expect(model.lastError == nil)
         model.requestRosettaInstall()
         #expect(model.rosettaInstallInProgress)
         await model.rosettaInstallTask?.value
