@@ -9,7 +9,7 @@ import SwiftUI
 
 /// Sheets that act on one game, opened from its footer.
 enum GameSheet: Identifiable, Hashable {
-    case install(String), voices(String), settings(String), setup(String)
+    case install(String), voices(String), settings(String), setup(String), rosetta(String)
 
     var id: String {
         switch self {
@@ -17,6 +17,7 @@ enum GameSheet: Identifiable, Hashable {
         case .voices(let game): "voices-\(game)"
         case .settings(let game): "settings-\(game)"
         case .setup(let game): "setup-\(game)"
+        case .rosetta(let game): "rosetta-\(game)"
         }
     }
 }
@@ -35,7 +36,8 @@ struct GameFooter: View {
     private var state: GameState { model.games[game.id] ?? GameState(status: .unknown) }
     private var launch: LaunchUIState? { model.launchState(for: game.id) }
     private var action: PrimaryAction {
-        .resolve(state, runtimesReady: model.runtimesReady, launch: launch, missingComponents: model.missingComponents(for: game.id))
+        .resolve(state, runtimesReady: model.runtimesReady, launch: launch, missingComponents: model.missingComponents(for: game.id),
+            rosetta: model.rosetta)
     }
 
     var body: some View {
@@ -152,6 +154,9 @@ struct GameFooter: View {
             }
         }
         if let launchLine { return launchLine }
+        if case .needsRosetta = action {
+            return String(localized: "Rosetta 2 is needed to run Windows games on this Mac")
+        }
         switch model.runtimeSetupProgress[game.id] {
         case .installing: return String(localized: "Getting \(game.name) ready to play", comment: "Status while runtime setup runs; the argument is the game's name")
         case .failed(let message): return String(localized: "Setup didn't finish: \(message)", comment: "Runtime setup failure; the argument is the reason")
@@ -312,6 +317,8 @@ struct PrimaryActionButton: View {
                     gameSheet = .setup(game.id)
                 }
             }
+        case .needsRosetta:
+            prominent("Install Rosetta…", alwaysEnabled: true) { gameSheet = .rosetta(game.id) }
         case .locationUnavailable:
             waiting("Location Unavailable")
                 .help(unavailablePath)

@@ -121,6 +121,8 @@ import RuntimeManager
             do {
                 await self.reattachOnStart()
                 if let error = self.launchStartupError { throw error }
+                await self.refreshRosetta()
+                if self.rosetta == .missing { throw LauncherError.rosettaMissing }
                 guard self.launchSlotOwner == id, self.launchTaskGenerations[id] == generation else {
                     if self.launchSlotOwner != id { self.launchStates[id] = nil; self.liveLaunchGames.remove(id) }
                     return

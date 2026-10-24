@@ -115,7 +115,7 @@ public struct DiagnosticBundle: Sendable {
             case .processFailed(let executable, let code, let stderr):
                 throw LauncherError.processFailed(executable: Redactor.redact(executable), exitCode: code,
                     stderrTail: Redactor.redact(stderr))
-            case .gameEditionMismatch, .gameEditionUnknown, .gameDistributionUnsupported: throw error
+            case .gameEditionMismatch, .gameEditionUnknown, .gameDistributionUnsupported, .rosettaMissing: throw error
             case .cancelled: throw LauncherError.cancelled
             case .journalCorrupt(let message): throw LauncherError.journalCorrupt(Redactor.redact(message))
             }

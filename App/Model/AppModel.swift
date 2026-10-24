@@ -88,6 +88,21 @@ final class AppModel {
     @ObservationIgnored private var errors: [String: String] = [:]
     @ObservationIgnored var installed: [InstalledComponent] = []
     private(set) var installedBundles: [String: InstalledRuntimeBundle] = [:]
+    private(set) var rosetta: RosettaStatus = .unknown
+    private(set) var rosettaInstallInProgress = false
+    @ObservationIgnored let rosettaProbe: any RosettaProbing
+    @ObservationIgnored let activationCenter: NotificationCenter
+    @ObservationIgnored let rosettaClock: any Clock<Duration>
+    @ObservationIgnored let rosettaPollInterval: Duration
+    @ObservationIgnored let rosettaPollTimeout: Duration
+    @ObservationIgnored let rosettaPrompt: @MainActor @Sendable () async throws -> Void
+    @ObservationIgnored var rosettaRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var rosettaRefreshGeneration = UUID()
+    @ObservationIgnored var rosettaPollTask: Task<Void, Never>?
+    @ObservationIgnored var rosettaPollGeneration = UUID()
+    @ObservationIgnored var rosettaInstallTask: Task<Void, Never>?
+    @ObservationIgnored var rosettaPromptGeneration = UUID()
+    @ObservationIgnored var runtimeSetupRosettaChecks: [String: (id: UUID, task: Task<Void, Never>)] = [:]
     private(set) var runtimeSetupProgress: [String: RuntimeSetupProgress] = [:]
     var runtimeConsentAccepted: [String: Bool] = [:]
     @ObservationIgnored var runtimeConsentRevision = UUID()
@@ -146,6 +161,11 @@ final class AppModel {
         artService: any GameArtProviding = EmptyGameArtProvider(),
         artServices: [Region: any GameArtProviding] = [:],
         gameServices: any GameServices = PreviewGameServices(),
+        rosettaProbe: any RosettaProbing = UnknownRosettaProbe(),
+        activationCenter: NotificationCenter = .default,
+        rosettaClock: any Clock<Duration> = ContinuousClock(),
+        rosettaPollInterval: Duration = .seconds(2), rosettaPollTimeout: Duration = .seconds(300),
+        rosettaPrompt: @escaping @MainActor @Sendable () async throws -> Void = { try await RosettaPrompt.open() },
         locale: Locale = .current,
         purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(),
         launchServices: any LaunchServices = PreviewLaunchServices(),
@@ -155,6 +175,9 @@ final class AppModel {
         recoverySleep: @escaping @Sendable (Duration) async throws -> Void = { try await ContinuousClock().sleep(for: $0) },
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }) {
         self.launchPreferences = launchPreferences ?? LiveLaunchPreferencesPersistence(paths: paths)
+        self.rosettaProbe = rosettaProbe; self.rosettaClock = rosettaClock
+        self.activationCenter = activationCenter
+        self.rosettaPollInterval = rosettaPollInterval; self.rosettaPollTimeout = rosettaPollTimeout; self.rosettaPrompt = rosettaPrompt
         self.recoverySleep = recoverySleep
         self.launchServices = launchServices; self.launchWindows = launchWindows; self.launchSleep = launchSleep
         self.paths = paths; self.manifest = manifest; self.gameServices = gameServices; self.purgeableSpace = purgeable
@@ -178,6 +201,8 @@ final class AppModel {
 
     func setGameState(_ id: String, _ state: GameState) { games[id] = state }
     func setGameRecord(_ id: String, _ record: GameRecord?) { gameRecords[id] = record }
+    func setRosetta(_ status: RosettaStatus) { rosetta = status }
+    func setRosettaInstallInProgress(_ inProgress: Bool) { rosettaInstallInProgress = inProgress }
     func applyArt(_ art: [String: GameArt], in region: Region) {
         gameArt = gameArt.filter { GameDefinition.find($0.key)?.region != region }
             .merging(art.filter { GameDefinition.find($0.key)?.region == region }) { _, new in new }
@@ -197,7 +222,8 @@ final class AppModel {
                 language: HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations), log: log))
         })
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
-            artServices: art, gameServices: LiveGameServices(paths: paths, log: log, guard: launch), launchServices: launch)
+            artServices: art, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
+            rosettaProbe: SystemRosettaProbe(), launchServices: launch)
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -227,6 +253,8 @@ final class AppModel {
     }
 
     deinit {
+        rosettaRefreshTask?.cancel(); rosettaPollTask?.cancel(); rosettaInstallTask?.cancel()
+        for check in runtimeSetupRosettaChecks.values { check.task.cancel() }
         for task in tasks.values { task.cancel() }
         searchTask?.cancel()
         for task in launchTasks.values { task.cancel() }
@@ -244,6 +272,7 @@ final class AppModel {
         started = true; isStarting = true
         defer { isStarting = false }
         await reattachOnStart()
+        await refreshRosetta()
         do {
             if manifest == nil { manifest = try await BundledRuntimeManifest.load() }
             do { try await services.sweepStaging() }

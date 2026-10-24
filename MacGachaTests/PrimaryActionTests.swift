@@ -5,9 +5,20 @@ import Testing
 import DownloadEngine
 import GameLibrary
 import Launch
+import LauncherCore
 @testable import MacGacha
 
 struct PrimaryActionTests {
+    @Test func rosettaPrecedenceIsLimitedToInstalledIdleGames() {
+        let installed = GameState(status: .installed(tag: "1"))
+        for ready in [true, false] {
+            #expect(PrimaryAction.resolve(installed, runtimesReady: ready, rosetta: .missing) == .needsRosetta)
+            #expect(PrimaryAction.resolve(installed, runtimesReady: ready, rosetta: .unknown) == (ready ? .play : .setUpRuntimes))
+            #expect(PrimaryAction.resolve(installed, runtimesReady: ready, launch: .running, rosetta: .missing) == .playing)
+        }
+        #expect(PrimaryAction.resolve(GameState(status: .notInstalled), runtimesReady: false, rosetta: .missing) == .install)
+        #expect(PrimaryAction.resolve(GameState(status: .updateAvailable(from: "1", to: "2")), runtimesReady: true, rosetta: .missing) == .update(to: "2"))
+    }
     @Test func installedAndReadyIsPlay() {
         let action = PrimaryAction.resolve(GameState(status: .installed(tag: "1")), runtimesReady: true)
         #expect(action == .play)

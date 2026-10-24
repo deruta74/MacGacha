@@ -375,6 +375,7 @@ struct RuntimeErrorLog {
         case .gameEditionMismatch: name = "gameEditionMismatch"
         case .gameEditionUnknown: name = "gameEditionUnknown"
         case .gameDistributionUnsupported: name = "gameDistributionUnsupported"
+        case .rosettaMissing: name = "rosettaMissing"
         case .cancelled: name = "cancelled"
         case .journalCorrupt: name = "journalCorrupt"
         }

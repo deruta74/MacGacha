@@ -70,6 +70,8 @@ struct RootView: View {
                 GameSettingsSheet(game: Self.game(id))
             case .setup(let id):
                 RuntimeSetupSheet(game: Self.game(id)) { panel = .runtimes }
+            case .rosetta(let id):
+                RosettaSheet(game: Self.game(id))
             }
         }
         // While a panel is open, its sheet presents the consent and import flow instead.
@@ -114,6 +116,7 @@ struct RootView: View {
         case "voices": gameSheet = .voices(selectedID)
         case "settings": gameSheet = .settings(selectedID)
         case "setup": gameSheet = .setup(selectedID)
+        case "rosetta": gameSheet = .rosetta(selectedID)
         default: break
         }
     }

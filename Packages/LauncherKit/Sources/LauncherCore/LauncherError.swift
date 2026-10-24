@@ -18,6 +18,7 @@ public enum LauncherError: Error, Sendable, Equatable {
     case gameEditionMismatch
     case gameEditionUnknown
     case gameDistributionUnsupported
+    case rosettaMissing
     case cancelled
     case journalCorrupt(String)
 }
