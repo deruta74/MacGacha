@@ -24,8 +24,9 @@ struct RootView: View {
     @Environment(\.openSettings) private var openSettings
     #endif
 
+    /// The rail shows one region; a selection from the other region falls back to its first game.
     private var game: LauncherGame {
-        LauncherGame.all.first { $0.id == selectedID } ?? LauncherGame.all[0]
+        model.visibleGames.first { $0.id == selectedID } ?? model.visibleGames[0]
     }
 
     /// Reduce Motion only changes the default; an explicit choice always wins.
@@ -42,7 +43,7 @@ struct RootView: View {
                 .id(game.id)
                 .transition(.opacity)
             HStack(alignment: .bottom, spacing: 0) {
-                GameRail(selectedID: $selectedID, panel: $panel)
+                GameRail(selectedID: Binding(get: { game.id }, set: { selectedID = $0 }), panel: $panel)
                     .padding(.leading, 12)
                     .padding(.top, 40) // below the window's traffic lights
                     .padding(.bottom, 12)
@@ -86,6 +87,8 @@ struct RootView: View {
             Text(recoveryMessage(notice))
         }
         .task { await model.loadGameArt() }
+        // A sheet belongs to one game; once its region is hidden it must not act on it.
+        .onChange(of: model.region) { gameSheet = nil }
         .task { model.quitConfirmation = QuitConfirmation.present }
         #if DEBUG
         .onAppear(perform: applyDebugLaunchArguments)

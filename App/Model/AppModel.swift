@@ -41,7 +41,14 @@ final class AppModel {
         var downloadSize: Int64? = nil
     }
 
-    private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(.global).map { ($0.id, GameState(status: .unknown)) })
+    var region: Region {
+        didSet {
+            guard region != oldValue else { return }
+            defaults?.set(region.rawValue, forKey: "region")
+            if started && regionLoadingEnabled { loadRegion(region) }
+        }
+    }
+    private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
     private(set) var gameRecords: [String: GameRecord] = [:]
     var isGameOperationRunning: Bool { gameOperation != nil }
     private(set) var gameArt: [String: GameArt]
@@ -57,7 +64,11 @@ final class AppModel {
     @ObservationIgnored let paths: AppPaths
     @ObservationIgnored var manifest: RuntimeManifest?
     @ObservationIgnored private let services: any RuntimeServices
-    @ObservationIgnored private let artService: any GameArtProviding
+    @ObservationIgnored let artServices: [Region: any GameArtProviding]
+    @ObservationIgnored var artHydrationTask: Task<Void, Never>?
+    @ObservationIgnored var artTasks: [Region: Task<Void, Never>] = [:]
+    @ObservationIgnored var regionLoadTasks: [Region: Task<Void, Never>] = [:]
+    @ObservationIgnored var regionLoadingEnabled = true
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored let purgeableSpace: any PurgeableSpaceProbe
     @ObservationIgnored let gameServices: any GameServices
@@ -66,8 +77,8 @@ final class AppModel {
     @ObservationIgnored var gameActivationTask: Task<Void, Never>?
     var gameOperation: GameOperationToken?
     @ObservationIgnored var gameProgress = GameProgress()
-    @ObservationIgnored var gameLastRefresh: ContinuousClock.Instant?
-    @ObservationIgnored var gameRefreshInFlight = false
+    @ObservationIgnored var gameLastRefresh: [Region: ContinuousClock.Instant] = [:]
+    @ObservationIgnored var gameRefreshInFlight: Set<Region> = []
     @ObservationIgnored var gameRevisions: [String: UUID] = [:]
     @ObservationIgnored let now: @Sendable () -> ContinuousClock.Instant
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
@@ -126,7 +137,9 @@ final class AppModel {
     init(paths: AppPaths = .standard(), manifest: RuntimeManifest? = nil,
         services: (any RuntimeServices)? = nil, defaults: UserDefaults? = .standard,
         artService: any GameArtProviding = EmptyGameArtProvider(),
+        artServices: [Region: any GameArtProviding] = [:],
         gameServices: any GameServices = PreviewGameServices(),
+        locale: Locale = .current,
         purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(),
         launchServices: any LaunchServices = PreviewLaunchServices(),
         launchPreferences: (any LaunchPreferencesPersistence)? = nil,
@@ -139,7 +152,16 @@ final class AppModel {
         self.launchServices = launchServices; self.launchWindows = launchWindows; self.launchSleep = launchSleep
         self.paths = paths; self.manifest = manifest; self.gameServices = gameServices; self.purgeableSpace = purgeable
         self.services = services ?? LiveRuntimeServices(paths: paths)
-        self.defaults = defaults; self.now = now; self.artService = artService; self.gameArt = artService.cached()
+        self.defaults = defaults; self.now = now
+        let preferred = Self.persistedRegion(defaults: defaults, locale: locale)
+        defaults?.set(preferred.rawValue, forKey: "region")
+        self.region = Self.initialRegion(defaults: defaults, locale: locale)
+        self.artServices = Region.allCases.reduce(into: [.global: artService]) { result, region in
+            result[region] = artServices[region] ?? result[region] ?? EmptyGameArtProvider()
+        }
+        self.gameArt = self.artServices.reduce(into: [:]) { result, provider in
+            result.merge(provider.value.cached().filter { GameDefinition.find($0.key)?.region == provider.key }) { _, new in new }
+        }
         let stored = defaults?.string(forKey: "installRoot")
         self.installRoot = stored.flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Games/MacGacha", isDirectory: true)
@@ -149,6 +171,10 @@ final class AppModel {
 
     func setGameState(_ id: String, _ state: GameState) { games[id] = state }
     func setGameRecord(_ id: String, _ record: GameRecord?) { gameRecords[id] = record }
+    func applyArt(_ art: [String: GameArt], in region: Region) {
+        gameArt = gameArt.filter { GameDefinition.find($0.key)?.region != region }
+            .merging(art.filter { GameDefinition.find($0.key)?.region == region }) { _, new in new }
+    }
 
     static func live() -> AppModel {
         // Keep legacy entry points safe too while the app switches to forCurrentProcess().
@@ -158,11 +184,13 @@ final class AppModel {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
         let launch = LiveLaunchServices(paths: paths, log: log)
+        let art: [Region: any GameArtProviding] = Dictionary(uniqueKeysWithValues: Region.allCases.map {
+            ($0, GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
+                bundleIdentifier: Bundle.main.bundleIdentifier), region: $0,
+                language: HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations), log: log))
+        })
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
-            artService: GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
-                bundleIdentifier: Bundle.main.bundleIdentifier),
-                // Art and news follow the interface language the app is actually shown in.
-                language: HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations), log: log), gameServices: LiveGameServices(paths: paths, log: log, guard: launch), launchServices: launch)
+            artServices: art, gameServices: LiveGameServices(paths: paths, log: log, guard: launch), launchServices: launch)
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -191,14 +219,6 @@ final class AppModel {
         return installed.contains { $0.kind == .wine } && installed.contains { $0.kind == .dxmt || $0.kind == .d3dmetal }
     }
 
-    func loadGameArt() async {
-        let persisted = await artService.loadCached()
-        guard !Task.isCancelled else { return }
-        gameArt = persisted
-        let updated = await artService.refresh()
-        if !Task.isCancelled { gameArt = updated }
-    }
-
     deinit {
         for task in tasks.values { task.cancel() }
         searchTask?.cancel()
@@ -206,6 +226,9 @@ final class AppModel {
         for task in launchRecoveryPolls.values { task.cancel() }
         for task in recoveryRetryTasks.values { task.cancel() }
         for task in recoveryInFlight.values { task.cancel() }
+        for task in regionLoadTasks.values { task.cancel() }
+        for task in artTasks.values { task.cancel() }
+        artHydrationTask?.cancel()
         gameTask?.cancel(); gameStartupTask?.cancel(); gameActivationTask?.cancel()
     }
 
@@ -582,7 +605,7 @@ struct BundledRuntimeManifest {
 
 extension AppModel {
     static var sampleGameStates: [String: GameState] {
-        Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(.global).map { game in
+        Dictionary(uniqueKeysWithValues: GameDefinition.all.map { game in
             let status: GameStatus = switch game.family {
             case .genshin: .installed(tag: "7.1.0")
             case .starrail: .paused(.update)
@@ -603,11 +626,11 @@ extension AppModel {
     static func preview(rows: [RuntimeRow] = sampleRows, consent: ConsentRequest? = nil,
         importState: ImportState? = nil, lastError: String? = nil,
         logLines: [String] = ["Runtime manager ready", "D3DMetal requires acceptance of Apple's license terms"],
-        games: [String: GameState] = sampleGameStates) -> AppModel {
+        games: [String: GameState] = sampleGameStates, region: Region = .global) -> AppModel {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacGacha-Preview-\(UUID().uuidString)")
         let model = AppModel(paths: AppPaths(root: root), manifest: try? RuntimeManifest(components: []),
             services: PreviewRuntimeServices(), defaults: nil, gameServices: PreviewGameServices(states: games))
-        model.games = games
+        model.regionLoadingEnabled = false; model.region = region; model.games = games
         model.rows = rows; model.consentRequest = consent; model.importState = importState
         model.installed = rows.compactMap { row in
             guard case .installed(let source) = row.state,

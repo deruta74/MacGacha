@@ -4,39 +4,6 @@ import AppKit
 import SwiftUI
 import LauncherCore
 
-/// The games MacGacha knows. Art is never bundled: it comes from the official
-/// HoYoPlay API at run time and is cached locally (see `AppModel.gameArt`).
-struct LauncherGame: Identifiable, Hashable {
-    let id: String
-    let name: String
-    /// Fallback colors while art loads or when offline.
-    let tint: Color
-    let deepTint: Color
-}
-
-extension LauncherGame {
-    // CN-3 adds the picker; keep the visible rail Global-only meanwhile.
-    static let all: [LauncherGame] = GameDefinition.inRegion(.global).map { definition in
-        let name: String, tint: Color, deepTint: Color
-        switch definition.family {
-        case .genshin:
-            name = String(localized: "Genshin Impact")
-            tint = Color(red: 0.98, green: 0.78, blue: 0.46); deepTint = Color(red: 0.16, green: 0.22, blue: 0.38)
-        case .starrail:
-            name = String(localized: "Honkai: Star Rail")
-            tint = Color(red: 0.69, green: 0.66, blue: 0.93); deepTint = Color(red: 0.10, green: 0.08, blue: 0.24)
-        case .zzz:
-            name = String(localized: "Zenless Zone Zero")
-            tint = Color(red: 0.85, green: 0.93, blue: 0.30); deepTint = Color(red: 0.10, green: 0.10, blue: 0.10)
-        }
-        return LauncherGame(id: definition.id, name: name, tint: tint, deepTint: deepTint)
-    }
-    var defaultInstallDirectoryName: String {
-        GameDefinition.find(id)?.defaultInstallDirectoryName ?? name
-    }
-
-}
-
 // MARK: - Images
 
 /// Decodes a cached image file off the main actor and fades it in when ready.
@@ -75,7 +42,7 @@ struct GameRail: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            ForEach(LauncherGame.all) { game in
+            ForEach(model.visibleGames) { game in
                 Button {
                     selectedID = game.id
                 } label: {
