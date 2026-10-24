@@ -18,6 +18,7 @@ public struct LaunchStartupResult: Sendable {
 /// event stream detaches that observer; it never cancels the game or its restore.
 public actor LaunchManager {
     package typealias ProxyFactory = @Sendable ([String], @escaping @Sendable (String) -> Void) async throws -> any LaunchSessionProxy
+    private let recipeOverrides: [String: LaunchRecipe]
     private let paths: AppPaths
     private let eventLog: EventLog
     private let sessionLogWriter: BestEffortLogWriter<SessionLogWork>
@@ -81,6 +82,7 @@ public actor LaunchManager {
         self.paths = paths; self.runtimes = runtimes; self.prefixes = prefixes; self.preparation = preparation
         self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock
         self.baseEnvironment = ProcessInfo.processInfo.environment; self.journalFileOps = SystemFileOps()
+        self.recipeOverrides = [:]
         self.hideHooks = .none; self.beforeJournalRead = {}; self.beforeRecoveryRead = {}
         self.sessionProvenance = Self.currentSessionProvenance
         self.proxyFactory = { hosts, log in try await SessionProxy.start(blockedHosts: hosts, log: log) }
@@ -92,6 +94,7 @@ public actor LaunchManager {
         baseEnvironment: [String: String] = [:], journalFileOps: any FileOps = SystemFileOps(),
         hideHooks: LaunchFileHooks = .none, beforeJournalRead: @escaping @Sendable () throws -> Void = {},
         beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {},
+        recipeOverrides: [String: LaunchRecipe] = [:],
         sessionProvenance: @escaping @Sendable () throws -> (bootSessionUUID: String, sessionStartTime: UInt64) = LaunchManager.currentSessionProvenance,
         beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) {
         self.eventLog = log ?? EventLog(directory: paths.logs)
@@ -99,6 +102,7 @@ public actor LaunchManager {
         self.paths = paths; self.runtimes = runtimes; self.prefixes = prefixes; self.preparation = preparation
         self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock
         self.proxyFactory = proxyFactory; self.baseEnvironment = baseEnvironment; self.journalFileOps = journalFileOps
+        self.recipeOverrides = recipeOverrides
         self.hideHooks = hideHooks; self.beforeJournalRead = beforeJournalRead; self.beforeRecoveryRead = beforeRecoveryRead
         self.sessionProvenance = sessionProvenance
     }
@@ -134,7 +138,7 @@ public actor LaunchManager {
             event("Launch failed", game: game.id, level: .error, metadata: ["stage": "lock"])
             pair.continuation.yield(.stage(.lock))
             pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "\(Self.name(busy)) is running"), logURL: nil,
-                unverifiedBuild: !(Recipes.recipe(for: game.id)?.verifiedBuilds.contains(gameBuild) ?? false))))
+                unverifiedBuild: !((recipeOverrides[game.id] ?? Recipes.recipe(for: game.id))?.verifiedBuilds.contains(gameBuild) ?? false))))
             pair.continuation.finish(); return pair.stream
         }
         if recovering || !guardRecoveries.isEmpty {
@@ -185,10 +189,10 @@ public actor LaunchManager {
     private func start(game: GameDefinition, installRoot: URL, gameBuild: String, events: AsyncStream<LaunchEvent>.Continuation) async {
         defer { finishedSupervision(game: game.id) }
         var stage = LaunchStage.preflight
-        let unverified = !(Recipes.recipe(for: game.id)?.verifiedBuilds.contains(gameBuild) ?? false)
+        let unverified = !((recipeOverrides[game.id] ?? Recipes.recipe(for: game.id))?.verifiedBuilds.contains(gameBuild) ?? false)
         do {
             events.yield(.stage(stage))
-            guard let recipe = Recipes.recipe(for: game.id) else { throw LauncherError.io("Unknown launch game") }
+            guard let recipe = (recipeOverrides[game.id] ?? Recipes.recipe(for: game.id)) else { throw LauncherError.io("Unknown launch game") }
             let paths = paths, journalFileOps = journalFileOps
             let (settings, logsEnabled) = try await BlockingIO.run {
                 let settings = try LaunchSettingsStore(paths: paths).load(game.id)
@@ -403,14 +407,14 @@ public actor LaunchManager {
         context.restoreEntryCount = max(context.restoreEntryCount, context.session.hides.count)
         note(context, "stage restore")
         context.continuation?.yield(.stage(.restore))
-        let paths = paths, journalFileOps = journalFileOps, beforeJournalRead = beforeJournalRead
+        let paths = paths, journalFileOps = journalFileOps, beforeJournalRead = beforeJournalRead, hideHooks = hideHooks
         if context.finalization == nil {
             let original = context.session
             do {
                 let (session, outcome) = try await BlockingIO.run {
                     var snapshot = original
                     let journal = LaunchJournal(paths: paths, fileOps: journalFileOps, sessionOwned: true, beforeRead: beforeJournalRead)
-                    let outcome = try HiddenFiles().restore(session: &snapshot, journal: journal, retainResolvedJournal: true)
+                    let outcome = try HiddenFiles(hooks: hideHooks).restore(session: &snapshot, journal: journal, retainResolvedJournal: true)
                     return (snapshot, outcome)
                 }
                 context.session = session
@@ -439,7 +443,9 @@ public actor LaunchManager {
                 }
                 // Publish notification first. Deletion always syncs the parent,
                 // including a retry after unlink succeeded but its fsync failed.
+                hideHooks.reach(.beforeJournalDelete)
                 try LaunchJournal(paths: paths, fileOps: journalFileOps, sessionOwned: true, beforeRead: beforeJournalRead).delete(game: session.game)
+                hideHooks.reach(.afterJournalDelete)
             }
         } catch {
             // Do not persist pending over a resolved journal, or discard our
