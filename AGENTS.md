@@ -68,6 +68,7 @@ swift test --package-path Packages/LauncherKit --filter <Suite>   # one package 
 - The build must have **zero Swift warnings**.
 - `scripts/check-headers.sh`: every Swift file starts with the two-line SPDX and project header (copy it from any existing file). Python and shell scripts carry it as comments.
 - `scripts/check-strings.py <derived-data>`: the string catalog must match the code, and every string (app and package catalogs) needs a Simplified Chinese (`zh-Hans`) translation with the same number of format arguments. Run with `--write` to add new strings to `Localizable.xcstrings`, then translate them.
+- `scripts/package-dmg.sh <release-name> [output-dir]`: builds Release and writes `MacGacha-<name>.dmg` (app plus an Applications link) and its `.sha256`. The numeric part of the name must match `MARKETING_VERSION` in `project.yml`; a suffix such as `-beta` only goes into file and tag names. Builds are ad-hoc signed until Developer ID signing lands.
 - The Steam shim has its own manual workflow (`steam-shim.yml`) and scripts (`build-steam-shim.sh`, `install-steam-shim-toolchain.py`). Its output must match `compat/steam-shim/SHA256SUMS` byte for byte.
 
 ## Code conventions
