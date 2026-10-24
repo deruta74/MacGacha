@@ -500,6 +500,7 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
         var acceptedCount = 0
         var calls: [String] = []
         var installs: [Install] = []
+        var bundleInstalls: [String] = []
         var components: [InstalledComponent] = []
         var bundles: [String: InstalledRuntimeBundle] = [:]
         var invalid: [InvalidRuntimeEntry] = []
@@ -515,11 +516,14 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
         var scanError: LauncherError?
         var sweepError: LauncherError?
         var removeError: LauncherError?
+        var acceptError: LauncherError?
         var holdNextScan = false
         var scanWaiter: CheckedContinuation<RuntimeScan, any Error>?
         var heldScan: RuntimeScan?
     }
     let state = Mutex(State())
+    let installEvents = AsyncStream<String>.makeStream(bufferingPolicy: .bufferingNewest(32))
+    let heldScanEvents = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     var snapshot: State { state.withLock { $0 } }
     func scanBundles(_ manifest: RuntimeManifest) async throws -> [String: InstalledRuntimeBundle] { snapshot.bundles }
     func remove(_ bundle: RuntimeBundle, manifest: RuntimeManifest) async throws {
@@ -541,6 +545,7 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
                 return .success(scan)
             }
             if let result { continuation.resume(with: result) }
+            else { heldScanEvents.continuation.yield(()) }
         }
     }
     func sweepStaging() async throws {
@@ -552,7 +557,14 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
     func install(_ c: RuntimeComponent, from candidate: GPTKCandidate?) -> AsyncThrowingStream<OperationEvent, any Error> {
         AsyncThrowingStream { continuation in
             state.withLock { $0.calls.append("install"); $0.installs.append(Install(component: c, candidate: candidate)); $0.continuation = continuation }
+            installEvents.continuation.yield(c.id.rawValue)
         }
+    }
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, from candidate: GPTKCandidate?) -> RuntimeInstallStream {
+        RuntimeInstallStream(AsyncThrowingStream { continuation in
+            state.withLock { $0.bundleInstalls.append(bundle.id.rawValue); $0.continuation = continuation }
+            installEvents.continuation.yield(bundle.id.rawValue)
+        })
     }
     func remove(_ c: InstalledComponent) async throws {
         try state.withLock {
@@ -565,7 +577,12 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
         state.withLock { $0.calls.append("removeInvalid"); $0.invalid.removeAll { $0 == entry } }
     }
     func isConsentAccepted(_ c: RuntimeComponent) -> Bool { state.withLock { c.consent == nil || $0.accepted } }
-    func acceptConsent(for c: RuntimeComponent) throws { state.withLock { $0.calls.append("accept"); $0.accepted = true; $0.acceptedCount += 1 } }
+    func acceptConsent(for c: RuntimeComponent) throws {
+        try state.withLock {
+            if let error = $0.acceptError { throw error }
+            $0.calls.append("accept"); $0.accepted = true; $0.acceptedCount += 1
+        }
+    }
     func locateGPTK(extraRoots: [URL]) async throws -> [GPTKCandidate] {
         state.withLock { $0.calls.append("locate"); $0.searchRoots.append(extraRoots); return $0.candidates }
     }

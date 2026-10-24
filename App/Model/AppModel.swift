@@ -87,6 +87,12 @@ final class AppModel {
     @ObservationIgnored private var errors: [String: String] = [:]
     @ObservationIgnored var installed: [InstalledComponent] = []
     private(set) var installedBundles: [String: InstalledRuntimeBundle] = [:]
+    private(set) var runtimeSetupProgress: [String: RuntimeSetupProgress] = [:]
+    var runtimeConsentAccepted: [String: Bool] = [:]
+    @ObservationIgnored var runtimeConsentRevision = UUID()
+    @ObservationIgnored var runtimeSetupChains: [String: RuntimeSetupChain] = [:]
+    @ObservationIgnored var runtimeSetupOwnedItems: Set<String> = []
+    @ObservationIgnored var runtimeSetupUpdateScheduled = false
     @ObservationIgnored private var importRuntimeBundle: RuntimeBundle?
     @ObservationIgnored private var invalid: [String: InvalidRuntimeEntry] = [:]
     @ObservationIgnored private var requestModes: [String: ConsentMode] = [:]
@@ -257,11 +263,17 @@ final class AppModel {
 
     private func scanAndApply() async throws {
         let generation = UUID(); scanGeneration = generation
+        let consentRevision = runtimeConsentRevision
         let scan = try await services.scan()
         let bundles: [String: InstalledRuntimeBundle]
         if let manifest { bundles = try await services.scanBundles(manifest) } else { bundles = [:] }
+        var consent: [String: Bool] = [:]
+        for component in manifest?.components ?? [] where component.consent != nil {
+            consent[component.id.rawValue] = await services.isConsentAccepted(component)
+        }
         try Task.checkCancellation()
         guard scanGeneration == generation else { return }
+        if runtimeConsentRevision == consentRevision { runtimeConsentAccepted = consent }
         installedBundles = bundles
         apply(scan)
     }
@@ -289,6 +301,7 @@ final class AppModel {
             guard !Task.isCancelled, self?.generations[id] == generation else {
                 self?.finish(id, generation: generation); return
             }
+            self?.cacheRuntimeConsent(accepted, for: component)
             self?.finish(id, generation: generation)
             guard let self else { return }
             if !accepted {
@@ -301,6 +314,7 @@ final class AppModel {
 
     func respondToConsent(accept: Bool) {
         guard let request = consentRequest else { return }
+        defer { scheduleRuntimeSetupUpdate() }
         consentRequest = nil
         guard accept, tasks[request.id] == nil,
             let component = requestedComponent(request.id) else { return }
@@ -312,11 +326,15 @@ final class AppModel {
                 try await services.acceptConsent(for: component)
                 try Task.checkCancellation()
                 guard self?.generations[id] == generation else { return }
+                self?.cacheRuntimeConsent(true, for: component)
                 self?.finish(id, generation: generation)
                 if request.mode == .importGPTK { self?.beginImport(component, bundle: self?.bundle(id)) }
                 else { self?.beginOperation(component, from: nil, bundle: self?.bundle(id)) }
             } catch {
-                if self?.generations[id] == generation { self?.show(error) }
+                if self?.generations[id] == generation {
+                    if launcherError(error) != .cancelled { self?.errors[id] = launcherError(error).userMessage }
+                    self?.show(error)
+                }
                 self?.finish(id, generation: generation)
             }
         }
@@ -367,6 +385,7 @@ final class AppModel {
     }
 
     func cancelImport() {
+        defer { scheduleRuntimeSetupUpdate() }
         searchTask?.cancel(); searchTask = nil; searchGeneration = UUID()
         importComponent = nil; importRuntimeBundle = nil; importState = nil; extraRoots = []
         if consentRequest?.mode == .importGPTK { consentRequest = nil }
@@ -374,6 +393,7 @@ final class AppModel {
     }
 
     func cancel(_ id: String) {
+        defer { scheduleRuntimeSetupUpdate() }
         tasks[id]?.cancel()
         if consentRequest?.id == id { consentRequest = nil }
         if importComponent?.id.rawValue == id || importRuntimeBundle?.id.rawValue == id { cancelImport() }
@@ -568,6 +588,35 @@ final class AppModel {
                 canImportGPTK: false, needsConsent: false))
         }
         rows = result
+        scheduleRuntimeSetupUpdate()
+    }
+
+    func setRuntimeSetupProgress(_ progress: RuntimeSetupProgress?, for id: String) {
+        if runtimeSetupProgress[id] != progress { runtimeSetupProgress[id] = progress }
+    }
+
+    private func cacheRuntimeConsent(_ accepted: Bool, for component: RuntimeComponent) {
+        guard component.consent != nil else { return }
+        runtimeConsentRevision = UUID(); runtimeConsentAccepted[component.id.rawValue] = accepted
+    }
+
+    var canStartRuntimeSetupItem: Bool {
+        tasks.isEmpty && working.isEmpty && consentRequest == nil && importState == nil
+    }
+
+    func runtimeSetupItemState(_ id: String) -> RuntimeSetupItemState {
+        // A fresh chain must wait for cancellation drainage, not subscribe to
+        // an attempt that can no longer complete its install.
+        if tasks[id]?.isCancelled == true { return .blocked }
+        if tasks[id] != nil || consentRequest?.id == id || importRuntimeBundle?.id.rawValue == id || importComponent?.id.rawValue == id {
+            if case .working(_, let fraction) = working[id] { return .busy(fraction: fraction) }
+            return .busy(fraction: nil)
+        }
+        if working[id] != nil { return .blocked }
+        if let error = errors[id] { return .failed(error) }
+        if bundle(id) != nil { return installedBundles[id] == nil ? .idle : .installed }
+        if let component = requestedComponent(id), installed.contains(where: { $0.kind == component.kind && $0.version == component.version.rawValue }) { return .installed }
+        return .idle
     }
 
     func show(_ error: any Error) {

@@ -68,6 +68,8 @@ struct RootView: View {
                 VoicePacksSheet(game: Self.game(id))
             case .settings(let id):
                 GameSettingsSheet(game: Self.game(id))
+            case .setup(let id):
+                RuntimeSetupSheet(game: Self.game(id)) { panel = .runtimes }
             }
         }
         // While a panel is open, its sheet presents the consent and import flow instead.
@@ -111,6 +113,7 @@ struct RootView: View {
         case "install": gameSheet = .install(selectedID)
         case "voices": gameSheet = .voices(selectedID)
         case "settings": gameSheet = .settings(selectedID)
+        case "setup": gameSheet = .setup(selectedID)
         default: break
         }
     }

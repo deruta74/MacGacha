@@ -225,15 +225,6 @@ import RuntimeManager
         }
     }
     func missingComponents(for id: String) -> Bool {
-        let settings = launchSettings(for: id)
-        #if DEBUG
-        if debugLaunchRuntimesReady { return false }
-        #endif
-        guard let bundle = manifest?.defaultBundle(for: settings.backend), installedBundles[bundle.id.rawValue] != nil else { return true }
-        guard settings.compatibilityPatches, let recipe = Recipes.recipe(for: id) else { return false }
-        let kind: ComponentKind
-        switch recipe.wrapper { case .none: return false; case .jadeite: kind = .jadeite; case .steamShim: kind = .steamShim }
-        guard let component = manifest?.components.first(where: { $0.kind == kind }) else { return true }
-        return !installed.contains { $0.kind == kind && $0.version == component.version.rawValue }
+        runtimeSetupRequirements(for: id).map { !$0.isEmpty } ?? true
     }
 }
