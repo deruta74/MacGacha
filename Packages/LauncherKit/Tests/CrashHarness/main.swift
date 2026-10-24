@@ -46,6 +46,10 @@ struct CrashHarness {
     static func main() async {
         do {
             let args = CommandLine.arguments
+            if args.count == 5, args[1] == "launch-integration" {
+                try await runLaunchIntegration(root: URL(fileURLWithPath: args[2]), mode: args[3], conflict: args[4] == "conflict")
+                return
+            }
             if args.count == 6, args[1] == "hold-wine-server-lock" {
                 try await BlockingIO.run {
                     let fs = try ContainedFileSystem(root: URL(fileURLWithPath: args[2]))

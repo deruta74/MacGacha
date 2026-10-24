@@ -105,9 +105,11 @@ public struct HiddenFiles: Sendable {
             // The resolved snapshot is durable before transient ownership state
             // is removed. Published recovery reports and copies are never removed.
             try removeState(session, journal: journal)
-            hooks.reach(.beforeJournalDelete)
-            if !retainResolvedJournal { try journal.delete(game: session.game) }
-            hooks.reach(.afterJournalDelete)
+            if !retainResolvedJournal {
+                hooks.reach(.beforeJournalDelete)
+                try journal.delete(game: session.game)
+                hooks.reach(.afterJournalDelete)
+            }
             return conflicts.isEmpty ? .clean : .conflict(movedTo: conflicts)
         } catch let changed as ChangedSource {
             session.state = .recoveryConflict
