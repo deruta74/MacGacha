@@ -524,6 +524,16 @@ public struct ContainedFileSystem: Sendable, Hashable {
         try synchronizeDirectories(path.components, createMissing: true)
     }
 
+    /// Inspect the pinned directory itself, never a symlink or its target.
+    package func requirePrivateDirectory(at path: SafeRelativePath) throws {
+        guard let fd = try directory(path.components, create: false) else { throw LauncherError.io("Recovery directory is missing") }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_uid == geteuid(), info.st_mode & 0o777 == 0o700 else {
+            throw LauncherError.unsafePath("Recovery directory must be owner-only")
+        }
+    }
+
     /// Heals both the leaf-parent barrier and interrupted ancestor creation.
     /// Never creates missing directories or follows links.
     package func synchronizeAncestors(of path: SafeRelativePath) throws {

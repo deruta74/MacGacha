@@ -11,8 +11,12 @@ public enum RestoreOutcome: Equatable, Sendable {
 public struct HiddenFiles: Sendable {
     private let fileOps: any FileOps
     private let hooks: LaunchFileHooks
+    private let externalRecoveryNeeded: @Sendable (FileSystemIdentity, FileSystemIdentity) -> Bool
     public init() { self.init(fileOps: SystemFileOps(), hooks: .none) }
-    package init(fileOps: any FileOps = SystemFileOps(), hooks: LaunchFileHooks = .none) { self.fileOps = fileOps; self.hooks = hooks }
+    package init(fileOps: any FileOps = SystemFileOps(), hooks: LaunchFileHooks = .none,
+        externalRecoveryNeeded: @escaping @Sendable (FileSystemIdentity, FileSystemIdentity) -> Bool = { $0.volume != $1.volume }) {
+        self.fileOps = fileOps; self.hooks = hooks; self.externalRecoveryNeeded = externalRecoveryNeeded
+    }
     public func hide(_ paths: [SafeRelativePath], session: inout LaunchSession, journal: LaunchJournal) throws {
         try session.validate()
         guard session.state == .preparing, session.hides.isEmpty, paths.count <= 256,
@@ -65,12 +69,13 @@ public struct HiddenFiles: Sendable {
         session = persisted
         do {
             let fs = try installFileSystem(session).pinRoot()
-            let recoveryFS = try ContainedFileSystem(root: journal.paths.root, fileOps: fileOps).pinRoot()
+            let appFS = try ContainedFileSystem(root: journal.paths.root, fileOps: fileOps).pinRoot()
             session.state = .restoring
             hooks.reach(.beforeRestoreStateWrite)
             try journal.write(session)
             hooks.reach(.afterRestoreStateWrite)
             var note = try readNote(session, journal: journal)
+            let recoveryFS = try prepareRecoveryLocation(session: &session, journal: journal, fs: fs, appFS: appFS, note: &note)
             while let entry = session.hides.first {
                 try restoreEntry(entry, session: session, fs: fs, recoveryFS: recoveryFS, journal: journal, note: &note)
                 session.hides.removeFirst()
@@ -91,7 +96,7 @@ public struct HiddenFiles: Sendable {
                 }
             }
             let conflicts = try note.entries.filter { $0.reason != .duplicate }.map {
-                try recoveryPath($0.entry.path, session: session, journal: journal).resolved(against: journal.paths.root)
+                try recoveryPath($0.entry.path, session: session, journal: journal).resolved(against: recoveryBase(session, journal: journal))
             }
             session.state = conflicts.isEmpty ? .done : .recoveryConflict
             hooks.reach(.beforeFinalWrite)
@@ -116,6 +121,75 @@ public struct HiddenFiles: Sendable {
             try? journal.write(session)
             try? publishPendingReport(session, journal: journal)
             return .pending(reason: "Launch files could not be fully restored: \(error)")
+        }
+    }
+
+    private func recoveryBase(_ session: LaunchSession, journal: LaunchJournal) -> URL {
+        session.recoveryLocation?.root ?? journal.paths.root
+    }
+
+    private func prepareRecoveryLocation(session: inout LaunchSession, journal: LaunchJournal,
+        fs: ContainedFileSystem, appFS: ContainedFileSystem, note: inout RecoveryNote) throws -> ContainedFileSystem {
+        let parentURL = session.installRoot.deletingLastPathComponent()
+        let relative = try SafeRelativePath(".macgacha-recovery/\(session.game)/\(session.sessionID.uuidString)")
+        if let location = session.recoveryLocation {
+            let parent = try ContainedFileSystem(root: parentURL, fileOps: fileOps, expectedRootIdentity: location.parentIdentity).pinRoot()
+            try validateRecoveryDirectories(parent, relative: relative)
+            guard let recovery = try parent.pinDirectoryIfPresent(at: relative), try recovery.rootIdentity() == location.identity else {
+                throw LauncherError.io("Recovery directory was replaced")
+            }
+            return recovery
+        }
+        guard externalRecoveryNeeded(try fs.rootIdentity(), try appFS.rootIdentity()) else { return appFS }
+        var needsArea = !note.entries.isEmpty || note.intents?.contains(where: { !$0.original }) == true
+        for entry in session.hides where !needsArea {
+            let hidden = try session.hiddenPath(entry)
+            if let actual = try fingerprint(hidden, in: fs) {
+                needsArea = try actual != Fingerprint(entry) || (fs.entryStamp(at: hidden)?.links != 1)
+                    || (try fs.itemType(at: entry.path, allowingLeafSymlink: true) != nil)
+            }
+        }
+        guard needsArea else { return appFS }
+        // A legacy EXDEV attempt may already have an app-data intent, but no
+        // publication. Migrate only after proving every such copy is still hidden.
+        for record in note.entries {
+            let destination = try recoveryPath(record.entry.path, session: session, journal: journal)
+            guard try appFS.itemType(at: destination, allowingLeafSymlink: true) == nil,
+                try fingerprint(session.hiddenPath(record.entry), in: fs) == record.actual else {
+                throw LauncherError.io("Existing recovery ownership needs attention")
+            }
+        }
+        for intent in note.intents ?? [] where !intent.original {
+            guard intent.quarantine == nil,
+                let stamp = try fs.entryStamp(at: session.hiddenPath(intent.entry)), intent.stamp.sameObject(as: stamp),
+                try fingerprint(session.hiddenPath(intent.entry), in: fs) == intent.actual else {
+                throw LauncherError.io("Existing recovery intent needs attention")
+            }
+        }
+        let parent = try ContainedFileSystem(root: parentURL, fileOps: fileOps).pinRoot()
+        guard try parent.rootIdentity().volume == fs.rootIdentity().volume else {
+            throw LauncherError.io("No recovery area outside the installation on its volume")
+        }
+        for count in 1...relative.components.count {
+            let directory = try SafeRelativePath(relative.components.prefix(count).joined(separator: "/"))
+            try parent.createDirectoryDurably(at: directory)
+            try parent.requirePrivateDirectory(at: directory)
+        }
+        guard let recovery = try parent.pinDirectoryIfPresent(at: relative) else { throw LauncherError.io("Recovery directory is missing") }
+        // Forget only failed cross-volume intents, while the durable hide list
+        // still owns every source. Persist the new destination before any rename.
+        note.entries.removeAll()
+        note.intents?.removeAll { !$0.original }
+        try writeNote(note, session: session, journal: journal)
+        session.recoveryLocation = LaunchRecoveryLocation(root: relative.resolved(against: parentURL),
+            parentIdentity: try parent.rootIdentity(), identity: try recovery.rootIdentity())
+        try journal.write(session)
+        return recovery
+    }
+
+    private func validateRecoveryDirectories(_ parent: ContainedFileSystem, relative: SafeRelativePath) throws {
+        for count in 1...relative.components.count {
+            try parent.requirePrivateDirectory(at: SafeRelativePath(relative.components.prefix(count).joined(separator: "/")))
         }
     }
 
@@ -198,7 +272,7 @@ public struct HiddenFiles: Sendable {
             if intent.quarantineRequired == true {
                 try markChanged(intent, session: session, fs: fs, recoveryFS: recoveryFS, journal: journal, note: &note)
             }
-            throw ChangedSource(locations: [try recoveryPath(entry.path, session: session, journal: journal).resolved(against: journal.paths.root)])
+            throw ChangedSource(locations: [try recoveryPath(entry.path, session: session, journal: journal).resolved(against: recoveryBase(session, journal: journal))])
         }
         let hidden = try session.hiddenPath(entry)
         if try fs.itemType(at: hidden, allowingLeafSymlink: true) != nil {
@@ -242,7 +316,7 @@ public struct HiddenFiles: Sendable {
             note.intents?[index].reviewRequired = true
             note.intents?[index].quarantineRequired = false
             try writeNote(note, session: session, journal: journal)
-            throw ChangedSource(locations: [destination.resolved(against: journal.paths.root)])
+            throw ChangedSource(locations: [destination.resolved(against: recoveryBase(session, journal: journal))])
         }
         let unverified = try SafeRelativePath(recoveryPath(intent.entry.path, session: session, journal: journal).description + ".unverified")
         var operation: QuarantineIntent
@@ -268,7 +342,7 @@ public struct HiddenFiles: Sendable {
             guard let expected, let current = try recoveryFS.entryStamp(at: unverified), expected.sameObject(as: current) else {
                 throw LauncherError.io("Recorded quarantine changed; manual recovery needed")
             }
-            throw ChangedSource(locations: [unverified.resolved(against: journal.paths.root)])
+            throw ChangedSource(locations: [unverified.resolved(against: recoveryBase(session, journal: journal))])
         case .returning:
             try returnDisplaced(operation, index: index, original: destination, sourceFS: sourceFS,
                 recoveryFS: recoveryFS, session: session, journal: journal, note: &note)
@@ -281,7 +355,7 @@ public struct HiddenFiles: Sendable {
                 else { throw LauncherError.io("Quarantine destination identity is uncertain; manual recovery needed") }
                 note.intents?[index].quarantine = operation
                 try writeNote(note, session: session, journal: journal)
-                throw ChangedSource(locations: [unverified.resolved(against: journal.paths.root)])
+                throw ChangedSource(locations: [unverified.resolved(against: recoveryBase(session, journal: journal))])
             }
             hooks.reach(.beforeQuarantineRename)
             let moved = try sourceFS.quarantineEntry(at: destination, to: unverified, in: recoveryFS,
@@ -297,7 +371,7 @@ public struct HiddenFiles: Sendable {
                 try returnDisplaced(operation, index: index, original: destination, sourceFS: sourceFS,
                     recoveryFS: recoveryFS, session: session, journal: journal, note: &note)
             }
-            throw ChangedSource(locations: [unverified.resolved(against: journal.paths.root)])
+            throw ChangedSource(locations: [unverified.resolved(against: recoveryBase(session, journal: journal))])
         }
     }
 
@@ -338,14 +412,14 @@ public struct HiddenFiles: Sendable {
                 operation.state = .conflict
                 note.intents?[index].quarantine = operation
                 try writeNote(note, session: session, journal: journal)
-                throw ChangedSource(locations: [operation.destination.resolved(against: journal.paths.root)])
+                throw ChangedSource(locations: [operation.destination.resolved(against: recoveryBase(session, journal: journal))])
             }
             throw LauncherError.io("original replaced by another file")
         }
         operation.state = .conflict
         note.intents?[index].quarantine = operation
         try writeNote(note, session: session, journal: journal)
-        throw ChangedSource(locations: [operation.destination.resolved(against: journal.paths.root)])
+        throw ChangedSource(locations: [operation.destination.resolved(against: recoveryBase(session, journal: journal))])
     }
 
     private func writeNote(_ note: RecoveryNote, session: LaunchSession, journal: LaunchJournal) throws {
@@ -431,7 +505,8 @@ public struct HiddenFiles: Sendable {
         lhs.path == rhs.path && lhs.hiddenName == rhs.hiddenName && lhs.size == rhs.size && lhs.sha256 == rhs.sha256
     }
     private func recoveryPath(_ path: SafeRelativePath, session: LaunchSession, journal: LaunchJournal) throws -> SafeRelativePath {
-        try journal.relative(session.game, "recovery/\(session.sessionID.uuidString)/\(path)")
+        if session.recoveryLocation != nil { return path }
+        return try journal.relative(session.game, "recovery/\(session.sessionID.uuidString)/\(path)")
     }
     private func notePath(_ session: LaunchSession, journal: LaunchJournal) throws -> SafeRelativePath {
         try journal.relative(session.game, "recovery/\(session.sessionID.uuidString).json")

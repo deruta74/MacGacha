@@ -91,7 +91,9 @@ struct SessionWatcher: Sendable {
                 scope: session.inspectionScope(runtimesRoot: runtimesRoot))
             let games = processes.filter { Self.isGame($0, name: gameName) }.map(\.identity)
             let server = processes.contains { ["wineserver", "wineserver64"].contains(Self.basename($0.executablePath)) }
-            let wrapper = session.processes.first.map { inspector.isAlive($0) } ?? false
+            // Prefix-matching wrappers/helpers can survive the crash before their
+            // identity write. Readable steam.exe/jadeite.exe are starting too.
+            let wrapper = !processes.isEmpty || (session.processes.first.map { inspector.isAlive($0) } ?? false)
             return (games, server, wrapper)
         }
     }

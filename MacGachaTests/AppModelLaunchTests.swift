@@ -13,6 +13,25 @@ import RuntimeManager
 
 @Suite(.serialized) @MainActor
 struct AppModelLaunchTests {
+    @Test func unresolvedStartupRetainsReservationQuitProtectionAndRetries() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        await fixture.services.setUnresolved(true)
+        await fixture.model.reattachOnStart()
+        #expect(fixture.model.launchSlotOwner == "genshin")
+        #expect(fixture.model.liveSessionGameName == String(localized: "Genshin Impact"))
+        guard case .recoveryNeeded = fixture.model.launchState(for: "genshin") else { Issue.record("Missing unresolved recovery"); return }
+        await fixture.services.failRecovery(1)
+        fixture.model.retryRecovery("genshin")
+        await fixture.model.recoveryInFlight["genshin"]?.value
+        #expect(fixture.model.launchSlotOwner == "genshin")
+        #expect(fixture.model.liveSessionGameName != nil)
+        await fixture.retryClock.waitForRequests(1)
+        await fixture.retryClock.tick()
+        await launchModelEventually { fixture.model.launchSlotOwner == nil }
+        #expect(fixture.model.liveSessionGameName == nil)
+        #expect(await fixture.services.recoveryCalls == 2)
+    }
+
     @Test func settingsSaveOnlyTheirGame() async throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
         await fixture.model.reattachOnStart()
@@ -289,6 +308,11 @@ struct AppModelLaunchTests {
 }
 
 private actor LaunchModelServices: LaunchServices, GameOperationGuard {
+    var unresolved = false
+    func setUnresolved(_ value: Bool) { unresolved = value }
+    func startupReattachment() async throws -> LaunchStartupResult {
+        LaunchStartupResult(sessions: try await reattach(), unresolved: unresolved ? ["genshin"] : [])
+    }
     let gate: LaunchStartupGate?
     var busy = false
     var guardCalls: [String] = []
@@ -322,11 +346,12 @@ private actor LaunchModelServices: LaunchServices, GameOperationGuard {
     func recover(_ id: String) async throws {
         recoveryCalls += 1
         if recoveryCalls <= recoveryFailures { throw LauncherError.busy("Injected recovery barrier") }
-        currentSession = nil
+        currentSession = nil; unresolved = false
     }
     private var observationGate: LaunchStartupGate?
     func delayNextObservation(_ gate: LaunchStartupGate) { observationGate = gate }
     func observation(_ id: String) async throws -> LaunchObservation? {
+        if unresolved { throw LauncherError.busy("Unreadable launch journal") }
         let snapshot = currentSession.map { LaunchObservation(session: $0, hasEnded: ended) }
         if let gate = observationGate { observationGate = nil; await gate.pause() }
         return snapshot

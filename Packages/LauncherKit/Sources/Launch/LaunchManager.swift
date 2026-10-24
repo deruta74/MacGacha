@@ -5,6 +5,15 @@ import LauncherCore
 import GameLibrary
 import RuntimeManager
 
+public struct LaunchStartupResult: Sendable {
+    public let sessions: [String: LaunchSession]
+    /// Journal discovery/read or ownership failed; absence is not established.
+    public let unresolved: Set<String>
+    public init(sessions: [String: LaunchSession] = [:], unresolved: Set<String> = []) {
+        self.sessions = sessions; self.unresolved = unresolved
+    }
+}
+
 /// Owns supervision independently of any UI observer. Cancelling or discarding the
 /// event stream detaches that observer; it never cancels the game or its restore.
 public actor LaunchManager {
@@ -27,6 +36,7 @@ public actor LaunchManager {
     private let beforeRecoveryRead: @Sendable () async throws -> Void
     private let sessionProvenance: @Sendable () throws -> (bootSessionUUID: String, sessionStartTime: UInt64)
     private var contexts: [String: Context] = [:]
+    private var unresolvedStartup: Set<String> = []
     private var reservedGame: String?
     private var recovering = false
     private var guardRecoveries: Set<String> = []
@@ -120,7 +130,7 @@ public actor LaunchManager {
     public func launch(game: GameDefinition, installRoot: URL, gameBuild: String) -> AsyncStream<LaunchEvent> {
         let pair = AsyncStream<LaunchEvent>.makeStream()
         // Reserve synchronously, before an actor reentrancy point or any I/O.
-        if let busy = reservedGame ?? contexts.keys.sorted().first ?? supervision.keys.sorted().first {
+        if let busy = reservedGame ?? contexts.keys.sorted().first ?? supervision.keys.sorted().first ?? unresolvedStartup.sorted().first {
             event("Launch failed", game: game.id, level: .error, metadata: ["stage": "lock"])
             pair.continuation.yield(.stage(.lock))
             pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "\(Self.name(busy)) is running"), logURL: nil,
@@ -150,6 +160,7 @@ public actor LaunchManager {
         let snapshot = try await read(game: game)
         if let context = contexts[game] { return (context.session, context.hasEnded) }
         guard snapshot == nil else { throw LauncherError.busy("Launch recovery is required") }
+        unresolvedStartup.remove(game)
         return nil
     }
 
@@ -371,6 +382,7 @@ public actor LaunchManager {
     private func observed(game: String, processes: [ProcessIdentity]) async throws {
         guard let context = contexts[game] else { return }
         context.watchPhase = .running
+        context.session.startupPending = false
         context.session.state = .running
         context.session.processes = Array(Set(context.session.processes + processes)).sorted { $0.pid < $1.pid }
         try await persist(context.session)
@@ -422,7 +434,8 @@ public actor LaunchManager {
         do {
             try await BlockingIO.run {
                 if case .conflict(let movedTo) = outcome {
-                    try RecoveryNoticeStore(paths: paths).record(RecoveryNotice(id: session.sessionID, game: session.game, movedTo: movedTo))
+                    try RecoveryNoticeStore(paths: paths).record(RecoveryNotice(id: session.sessionID, game: session.game,
+                        movedTo: movedTo, recoveryRoot: session.recoveryLocation?.root))
                 }
                 // Publish notification first. Deletion always syncs the parent,
                 // including a retry after unlink succeeded but its fsync failed.
@@ -459,6 +472,7 @@ public actor LaunchManager {
         guard context.hasEnded, context.session.endLogged != true else { return }
         var snapshot = context.session
         snapshot.endLogged = true
+        snapshot.startupPending = false
         // Durable before enqueue: a crash may lose a best-effort line, but must
         // never produce another end notification on the next recovery attempt.
         try await persist(snapshot)
@@ -498,6 +512,7 @@ public actor LaunchManager {
                     persisted.processGroupIDs = (persisted.processGroupIDs ?? []).union([owned.pid])
                 }
                 persisted.state = .recoveryPending
+                persisted.startupPending = !context.hasEnded && context.watchPhase == .spawning
                 try await persist(persisted)
                 context.session = persisted
             }
@@ -542,19 +557,32 @@ public actor LaunchManager {
         await reattachAll(recoveryGame: nil)
     }
 
+    public func reattachStartup() async -> LaunchStartupResult {
+        let sessions = await reattachAll()
+        return LaunchStartupResult(sessions: sessions, unresolved: unresolvedStartup)
+    }
+
     private func reattachAll(recoveryGame: String?) async -> [String: LaunchSession] {
         guard !recovering else { return contexts.mapValues(\.session) }
         recovering = true
         defer { recovering = false }
         for game in Recipes.games where contexts[game] == nil && (!guardRecoveries.contains(game) || recoveryGame == game) {
             do {
-                guard let snapshot = try await read(game: game) else { continue }
-                let paths = paths
-                let (lock, pin) = try await BlockingIO.run {
-                    (try SessionLock.acquire(paths: paths, game: game), try RuntimePin.pin(paths: paths, componentIDs: snapshot.componentIDs))
+                guard try await read(game: game) != nil else { unresolvedStartup.remove(game); continue }
+                let paths = paths, journalFileOps = journalFileOps, beforeJournalRead = beforeJournalRead
+                let owned = try await BlockingIO.run { () throws -> (LaunchSession, SessionLock, RuntimePin)? in
+                    let lock = try SessionLock.acquire(paths: paths, game: game)
+                    // Discovery precedes exclusion. Another launcher may have
+                    // finalized or replaced that journal while we awaited it.
+                    let journal = LaunchJournal(paths: paths, fileOps: journalFileOps, beforeRead: beforeJournalRead)
+                    guard let current = try journal.read(game: game) else { return nil }
+                    let pin = try RuntimePin.pin(paths: paths, componentIDs: current.componentIDs)
+                    return (current, lock, pin)
                 }
+                guard let (snapshot, lock, pin) = owned else { unresolvedStartup.remove(game); continue }
                 let context = Context(session: snapshot, lock: lock, pin: pin)
                 contexts[game] = context
+                unresolvedStartup.remove(game)
                 if let url = snapshot.sessionLogURL,
                     url.deletingLastPathComponent().standardizedFileURL == paths.logs.standardizedFileURL,
                     LaunchLogFiles.parseName(url.lastPathComponent)?.game == game {
@@ -563,7 +591,11 @@ public actor LaunchManager {
                     sessionLogWriter.post(.cap(log), bytes: 0)
                 }
                 do {
-                    if try await alive(snapshot) {
+                    // Spawning without identities may precede a delayed Wine
+                    // wrapper. Only startup's complete absence grace can end it.
+                    let present = try await alive(snapshot)
+                    let starting = snapshot.state == .spawning || snapshot.startupPending == true || present
+                    if starting {
                         guard let executable = Self.executable(snapshot) else {
                             await pending(context, reason: "The snapshot's executable could not be confirmed"); continue
                         }
@@ -583,7 +615,7 @@ public actor LaunchManager {
                         context.worker = task; supervision[game] = task
                     }
                 }
-            } catch { /* A busy or unreadable snapshot is retained for the next recovery attempt. */ }
+            } catch { unresolvedStartup.insert(game) }
         }
         return contexts.mapValues(\.session)
     }
@@ -598,13 +630,9 @@ public actor LaunchManager {
         return try await BlockingIO.run {
             let processes = try inspector.processes(environmentContains: "WINEPREFIX", value: session.prefix.path, scope: scope)
             if session.processes.contains(where: { inspector.isAlive($0) }) { return true }
-            guard let executable = Self.executable(session)?.lowercased() else { throw LauncherError.io("Unknown snapshot executable") }
-            return processes.contains {
-                let leaf = URL(fileURLWithPath: $0.executablePath).lastPathComponent.lowercased()
-                if leaf == "wineserver" || leaf == "wineserver64" || leaf == executable { return true }
-                return ["wine", "wine64", "wine-preloader", "wine64-preloader"].contains(leaf)
-                    && $0.arguments.first.map { Self.executableLeaf($0) == executable } == true
-            }
+            // Any prefix-matching helper can still start the game after a crash
+            // before the wrapper identity was journaled.
+            return !processes.isEmpty
         }
     }
 
@@ -647,6 +675,7 @@ public actor LaunchManager {
             let snapshot = try await read(game: game)
             try requireGuardOwnership(game: game)
             guard contexts[game] == nil, snapshot == nil else { throw LauncherError.busy("Launch recovery is required") }
+            unresolvedStartup.remove(game)
             return
         }
         guard context.session.state == .recoveryPending || context.session.state == .recoveryConflict else {

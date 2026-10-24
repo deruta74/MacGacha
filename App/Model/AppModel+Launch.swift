@@ -72,8 +72,13 @@ import RuntimeManager
             guard let self else { return }
             do {
                 // Recovery runs first even if launch preferences are corrupt.
-                let sessions = try await services.reattach()
-                for (id, session) in sessions {
+                let startup = try await services.startupReattachment()
+                for id in startup.unresolved.sorted() {
+                    self.liveLaunchGames.insert(id)
+                    self.showRecovery(id)
+                    self.monitorUncertainLaunch(id)
+                }
+                for (id, session) in startup.sessions {
                     await self.applySession(session, id: id)
                     if self.launchSlotOwner == id { self.monitorReattached(id) }
                 }
