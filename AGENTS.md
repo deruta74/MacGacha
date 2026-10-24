@@ -21,7 +21,7 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 
 | Path | What lives there |
 |---|---|
-| `App/` | The SwiftUI app. `Model/`: `AppModel`, service adapters and launch integration (persisted region selection with three visible editions, lazy per-region remote status/art, other-region activity summaries, observable launch state, per-game/global settings, startup reattachment, recovery notices, a launch-slot reservation through preparation and recovery, guarded recovery retries (including unresolved startup journals), and verified-end window lifecycle). `Views/`. `Resources/`: `Localizable.xcstrings`, `runtime-manifest.json`, credits. |
+| `App/` | The SwiftUI app. `Model/`: `AppModel`, service adapters, recommended runtime setup (shared missing-component plans, cached Apple consent, sequential installs with shared-item progress/cancellation) and launch integration (persisted region selection with three visible editions, lazy per-region remote status/art, other-region activity summaries, observable launch state, per-game/global settings, startup reattachment, recovery notices, a launch-slot reservation through preparation and recovery, guarded recovery retries (including unresolved startup journals), and verified-end window lifecycle). `Views/`. `Resources/`: `Localizable.xcstrings`, `runtime-manifest.json`, credits. |
 | `MacGachaTests/` | App unit tests (Swift Testing), run through `xcodebuild test`. |
 | `Packages/LauncherKit/` | SwiftPM package with all logic. The app is a thin layer over it. |
 | `compat/steam-shim/` | Reproducible build inputs, notices and `SHA256SUMS` for the Proton `steam.exe` shim. |
@@ -116,6 +116,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
   - HoYoPlay art;
   - diagnostics;
   - localization: English and Simplified Chinese; HoYoPlay art and news follow the interface language.
+- Recommended runtime setup model: `runtimeSetupPlan(for:)`, `installRecommended(for:)`, `cancelRuntimeSetup(for:)`, observable per-game progress and failure dismissal. Plans share the launch requirement check; consent uses the existing sheet and accepted-state cache. Chains serialize downloads, join existing items, preserve completed installs after failure, and survive region/game changes. The footer's "Set Up…" opens `RuntimeSetupSheet` (item list, sizes, Apple-terms note, Choose Manually… to the Runtimes panel) and shows chain progress with a stop button and a failure line.
 - **In progress:** one-click Play.
   - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy, prefix launch preparation, session logs with a global off setting and per-launch copies, session locks and runtime pins, launch manager state machine with exclusive watch/reattach/restore ownership and acknowledged recovery notices; milestone safety fixes add under-lock journal barriers, unresolved-startup protection, pinned runtime replacement and same-volume external-install recovery.
   - App launch model integration includes guarded recovery retries (5/15/60 seconds, then every minute and on activation), explicit Retry, and a launch reservation through durable finalization; the Play footer, settings and quit/recovery presentation remain pending view-layer integration.

@@ -9,13 +9,14 @@ import SwiftUI
 
 /// Sheets that act on one game, opened from its footer.
 enum GameSheet: Identifiable, Hashable {
-    case install(String), voices(String), settings(String)
+    case install(String), voices(String), settings(String), setup(String)
 
     var id: String {
         switch self {
         case .install(let game): "install-\(game)"
         case .voices(let game): "voices-\(game)"
         case .settings(let game): "settings-\(game)"
+        case .setup(let game): "setup-\(game)"
         }
     }
 }
@@ -151,6 +152,11 @@ struct GameFooter: View {
             }
         }
         if let launchLine { return launchLine }
+        switch model.runtimeSetupProgress[game.id] {
+        case .installing: return String(localized: "Getting \(game.name) ready to play", comment: "Status while runtime setup runs; the argument is the game's name")
+        case .failed(let message): return String(localized: "Setup didn't finish: \(message)", comment: "Runtime setup failure; the argument is the reason")
+        case nil: break
+        }
         // A disabled button shows no tooltip on macOS, so the reason it waits goes here.
         if let busy = busyElsewhere { return busy }
         switch state.status {
@@ -297,8 +303,15 @@ struct PrimaryActionButton: View {
         case .update(let tag):
             prominent("Update to \(tag)") { model.updateGame(game.id) }
         case .setUpRuntimes:
-            // Opening Runtimes doesn't compete with a game download.
-            prominent("Set Up Runtimes", alwaysEnabled: true) { panel = .runtimes }
+            // Runtime downloads don't compete with a game download.
+            if case .installing(let item, let step, let total, let fraction) = model.runtimeSetupProgress[game.id] {
+                setupProgress(item: item, step: step, total: total, fraction: fraction)
+            } else {
+                prominent("Set Up…", alwaysEnabled: true) {
+                    model.dismissRuntimeSetupFailure(for: game.id)
+                    gameSheet = .setup(game.id)
+                }
+            }
         case .locationUnavailable:
             waiting("Location Unavailable")
                 .help(unavailablePath)
@@ -384,6 +397,46 @@ struct PrimaryActionButton: View {
         }
         .padding(.leading, 18)
         .padding(.trailing, canPause ? 8 : 18)
+        .frame(height: 52)
+        .foregroundStyle(.white)
+        .glassEffect(.regular, in: .capsule)
+    }
+
+    /// The recommended runtimes install one after another; the label says which one and how far along the list.
+    private func setupProgress(item: String, step: Int, total: Int, fraction: Double?) -> some View {
+        let label = total > 1
+            ? String(localized: "Installing \(item) (\(step) of \(total))…", comment: "Runtime setup progress; component name, its position, the number of components")
+            : String(localized: "Installing \(item)…", comment: "Runtime setup progress; the argument is the component name")
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(label)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                if let fraction {
+                    ProgressView(value: fraction)
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
+            }
+            .tint(game.tint)
+            .frame(minWidth: 300, alignment: .leading)
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            Button {
+                model.cancelRuntimeSetup(for: game.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .help("Stop Setup")
+            .accessibilityLabel("Stop Setup")
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 8)
         .frame(height: 52)
         .foregroundStyle(.white)
         .glassEffect(.regular, in: .capsule)

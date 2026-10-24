@@ -55,6 +55,17 @@
         }
       }
     },
+    "%@ is a Windows game. MacGacha runs it with these compatibility components, matched to the game's settings." : {
+      "comment" : "Runtime setup sheet explanation; the argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 是 Windows 游戏。MacGacha 会根据该游戏的设置，使用以下兼容性组件运行游戏。"
+          }
+        }
+      }
+    },
     "%@ is downloading — pause it to start this one" : {
       "comment" : "The argument is another game's name",
       "localizations" : {
@@ -385,6 +396,16 @@
         }
       }
     },
+    "Choose Manually…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动选择…"
+          }
+        }
+      }
+    },
     "Choose a folder that already has %@. MacGacha checks it and downloads only what's missing." : {
       "localizations" : {
         "zh-Hans" : {
@@ -431,6 +452,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择…"
+          }
+        }
+      }
+    },
+    "Close" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
           }
         }
       }
@@ -525,6 +556,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "D3DMetal %@"
+          }
+        }
+      }
+    },
+    "D3DMetal is Apple software. You'll be asked to accept Apple's license terms before it downloads." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D3DMetal 是 Apple 软件。下载前，你需要接受 Apple 的许可条款。"
           }
         }
       }
@@ -664,6 +705,16 @@
         }
       }
     },
+    "Everything %@ needs is installed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 所需的组件均已安装。"
+          }
+        }
+      }
+    },
     "Export Diagnostic Bundle…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -790,6 +841,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "从 Apple 获取 Game Porting Toolkit"
+          }
+        }
+      }
+    },
+    "Getting %@ ready to play" : {
+      "comment" : "Status while runtime setup runs; the argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在为%@准备运行环境"
           }
         }
       }
@@ -985,6 +1047,34 @@
         }
       }
     },
+    "Installing %@ (%lld of %lld)…" : {
+      "comment" : "Runtime setup progress; component name, its position, the number of components",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Installing %1$@ (%2$lld of %3$lld)…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在安装%@（第 %lld 项，共 %lld 项）…"
+          }
+        }
+      }
+    },
+    "Installing %@…" : {
+      "comment" : "Runtime setup progress; the argument is the component name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在安装%@…"
+          }
+        }
+      }
+    },
     "Installing…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1001,6 +1091,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "安装、更新和错误都会记录在这里。"
+          }
+        }
+      }
+    },
+    "Jadeite" : {
+      "comment" : "Runtime component name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jadeite"
           }
         }
       }
@@ -1103,6 +1204,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "MacGacha"
+          }
+        }
+      }
+    },
+    "MacGacha can't tell yet what %@ needs. Choose the runtimes manually, or try again in a moment." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 暂时无法确定%@需要哪些组件。请手动选择运行环境，或稍后再试。"
           }
         }
       }
@@ -1494,12 +1605,23 @@
         }
       }
     },
-    "Set Up Runtimes" : {
+    "Set Up %@" : {
+      "comment" : "Runtime setup sheet title; the argument is the game's name",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "设置运行环境"
+            "value" : "为%@设置运行环境"
+          }
+        }
+      }
+    },
+    "Set Up…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置运行环境…"
           }
         }
       }
@@ -1510,6 +1632,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设置"
+          }
+        }
+      }
+    },
+    "Setup didn't finish: %@" : {
+      "comment" : "Runtime setup failure; the argument is the reason",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置未完成：%@"
           }
         }
       }
@@ -1612,6 +1745,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Steam 兼容层"
+          }
+        }
+      }
+    },
+    "Stop Setup" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止设置"
           }
         }
       }
