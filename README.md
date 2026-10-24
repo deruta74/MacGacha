@@ -1,6 +1,6 @@
 # MacGacha — universal launcher for HoYoverse games on Apple Silicon
 
-> 🚧 **Work in progress.** Games can be installed, updated, verified and started with one click. Play is in final testing across all three games. There are no releases yet.
+> 🚧 **Work in progress.** Games can be installed, updated, verified and started with one click in all three games. The first beta release is being prepared.
 
 A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenless Zone Zero** on Apple Silicon. It aims to provide reliable resumable downloads, file verification, and managed Wine / DXMT / D3DMetal runtimes.
 
@@ -26,6 +26,12 @@ Code and documentation in this repository may be written or modified with assist
 - **Runtimes.** Wine, DXMT and D3DMetal are downloaded and kept side by side, so an update never breaks a working version. D3DMetal is installed only after you accept Apple's terms, or imported from an existing Game Porting Toolkit. The default DXMT build now uses CrossOver's Wine, which needs about 2.5× less CPU than the previous one.
 - **Compatibility components.** jadeite and a Steam launcher shim are installed and removed from the Runtimes window. We build the shim ourselves, reproducibly, from Valve's Proton source ([release](https://github.com/deruta74/MacGacha/releases/tag/steam-shim-proton-10.0-4)).
 - **Launcher.** One window for all three games with the official banners and background art, plus a diagnostics bundle for bug reports.
+- **One-click Play.** Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game and minimizes itself to the Dock. When the game closes, it comes back and puts back any game files it hid. Accepted in all three games on D3DMetal and DXMT.
+- **One-click setup.** When a game needs runtimes, "Set Up…" lists exactly what it needs for its settings (the Wine bundle and its compatibility component) and installs it all in one go, asking for Apple's terms only when D3DMetal is part of it. The Runtimes panel stays available for picking versions by hand.
+- **Per-game settings:** graphics backend, frame limit, Retina mode, DirectX 12 for Zenless Zone Zero, and a switch for the compatibility workaround.
+- **Recovery.** If the launcher crashes or is quit while a game runs, it finds the game again on restart and restores everything once the game exits. Quitting during a game asks first.
+- **Privacy.** Games run in their own Wine prefix with no links to your Desktop, Documents or other home folders. Session logs stay on your Mac and can be turned off in Settings.
+- **Languages.** English and Simplified Chinese interface; game news and art follow the interface language.
 
 **Verified by hand on an M5 Pro (macOS 27)**
 
@@ -39,22 +45,14 @@ All three games start and play with a community anti-cheat workaround. None of t
 
 DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin; it can be changed per game.
 
-**Working now: one-click Play** (final testing)
-- Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game and minimizes itself to the Dock. When the game closes, it comes back and puts back any game files it hid. Tested end to end with Genshin Impact.
-- One-click setup: when a game needs runtimes, "Set Up…" lists exactly what it needs for its settings (the Wine bundle and its compatibility component) and installs it all in one go, asking for Apple's terms only when D3DMetal is part of it. The Runtimes panel stays available for picking versions by hand.
-- Per-game settings: graphics backend, frame limit, Retina mode, DirectX 12 for Zenless Zone Zero, and a switch for the compatibility workaround.
-- Recovery: if the launcher crashes or is quit while a game runs, it finds the game again on restart and restores everything once the game exits. Quitting during a game asks first.
-- Privacy: games run in their own Wine prefix with no links to your Desktop, Documents or other home folders. Session logs stay on your Mac and can be turned off in Settings.
-
 **In progress**
-- **Acceptance of Play** in all three games, including online features (co-op, events, purchases), and an automated launch test against real Wine for D3DMetal and DXMT.
-- **Clearer launch logs** with the session's start, end and restore result.
+- **Mainland China editions (beta):** a region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and reaches the login screen; a Wine fix for the mainland builds' signature check comes next.
+- **First beta release** as a downloadable disk image.
 
 **Next**
 - **Display choice:** pick the monitor a game opens on when several are connected; the main display by default.
 - **Rotating banners and news** like HoYoPlay: several background arts per game, event cards, and Events / Notices / News tabs.
-- **Languages:** a translated interface, and game news and art in your language.
-- **Mainland China servers** through the miHoYo launcher endpoints.
+- **More languages** for the interface.
 - **Downloads:** estimated time remaining; pre-downloading the next version before release; smaller patch-based updates.
 - **Audio:** surround output from the games, including Spatial Audio on AirPods.
 - **Releases:** signed and notarized builds with automatic updates.
