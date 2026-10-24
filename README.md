@@ -50,7 +50,7 @@ All three games start and play with a community anti-cheat workaround. None of t
 DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin; it can be changed per game.
 
 **In progress**
-- **Mainland China editions (beta):** a region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and reaches the login screen; a Wine fix for the mainland builds' signature check comes next.
+- **Mainland China editions (beta):** a region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and reaches the login screen; CN Genshin/ZZZ on Wine 11.20 use a scoped Wine signature-verification fix, installed through Set Up without changing game files (component release publication pending).
 - **First beta release** as a downloadable disk image.
 
 **Next**

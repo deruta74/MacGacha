@@ -625,10 +625,11 @@ final class AppModel {
         if error != .cancelled { lastError = error.userMessage }
     }
     private static func id(_ component: InstalledComponent) -> String { "\(component.kind.idPrefix)-\(component.version)" }
-    private static func kindName(_ kind: ComponentKind) -> String {
+    static func kindName(_ kind: ComponentKind) -> String {
         switch kind {
         case .wine: "Wine"; case .dxmt: "DXMT"; case .d3dmetal: "D3DMetal"
-        case .jadeite: "Jadeite"; case .steamShim: String(localized: "Steam shim", comment: "Runtime component name")
+        case .crypt32Fix: String(localized: "Wine crypt32 fix", comment: "Runtime component name")
+        case .jadeite: String(localized: "Jadeite", comment: "Runtime component name"); case .steamShim: String(localized: "Steam shim", comment: "Runtime component name")
         }
     }
 }

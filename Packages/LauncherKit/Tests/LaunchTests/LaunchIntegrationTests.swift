@@ -15,7 +15,7 @@ struct LaunchIntegrationTests {
     @Test(.timeLimit(.minutes(30)), arguments: ["d3dmetal", "dxmt"])
     func realLaunchAndCrashRecovery(backend: String) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try await withProbeTestRoot(root: root, setup: { try await install(backend: backend, root: $0) }) { configuration in
+        try await withProbeTestRoot(root: root, setup: { try await installLaunchProbeRuntime(backend: backend, root: $0) }) { configuration in
             do {
                 try await cleanLaunch(configuration)
                 for step in LaunchFileStep.hideSteps {
@@ -49,7 +49,7 @@ private let restoreSteps = LaunchFileStep.restoreSteps + [.beforeClaimWrite, .af
 private let originalDLL = Data("integration original vulkan DLL".utf8)
 private let replacementDLL = Data("integration replacement vulkan DLL".utf8)
 
-private func install(backend: String, root: URL) async throws -> ProbeLaunchConfiguration {
+func installLaunchProbeRuntime(backend: String, root: URL) async throws -> ProbeLaunchConfiguration {
     let fixtures = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["MACGACHA_RUNTIME_FIXTURES"]))
     let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -305,7 +305,7 @@ private func assertClosed(_ port: UInt16) async throws {
 }
 
 /// Fixture reads retain the production component size/hash checks and never use the network.
-private struct ProbeFixtureHTTP: HTTPClient {
+struct ProbeFixtureHTTP: HTTPClient {
     let root: URL
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (DownloadEngine.HTTPResponseHead, HTTPBody) {
         try await BlockingIO.run {

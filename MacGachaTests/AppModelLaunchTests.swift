@@ -133,6 +133,29 @@ struct AppModelLaunchTests {
         try await fixture.model.flushLaunchSettings()
     }
 
+    @Test func missingCNWineFixBlocksPlayAndClearsAfterInstallation() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        let manifest = try await BundledRuntimeManifest.load()
+        let bundle = try #require(manifest.defaultBundle(for: .d3dmetal))
+        let fix = try #require(manifest.components.first { $0.id.rawValue == Crypt32Fix.componentID })
+        let runtimes = PreviewRuntimeServices()
+        for try await _ in runtimes.install(bundle, manifest: manifest, from: nil) {}
+        let model = AppModel(paths: fixture.paths, manifest: manifest, services: runtimes, defaults: nil, launchServices: fixture.services)
+        await model.reattachOnStart()
+        await model.refreshRuntimes()
+        var settings = model.launchSettings(for: "zzz-cn"); settings.compatibilityPatches = false
+        try model.saveLaunchSettings(settings, for: "zzz-cn")
+        #expect(model.missingComponents(for: "zzz-cn"))
+        #expect(PrimaryAction.resolve(GameState(status: .installed(tag: "1")), runtimesReady: true,
+            missingComponents: model.missingComponents(for: "zzz-cn")) == .setUpRuntimes)
+        for try await _ in runtimes.install(fix, from: nil) {}
+        await model.refreshRuntimes()
+        #expect(!model.missingComponents(for: "zzz-cn"))
+        #expect(PrimaryAction.resolve(GameState(status: .installed(tag: "1")), runtimesReady: true,
+            missingComponents: model.missingComponents(for: "zzz-cn")) == .play)
+        try await model.flushLaunchSettings()
+    }
+
     @Test func missingShimIsSetUpRuntimes() async throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
         await fixture.model.reattachOnStart()
