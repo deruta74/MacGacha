@@ -1,17 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Wine crypt32 fix" : {
-      "comment" : "Runtime component name",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine crypt32 修复"
-          }
-        }
-      }
-    },
     "%@ Settings" : {
       "comment" : "Sheet title; the argument is the game's name",
       "localizations" : {
@@ -2354,6 +2343,17 @@
         }
       }
     },
+    "Wine crypt32 fix" : {
+      "comment" : "Runtime component name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine crypt32 修复"
+          }
+        }
+      }
+    },
     "Workarounds %@ needs to start on a Mac, such as a small helper that starts the game. They don't change the game's files. With patches off, the game usually doesn't start." : {
       "comment" : "The argument is the game's name",
       "localizations" : {
@@ -2407,12 +2407,12 @@
         }
       }
     },
-    "macOS shows its own window to install Rosetta. MacGacha doesn't need your password." : {
+    "macOS shows its own window to install Rosetta and may ask for your Mac password. MacGacha never sees it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "macOS 会显示自己的窗口来安装 Rosetta。MacGacha 不需要你的密码。"
+            "value" : "macOS 会显示自己的窗口来安装 Rosetta，可能会要求输入你的 Mac 密码。MacGacha 不会看到你的密码。"
           }
         }
       }

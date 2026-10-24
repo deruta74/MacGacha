@@ -34,7 +34,7 @@ struct RosettaSheet: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     } else {
-                        Label("macOS shows its own window to install Rosetta. MacGacha doesn't need your password.", systemImage: "info.circle")
+                        Label("macOS shows its own window to install Rosetta and may ask for your Mac password. MacGacha never sees it.", systemImage: "info.circle")
                     }
                 } footer: {
                     if waiting {
