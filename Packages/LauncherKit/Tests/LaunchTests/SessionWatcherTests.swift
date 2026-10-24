@@ -144,11 +144,12 @@ import TestSupport
         #expect(clock.elapsed == .zero)
     }
 
-    @Test func wineLoaderUsesExecutableArgumentButNotArbitraryArguments() async throws {
+    @Test(arguments: ["/runtime/bin/wine64-preloader", "/runtime/lib/wine/x86_64-unix/wine"])
+    func wineLoaderUsesExecutableArgumentButNotArbitraryArguments(loader: String) async throws {
         let clock = WatchClock()
-        let game = InspectedProcess(identity: .init(pid: 2, startTime: 2), executablePath: "/runtime/bin/wine64-preloader",
+        let game = InspectedProcess(identity: .init(pid: 2, startTime: 2), executablePath: loader,
             arguments: ["C:\\Games\\StarRail.exe", "argument"])
-        let other = InspectedProcess(identity: .init(pid: 3, startTime: 3), executablePath: "/runtime/bin/wine64-preloader",
+        let other = InspectedProcess(identity: .init(pid: 3, startTime: 3), executablePath: loader,
             arguments: ["helper.exe", "StarRail.exe"])
         let observations = Mutex([[ProcessIdentity]]())
         try await SessionWatcher(runtimesRoot: URL(fileURLWithPath: "/runtime"), inspector: WatchInspector { clock.elapsed < .seconds(3) ? [game, other] : [] },

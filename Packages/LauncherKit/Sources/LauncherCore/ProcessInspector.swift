@@ -77,7 +77,8 @@ public struct SystemProcessInspector: ProcessInspector {
     }
 
     public func processes(environmentContains key: String, value: String, scope: ProcessInspectionScope) throws -> [InspectedProcess] {
-        guard !key.isEmpty, !key.contains("="), !key.utf8.contains(0), !value.utf8.contains(0) else { return [] }
+        guard !key.isEmpty, !key.contains("="), !key.utf8.contains(0), !value.utf8.contains(0),
+            !ProcessArguments.isDarwinAuxiliaryKey(Array(key.utf8)) else { return [] }
         let entry = Array((key + "=" + value).utf8)
         var matches: [InspectedProcess] = []
         let table = try kernel.processes()
@@ -280,9 +281,19 @@ extension kinfo_proc {
     }
 }
 
-/// KERN_PROCARGS2: argc, executable C string, NUL padding, argc argument C
-/// strings, then environment C strings. No strlen or unchecked pointer walking.
+/// KERN_PROCARGS2: argc, executable C string, NUL padding, exactly argc argument
+/// C strings (including empty slots), argv padding, then environment C strings
+/// through the first empty entry. No strlen or unchecked pointer walking.
 struct ProcessArguments {
+    // Empty environ can expose Apple's auxiliary tail after argv padding. Our
+    // children always have WINEPREFIX in a nonempty environment, and every Darwin
+    // auxiliary key is lowercase (ptr_munge, dyld_hw_tpro, …) while the set keeps
+    // growing. Queries therefore accept only uppercase names, which can't collide.
+    static func isDarwinAuxiliaryKey(_ key: [UInt8]) -> Bool {
+        guard let first = key.first, first == 95 || (65...90).contains(first) else { return true }
+        return !key.allSatisfy { $0 == 95 || (65...90).contains($0) || (48...57).contains($0) }
+    }
+
     private let pathBytes: [UInt8]
     private let argumentBytes: [[UInt8]]
     private let environmentBytes: [[UInt8]]
@@ -292,12 +303,24 @@ struct ProcessArguments {
     var executablePath: String { String(decoding: pathBytes, as: UTF8.self) }
     var arguments: [String] { argumentBytes.map { String(decoding: $0, as: UTF8.self) } }
     var environment: [String] { environmentBytes.map { String(decoding: $0, as: UTF8.self) } }
-    func environmentContains(_ entry: [UInt8]) -> Bool { environmentBytes.contains(entry) }
+    func environmentContains(_ entry: [UInt8]) -> Bool {
+        guard !Self.isDarwinAuxiliaryKey(Array(entry.prefix { $0 != 61 })) else { return false }
+        return environmentBytes.contains(entry)
+    }
 
-    /// Retain complete matching entries even if a later entry was truncated.
-    /// This is positive evidence only; malformed data never proves absence.
+    /// Retain positive evidence before a truncated tail. Both callers use the
+    /// same byte layout; malformed data can never prove a process absent.
     static func environmentContains(_ entry: [UInt8], in data: Data) -> Bool {
-        guard data.count >= MemoryLayout<Int32>.size else { return false }
+        scan(data)?.arguments.environmentContains(entry) == true
+    }
+
+    static func parse(_ data: Data) -> ProcessArguments? {
+        guard let result = scan(data), result.complete else { return nil }
+        return result.arguments
+    }
+
+    private static func scan(_ data: Data) -> (arguments: ProcessArguments, complete: Bool)? {
+        guard data.count >= MemoryLayout<Int32>.size else { return nil }
         let argc = data.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
         let bytes = [UInt8](data)
         var offset = MemoryLayout<Int32>.size
@@ -306,44 +329,27 @@ struct ProcessArguments {
             let value = Array(bytes[offset..<end]); offset = end + 1
             return value
         }
-        guard argc > 0, Int(argc) <= bytes.count - offset, let path = next(), !path.isEmpty else { return false }
+        guard argc > 0, Int(argc) <= bytes.count - offset, let path = next(), !path.isEmpty else { return nil }
         while offset < bytes.count && bytes[offset] == 0 { offset += 1 }
-        for _ in 0..<argc { guard next() != nil else { return false } }
-        while let value = next(), !value.isEmpty {
-            if value == entry { return true }
+        var arguments: [[UInt8]] = [], environment: [[UInt8]] = []
+        func result(_ complete: Bool) -> (ProcessArguments, Bool) {
+            (ProcessArguments(pathBytes: path, argumentBytes: arguments, environmentBytes: environment), complete)
         }
-        return false
-    }
-
-    static func parse(_ data: Data) -> ProcessArguments? {
-        guard data.count >= MemoryLayout<Int32>.size else { return nil }
-        let argc = data.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
-        let bytes = [UInt8](data)
-        var offset = MemoryLayout<Int32>.size
-        func string() -> [UInt8]? {
-            guard offset < bytes.count, let end = bytes[offset...].firstIndex(of: 0) else { return nil }
-            let value = Array(bytes[offset..<end])
-            offset = end + 1
-            return value
-        }
-        guard argc > 0, Int(argc) <= bytes.count - offset,
-            let path = string(), !path.isEmpty else { return nil }
-        while offset < bytes.count && bytes[offset] == 0 { offset += 1 }
-        var arguments: [[UInt8]] = []
+        // argc is authoritative, including empty slots left by Wine rewriting
+        // argv in place. An assignment-shaped argument is still an argument.
         for _ in 0..<argc {
-            guard let argument = string() else { return nil }
-            arguments.append(argument)
+            guard let value = next() else { return result(false) }
+            arguments.append(value)
         }
-        var environment: [[UInt8]] = []
+        // Wine leaves the unused original argv area as NUL padding. Only the
+        // gap before environ is skipped; its first empty entry ends environ,
+        // excluding Apple's trailing auxiliary vector regardless of key names.
+        while offset < bytes.count && bytes[offset] == 0 { offset += 1 }
         while offset < bytes.count {
-            guard let value = string() else { return nil }
-            if value.isEmpty {
-                // Darwin may return padding and Apple auxiliary strings after
-                // the environment terminator. They are not environment entries.
-                break
-            }
+            guard let value = next() else { return result(false) }
+            if value.isEmpty { break }
             environment.append(value)
         }
-        return ProcessArguments(pathBytes: path, argumentBytes: arguments, environmentBytes: environment)
+        return result(true)
     }
 }

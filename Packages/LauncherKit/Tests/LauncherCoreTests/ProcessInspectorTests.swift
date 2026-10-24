@@ -30,6 +30,150 @@ import Testing
         #expect(parsed.executablePath == "/bin/sleep")
         #expect(parsed.arguments == ["sleep", "", "space arg", "日本語"])
         #expect(parsed.environment == ["A=1", "WINEPREFIX=/some prefix", "A=2"])
+        let entry = Array("WINEPREFIX=/some prefix".utf8)
+        #expect(parsed.environmentContains(entry))
+        #expect(ProcessArguments.environmentContains(entry, in: data))
+    }
+
+    @Test(arguments: [2, 8, 16]) func rewrittenWineArgumentsFindPrefixBeyondPadding(argc: Int32) throws {
+        let data = wineArguments(argc: argc, padding: 32)
+        let parsed = try #require(ProcessArguments.parse(data))
+        #expect(parsed.executablePath == "/runtime/lib/wine/x86_64-unix/wine")
+        #expect(parsed.arguments.first == "C:\\Games\\GenshinImpact.exe")
+        #expect(parsed.environment == ["HOME=/synthetic/home", "WINEPREFIX=/synthetic/prefix", "LANG=en_US.UTF-8"])
+        let entry = Array("WINEPREFIX=/synthetic/prefix".utf8)
+        #expect(parsed.environmentContains(entry))
+        #expect(ProcessArguments.environmentContains(entry, in: data))
+        let matches = try SystemProcessInspector(kernel: ByteInspectionFixture(data: [data])).processes(
+            environmentContains: "WINEPREFIX", value: "/synthetic/prefix", scope: runtimeScope)
+        #expect(matches.map(\.identity.pid) == [100])
+        #expect(matches.first?.arguments.first == "C:\\Games\\GenshinImpact.exe")
+    }
+
+    @Test(arguments: [false, true]) func liveWineDumpLayoutPreservesArgvAndEnvironment(cmd: Bool) throws {
+        let image = cmd ? "C:\\windows\\system32\\cmd.exe" : "C:\\windows\\system32\\services.exe"
+        var argc: Int32 = cmd ? 4 : 2
+        var data = withUnsafeBytes(of: &argc) { Data($0) }
+        data.append(contentsOf: "/runtime/lib/wine/x86_64-unix/wine".utf8)
+        data.append(contentsOf: repeatElement(UInt8(0), count: 4))
+        data.append(contentsOf: image.utf8)
+        if cmd { data.append(contentsOf: "\0/c\0ping -n 30 127.0.0.1 >nul".utf8) }
+        data.append(contentsOf: repeatElement(UInt8(0), count: 102))
+        let environment = ["GST_PLUGIN_SCANNER=/runtime/scanner", "DYLD_FALLBACK_LIBRARY_PATH=/runtime/lib",
+            "WINEPREFIX=/synthetic/prefix", "WINELOADERNOEXEC=1"]
+        data.append(contentsOf: environment.joined(separator: "\0").utf8)
+        data.append(contentsOf: repeatElement(UInt8(0), count: cmd ? 103 : 102))
+        data.append(contentsOf: "ptr_munge=".utf8)
+        data.append(contentsOf: repeatElement(UInt8(0), count: 19))
+        data.append(contentsOf: "main_stack=".utf8)
+        data.append(contentsOf: repeatElement(UInt8(0), count: 43))
+        data.append(contentsOf: "executable_file=0x123\0dyld_file=/usr/lib/dyld\0executable_cdhash=abc\0executable_boothash=def\0WINEPREFIX=/auxiliary\0th_port=".utf8)
+        data.append(contentsOf: repeatElement(UInt8(0), count: 6))
+        data.append(contentsOf: "security_config=0x0".utf8) // Ignored auxiliary tail need not be a C string.
+        let parsed = try #require(ProcessArguments.parse(data))
+        #expect(parsed.arguments == (cmd ? [image, "/c", "ping -n 30 127.0.0.1 >nul", ""] : [image, ""]))
+        #expect(parsed.environment == environment)
+        let prefix = Array("WINEPREFIX=/synthetic/prefix".utf8), auxiliary = Array("WINEPREFIX=/auxiliary".utf8)
+        #expect(parsed.environmentContains(prefix))
+        #expect(ProcessArguments.environmentContains(prefix, in: data))
+        #expect(!parsed.environmentContains(auxiliary))
+        #expect(!ProcessArguments.environmentContains(auxiliary, in: data))
+    }
+
+    @Test func rewrittenWineArgcRunningPastBufferIsIncomplete() {
+        let data = wineArguments(argc: 80, padding: 0)
+        #expect(ProcessArguments.parse(data) == nil)
+        #expect(!ProcessArguments.environmentContains(Array("WINEPREFIX=/synthetic/prefix".utf8), in: data))
+        #expect(throws: ProcessInspectionError.incompleteScan) {
+            try SystemProcessInspector(kernel: ByteInspectionFixture(data: [data])).processes(
+                environmentContains: "WINEPREFIX", value: "/synthetic/prefix", scope: runtimeScope)
+        }
+    }
+
+    @Test(arguments: ["/usr/bin/env", "/runtime/wine"])
+    func untouchedAssignmentArgumentsAreNotEnvironment(path: String) throws {
+        let data = procArguments(path: path, arguments: ["Game.exe", "WINEPREFIX=/session"], environment: ["HOME=/home"])
+        let parsed = try #require(ProcessArguments.parse(data))
+        #expect(parsed.arguments == ["Game.exe", "WINEPREFIX=/session"])
+        let entry = Array("WINEPREFIX=/session".utf8)
+        #expect(!parsed.environmentContains(entry))
+        #expect(!ProcessArguments.environmentContains(entry, in: data))
+        #expect(try SystemProcessInspector(kernel: ByteInspectionFixture(data: [data])).processes(
+            environmentContains: "WINEPREFIX", value: "/session", scope: runtimeScope).isEmpty)
+    }
+
+    @Test(arguments: ["executable_path", "ptr_munge", "main_stack", "dyld_file"])
+    func appleNamedEnvironmentEntriesDoNotTruncateEnvironment(key: String) throws {
+        let entries = [key + "=/ordinary/value", "WINEPREFIX=/session"]
+        let data = procArguments(path: "/runtime/wine", arguments: ["wine", "", "game.exe", ""], environment: entries)
+        let parsed = try #require(ProcessArguments.parse(data))
+        #expect(parsed.arguments == ["wine", "", "game.exe", ""])
+        #expect(parsed.environment == entries)
+        // Auxiliary names remain legal environment entries, but are reserved
+        // from queries; they must never hide the ordinary entries after them.
+        #expect(!parsed.environmentContains(Array(entries[0].utf8)))
+        #expect(!ProcessArguments.environmentContains(Array(entries[0].utf8), in: data))
+        #expect(parsed.environmentContains(Array(entries[1].utf8)))
+        #expect(ProcessArguments.environmentContains(Array(entries[1].utf8), in: data))
+        #expect(try SystemProcessInspector(kernel: ByteInspectionFixture(data: [data])).processes(
+            environmentContains: "WINEPREFIX", value: "/session", scope: runtimeScope).map(\.identity.pid) == [100])
+    }
+
+    @Test(arguments: darwinAuxiliaryQueryKeys)
+    func emptyEnvironmentAuxiliaryTailCannotMatchQueriedKeys(key: String) throws {
+        var data = procArguments(path: "/usr/bin/python3", arguments: ["python3", "-c", "pass"], environment: [])
+        data.append(contentsOf: repeatElement(UInt8(0), count: 16))
+        // Like Darwin's env={} Python payload: empty environ/padding followed
+        // by Apple's C-string auxiliary vector, with no WINEPREFIX entry.
+        for name in darwinAuxiliaryQueryKeys { data.append(contentsOf: "\(name)=synthetic\0".utf8) }
+        let parsed = try #require(ProcessArguments.parse(data))
+        let prefix = Array("WINEPREFIX=/session".utf8), auxiliary = Array("\(key)=synthetic".utf8)
+        #expect(!parsed.environmentContains(prefix))
+        #expect(!ProcessArguments.environmentContains(prefix, in: data))
+        #expect(!parsed.environmentContains(auxiliary))
+        #expect(!ProcessArguments.environmentContains(auxiliary, in: data))
+        let inspector = SystemProcessInspector(kernel: ByteInspectionFixture(data: [data]))
+        #expect(try inspector.processes(environmentContains: "WINEPREFIX", value: "/session", scope: runtimeScope).isEmpty)
+        #expect(try inspector.processes(environmentContains: key, value: "synthetic", scope: runtimeScope).isEmpty)
+        // A reserved query must be rejected before any process-table access.
+        #expect(try SystemProcessInspector(kernel: FailingInspectionKernel()).processes(
+            environmentContains: key, value: "synthetic", scope: runtimeScope).isEmpty)
+    }
+
+    /// Lowercase names could collide with Darwin's auxiliary tail, so queries refuse them;
+    /// the parsed environment itself keeps the entry.
+    @Test func lowercaseQueryKeysAreRefused() throws {
+        let data = procArguments(environment: ["ordinary_key=match", "WINEPREFIX=/synthetic/prefix"])
+        let parsed = try #require(ProcessArguments.parse(data))
+        #expect(parsed.environmentContains(Array("WINEPREFIX=/synthetic/prefix".utf8)))
+        #expect(!ProcessArguments.environmentContains(Array("ordinary_key=match".utf8), in: data))
+        #expect(try SystemProcessInspector(kernel: ByteInspectionFixture(data: [data])).processes(
+            environmentContains: "ordinary_key", value: "match", scope: runtimeScope).isEmpty)
+        #expect(try SystemProcessInspector(kernel: ByteInspectionFixture(data: [data])).processes(
+            environmentContains: "WINEPREFIX", value: "/synthetic/prefix", scope: runtimeScope).map(\.identity.pid) == [100])
+    }
+
+    @Test(arguments: ["executable_path=/runtime/wine", "ptr_munge=0x123", "main_stack=0x456"])
+    func appleVectorCannotSupplyMatchingEnvironment(marker: String) throws {
+        var data = wineArguments(argc: 2, padding: 20)
+        data.append(contentsOf: ("\0" + marker + "\0WINEPREFIX=/auxiliary\0\0").utf8)
+        let parsed = try #require(ProcessArguments.parse(data))
+        #expect(parsed.environment.contains("WINEPREFIX=/synthetic/prefix"))
+        #expect(!parsed.environmentContains(Array("WINEPREFIX=/auxiliary".utf8)))
+        #expect(!ProcessArguments.environmentContains(Array("WINEPREFIX=/auxiliary".utf8), in: data))
+        #expect(!parsed.environment.contains(marker))
+    }
+
+    @Test func winePrefixEvidenceSurvivesTruncationAfterPadding() {
+        var data = wineArguments(argc: 2, padding: 20)
+        data.removeLast() // Keep the truncation inside environ, before its empty terminator.
+        data.append(contentsOf: "OTHER=truncated".utf8)
+        #expect(ProcessArguments.parse(data) == nil)
+        #expect(ProcessArguments.environmentContains(Array("WINEPREFIX=/synthetic/prefix".utf8), in: data))
+        let inspector = SystemProcessInspector(kernel: GroupInspectionFixture(candidateData: data))
+        #expect(throws: ProcessInspectionError.incompleteScan) {
+            try inspector.processes(environmentContains: "WINEPREFIX", value: "/synthetic/prefix", scope: ProcessInspectionScope(executableRoots: []))
+        }
     }
 
     @Test func procArgs2RejectsMalformedAndTruncatedBuffers() {
@@ -78,7 +222,7 @@ import Testing
     @Test func procArgs2DoesNotTreatAppleAuxiliaryStringsAsEnvironment() throws {
         var data = procArguments(environment: ["TAG=real"])
         data.append(0)
-        data.append(contentsOf: "TAG=auxiliary\0executable_path=/bin/sleep\0".utf8)
+        data.append(contentsOf: "executable_path=/bin/sleep\0TAG=auxiliary\0".utf8)
         let parsed = try #require(ProcessArguments.parse(data))
         #expect(parsed.environment == ["TAG=real"])
     }
@@ -395,3 +539,21 @@ private struct GroupInspectionFixture: ProcessKernel {
         return info
     }
 }
+
+
+private func wineArguments(argc: Int32, padding: Int) -> Data {
+    var count = argc
+    var data = withUnsafeBytes(of: &count) { Data($0) }
+    data.append(contentsOf: "/runtime/lib/wine/x86_64-unix/wine\0\0\0C:\\Games\\GenshinImpact.exe\0".utf8)
+    data.append(contentsOf: repeatElement(UInt8(0), count: padding))
+    data.append(contentsOf: "HOME=/synthetic/home\0WINEPREFIX=/synthetic/prefix\0LANG=en_US.UTF-8\0\0".utf8)
+    return data
+}
+
+private let darwinAuxiliaryQueryKeys = [
+    "executable_path", "ptr_munge", "main_stack", "executable_file", "dyld_file",
+    "executable_cdhash", "executable_boothash", "th_port", "security_config",
+    "pfz", "stack_guard", "malloc_entropy", "arm64e_abi", "dyld_hw_tpro", "dyld_hw_tpro_pagers",
+    // Unknown future auxiliary names are rejected by shape, not by this list.
+    "future_darwin_key"
+]
