@@ -129,9 +129,9 @@ private func resolve(_ game: String, settings: LaunchSettings? = nil, components
 }
 
 @Test func recipeVersionsAndVerifiedBuildsMatchSpec() throws {
-    #expect(try #require(Recipes.recipe(for: "genshin")).verifiedBuilds == ["7.1"])
+    #expect(try #require(Recipes.recipe(for: "genshin")).verifiedBuilds == ["7.1.0"])
     #expect(try #require(Recipes.recipe(for: "starrail")).verifiedBuilds == ["4.6.0"])
-    #expect(try #require(Recipes.recipe(for: "zzz")).verifiedBuilds == ["Phase 0 install of 2026-10-23"])
+    #expect(try #require(Recipes.recipe(for: "zzz")).verifiedBuilds == ["3.3.0"])
     for game in ["genshin", "starrail", "zzz"] { #expect(try #require(Recipes.recipe(for: game)).recipeVersion == 1) }
 }
 

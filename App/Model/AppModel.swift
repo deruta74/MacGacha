@@ -157,7 +157,7 @@ final class AppModel {
         let log = EventLog(directory: paths.logs)
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
-        let launch = LiveLaunchServices(paths: paths)
+        let launch = LiveLaunchServices(paths: paths, log: log)
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artService: GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
                 bundleIdentifier: Bundle.main.bundleIdentifier),
