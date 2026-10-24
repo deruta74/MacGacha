@@ -141,7 +141,7 @@ func bundleComponent(_ c: RuntimeComponent, bytes: Data) throws -> RuntimeCompon
     let fixture = try BundleFixture()
     let runtime = try await fixture.manager.install(fixture.bundle)
     let runner = FakeProcessRunner()
-    let prefixes = PrefixManager(paths: AppPaths(root: fixture.temp.url), runner: runner)
+    let prefixes = PrefixManager(paths: AppPaths(root: fixture.temp.url), runner: runner, inspector: IdlePrefixInspector())
     let url = try await prefixes.createPrefix(game: "genshin", bundle: runtime)
     #expect(url == (try prefixes.prefixURL(game: "genshin", bundle: runtime.id)))
     #expect(url.lastPathComponent == "genshin-dxmt-test")

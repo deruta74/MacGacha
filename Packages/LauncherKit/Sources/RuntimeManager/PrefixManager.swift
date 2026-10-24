@@ -7,11 +7,15 @@ import DownloadEngine
 public struct PrefixManager: Sendable {
     private let paths: AppPaths
     private let runner: any ProcessRunner
+    private let inspector: any ProcessInspector
+    private let serverProbe: WineServerProbe
     static let markerLimit = 16_384
 
-    public init(paths: AppPaths, runner: any ProcessRunner) {
+    public init(paths: AppPaths, runner: any ProcessRunner, inspector: any ProcessInspector = SystemProcessInspector(), wineServerRoot: URL? = nil) {
         self.paths = paths
         self.runner = runner
+        self.inspector = inspector
+        self.serverProbe = WineServerProbe(root: wineServerRoot)
     }
 
     /// Maps validated identifiers to a prefix without creating any filesystem entries.
@@ -68,6 +72,12 @@ public struct PrefixManager: Sendable {
                 return url
             }
 
+            if existing != nil {
+                guard let current = try fs.pinDirectoryIfPresent(at: prefix) else { throw LauncherError.io("Prefix is missing") }
+                try PrefixShellFolders.validate(in: current)
+            }
+            guard let idlePrefix = try fs.pinDirectoryIfPresent(at: prefix) else { throw LauncherError.io("Prefix is missing") }
+            try PrefixShellFolders.requireIdle(prefix: url, prefixFS: idlePrefix, wineBinary: binary, runtimeRoot: paths.runtimes, inspector: inspector, serverProbe: serverProbe)
             let arguments: [String]
             if let existing {
                 // Persist uncertainty before Wine can modify the initialized tree.
@@ -94,6 +104,9 @@ public struct PrefixManager: Sendable {
                 throw LauncherError.processFailed(executable: wineBinary.path, exitCode: result.exitCode,
                     stderrTail: String(decoding: result.stderr.suffix(4096), as: UTF8.self))
             }
+            guard let prefixFS = try fs.pinDirectoryIfPresent(at: prefix) else { throw LauncherError.io("Prefix is missing") }
+            try prefixFS.createDirectory(at: SafeRelativePath("drive_c/users"))
+            try await finishShellFolders(prefixFS, prefix: url, wineBinary: binary, environment: environment)
             if runtimeDigest != nil {
                 let config = try await runner.run(wineBinary, arguments: ["winecfg", "-v", "win10"], environment: environment, currentDirectory: nil)
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
@@ -101,6 +114,7 @@ public struct PrefixManager: Sendable {
                     throw LauncherError.processFailed(executable: wineBinary.path, exitCode: config.exitCode,
                         stderrTail: String(decoding: config.stderr.suffix(4096), as: UTF8.self))
                 }
+                try await finishShellFolders(prefixFS, prefix: url, wineBinary: binary, environment: environment)
             }
             let readiness = PrefixMarker(schemaVersion: PrefixMarker.schema, game: game, backend: identifier,
                 state: .ready, wineBinaryPath: binary.path, wineBinaryIdentity: identity, createdAt: existing?.createdAt ?? Date(), bundleID: runtimeDigest == nil ? nil : identifier, runtimeDigest: runtimeDigest)
@@ -110,6 +124,24 @@ public struct PrefixManager: Sendable {
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
             throw error
         }
+    }
+
+    private func finishShellFolders(_ fs: ContainedFileSystem, prefix: URL, wineBinary: URL,
+        environment: [String: String]) async throws {
+        try PrefixShellFolders.validate(in: fs)
+        // wineboot/winecfg can leave Wine's services running briefly. Join our
+        // server before any unlink; fake runners with no processes need no wait.
+        if try !PrefixShellFolders.isIdle(prefix: prefix, prefixFS: fs, wineBinary: wineBinary, runtimeRoot: paths.runtimes, inspector: inspector, serverProbe: serverProbe) {
+            let server = wineBinary.deletingLastPathComponent().appendingPathComponent("wineserver")
+            let result = try await runner.run(server, arguments: ["-w"], environment: environment,
+                currentDirectory: nil, timeout: .seconds(60), timeoutWait: { try await Task.sleep(for: $0) })
+            guard result.exitCode == 0 else {
+                throw LauncherError.processFailed(executable: server.path, exitCode: result.exitCode,
+                    stderrTail: String(decoding: result.stderr.suffix(4096), as: UTF8.self))
+            }
+        }
+        try PrefixShellFolders.requireIdle(prefix: prefix, prefixFS: fs, wineBinary: wineBinary, runtimeRoot: paths.runtimes, inspector: inspector, serverProbe: serverProbe)
+        try PrefixShellFolders.repair(in: fs)
     }
 
     private func prefixPath(game: String, backend: ComponentKind) throws -> SafeRelativePath {
