@@ -17,7 +17,7 @@ extension LauncherError {
         case .busy: String(localized: "Another operation is already running. Wait for it to finish and try again.")
         case .fileTooLarge: String(localized: "A file exceeds the supported size limit. Choose another source.")
         case .consentRequired: String(localized: "Accept the license terms before installing this component.")
-        case .processFailed: String(localized: "A required tool could not finish. Check Diagnostics for details.")
+        case .processSpawnFailed, .processFailed: String(localized: "A required tool could not finish. Check Diagnostics for details.")
         case .rosettaMissing: String(localized: "Rosetta 2 is required to run games. Install it using MacGacha, then try again.")
         case .gameEditionMismatch: String(localized: "This folder belongs to a different game or edition. Choose the matching game and region.")
         case .gameEditionUnknown: String(localized: "MacGacha could not identify this folder’s edition. Select an official installation with its launcher configuration.")

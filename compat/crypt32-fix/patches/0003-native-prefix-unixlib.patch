@@ -1,0 +1,41 @@
+SPDX-License-Identifier: LGPL-2.1-or-later
+MacGacha native-prefix adaptation; Copyright (c) 2026 deruta74.
+
+Wine's builtin mapping records its Unix companion. Native identification removes
+that mapping, so explicitly load the same Wine 11.20 runtime crypt32.so through
+Wine's existing name-based Unix library API. No Unix code is bundled. Release
+the reference on dynamic detach; process teardown follows Wine's original path.
+
+--- a/dlls/crypt32/main.c
++++ b/dlls/crypt32/main.c
+@@ -46,6 +46,9 @@
+ };
+ static CRITICAL_SECTION prov_param_cs = { &prov_param_cs_debug, -1, 0, 0, 0, 0 };
+ 
++/* Native prefix loading has no builtin mapping from which to find the Unix half. */
++static unixlib_module_t native_unixlib;
++
+ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, PVOID pvReserved)
+ {
+     switch (reason)
+@@ -56,7 +59,11 @@
+             init_empty_store();
+             crypt_oid_init();
+             if (__wine_init_unix_call())
+-                return FALSE;
++            {
++                const UNICODE_STRING name = RTL_CONSTANT_STRING(L"crypt32.so");
++                if (__wine_load_unix_lib(&name, &native_unixlib, &__wine_unixlib_handle))
++                    return FALSE;
++            }
+             CRYPT32_CALL( process_attach, NULL );
+             break;
+         case DLL_PROCESS_DETACH:
+@@ -66,6 +73,7 @@
+             default_chain_engine_free();
+             if (hDefProv) CryptReleaseContext(hDefProv, 0);
+             CRYPT32_CALL( process_detach, NULL );
++            if (native_unixlib) __wine_unload_unix_lib(native_unixlib);
+             break;
+     }
+     return TRUE;

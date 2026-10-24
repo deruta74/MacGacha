@@ -354,32 +354,18 @@ struct RuntimeErrorLog {
 
     init(_ error: LauncherError) {
         message = error == .cancelled ? "Runtime operation cancelled" : "Runtime operation failed"
-        var fields: [String: String] = [:]
-        let name: String
+        var fields = ["case": error.logCase]
         switch error {
-        case .unsafePath: name = "unsafePath"
-        case .invalidDigest: name = "invalidDigest"
         case .sizeMismatch(_, let expected, let actual):
-            name = "sizeMismatch"; fields = ["expectedSize": String(expected), "actualSize": String(actual)]
-        case .digestMismatch: name = "digestMismatch"
+            fields["expectedSize"] = String(expected); fields["actualSize"] = String(actual)
         case .insufficientSpace(let required, let available):
-            name = "insufficientSpace"; fields = ["required": String(required), "available": String(available)]
+            fields["required"] = String(required); fields["available"] = String(available)
         case .http(let status, let url):
-            name = "http"; fields = ["host": url.host ?? "unknown", "status": String(status)]
-        case .transport: name = "transport"
-        case .io: name = "io"
-        case .busy: name = "busy"
-        case .fileTooLarge(_, let limit): name = "fileTooLarge"; fields = ["limit": String(limit)]
-        case .consentRequired: name = "consentRequired"
-        case .processFailed(_, let exitCode, _): name = "processFailed"; fields = ["exitCode": String(exitCode)]
-        case .gameEditionMismatch: name = "gameEditionMismatch"
-        case .gameEditionUnknown: name = "gameEditionUnknown"
-        case .gameDistributionUnsupported: name = "gameDistributionUnsupported"
-        case .rosettaMissing: name = "rosettaMissing"
-        case .cancelled: name = "cancelled"
-        case .journalCorrupt: name = "journalCorrupt"
+            fields["host"] = url.host ?? "unknown"; fields["status"] = String(status)
+        case .fileTooLarge(_, let limit): fields["limit"] = String(limit)
+        case .processFailed(_, let exitCode, _): fields["exitCode"] = String(exitCode)
+        default: break
         }
-        fields["case"] = name
         metadata = fields
     }
 }

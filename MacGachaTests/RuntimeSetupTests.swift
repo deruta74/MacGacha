@@ -20,14 +20,55 @@ import Launch
         #expect(plan.gameID == configuration.game)
         #expect(plan.items.first?.id == bundle.id.rawValue)
         #expect(plan.items.first?.name == bundle.displayName)
+        var expected = [bundle.id.rawValue]
+        if configuration.backend == .d3dmetal && ["genshin-cn", "zzz-cn"].contains(configuration.game) {
+            expected.append(Crypt32Fix.componentID)
+        }
         if configuration.patches {
             let recipe = try #require(Recipes.recipe(for: configuration.game))
             let wrapper: ComponentKind = recipe.wrapper == .jadeite ? .jadeite : .steamShim
-            #expect(plan.items.map(\.id) == [bundle.id.rawValue, try #require(manifest.components.first { $0.kind == wrapper }).id.rawValue])
-        } else { #expect(plan.items.count == 1) }
+            expected.append(try #require(manifest.components.first { $0.kind == wrapper }).id.rawValue)
+        }
+        #expect(plan.items.map(\.id) == expected)
         #expect(plan.totalSize != nil)
         #expect(plan.needsAppleTerms == (configuration.backend == .d3dmetal))
         #expect(model.missingComponents(for: configuration.game) == !plan.items.isEmpty)
+    }
+
+    @Test(arguments: ["genshin-cn", "zzz-cn"], [true, false])
+    func cnWineCorrectionFollowsBundleEvenWithoutGamePatches(game: String, patches: Bool) throws {
+        let (model, _, manifest) = try fixture(game, backend: .d3dmetal, patches: patches)
+        let plan = try #require(model.runtimeSetupPlan(for: game))
+        let component = try #require(manifest.components.first { $0.id.rawValue == Crypt32Fix.componentID })
+        #expect(plan.items[1] == RuntimeSetupPlan.Item(id: component.id.rawValue,
+            name: String(localized: "Wine crypt32 fix", comment: "Runtime component name"), size: component.size))
+        #expect(model.missingComponents(for: game))
+    }
+
+    @Test(arguments: ["genshin", "zzz", "starrail-cn"], [RuntimeBackend.dxmt, .d3dmetal])
+    func unaffectedEditionsDoNotRecommendWineCorrection(game: String, backend: RuntimeBackend) throws {
+        let (model, _, _) = try fixture(game, backend: backend)
+        let plan = try #require(model.runtimeSetupPlan(for: game))
+        #expect(!plan.items.contains { $0.id == Crypt32Fix.componentID })
+    }
+
+    @Test(arguments: ["genshin-cn", "zzz-cn"], [RuntimeBackend.dxmt, .d3dmetal])
+    func installedWineCorrectionIsOmittedAndDxmtNeverNeedsIt(game: String, backend: RuntimeBackend) async throws {
+        let (model, fake, manifest) = try fixture(game, backend: backend, patches: false)
+        let bundle = try #require(manifest.defaultBundle(for: backend))
+        try publish(bundle.id.rawValue, fake: fake, manifest: manifest)
+        await model.refreshRuntimes()
+        if backend == .d3dmetal {
+            #expect(model.runtimeSetupPlan(for: game)?.items.map(\.id) == [Crypt32Fix.componentID])
+            #expect(model.missingComponents(for: game))
+        } else {
+            #expect(model.runtimeSetupPlan(for: game) == nil)
+            #expect(!model.missingComponents(for: game))
+        }
+        try publish(Crypt32Fix.componentID, fake: fake, manifest: manifest)
+        await model.refreshRuntimes()
+        #expect(model.runtimeSetupPlan(for: game) == nil)
+        #expect(!model.missingComponents(for: game))
     }
 
     @Test func totalsRequireEveryKnownSizeAndDoNotOverflow() {

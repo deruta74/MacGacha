@@ -135,14 +135,14 @@ public actor LaunchManager {
         let pair = AsyncStream<LaunchEvent>.makeStream()
         // Reserve synchronously, before an actor reentrancy point or any I/O.
         if let busy = reservedGame ?? contexts.keys.sorted().first ?? supervision.keys.sorted().first ?? unresolvedStartup.sorted().first {
-            event("Launch failed", game: game.id, level: .error, metadata: ["stage": "lock"])
+            event("Launch failed", game: game.id, level: .error, metadata: Self.failureMetadata(LauncherError.busy("Launch slot unavailable"), stage: .lock))
             pair.continuation.yield(.stage(.lock))
             pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "\(Self.name(busy)) is running"), logURL: nil,
                 unverifiedBuild: !((recipeOverrides[game.id] ?? Recipes.recipe(for: game.id))?.verifiedBuilds.contains(gameBuild) ?? false))))
             pair.continuation.finish(); return pair.stream
         }
         if recovering || !guardRecoveries.isEmpty {
-            event("Launch failed", game: game.id, level: .error, metadata: ["stage": "lock"])
+            event("Launch failed", game: game.id, level: .error, metadata: Self.failureMetadata(LauncherError.busy("Launch slot unavailable"), stage: .lock))
             pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "Launch recovery is in progress"), logURL: nil, unverifiedBuild: false)))
             pair.continuation.finish(); return pair.stream
         }
@@ -210,7 +210,7 @@ public actor LaunchManager {
             let bundle = selection.bundle
             let prefix = try await prefixes.prefixURL(game: game.id, bundle: bundle)
             let preview = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment)
+                wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue)
             guard !selection.componentIDs.isEmpty else { throw LauncherError.io("The runtime bundle has no pinnable components") }
             let compatibilityIDs = try preview.requiredComponents.map { kind in
                 guard let id = selection.compatibilityComponentIDs[kind] else { throw LauncherError.io("Required compatibility component has no pin identity") }
@@ -266,6 +266,10 @@ public actor LaunchManager {
                 var snapshot = original
                 try LaunchCopies.copyIfPresent(preview.copyIfPresent, installRoot: installRoot,
                     system32: prefix.appendingPathComponent("drive_c/windows/system32"), log: log)
+                for copy in preview.componentCopies {
+                    try LaunchCopies.copyRequired([(copy.source, copy.toSystem32)], componentRoot: copy.root,
+                        system32: prefix.appendingPathComponent("drive_c/windows/system32"), log: log)
+                }
                 let result = Result { try HiddenFiles(hooks: hideHooks).hide(preview.hidden, session: &snapshot,
                     journal: LaunchJournal(paths: paths, fileOps: journalFileOps, sessionOwned: true, beforeRead: beforeJournalRead)) }
                 return (snapshot, result)
@@ -283,7 +287,7 @@ public actor LaunchManager {
             context.proxy = try await proxyFactory(preview.blockedHosts, logger)
             context.session.proxyPort = context.proxy?.port
             let resolved = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment)
+                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue)
             stage = .spawn; events.yield(.stage(stage)); note(context, "stage spawn")
             context.session.state = .spawning; try await persist(context.session)
             let spawner = spawner, output = context.log?.processOutput ?? .discard
@@ -299,7 +303,7 @@ public actor LaunchManager {
             await watch(game: game.id, executable: recipe.executable.components.last!)
             return
         } catch {
-            event("Launch failed", game: game.id, level: .error, metadata: ["stage": stage.rawValue])
+            event("Launch failed", game: game.id, level: .error, metadata: Self.failureMetadata(error, stage: stage))
             if let context = contexts[game.id] {
                 // hide() may have durably recorded more entries before throwing.
                 if let persisted = try? await read(game: game.id), persisted.sessionID == context.session.sessionID { context.session = persisted }
@@ -307,7 +311,7 @@ public actor LaunchManager {
                     if !context.session.processes.contains(owned) { context.session.processes.append(owned) }
                     context.session.processGroupIDs = (context.session.processGroupIDs ?? []).union([owned.pid])
                 }
-                note(context, "failed \(stage.rawValue)")
+                noteFailure(error, stage: stage, context: context)
                 if context.ownedWrapper != nil, let executable = Self.executable(context.session) {
                     // A successful spawn is irreversible: retain ownership and
                     // defer its failure report until verified end and restore.
@@ -351,7 +355,7 @@ public actor LaunchManager {
                 context.endOutcome = context.ready ? "normal" : "before ready"
                 context.session.state = .ending; try await persist(context.session)
                 context.continuation?.yield(.ended(normal: context.ready))
-                if !context.ready { note(context, "failed watch: game ended before ready") }
+                if !context.ready { noteFailure(LauncherError.io("The game ended before a window appeared"), stage: .watch, context: context) }
                 await stopProxy(context)
                 _ = await restore(context)
                 if let failure = context.deferredFailure {
@@ -363,7 +367,7 @@ public actor LaunchManager {
             } catch SessionWatchError.startup {
                 context.hasEnded = true
                 context.endOutcome = "startup failure"
-                note(context, "failed watch: startup")
+                noteFailure(LauncherError.io("The game did not start"), stage: .watch, context: context)
                 context.continuation?.yield(.ended(normal: false)); await stopProxy(context)
                 _ = await restore(context)
                 if let failure = context.deferredFailure {
@@ -545,10 +549,22 @@ public actor LaunchManager {
         return try await BlockingIO.run { try LaunchJournal(paths: paths, fileOps: journalFileOps, beforeRead: beforeJournalRead).read(game: game) }
     }
     private func report(_ error: any Error, stage: LaunchStage, context: Context, unverified: Bool) {
-        if stage == .watch { event("Launch failed", game: context.session.game, level: .error, metadata: ["stage": stage.rawValue]) }
+        if stage == .watch {
+            event("Launch failed", game: context.session.game, level: .error, metadata: Self.failureMetadata(error, stage: stage))
+        }
         context.continuation?.yield(.stage(.report))
         context.continuation?.yield(.failed(Self.failure(error, stage: stage, log: context.lifecycleLog?.url, unverified: unverified)))
         context.continuation?.finish(); context.continuation = nil
+    }
+    private static func failureMetadata(_ error: any Error, stage: LaunchStage) -> [String: String] {
+        let failure = error as? LauncherError ?? (error is CancellationError ? .cancelled : .io(""))
+        var fields = ["stage": stage.rawValue, "case": failure.logCase]
+        fields["reason"] = failure.logReason
+        return fields
+    }
+    private func noteFailure(_ error: any Error, stage: LaunchStage, context: Context) {
+        let fields = Self.failureMetadata(error, stage: stage)
+        note(context, "failed \(stage.rawValue) case=\(fields["case", default: "io"])" + (fields["reason"].map { " reason=\($0)" } ?? ""))
     }
     private static func failure(_ error: any Error, stage: LaunchStage, log: URL?, unverified: Bool) -> LaunchFailure {
         LaunchFailure(stage: stage, message: String(localized: "Launch failed during \(stage.rawValue)."), logURL: log, unverifiedBuild: unverified)

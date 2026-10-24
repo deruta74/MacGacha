@@ -8,9 +8,11 @@ public struct PreparationRequest: Equatable, Sendable {
     public let steamShim: URL?
     public let dxmtExtras: [String]
     public let nvidiaKeys: Bool
+    public let crypt32Native: Bool
 
-    public init(retina: Bool, steamShim: URL?, dxmtExtras: [String], nvidiaKeys: Bool) {
+    public init(retina: Bool, steamShim: URL?, dxmtExtras: [String], nvidiaKeys: Bool, crypt32Native: Bool = false) {
         self.retina = retina; self.steamShim = steamShim
         self.dxmtExtras = dxmtExtras; self.nvidiaKeys = nvidiaKeys
+        self.crypt32Native = crypt32Native
     }
 }

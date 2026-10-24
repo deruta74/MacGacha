@@ -4,6 +4,12 @@ import Foundation
 import LauncherCore
 import RuntimeManager
 
+public struct LaunchComponentCopy: Equatable, Sendable {
+    public let root: URL
+    public let source: SafeRelativePath
+    public let toSystem32: String
+}
+
 public struct ResolvedLaunch: Equatable, Sendable {
     public let executable: URL
     public let arguments: [String]
@@ -14,24 +20,39 @@ public struct ResolvedLaunch: Equatable, Sendable {
     public let blockedHosts: [String]
     public let preparation: PreparationRequest
     public let requiredComponents: [ComponentKind]
+    public let componentCopies: [LaunchComponentCopy]
 
     public static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.executable == rhs.executable && lhs.arguments == rhs.arguments && lhs.environment == rhs.environment
             && lhs.currentDirectory == rhs.currentDirectory && lhs.hidden == rhs.hidden
             && lhs.copyIfPresent.elementsEqual(rhs.copyIfPresent, by: { $0.source == $1.source && $0.toSystem32 == $1.toSystem32 })
             && lhs.blockedHosts == rhs.blockedHosts && lhs.preparation == rhs.preparation && lhs.requiredComponents == rhs.requiredComponents
+            && lhs.componentCopies == rhs.componentCopies
     }
 }
 
 public enum LaunchResolver {
+    /// Shared with setup availability; checking requirements never needs component files.
+    public static func requiredComponents(recipe: LaunchRecipe, settings: LaunchSettings, runtimeBundleID: String?) -> [ComponentKind] {
+        var required: [ComponentKind] = []
+        if settings.compatibilityPatches {
+            switch recipe.wrapper { case .none: break; case .jadeite: required.append(.jadeite); case .steamShim: required.append(.steamShim) }
+        }
+        if Crypt32Fix.applies(game: recipe.game, backend: settings.backend, bundleID: runtimeBundleID) { required.append(.crypt32Fix) }
+        return required
+    }
     public static func resolve(recipe: LaunchRecipe, settings: LaunchSettings, installRoot: URL, prefix: URL,
-        wineBinary: URL, proxyPort: UInt16, componentRoots: [ComponentKind: URL], baseEnvironment: [String: String]) throws -> ResolvedLaunch {
+        wineBinary: URL, proxyPort: UInt16, componentRoots: [ComponentKind: URL], baseEnvironment: [String: String],
+        runtimeBundleID: String? = nil) throws -> ResolvedLaunch {
         guard Recipes.recipe(for: recipe.game) != nil else { throw LauncherError.io("Unknown launch game: \(recipe.game)") }
         try settings.validate()
         for url in [installRoot, prefix, wineBinary] { try validateLocalURL(url) }
 
         let gamePath = WinePath.windowsPath(for: recipe.executable.resolved(against: installRoot))
-        var arguments = [gamePath], requiredComponents: [ComponentKind] = []
+        var arguments = [gamePath]
+        let requiredComponents = requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: runtimeBundleID)
+        for kind in requiredComponents { _ = try requiredRoot(kind, in: componentRoots) }
+        var componentCopies: [LaunchComponentCopy] = []
         var steamShim: URL?
         if settings.compatibilityPatches {
             switch recipe.wrapper {
@@ -39,11 +60,9 @@ public enum LaunchResolver {
             case .jadeite:
                 let root = try requiredRoot(.jadeite, in: componentRoots)
                 arguments.insert(WinePath.windowsPath(for: root.appendingPathComponent("jadeite.exe")), at: 0)
-                requiredComponents = [.jadeite]
             case .steamShim:
                 steamShim = try requiredRoot(.steamShim, in: componentRoots)
                 arguments.insert(#"C:\windows\system32\steam.exe"#, at: 0)
-                requiredComponents = [.steamShim]
             }
         }
         if recipe.supportsDirectX12 && settings.directX12 && settings.backend == .d3dmetal {
@@ -55,6 +74,11 @@ public enum LaunchResolver {
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         environment["WINEPREFIX"] = prefix.path
         environment["WINEDLLOVERRIDES"] = ""
+        if requiredComponents.contains(.crypt32Fix) {
+            environment["WINEDLLOVERRIDES"] = "crypt32=n,b"
+            componentCopies.append(LaunchComponentCopy(root: try requiredRoot(.crypt32Fix, in: componentRoots),
+                source: try SafeRelativePath("x86_64-windows/crypt32.dll"), toSystem32: "crypt32.dll"))
+        }
         environment["WINEDEBUG"] = "fixme-all"
         let proxy = "http://127.0.0.1:\(proxyPort)"
         for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] { environment[key] = proxy }
@@ -81,8 +105,9 @@ public enum LaunchResolver {
             copyIfPresent: settings.compatibilityPatches ? recipe.copyIfPresent : [],
             blockedHosts: settings.compatibilityPatches ? recipe.blockedHosts : [],
             preparation: PreparationRequest(retina: settings.retina, steamShim: steamShim,
-                dxmtExtras: dxmt ? (["winemetal.dll"] + (starRail ? ["nvngx.dll"] : [])) : [], nvidiaKeys: dxmt && starRail),
-            requiredComponents: requiredComponents)
+                dxmtExtras: dxmt ? (["winemetal.dll"] + (starRail ? ["nvngx.dll"] : [])) : [], nvidiaKeys: dxmt && starRail,
+                crypt32Native: requiredComponents.contains(.crypt32Fix)),
+            requiredComponents: requiredComponents, componentCopies: componentCopies)
     }
 
     private static func requiredRoot(_ kind: ComponentKind, in roots: [ComponentKind: URL]) throws -> URL {

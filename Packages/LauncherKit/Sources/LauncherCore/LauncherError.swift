@@ -14,6 +14,7 @@ public enum LauncherError: Error, Sendable, Equatable {
     case busy(String)
     case fileTooLarge(path: String, limit: Int)
     case consentRequired(String)
+    case processSpawnFailed(errno: Int32)
     case processFailed(executable: String, exitCode: Int32, stderrTail: String)
     case gameEditionMismatch
     case gameEditionUnknown

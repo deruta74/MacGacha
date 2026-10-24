@@ -272,7 +272,7 @@ private final class ProcessCancellation: Sendable {
             do {
                 try process.run()
             } catch {
-                throw LauncherError.io(error.localizedDescription)
+                throw LauncherError.processLaunchFailure(error)
             }
             state.launched = true
         }

@@ -1,6 +1,17 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Wine crypt32 fix" : {
+      "comment" : "Runtime component name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine crypt32 修复"
+          }
+        }
+      }
+    },
     "%@ Settings" : {
       "comment" : "Sheet title; the argument is the game's name",
       "localizations" : {

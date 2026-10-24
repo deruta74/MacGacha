@@ -81,6 +81,10 @@ import TestSupport
     @Test func spawnFailuresThrowLauncherError() async throws {
         try await BlockingIO.run {
             let temp = try TempDir(); let output = temp.url.appendingPathComponent("log")
+            #expect(throws: LauncherError.processSpawnFailed(errno: ENOENT)) {
+                try SystemProcessSpawner().spawn(temp.url.appendingPathComponent("missing"), arguments: [], environment: [:],
+                    currentDirectory: temp.url, output: .discard)
+            }
             for executable in [temp.url.appendingPathComponent("missing"), temp.url] {
                 #expect(throws: LauncherError.self) {
                     try SystemProcessSpawner().spawn(executable, arguments: [], environment: [:], currentDirectory: temp.url, outputFile: output)
