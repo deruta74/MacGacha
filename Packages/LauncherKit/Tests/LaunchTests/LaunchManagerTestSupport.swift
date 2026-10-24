@@ -100,16 +100,16 @@ final class ManagerInspector: ProcessInspector, Sendable {
 
 final class ManagerSpawner: ProcessSpawner, Sendable {
     struct Call: Sendable { let outputDiscarded: Bool; let environment: [String: String] }
-    private struct State { var calls: [Call] = []; var fail = false; var afterSpawn: (@Sendable () throws -> Void)? }
+    private struct State { var calls: [Call] = []; var failure: LauncherError?; var afterSpawn: (@Sendable () throws -> Void)? }
     private let state = Mutex(State())
     let identity = ProcessIdentity(pid: 12345, startTime: 100)
     var calls: [Call] { state.withLock { $0.calls } }
-    func fail() { state.withLock { $0.fail = true } }
+    func fail(_ error: LauncherError = .io("injected spawn failure")) { state.withLock { $0.failure = error } }
     func afterSpawn(_ action: @escaping @Sendable () throws -> Void) { state.withLock { $0.afterSpawn = action } }
     func spawn(_ executable: URL, arguments: [String], environment: [String: String], currentDirectory: URL, output: ProcessOutput) throws -> ProcessIdentity {
         let action = try state.withLock { state in
             state.calls.append(Call(outputDiscarded: { if case .discard = output { true } else { false } }(), environment: environment))
-            if state.fail { throw LauncherError.io("injected spawn failure") }
+            if let failure = state.failure { throw failure }
             return state.afterSpawn
         }
         try action?()
@@ -147,10 +147,10 @@ struct ManagerPrefixProvider: LaunchPrefixProviding {
     func createPrefix(game: String, bundle: InstalledRuntimeBundle) async throws -> URL { prefix }
 }
 final class ManagerPreparation: LaunchPreparing, Sendable {
-    private let failure = Mutex(false)
-    func fail() { failure.withLock { $0 = true } }
+    private let failure = Mutex<LauncherError?>(nil)
+    func fail(_ error: LauncherError = .io("injected preparation failure")) { failure.withLock { $0 = error } }
     func ensure(prefix: URL, wineBinary: URL, request: PreparationRequest) async throws {
-        if failure.withLock({ $0 }) { throw LauncherError.io("injected preparation failure") }
+        if let error = failure.withLock({ $0 }) { throw error }
     }
 }
 

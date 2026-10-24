@@ -112,6 +112,7 @@ public struct DiagnosticBundle: Sendable {
             case .fileTooLarge(let path, let limit):
                 throw LauncherError.fileTooLarge(path: Redactor.redact(path), limit: limit)
             case .consentRequired(let component): throw LauncherError.consentRequired(Redactor.redact(component))
+            case .processSpawnFailed: throw error
             case .processFailed(let executable, let code, let stderr):
                 throw LauncherError.processFailed(executable: Redactor.redact(executable), exitCode: code,
                     stderrTail: Redactor.redact(stderr))
