@@ -8,6 +8,25 @@ import TestSupport
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchJournalTests {
+    @Test func ownedJournalHidesAndRestoresWhileOtherGameOwnsOperationLease() async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            let lock = try SessionLock.acquire(paths: f.paths, game: "starrail")
+            let store = GameRecordStore(directory: f.paths.games)
+            let lease = try await store.acquireOperationLease()
+            defer { withExtendedLifetime((lock, lease)) {} }
+            let owned = LaunchJournal(paths: f.paths, sessionOwned: true)
+            try f.fs.writeAtomically(oldBytes, to: gamePath)
+            try owned.write(f.session)
+            try HiddenFiles().hide([gamePath], session: &f.session, journal: owned)
+            #expect(try f.fs.itemType(at: gamePath) == nil)
+            #expect(try HiddenFiles().restore(session: &f.session, journal: owned) == .clean)
+            #expect(try f.fs.readFile(at: gamePath, maxBytes: 100) == oldBytes)
+            #expect(try owned.read(game: "starrail") == nil)
+            #expect(throws: LauncherError.self) { try f.journal.write(f.session) }
+        }
+    }
+
     @Test func snapshotRoundTripsWithoutConsultingCurrentSettings() async throws {
         try await BlockingIO.run {
             let f = try LaunchFixture()

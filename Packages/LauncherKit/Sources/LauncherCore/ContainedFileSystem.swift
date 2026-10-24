@@ -813,6 +813,12 @@ public struct ContainedFileSystem: Sendable, Hashable {
         try writeAtomically(data, to: path, temporaryPrefix: ".macgacha-cache-write-")
     }
 
+    /// Per-game session ownership permits concurrent writes with an unrelated
+    /// download. Operation sweeps must never treat these as operation-owned.
+    package func writeLaunchAtomically(_ data: Data, to path: SafeRelativePath) throws {
+        try writeAtomically(data, to: path, temporaryPrefix: ".macgacha-launch-write-")
+    }
+
     private func writeAtomically(_ data: Data, to path: SafeRelativePath, temporaryPrefix: String) throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard let parent = try directory(Array(path.components.dropLast()), create: true) else {

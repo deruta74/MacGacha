@@ -244,7 +244,7 @@ import TestSupport
             defer { killAndReap(child.pid) }
             var result: [InspectedProcess] = []
             try await waitUntil {
-                result = SystemProcessInspector().processes(environmentContains: "MACGACHA_TEST_TAG", value: tag)
+                result = try SystemProcessInspector().processes(environmentContains: "MACGACHA_TEST_TAG", value: tag)
                 return !result.isEmpty
             }
             #expect(result.map(\.identity) == [child])

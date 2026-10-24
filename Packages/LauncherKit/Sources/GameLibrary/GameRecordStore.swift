@@ -18,6 +18,7 @@ public actor GameRecordStore {
     /// may belong to a lease-free writer, even while an operation owns the store.
     package static let cacheTemporarySafeAge: TimeInterval = 3600
     private static let cacheTemporaryPrefix = ".macgacha-cache-write-"
+    private static let launchTemporaryPrefix = ".macgacha-launch-write-"
     private static let operationTemporaryPrefix = ".macgacha-write-"
     private let directory: URL
     private let fileOps: any FileOps
@@ -28,14 +29,18 @@ public actor GameRecordStore {
     /// The store directory's identity excludes other runners, including runners
     /// using another store instance or another pathname for the same directory.
     /// Retain the lease through record advancement and receipt acknowledgement.
-    package func acquireOperationLease(waitForPipelineDrain: Bool = false) async throws -> GameOperationLease {
+    package func acquireOperationLease(waitForPipelineDrain: Bool = false, retainedGameLock: InstallLock? = nil) async throws -> GameOperationLease {
         let fs = try writableFilesystem()
         if waitForPipelineDrain { try await GameOperationLease.waitForPipelineDrain(fs: fs) }
-        let lease = try GameOperationLease.acquire(fs: fs)
+        let lease = try GameOperationLease.acquire(fs: fs, retainedGameLock: retainedGameLock)
         do {
             for game in try gameDirectories() { try sweepInterruptedWrites(for: game, fs: fs) }
             return lease
         } catch { withExtendedLifetime(lease) {}; throw error }
+    }
+
+    package func waitForPipelineDrain() async throws {
+        try await GameOperationLease.waitForPipelineDrain(fs: writableFilesystem())
     }
 
     public func load(_ game: String) throws -> GameRecord? {
@@ -171,7 +176,7 @@ public actor GameRecordStore {
         let paths = try fs.contentsOfDirectory(at: directory)
         // Cache siblings have their own bounded directory-enumeration limit;
         // young recognized names must not prevent retiring other orphan state.
-        guard paths.lazy.filter({ !Self.isTemporary($0, prefix: Self.cacheTemporaryPrefix) }).count <= 64 else {
+        guard paths.lazy.filter({ !Self.isTemporary($0, prefix: Self.cacheTemporaryPrefix) && !Self.isTemporary($0, prefix: Self.launchTemporaryPrefix) }).count <= 64 else {
             throw LauncherError.journalCorrupt("too many game metadata entries")
         }
         let cutoff = Date().addingTimeInterval(-Self.cacheTemporarySafeAge)
@@ -188,6 +193,10 @@ public actor GameRecordStore {
             // before a game record exists. Never retire user recovery copies.
             if path.components.last == "launch-session.json", try fs.itemType(at: path) == .regularFile { continue }
             if path.components.last == "recovery", try fs.itemType(at: path) == .directory { continue }
+            if Self.isTemporary(path, prefix: Self.launchTemporaryPrefix) {
+                if try launchTemporaryIsExpired(path, fs: fs, cutoff: cutoff, game: game) { removable.append(path) }
+                continue
+            }
             if Self.isTemporary(path, prefix: Self.cacheTemporaryPrefix) {
                 if try cacheTemporaryIsExpired(path, fs: fs, cutoff: cutoff) { removable.append(path) }
                 continue
@@ -273,7 +282,9 @@ public actor GameRecordStore {
         let cutoff = Date().addingTimeInterval(-Self.cacheTemporarySafeAge)
         for directory in directories {
             for path in try fs.contentsOfDirectory(at: directory) {
-                if Self.isTemporary(path, prefix: Self.cacheTemporaryPrefix) {
+                if Self.isTemporary(path, prefix: Self.launchTemporaryPrefix) {
+                    if try launchTemporaryIsExpired(path, fs: fs, cutoff: cutoff, game: game) { try fs.removeFile(at: path) }
+                } else if Self.isTemporary(path, prefix: Self.cacheTemporaryPrefix) {
                     if try cacheTemporaryIsExpired(path, fs: fs, cutoff: cutoff) { try fs.removeFile(at: path) }
                 } else if directory == gamePath, Self.isTemporary(path, prefix: Self.operationTemporaryPrefix),
                     try fs.itemType(at: path) == .regularFile {
@@ -288,6 +299,20 @@ public actor GameRecordStore {
         guard name.hasPrefix(prefix) else { return false }
         let suffix = String(name.dropFirst(prefix.count))
         return suffix.count == 36 && UUID(uuidString: suffix)?.uuidString.lowercased() == suffix.lowercased()
+    }
+
+    private func launchTemporaryIsExpired(_ path: SafeRelativePath, fs: ContainedFileSystem, cutoff: Date, game: String) throws -> Bool {
+        // Unlike cache writes, a launch owns a per-game lock. Even a slow write
+        // older than the conservative age cutoff is live while that lock is held.
+        guard try fs.itemType(at: path) == .regularFile else {
+            throw LauncherError.journalCorrupt("unexpected launch temporary")
+        }
+        guard try cacheTemporaryIsExpired(path, fs: fs, cutoff: cutoff) else { return false }
+        let lock: InstallLock
+        do { lock = try InstallLock(fs: fs, path: relative(game, ".session.lock")) }
+        catch LauncherError.busy { return false }
+        defer { withExtendedLifetime(lock) {} }
+        return true
     }
 
     private func cacheTemporaryIsExpired(_ path: SafeRelativePath, fs: ContainedFileSystem, cutoff: Date) throws -> Bool {
@@ -319,7 +344,12 @@ package final class GameOperationLease: PipelineDrainOwner {
     private static let registry = Mutex(Registry())
     private let key: FileSystemIdentity
     private let lock: InstallLock
-    private init(key: FileSystemIdentity, lock: InstallLock) { self.key = key; self.lock = lock }
+    // Engine.run retains this lease through pipeline drainage after cancellation.
+    // Per-game exclusion must live just as long as the global operation lease.
+    private let retainedGameLock: InstallLock?
+    private init(key: FileSystemIdentity, lock: InstallLock, retainedGameLock: InstallLock?) {
+        self.key = key; self.lock = lock; self.retainedGameLock = retainedGameLock
+    }
     package func pipelineWillDrain(wait: @escaping @Sendable () async throws -> Void) {
         Self.registry.withLock { $0.drains[key] = wait }
     }
@@ -327,14 +357,14 @@ package final class GameOperationLease: PipelineDrainOwner {
         let key = try fs.rootIdentity()
         if let wait = registry.withLock({ $0.drains[key] }) { try await wait() }
     }
-    package static func acquire(fs: ContainedFileSystem) throws -> GameOperationLease {
+    package static func acquire(fs: ContainedFileSystem, retainedGameLock: InstallLock? = nil) throws -> GameOperationLease {
         let key = try fs.rootIdentity()
         guard registry.withLock({ $0.active.insert(key).inserted }) else {
             throw LauncherError.busy("another game operation is running")
         }
         do {
             let lock = try InstallLock(fs: fs, path: SafeRelativePath(".operation.lock"))
-            return GameOperationLease(key: key, lock: lock)
+            return GameOperationLease(key: key, lock: lock, retainedGameLock: retainedGameLock)
         } catch {
             _ = registry.withLock { $0.active.remove(key) }
             if case LauncherError.busy = error { throw LauncherError.busy("another game operation is running") }

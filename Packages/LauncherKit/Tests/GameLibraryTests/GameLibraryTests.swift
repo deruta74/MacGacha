@@ -41,6 +41,45 @@ import TestSupport
         #expect(try libraryStateFiles(at: f.install) == installed)
     }
 
+    @Test(arguments: ["install", "adopt", "update", "resume", "verify", "voices", "uninstall"])
+    func heldSessionLockBlocksEveryOperationBeforeMutation(operation: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        let fs = try ContainedFileSystem(root: f.paths.games)
+        let lock = try InstallLock(fs: fs, path: SafeRelativePath("\(game.id)/.session.lock"))
+        defer { withExtendedLifetime(lock) {} }
+        let before = try libraryStateFiles(at: f.paths.games)
+        let installed = try libraryStateFiles(at: f.install)
+        do {
+            if operation == "uninstall" { try await f.library.uninstall(game) }
+            else {
+                let stream = switch operation {
+                case "install": await f.library.install(game, voices: ["en-us"], at: f.install, approved: true)
+                case "adopt": await f.library.adopt(game, folder: f.install, voices: ["en-us"])
+                case "update": await f.library.update(game, approved: true)
+                case "resume": await f.library.resume(game, approved: true)
+                case "verify": await f.library.verify(game, mode: .full)
+                default: await f.library.setVoices(game, ["en-us"])
+                }
+                _ = try await libraryCollect(stream)
+            }
+            Issue.record("Operation ignored live session ownership")
+        } catch LauncherError.busy { }
+        #expect(try libraryStateFiles(at: f.paths.games) == before)
+        #expect(try libraryStateFiles(at: f.install) == installed)
+    }
+
+    @Test func sessionClaimedBetweenGuardAndOperationLeaseRefusesMutation() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        let before = try libraryStateFiles(at: f.paths.games)
+        let guardClaim = SessionClaimingLibraryGuard(paths: f.paths)
+        let library = f.restarted(operationGuard: guardClaim)
+        do {
+            _ = try await libraryCollect(await library.verify(game, mode: .full))
+            Issue.record("Operation crossed a session claimed after its guard check")
+        } catch LauncherError.busy { }
+        #expect(try libraryStateFiles(at: f.paths.games) == before)
+    }
+
     @Test func otherGameStillInstalls() async throws {
         let f = try LibraryFixture()
         let other = GameDefinition.all.first { $0.id == "zzz" }!
@@ -252,7 +291,7 @@ import TestSupport
         let before = f.cdn.requestLog.count
         if remaining == nil { await f.restarted().start() } else { try await f.restarted().uninstall(game) }
         #expect(try await f.store.load(game.id) == nil)
-        #expect(try await f.store.gameDirectories().isEmpty)
+        try await expectOnlyRetainedSessionLock(f)
         #expect(f.cdn.requestLog.count == before)
         if adopted { #expect(try f.fs.readFile(at: SafeRelativePath("foreign"), maxBytes: 100) == Data("mine".utf8)) }
     }
@@ -445,6 +484,21 @@ import TestSupport
         try f.assertFiles(1)
     }
 
+    @Test func startupLeavesLiveSessionMetadataUntouched() async throws {
+        let f = try LibraryFixture()
+        let plan = InstallPlan(id: try SafeIdentifier("orphan"), objects: [:], files: [], deletions: [])
+        try await f.store.savePlan(plan, for: game.id)
+        let fs = try ContainedFileSystem(root: f.paths.games)
+        var lock: InstallLock? = try InstallLock(fs: fs, path: SafeRelativePath("\(game.id)/.session.lock"))
+        await f.library.start()
+        #expect(try await f.store.loadPlan(for: game.id) != nil)
+        withExtendedLifetime(lock) {}
+        lock = nil
+        await f.restarted().start()
+        #expect(try await f.store.loadPlan(for: game.id) == nil)
+        try await expectOnlyRetainedSessionLock(f)
+    }
+
     @Test func startupReconcilesPlanWithoutRecord() async throws {
         let f = try LibraryFixture()
         let plan = InstallPlan(id: try SafeIdentifier("orphan"), objects: [:], files: [], deletions: [])
@@ -455,7 +509,7 @@ import TestSupport
         try ContainedFileSystem(root: await f.store.manifestCache(for: game.id)).writeAtomically(Data("cache".utf8), to: SafeRelativePath("manifest.zst"))
         await f.library.start()
         #expect(try await f.store.loadPlan(for: game.id) == nil)
-        #expect(try await f.store.gameDirectories().isEmpty)
+        try await expectOnlyRetainedSessionLock(f)
         #expect(f.cdn.requestLog.isEmpty)
     }
 
@@ -526,7 +580,7 @@ import TestSupport
         try f.fs.writeAtomically(Data("unrelated".utf8), to: SafeRelativePath("control"))
         try await f.restarted().uninstall(game)
         #expect(try await f.store.load(game.id) == nil)
-        #expect(try await f.store.gameDirectories().isEmpty)
+        try await expectOnlyRetainedSessionLock(f)
         #expect(try f.fs.contentsOfRootDirectory() == [SafeRelativePath("control")])
         #expect(try f.fs.readFile(at: SafeRelativePath("control"), maxBytes: 100) == Data("unrelated".utf8))
     }
@@ -666,11 +720,10 @@ import TestSupport
         }
     }
 
-    @Test func uninstallRetiresGameDirectory() async throws {
+    @Test func uninstallRetiresMetadataButPreservesSessionLock() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         try await f.library.uninstall(game)
-        #expect(!FileManager.default.fileExists(atPath: f.paths.games.appendingPathComponent(game.id).path))
-        #expect(try await f.store.gameDirectories().isEmpty)
+        try await expectOnlyRetainedSessionLock(f)
     }
 
     @Test(arguments: ["verify", "adopt", "voices"])
@@ -948,4 +1001,24 @@ private func libraryStateFiles(at root: URL) throws -> [String: Data] {
     }
     try visit(fs.contentsOfRootDirectory())
     return result
+}
+
+private actor SessionClaimingLibraryGuard: GameOperationGuard {
+    let paths: AppPaths
+    var lock: InstallLock?
+    init(paths: AppPaths) { self.paths = paths }
+    func willOperate(on game: String) async throws {
+        let paths = paths
+        lock = try await BlockingIO.run {
+            try InstallLock(fs: ContainedFileSystem(root: paths.games), path: SafeRelativePath("\(game)/.session.lock"))
+        }
+    }
+}
+
+private func expectOnlyRetainedSessionLock(_ fixture: borrowing LibraryFixture) async throws {
+    #expect(try await fixture.store.gameDirectories() == [game.id])
+    let fs = try ContainedFileSystem(root: fixture.paths.games)
+    let retained = try SafeRelativePath("\(game.id)/.session.lock")
+    #expect(try fs.contentsOfDirectory(at: SafeRelativePath(game.id)) == [retained])
+    #expect(try fs.itemType(at: retained) == .regularFile)
 }

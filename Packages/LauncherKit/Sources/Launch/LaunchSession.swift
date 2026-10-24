@@ -24,23 +24,28 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     public var processes: [ProcessIdentity]
     public var hides: [HideEntry]
     public var proxyPort: UInt16?
+    /// Additive recovery context: never rediscover a different launch's log or executable.
+    public var sessionLogURL: URL?
+    public let gameExecutable: SafeRelativePath?
     public let createdAt: Date
 
     public init(sessionID: UUID, game: String, installRoot: URL, installIdentity: FileSystemIdentity, prefix: URL,
         bundleID: String, runtimeDigest: Digest, wineBinary: URL, wineserver: URL, componentIDs: [String],
         recipeVersion: Int, settings: LaunchSettings, state: State = .preparing, processes: [ProcessIdentity] = [],
-        hides: [HideEntry] = [], proxyPort: UInt16? = nil, createdAt: Date = Date()) {
+        hides: [HideEntry] = [], proxyPort: UInt16? = nil, createdAt: Date = Date(),
+        sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil) {
         self.sessionID = sessionID; self.game = game; self.installRoot = installRoot; self.installIdentity = installIdentity
         self.prefix = prefix; self.bundleID = bundleID; self.runtimeDigest = runtimeDigest; self.wineBinary = wineBinary
         self.wineserver = wineserver; self.componentIDs = componentIDs; self.recipeVersion = recipeVersion
         self.settings = settings; self.state = state; self.processes = processes; self.hides = hides
         self.proxyPort = proxyPort; self.createdAt = createdAt
+        self.sessionLogURL = sessionLogURL; self.gameExecutable = gameExecutable
     }
 
     func validate() throws {
         _ = try SafeIdentifier(game); _ = try SafeIdentifier(bundleID)
         for id in componentIDs { _ = try SafeIdentifier(id) }
-        for url in [installRoot, prefix, wineBinary, wineserver] {
+        for url in [installRoot, prefix, wineBinary, wineserver] + (sessionLogURL.map { [$0] } ?? []) {
             guard url.isFileURL, url.path.hasPrefix("/"), !url.path.utf8.contains(0),
                 url.host == nil || url.host == "" || url.host == "localhost" else { throw LauncherError.journalCorrupt("Invalid session URL") }
         }
