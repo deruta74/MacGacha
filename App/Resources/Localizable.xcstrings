@@ -794,6 +794,16 @@
         }
       }
     },
+    "Global" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "国际服"
+          }
+        }
+      }
+    },
     "Graphics" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1128,6 +1138,16 @@
         }
       }
     },
+    "Mainland China (Beta)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中国大陆（测试版）"
+          }
+        }
+      }
+    },
     "More for %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1338,6 +1358,16 @@
         }
       }
     },
+    "Region" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "区服"
+          }
+        }
+      }
+    },
     "Reload recent events" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1524,6 +1554,16 @@
         }
       }
     },
+    "Shows the games for this region's servers. A download or game in the other region keeps going when you switch. Mainland China is in beta: signing in hasn't been tested yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示该区服的游戏。切换后，另一区服正在进行的下载或游戏会继续。中国大陆区服处于测试阶段：尚未测试登录。"
+          }
+        }
+      }
+    },
     "Some game files aren't back yet. MacGacha keeps trying — or choose Try Restoring Again in the … menu." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1572,6 +1612,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Steam 兼容层"
+          }
+        }
+      }
+    },
+    "Switch to Global" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到国际服"
+          }
+        }
+      }
+    },
+    "Switch to Mainland China" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到中国大陆"
           }
         }
       }
@@ -2093,6 +2153,7 @@
       }
     },
     "原神" : {
+      "comment" : "Mainland China edition; keep the official Chinese name in every language",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -2103,6 +2164,7 @@
       }
     },
     "崩坏：星穹铁道" : {
+      "comment" : "Mainland China edition; keep the official Chinese name in every language",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -2113,6 +2175,7 @@
       }
     },
     "绝区零" : {
+      "comment" : "Mainland China edition; keep the official Chinese name in every language",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {

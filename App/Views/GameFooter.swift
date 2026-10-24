@@ -4,6 +4,7 @@ import AppKit
 import DownloadEngine
 import GameLibrary
 import Launch
+import LauncherCore
 import SwiftUI
 
 /// Sheets that act on one game, opened from its footer.
@@ -41,6 +42,9 @@ struct GameFooter: View {
             title
             Spacer(minLength: 24)
             VStack(alignment: .trailing, spacing: 10) {
+                if let note = otherRegionNote {
+                    OtherRegionNote(text: note.text) { model.region = note.region }
+                }
                 HStack(spacing: 8) {
                     Text(statusLine)
                         .contentTransition(.opacity)
@@ -199,6 +203,14 @@ struct GameFooter: View {
         case .proxy: String(localized: "Couldn't start the network helper for \(game.name)", comment: "The argument is the game's name")
         case .spawn, .restore, .report: String(localized: "\(game.name) couldn't start", comment: "The argument is the game's name")
         }
+    }
+
+    /// The status line already names the other region's game; this offers the way to it.
+    private var otherRegionNote: (text: String, region: Region)? {
+        guard let other = model.otherRegionActivity?.game else { return nil }
+        let text = other.region == .mainlandChina
+            ? String(localized: "Switch to Mainland China") : String(localized: "Switch to Global")
+        return (text, other.region)
     }
 
     /// Only one game runs at a time, from pressing Play until its files are back.
@@ -518,5 +530,22 @@ enum ByteSize {
         guard let unit = units.first(where: { reference >= $0.0 }) else { return text(bytes) }
         let value = Double(bytes) / Double(unit.0)
         return value.formatted(.number.precision(.fractionLength(1)))
+    }
+}
+
+/// A small button to the region whose game is downloading or running.
+struct OtherRegionNote: View {
+    let text: String
+    let show: () -> Void
+
+    var body: some View {
+        Button(action: show) {
+            Label(text, systemImage: "globe.asia.australia")
+                .font(.callout)
+                .padding(.horizontal, 4)
+        }
+        .buttonStyle(.glass)
+        .controlSize(.small)
+        .foregroundStyle(.white)
     }
 }

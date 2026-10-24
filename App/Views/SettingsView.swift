@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import AppKit
+import LauncherCore
 import SwiftUI
 
 struct SettingsView: View {
@@ -11,6 +12,16 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                Picker("Region", selection: Binding(get: { model.region }, set: { model.region = $0 })) {
+                    Text("Global").tag(Region.global)
+                    Text("Mainland China (Beta)").tag(Region.mainlandChina)
+                }
+            } footer: {
+                Text("Shows the games for this region's servers. A download or game in the other region keeps going when you switch. Mainland China is in beta: signing in hasn't been tested yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section {
                 Toggle("Animated backgrounds", isOn: Binding(
                     get: { animatedBackgrounds },

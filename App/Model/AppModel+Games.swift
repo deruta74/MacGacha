@@ -6,10 +6,21 @@ import LauncherCore
 import DownloadEngine
 import GameLibrary
 
-struct GameOperationToken: Sendable, Equatable { let id: String; let generation: UUID }
+struct GameOperationToken: Sendable, Equatable {
+    let id: String; let generation: UUID
+    var kind: OtherRegionActivity = .downloading
+}
 private enum GameRequest: Sendable {
     case install(Set<String>, URL, Bool), adopt(URL, Set<String>), update, resume(Bool), verify, voices(Set<String>), uninstall
     var isUninstall: Bool { if case .uninstall = self { true } else { false } }
+    func activity(record: GameRecord?) -> OtherRegionActivity {
+        switch self {
+        case .verify, .adopt: .verifying
+        case .update, .uninstall: .updating
+        case .resume: record?.pending?.kind == .update ? .updating : record?.pending?.kind == .repair ? .verifying : .downloading
+        case .install, .voices: .downloading
+        }
+    }
 }
 private struct GameSnapshot: Sendable {
     let status: GameStatus
@@ -24,14 +35,18 @@ private struct GameSnapshot: Sendable {
 
 @MainActor extension AppModel {
     func refreshGames() async {
+        await refreshGames(in: region)
+    }
+
+    func refreshGames(in region: Region) async {
         let time = now()
-        guard !gameRefreshInFlight, gameLastRefresh.map({ $0.duration(to: time) >= .seconds(600) }) ?? true else { return }
-        gameRefreshInFlight = true; gameLastRefresh = time
-        defer { gameRefreshInFlight = false }
+        guard !gameRefreshInFlight.contains(region), gameLastRefresh[region].map({ $0.duration(to: time) >= .seconds(600) }) ?? true else { return }
+        gameRefreshInFlight.insert(region); gameLastRefresh[region] = time
+        defer { gameRefreshInFlight.remove(region) }
         await ensureGameStartup().value
         guard !Task.isCancelled, launchStartupError == nil else { return }
         let revisions = gameRevisions, services = gameServices
-        let ids = GameDefinition.inRegion(.global).map(\.id).filter { $0 != gameOperation?.id }
+        let ids = GameDefinition.inRegion(region).map(\.id).filter { $0 != gameOperation?.id }
         let results = await withTaskGroup(of: (String, GameSnapshot).self) { group in
             for id in ids { group.addTask { (id, await readGame(services, id: id)) } }
             var result: [(String, GameSnapshot)] = []
@@ -41,6 +56,24 @@ private struct GameSnapshot: Sendable {
         guard !Task.isCancelled else { return }
         for (id, snapshot) in results where gameRevisions[id] == revisions[id] {
             applyGame(snapshot, id: id, activity: games[id]?.activity)
+        }
+        // Records are local; only the selected region performs remote status reads.
+        let others = GameDefinition.all.filter { $0.region != region && $0.id != gameOperation?.id }.map(\.id)
+        let records = await withTaskGroup(of: (String, GameRecord?, LauncherError?).self) { group in
+            for id in others {
+                group.addTask {
+                    do { return (id, try await services.record(id), nil) }
+                    catch { return (id, nil, launcherError(error)) }
+                }
+            }
+            var result: [(String, GameRecord?, LauncherError?)] = []
+            for await value in group { result.append(value) }
+            return result
+        }
+        guard !Task.isCancelled else { return }
+        for (id, record, error) in records where gameRevisions[id] == revisions[id] {
+            setGameRecord(id, record)
+            if let error { show(error) }
         }
     }
 
@@ -90,10 +123,10 @@ private struct GameSnapshot: Sendable {
         return task
     }
 
-    private func reserveGame(_ id: String, activity: GameActivity) -> GameOperationToken? {
+    private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity) -> GameOperationToken? {
         guard GameDefinition.all.contains(where: { $0.id == id }) else { show(LauncherError.io("Unknown game")); return nil }
         guard gameOperation == nil else { show(LauncherError.busy("another game operation is running")); return nil }
-        let token = GameOperationToken(id: id, generation: UUID())
+        let token = GameOperationToken(id: id, generation: UUID(), kind: kind)
         gameOperation = token; gameRevisions[id] = token.generation
         gameProgress = GameProgress()
         dismissError()
@@ -102,7 +135,8 @@ private struct GameSnapshot: Sendable {
     }
 
     @discardableResult private func beginGame(_ id: String, _ request: GameRequest) -> Task<Void, Never>? {
-        guard let token = reserveGame(id, activity: request.isUninstall ? .working(.deleting, fraction: nil, bytesPerSecond: nil) : .resolving) else { return nil }
+        guard let token = reserveGame(id, activity: request.isUninstall ? .working(.deleting, fraction: nil, bytesPerSecond: nil) : .resolving,
+            kind: request.activity(record: gameRecords[id])) else { return nil }
         let services = gameServices, startup = ensureGameStartup()
         let task = Task { [weak self] in
             var approval: (required: Int64, available: Int64)?

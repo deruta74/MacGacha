@@ -15,9 +15,9 @@ import Sophon
 
 @Suite(.serialized) @MainActor
 struct AppModelGamesTests {
-    @Test func visibleRailRemainsGlobalAndInstallFoldersAreEditionSpecific() throws {
-        #expect(LauncherGame.all.map(\.id) == GameDefinition.inRegion(.global).map(\.id))
-        #expect(LauncherGame.all.count == 3)
+    @Test func editionRegistryAndInstallFoldersAreEditionSpecific() throws {
+        #expect(LauncherGame.all.map(\.id) == GameDefinition.all.map(\.id))
+        #expect(LauncherGame.all.count == 6)
         let style = try #require(LauncherGame.all.first)
         for definition in GameDefinition.inRegion(.mainlandChina) {
             let game = LauncherGame(id: definition.id, name: "Unrelated interface name", tint: style.tint, deepTint: style.deepTint)
@@ -427,7 +427,7 @@ struct AppModelGamesTests {
         await model.start()
         #expect(model.games.isEmpty)
         let preview = AppModel.preview()
-        #expect(Set(preview.games.keys) == ["genshin", "starrail", "zzz"])
+        #expect(Set(preview.games.keys) == Set(GameDefinition.all.map(\.id)))
         #expect(preview.gameArt.isEmpty)
     }
 }
