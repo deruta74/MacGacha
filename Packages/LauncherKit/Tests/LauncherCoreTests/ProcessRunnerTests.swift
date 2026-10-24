@@ -127,7 +127,8 @@ func processRunnerReportsLaunchFailure() async throws {
             currentDirectory: nil
         )
         Issue.record("A missing executable must fail to launch")
-    } catch LauncherError.io {
+    } catch LauncherError.processSpawnFailed(let code) {
+        #expect(code == ENOENT)
         // Launch failures must also release the pending pipe readers.
     }
 }

@@ -134,7 +134,7 @@ private func openProcessLog(_ url: URL) throws -> Int32 {
 }
 
 private func checkSpawn(_ status: Int32) throws {
-    guard status == 0 else { throw LauncherError.io("Spawning process: \(String(cString: strerror(status)))") }
+    guard status == 0 else { throw LauncherError.processSpawnFailed(errno: status) }
 }
 
 private func withProcessStrings<T>(_ strings: [String], _ body: (UnsafePointer<UnsafeMutablePointer<CChar>?>) throws -> T) throws -> T {

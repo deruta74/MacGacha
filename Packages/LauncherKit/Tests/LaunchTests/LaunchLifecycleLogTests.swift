@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Darwin
 import Foundation
 import Testing
 import LauncherCore
@@ -127,6 +128,7 @@ import TestSupport
         #expect(records.last?.message == "Launch failed")
         #expect(records.last?.metadata["stage"] == "watch")
         #expect(try await sessionText(url).contains("session ended: before ready"))
+        #expect(try await sessionText(url).contains("failed watch case=io"))
     }
 
     @Test func startupFailureIsLogged() async throws {
@@ -145,6 +147,7 @@ import TestSupport
             if case .failed(let failure) = event { return failure.logURL }; return nil
         }.first)
         #expect(try await sessionText(url).contains("session ended: startup failure"))
+        #expect(try await sessionText(url).contains("failed watch case=io"))
     }
 
     @Test(arguments: [true, false]) func restoreOutcomesIncludeCounts(conflict: Bool) async throws {
@@ -195,6 +198,52 @@ import TestSupport
         let records = try await readEvents(f)
         #expect(records.contains { $0.message == "Launch failed" && $0.metadata["stage"] == "prepare" })
         #expect(!records.contains { $0.message == "Game running" })
+    }
+
+    @Test(arguments: [true, false])
+    func spawnFailureHasPathFreeCaseAndErrno(logsEnabled: Bool) async throws {
+        try await assertFailureLogged(.processSpawnFailed(errno: EBADARCH), stage: .spawn,
+            expectedCase: "processSpawnFailed", reason: "EBADARCH", logsEnabled: logsEnabled)
+    }
+
+    @Test func processFailureHasOnlyExitCodeAndNoPrivatePayload() async throws {
+        try await assertFailureLogged(.processFailed(executable: "/Users/private-person/private/wineboot",
+            exitCode: 42, stderrTail: "private-person https://example.invalid/?token=planted-secret"),
+            stage: .prepare, expectedCase: "processFailed", reason: "exit code 42")
+    }
+
+    @Test func freeFormFailurePayloadIsNeverLoggedAsAReason() async throws {
+        try await assertFailureLogged(.io("EBADARCH /Users/private-person/private token=planted-secret"),
+            stage: .prepare, expectedCase: "io", reason: nil)
+    }
+
+    private func assertFailureLogged(_ error: LauncherError, stage: LaunchStage, expectedCase: String,
+        reason: String?, logsEnabled: Bool = true) async throws {
+        let f = try await ManagerFixture.make(logsEnabled: logsEnabled), manager = f.manager(), events = ManagerEvents()
+        if stage == .spawn { f.spawner.fail(error) } else { f.preparation.fail(error) }
+        let consumer = await f.consume(manager, events: events)
+        await consumer.value; await manager.waitForSupervision(game: "starrail"); await manager.flushLogs()
+        let records = try await readEvents(f)
+        let failed = try #require(records.first { $0.message == "Launch failed" })
+        var expected = ["game": "starrail", "stage": stage.rawValue, "case": expectedCase]
+        expected["reason"] = reason
+        #expect(failed.metadata == expected)
+        var output = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
+        if logsEnabled {
+            let values = await events.values
+            let url = try #require(values.compactMap { event -> URL? in
+                if case .failed(let failure) = event { return failure.logURL }; return nil
+            }.first)
+            let text = try await sessionText(url)
+            #expect(text.contains("failed \(stage.rawValue) case=\(expectedCase)" + (reason.map { " reason=\($0)" } ?? "")))
+            // Session headers intentionally contain local paths; only lifecycle lines are path-free.
+            output += text.split(separator: "\n").filter { $0.contains("failed ") }.joined(separator: "\n")
+        }
+        for privateValue in [f.temp.url.path, "/Users/", "private-person", "planted-secret", "token="] {
+            #expect(!output.contains(privateValue))
+        }
+        #expect(try await f.journal() == nil)
+        try await f.assertOriginalRestored()
     }
 
     @Test func reattachAfterExitLogsEndOnceAcrossAnotherRestart() async throws {
