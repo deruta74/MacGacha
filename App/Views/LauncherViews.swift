@@ -15,9 +15,9 @@ struct LauncherGame: Identifiable, Hashable {
 
 extension LauncherGame {
     static let all: [LauncherGame] = [
-        LauncherGame(id: "genshin", name: "Genshin Impact", tint: Color(red: 0.98, green: 0.78, blue: 0.46), deepTint: Color(red: 0.16, green: 0.22, blue: 0.38)),
-        LauncherGame(id: "starrail", name: "Honkai: Star Rail", tint: Color(red: 0.69, green: 0.66, blue: 0.93), deepTint: Color(red: 0.10, green: 0.08, blue: 0.24)),
-        LauncherGame(id: "zzz", name: "Zenless Zone Zero", tint: Color(red: 0.85, green: 0.93, blue: 0.30), deepTint: Color(red: 0.10, green: 0.10, blue: 0.10)),
+        LauncherGame(id: "genshin", name: String(localized: "Genshin Impact"), tint: Color(red: 0.98, green: 0.78, blue: 0.46), deepTint: Color(red: 0.16, green: 0.22, blue: 0.38)),
+        LauncherGame(id: "starrail", name: String(localized: "Honkai: Star Rail"), tint: Color(red: 0.69, green: 0.66, blue: 0.93), deepTint: Color(red: 0.10, green: 0.08, blue: 0.24)),
+        LauncherGame(id: "zzz", name: String(localized: "Zenless Zone Zero"), tint: Color(red: 0.85, green: 0.93, blue: 0.30), deepTint: Color(red: 0.10, green: 0.10, blue: 0.10)),
     ]
 }
 

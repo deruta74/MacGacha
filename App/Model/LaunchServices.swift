@@ -27,12 +27,13 @@ protocol LaunchServices: Sendable {
 /// Construction performs no I/O; callers join startup before any game operation.
 actor LiveLaunchServices: LaunchServices, GameOperationGuard {
     private let paths: AppPaths
+    private let log: EventLog?
     private var construction: Task<LaunchManager, any Error>?
     private var startup: Task<[String: LaunchSession], Never>?
-    init(paths: AppPaths) { self.paths = paths }
+    init(paths: AppPaths, log: EventLog? = nil) { self.paths = paths; self.log = log }
     private func manager() async throws -> LaunchManager {
         if let construction { return try await construction.value }
-        let paths = paths
+        let paths = paths, log = log
         let task = Task {
             let manifest = try await BundledRuntimeManifest.load()
             let runner = SystemProcessRunner(), store = RuntimeStore(paths: paths)
@@ -41,7 +42,7 @@ actor LiveLaunchServices: LaunchServices, GameOperationGuard {
                 installer: ComponentInstaller(store: store, consent: consent))
             return LaunchManager(paths: paths, runtimes: LiveLaunchRuntimes(manifest: manifest, manager: bundles, store: store),
                 prefixes: PrefixManager(paths: paths, runner: runner), preparation: LaunchPreparation(paths: paths, runner: runner),
-                spawner: SystemProcessSpawner(), inspector: SystemProcessInspector(), runner: runner, clock: ContinuousClock())
+                spawner: SystemProcessSpawner(), inspector: SystemProcessInspector(), runner: runner, clock: ContinuousClock(), log: log)
         }
         construction = task
         return try await task.value
