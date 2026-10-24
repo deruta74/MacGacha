@@ -31,17 +31,65 @@ public actor EventLog {
         public var metadata: [String: String]
     }
 
-    private let directory: URL
-    private let maxFileBytes: Int
-    private let keepFiles: Int
+    private nonisolated let writer: BestEffortLogWriter<EventLogInput>
 
     public init(directory: URL, maxFileBytes: Int = 5 << 20, keepFiles: Int = 5) {
-        self.directory = directory
-        self.maxFileBytes = max(128, maxFileBytes) // Leave room for the smallest valid JSONL record.
-        self.keepFiles = max(1, keepFiles)
+        self.writer = Self.makeWriter(directory: directory, maxFileBytes: maxFileBytes, keepFiles: keepFiles,
+            pendingRecords: 128, beforeWrite: {})
+    }
+    package init(directory: URL, maxFileBytes: Int = 5 << 20, keepFiles: Int = 5,
+        pendingRecords: Int, beforeWrite: @escaping @Sendable () throws -> Void) {
+        self.writer = Self.makeWriter(directory: directory, maxFileBytes: maxFileBytes, keepFiles: keepFiles,
+            pendingRecords: pendingRecords, beforeWrite: beforeWrite)
+    }
+    private nonisolated static func makeWriter(directory: URL, maxFileBytes: Int, keepFiles: Int,
+        pendingRecords: Int, beforeWrite: @escaping @Sendable () throws -> Void) -> BestEffortLogWriter<EventLogInput> {
+        let sink = EventLogFileWriter(directory: directory, maxFileBytes: max(128, maxFileBytes), keepFiles: max(1, keepFiles))
+        return BestEffortLogWriter(maxPendingCount: pendingRecords) { input in
+            try beforeWrite()
+            sink.write(input)
+        }
     }
 
-    public func log(_ level: Level, _ category: String, _ message: String, metadata: [String: String] = [:]) {
+    public nonisolated var droppedRecordCount: UInt64 { writer.droppedCount }
+
+    /// Non-suspending and bounded. Operational supervision must use this API:
+    /// regular-file writes can stall even when the file was opened O_NONBLOCK.
+    public nonisolated func post(_ level: Level, _ category: String, _ message: String, metadata: [String: String] = [:]) {
+        enqueue(level, category, message, metadata: metadata)
+    }
+    /// Existing callers can still join their write (or its best-effort discard).
+    public nonisolated func log(_ level: Level, _ category: String, _ message: String, metadata: [String: String] = [:]) async {
+        let ticket = enqueue(level, category, message, metadata: metadata)
+        await writer.wait(through: ticket)
+    }
+    public nonisolated func flush() async { await writer.drain() }
+
+    @discardableResult private nonisolated func enqueue(_ level: Level, _ category: String, _ message: String,
+        metadata: [String: String]) -> UInt64 {
+        // Omit whole oversized inputs rather than trimming before redaction.
+        let input = EventLogInput(level: level, category: EventLogFileWriter.cappedInput(category),
+            message: EventLogFileWriter.cappedInput(message), metadata: Dictionary(uniqueKeysWithValues:
+                metadata.keys.sorted().prefix(128).map { ($0, EventLogFileWriter.cappedInput(metadata[$0]!)) }))
+        return writer.post(input, bytes: input.bytes)
+    }
+}
+
+private struct EventLogInput: Sendable {
+    let level: EventLog.Level
+    let category: String
+    let message: String
+    let metadata: [String: String]
+    var bytes: Int { category.utf8.count + message.utf8.count + metadata.reduce(128) { $0 + $1.key.utf8.count + $1.value.utf8.count + 64 } }
+}
+
+/// Plain synchronous sink: no actor hop may move file I/O back to the pool.
+private struct EventLogFileWriter: Sendable {
+    let directory: URL
+    let maxFileBytes: Int
+    let keepFiles: Int
+    func write(_ input: EventLogInput) {
+        let level = input.level, category = input.category, message = input.message, metadata = input.metadata
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let budget = min(maxFileBytes, 5 << 20)
@@ -49,7 +97,7 @@ public actor EventLog {
         var remaining = budget / 2
         for key in metadata.keys.sorted().prefix(128) where remaining > 0 {
             // Match the original key before truncation can turn "password" into "pass".
-            let entry = Redactor.redact(metadata: [key: cappedInput(metadata[key] ?? "")])
+            let entry = Redactor.redact(metadata: [key: Self.cappedInput(metadata[key] ?? "")])
             if let (safeKey, value) = entry.first {
                 let boundedKey = Redactor.uniqueKey(prefix(safeKey, bytes: min(remaining, 256)), in: boundedMetadata, maxBytes: 256)
                 let boundedValue = prefix(value, bytes: min(remaining, 4096))
@@ -57,9 +105,9 @@ public actor EventLog {
                 remaining -= min(remaining, boundedKey.utf8.count + boundedValue.utf8.count)
             }
         }
-        var record = Record(ts: ISO8601DateFormatter().string(from: Date()), level: level,
-            category: prefix(Redactor.redact(cappedInput(category)), bytes: min(budget, 1024)),
-            message: prefix(Redactor.redact(cappedInput(message)), bytes: budget), metadata: boundedMetadata)
+        var record = EventLog.Record(ts: ISO8601DateFormatter().string(from: Date()), level: level,
+            category: prefix(Redactor.redact(Self.cappedInput(category)), bytes: min(budget, 1024)),
+            message: prefix(Redactor.redact(Self.cappedInput(message)), bytes: budget), metadata: boundedMetadata)
         guard var data = try? encoder.encode(record) else { return }
         if data.count >= budget {
             record.metadata = [:]
@@ -141,7 +189,7 @@ public actor EventLog {
         return errno != ENOENT
     }
 
-    private func cappedInput(_ string: String) -> String {
+    static func cappedInput(_ string: String) -> String {
         let count = string.utf8.count
         return count > 1 << 20 ? "<omitted \(count) bytes>" : string
     }

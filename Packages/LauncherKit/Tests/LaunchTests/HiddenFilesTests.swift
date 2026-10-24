@@ -50,6 +50,51 @@ final class FixtureDirectory {
 }
 
 @Suite(.timeLimit(.minutes(1))) struct HiddenFilesTests {
+    @Test(arguments: [false, true]) func cleanRestoreDoesNotPublishEmptyRecoveryReport(noHiddenFiles: Bool) async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            if !noHiddenFiles {
+                try f.fs.writeAtomically(oldBytes, to: f.hidden)
+                f.session.hides = [f.entry()]
+            }
+            let metadata = try ContainedFileSystem(root: f.paths.root)
+            let existing = try SafeRelativePath("Games/starrail/recovery/older-session.json")
+            let sentinel = Data("existing user recovery record".utf8)
+            try metadata.writeAtomically(sentinel, to: existing)
+            try f.journal.write(f.session)
+            #expect(try HiddenFiles().restore(session: &f.session, journal: f.journal) == .clean)
+            #expect(try metadata.itemType(at: SafeRelativePath("Games/starrail/recovery/\(f.session.sessionID.uuidString).json")) == nil)
+            #expect(try metadata.readFile(at: existing, maxBytes: 100) == sentinel)
+        }
+    }
+
+    @Test func preservedCopiesStillHaveRecoveryReport() async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            try f.fs.writeAtomically(newBytes, to: gamePath); try f.fs.writeAtomically(oldBytes, to: f.hidden)
+            f.session.hides = [f.entry()]; try f.journal.write(f.session)
+            #expect(try HiddenFiles().restore(session: &f.session, journal: f.journal) == .conflict(movedTo: [f.recovery]))
+            let data = try ContainedFileSystem(root: f.paths.root).readFile(at: SafeRelativePath("Games/starrail/recovery/\(f.session.sessionID.uuidString).json"), maxBytes: 1 << 20)
+            let report = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            #expect((report["entries"] as? [Any])?.count == 1)
+            #expect(try Data(contentsOf: f.recovery) == oldBytes)
+        }
+    }
+
+    @Test func cleanRestoreLeavesLegacyReportUntouched() async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            try f.fs.writeAtomically(oldBytes, to: f.hidden)
+            f.session.hides = [f.entry()]; try f.journal.write(f.session)
+            let path = try SafeRelativePath("Games/starrail/recovery/\(f.session.sessionID.uuidString).json")
+            let report = Data("{\"sessionID\":\"\(f.session.sessionID.uuidString)\",\"entries\":[],\"message\":\"legacy report\"}".utf8)
+            let metadata = try ContainedFileSystem(root: f.paths.root)
+            try metadata.writeAtomically(report, to: path)
+            #expect(try HiddenFiles().restore(session: &f.session, journal: f.journal) == .clean)
+            #expect(try metadata.readFile(at: path, maxBytes: 1000) == report)
+        }
+    }
+
     // Restore-table row 1.
     @Test func missingOriginalMatchingHiddenIsRestored() async throws {
         try await BlockingIO.run {
@@ -344,7 +389,9 @@ private final class RecoveryNoteDirectorySyncFailure: FileOps {
     }
     func rename(from source: String, in src: Int32, to target: String, in dst: Int32, exclusive: Bool) throws {
         try base.rename(from: source, in: src, to: target, in: dst, exclusive: exclusive)
-        if target.hasSuffix(".json"), UUID(uuidString: String(target.dropLast(5))) != nil { renamed.withLock { $0 = true } }
+        let publicNote = target.hasSuffix(".json") && UUID(uuidString: String(target.dropLast(5))) != nil
+        let privateState = target.hasPrefix(".") && target.hasSuffix(".state") && UUID(uuidString: String(target.dropFirst().dropLast(6))) != nil
+        if publicNote || privateState { renamed.withLock { $0 = true } }
     }
     func unlink(_ name: String, in dir: Int32, isDirectory: Bool) throws { try base.unlink(name, in: dir, isDirectory: isDirectory) }
 }

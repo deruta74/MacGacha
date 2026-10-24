@@ -31,6 +31,8 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     public let sessionStartTime: UInt64?
     public var hides: [HideEntry]
     public var proxyPort: UInt16?
+    /// At-most-once best-effort end notification. nil supports older journals.
+    public var endLogged: Bool?
     /// Additive recovery context: never rediscover a different launch's log or executable.
     public var sessionLogURL: URL?
     public let gameExecutable: SafeRelativePath?
@@ -41,7 +43,7 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         recipeVersion: Int, settings: LaunchSettings, state: State = .preparing, processes: [ProcessIdentity] = [],
         hides: [HideEntry] = [], proxyPort: UInt16? = nil, createdAt: Date = Date(),
         sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil, processGroupIDs: Set<Int32>? = nil,
-        bootSessionUUID: String? = nil, sessionStartTime: UInt64? = nil) {
+        bootSessionUUID: String? = nil, sessionStartTime: UInt64? = nil, endLogged: Bool? = nil) {
         self.sessionID = sessionID; self.game = game; self.installRoot = installRoot; self.installIdentity = installIdentity
         self.prefix = prefix; self.bundleID = bundleID; self.runtimeDigest = runtimeDigest; self.wineBinary = wineBinary
         self.wineserver = wineserver; self.componentIDs = componentIDs; self.recipeVersion = recipeVersion
@@ -49,6 +51,7 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         self.proxyPort = proxyPort; self.createdAt = createdAt
         self.sessionLogURL = sessionLogURL; self.gameExecutable = gameExecutable; self.processGroupIDs = processGroupIDs
         self.bootSessionUUID = bootSessionUUID; self.sessionStartTime = sessionStartTime
+        self.endLogged = endLogged
     }
 
     func validate() throws {

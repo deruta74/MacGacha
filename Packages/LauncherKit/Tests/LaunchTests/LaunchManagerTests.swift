@@ -330,6 +330,7 @@ import TestSupport
         #expect(failure.stage == .spawn)
         #expect(failure.unverifiedBuild)
         let log = try #require(failure.logURL)
+        await manager.flushLogs()
         let text = try await BlockingIO.run { String(decoding: try Data(contentsOf: log), as: UTF8.self) }
         #expect(text.contains("unverified build"))
         try await f.assertOriginalRestored()
@@ -382,8 +383,10 @@ import TestSupport
         #expect(f.spawner.calls.first?.outputDiscarded == true)
         #expect(try await f.journal()?.state == .running)
         try await f.assertHidden()
-        let logFiles = try await BlockingIO.run { try ContainedFileSystem(root: f.paths.root).itemType(at: SafeRelativePath("Logs")) }
-        #expect(logFiles == nil)
+        let logURL = await manager.liveSession(for: "starrail")?.sessionLogURL
+        #expect(logURL == nil)
+        let logFiles = try await BlockingIO.run { try LaunchLogFiles.latestSessionLogURLs(in: f.paths.logs) }
+        #expect(logFiles.isEmpty)
         try await f.end(manager); await consumer.value
         #expect(try await f.journal() == nil)
         try await f.assertOriginalRestored()

@@ -97,6 +97,9 @@ public struct HiddenFiles: Sendable {
             hooks.reach(.beforeFinalWrite)
             try journal.write(session)
             hooks.reach(.afterFinalWrite)
+            // The resolved snapshot is durable before transient ownership state
+            // is removed. Published recovery reports and copies are never removed.
+            try removeState(session, journal: journal)
             hooks.reach(.beforeJournalDelete)
             if !retainResolvedJournal { try journal.delete(game: session.game) }
             hooks.reach(.afterJournalDelete)
@@ -104,12 +107,14 @@ public struct HiddenFiles: Sendable {
         } catch let changed as ChangedSource {
             session.state = .recoveryConflict
             try? journal.write(session)
+            try? publishPendingReport(session, journal: journal)
             return .conflict(movedTo: changed.locations)
         } catch {
             session.state = .recoveryPending
             // A failed metadata write never authorizes deletion. The previous
             // durable snapshot remains sufficient to retry all idempotent moves.
             try? journal.write(session)
+            try? publishPendingReport(session, journal: journal)
             return .pending(reason: "Launch files could not be fully restored: \(error)")
         }
     }
@@ -344,14 +349,39 @@ public struct HiddenFiles: Sendable {
     }
 
     private func writeNote(_ note: RecoveryNote, session: LaunchSession, journal: LaunchJournal) throws {
+        // Direct restores need durable inode intents too, but those are internal
+        // transaction state, not evidence of copies preserved for the user.
+        try journal.withOwnership { metadata in
+            try journal.writeMetadata(journal.encode(note), to: statePath(session, journal: journal), in: metadata)
+            if !note.entries.isEmpty {
+                try journal.writeMetadata(journal.encode(note), to: notePath(session, journal: journal), in: metadata)
+            }
+        }
+    }
+
+    private func removeState(_ session: LaunchSession, journal: LaunchJournal) throws {
+        let path = try statePath(session, journal: journal)
+        try journal.withOwnership { metadata in
+            if try metadata.itemType(at: path) != nil { try metadata.removeFile(at: path) }
+        }
+    }
+
+    private func publishPendingReport(_ session: LaunchSession, journal: LaunchJournal) throws {
+        var note = try readNote(session, journal: journal)
+        note.message = note.entries.isEmpty
+            ? "Launch recovery is pending; some files still need attention. No verified recovery copies are recorded yet."
+            : "Copies preserved during launch recovery; some files still need attention."
         try journal.withOwnership { metadata in
             try journal.writeMetadata(journal.encode(note), to: notePath(session, journal: journal), in: metadata)
         }
     }
 
     private func readNote(_ session: LaunchSession, journal: LaunchJournal) throws -> RecoveryNote {
-        guard let data = try journal.readData(at: notePath(session, journal: journal)) else { return RecoveryNote(sessionID: session.sessionID) }
-        let note = try JSONDecoder().decode(RecoveryNote.self, from: data)
+        let state = try statePath(session, journal: journal)
+        let stateData = try journal.readData(at: state)
+        let source = try stateData == nil ? notePath(session, journal: journal) : state
+        guard let data = try stateData ?? journal.readData(at: source) else { return RecoveryNote(sessionID: session.sessionID) }
+        var note = try JSONDecoder().decode(RecoveryNote.self, from: data)
         guard note.sessionID == session.sessionID, note.entries.count <= 256,
             Set(note.entries.map { LaunchSession.pathKey($0.entry.path) }).count == note.entries.count else {
             throw LauncherError.journalCorrupt("Invalid recovery note")
@@ -387,9 +417,15 @@ public struct HiddenFiles: Sendable {
         // directory sync failed. Heal that barrier before relying on the note
         // as durable ownership evidence for any game-file move.
         try journal.withOwnership { metadata in
-            try metadata.synchronizeAncestors(of: notePath(session, journal: journal))
+            try metadata.synchronizeAncestors(of: source)
         }
+        // Legacy/published reports may predate the durable resolved-entry write.
+        // The journal decides which intents are still needed for replay.
+        note.intents?.removeAll { intent in !session.hides.contains { $0.path == intent.entry.path } }
         return note
+    }
+    private func statePath(_ session: LaunchSession, journal: LaunchJournal) throws -> SafeRelativePath {
+        try journal.relative(session.game, "recovery/.\(session.sessionID.uuidString).state")
     }
     private func sameEntry(_ lhs: HideEntry, _ rhs: HideEntry) -> Bool {
         lhs.path == rhs.path && lhs.hiddenName == rhs.hiddenName && lhs.size == rhs.size && lhs.sha256 == rhs.sha256
