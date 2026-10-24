@@ -97,9 +97,11 @@ public struct HiddenFiles: Sendable {
             hooks.reach(.beforeFinalWrite)
             try journal.write(session)
             hooks.reach(.afterFinalWrite)
-            hooks.reach(.beforeJournalDelete)
-            if !retainResolvedJournal { try journal.delete(game: session.game) }
-            hooks.reach(.afterJournalDelete)
+            if !retainResolvedJournal {
+                hooks.reach(.beforeJournalDelete)
+                try journal.delete(game: session.game)
+                hooks.reach(.afterJournalDelete)
+            }
             return conflicts.isEmpty ? .clean : .conflict(movedTo: conflicts)
         } catch let changed as ChangedSource {
             session.state = .recoveryConflict
