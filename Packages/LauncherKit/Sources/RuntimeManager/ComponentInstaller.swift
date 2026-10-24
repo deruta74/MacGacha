@@ -32,9 +32,9 @@ public struct ComponentInstaller: Sendable {
         self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
     }
 
-    func install(_ component: RuntimeComponent, lease: RuntimeStoreLease) -> ComponentInstallStream {
+    func install(_ component: RuntimeComponent, lease: RuntimeStoreLease, pins: RuntimeRemovalLease) -> ComponentInstallStream {
         ComponentInstallStream(session: ComponentInstallSession(component: component, candidate: nil, store: store, consent: consent,
-            fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint, lease: lease))
+            fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint, lease: lease, pins: pins))
     }
 
     /// Pull-driven: dropping the stream releases the store lock; cancelling its consumer
@@ -89,6 +89,7 @@ fileprivate actor ComponentInstallSession {
     private var fs: ContainedFileSystem?
     private var lock: InstallLock?
     private var lease: RuntimeStoreLease?
+    private var pins: RuntimeRemovalLease?
     private var download: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
     private var incoming: SafeRelativePath?
     private var downloads: SafeRelativePath?
@@ -97,8 +98,8 @@ fileprivate actor ComponentInstallSession {
 
     init(component: RuntimeComponent, candidate: GPTKCandidate?, store: RuntimeStore, consent: ConsentStore, fetcher: ChunkFetcher?,
         extractor: ArchiveExtractor?, disk: any DiskSpaceProbe, fileOps: any FileOps,
-        failurePoint: @escaping @Sendable (ComponentInstaller.PublishPoint) throws -> Void, lease: RuntimeStoreLease? = nil) {
-        self.lease = lease
+        failurePoint: @escaping @Sendable (ComponentInstaller.PublishPoint) throws -> Void, lease: RuntimeStoreLease? = nil, pins: RuntimeRemovalLease? = nil) {
+        self.lease = lease; self.pins = pins
         self.component = component; self.candidate = candidate; self.store = store; self.consent = consent; self.fetcher = fetcher
         self.extractor = extractor; self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
     }
@@ -132,6 +133,7 @@ fileprivate actor ComponentInstallSession {
                 try fs.createDirectory(at: runtimes)
                 if lease == nil { lock = try InstallLock(fs: fs, path: SafeRelativePath("\(runtimes)/.lock")) }
                 self.fs = fs
+                if pins == nil { pins = try RuntimeRemovalLease(paths: store.paths, componentIDs: [component.id.rawValue]) }
                 try store.sweepStaging()
                 let kind = try SafeRelativePath("\(runtimes)/\(component.kind.rawValue)")
                 try fs.createDirectory(at: kind)
@@ -237,7 +239,7 @@ fileprivate actor ComponentInstallSession {
                 let fs = try filesystem()
                 if let incoming { try fs.removeItem(at: incoming) }
                 if let downloads { try fs.removeItem(at: downloads) }
-                step = .done; lock = nil; lease = nil
+                step = .done; lock = nil; lease = nil; pins = nil
                 return .phase(.completed)
             case .done: return nil
             }
@@ -271,7 +273,7 @@ fileprivate actor ComponentInstallSession {
                 try? fs.removeItem(at: parent)
             }
         }
-        step = .done; lock = nil; lease = nil
+        step = .done; lock = nil; lease = nil; pins = nil
     }
 
     private func filesystem() throws -> ContainedFileSystem {

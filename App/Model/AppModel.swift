@@ -216,7 +216,11 @@ final class AppModel {
         await reattachOnStart()
         do {
             if manifest == nil { manifest = try await BundledRuntimeManifest.load() }
-            try await services.sweepStaging()
+            do { try await services.sweepStaging() }
+            catch LauncherError.busy {
+                // Recovery defers mutation, but installed runtimes remain
+                // inspectable and must not appear available for replacement.
+            }
             try await scanAndApply()
             await refreshLogs()
         } catch { show(error) }
@@ -442,7 +446,11 @@ final class AppModel {
             working[id] = .working(phase: .deleting, fraction: nil); rebuildRows()
             defer { working[id] = nil; rebuildRows() }
             do { try await services.remove(bundle, manifest: manifest); try await scanAndApply(); errors[id] = nil }
-            catch { errors[id] = launcherError(error).userMessage; show(error) }
+            catch {
+                if case LauncherError.busy = error { errors[id] = nil }
+                else { errors[id] = launcherError(error).userMessage }
+                show(error)
+            }
             return
         }
         let component = installed.first { Self.id($0) == id }
@@ -455,7 +463,11 @@ final class AppModel {
             else if let bad { try await services.removeInvalid(bad) }
             try await scanAndApply()
             errors[id] = nil
-        } catch { errors[id] = launcherError(error).userMessage; show(error) }
+        } catch {
+            if case LauncherError.busy = error { errors[id] = nil }
+            else { errors[id] = launcherError(error).userMessage }
+            show(error)
+        }
     }
 
     func refreshLogs() async { logLines = Array((await services.recentLogLines(limit: 200)).suffix(200)) }

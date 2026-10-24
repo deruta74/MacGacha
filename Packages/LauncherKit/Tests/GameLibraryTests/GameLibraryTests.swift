@@ -11,6 +11,25 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
+    @Test(arguments: ["verify", "update", "uninstall", "startup"])
+    func crashedLaunchBetweenGuardAndExclusionRefusesMutation(operation: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        let before = try await f.store.load(game.id)
+        let paths = f.paths, install = f.install
+        let guardClaim = CrashedSessionLibraryGuard(paths: paths, install: install)
+        let library = f.restarted(operationGuard: guardClaim)
+        if operation == "startup" { await library.start() }
+        else {
+            await #expect(throws: LauncherError.self) {
+                if operation == "uninstall" { try await library.uninstall(game) }
+                else if operation == "update" { _ = try await libraryCollect(await library.update(game, approved: true)) }
+                else { _ = try await libraryCollect(await library.verify(game, mode: .full)) }
+            }
+        }
+        #expect(try await f.store.load(game.id) == before)
+        #expect(try f.fs.itemType(at: SafeRelativePath("Game.exe.macgacha-hidden-test")) == .regularFile)
+        #expect(try ContainedFileSystem(root: paths.root).readFile(at: SafeRelativePath("Games/\(game.id)/launch-session.json"), maxBytes: 100) == Data("unfinished launch".utf8))
+    }
     @Test(arguments: ["install", "adopt", "update", "resume", "verify", "voices", "uninstall"])
     func verifyRefusedWhileGuardThrows(operation: String) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
@@ -1011,6 +1030,21 @@ private actor SessionClaimingLibraryGuard: GameOperationGuard {
         let paths = paths
         lock = try await BlockingIO.run {
             try InstallLock(fs: ContainedFileSystem(root: paths.games), path: SafeRelativePath("\(game)/.session.lock"))
+        }
+    }
+}
+
+private struct CrashedSessionLibraryGuard: GameOperationGuard {
+    let paths: AppPaths
+    let install: URL
+    func willOperate(on game: String) async throws {
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: paths.root)
+            let lock = try InstallLock(fs: fs, path: SafeRelativePath("Games/\(game)/.session.lock"))
+            defer { withExtendedLifetime(lock) {} }
+            let gameFS = try ContainedFileSystem(root: install)
+            try gameFS.moveRegularFile(at: SafeRelativePath("Game.exe"), to: SafeRelativePath("Game.exe.macgacha-hidden-test"), in: gameFS)
+            try fs.writeAtomically(Data("unfinished launch".utf8), to: SafeRelativePath("Games/\(game)/launch-session.json"))
         }
     }
 }

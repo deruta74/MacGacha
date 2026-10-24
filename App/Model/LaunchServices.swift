@@ -12,6 +12,7 @@ struct LaunchObservation: Sendable {
 }
 
 protocol LaunchServices: Sendable {
+    func startupReattachment() async throws -> LaunchStartupResult
     func reattach() async throws -> [String: LaunchSession]
     func launch(game: GameDefinition, record: GameRecord) async throws -> AsyncStream<LaunchEvent>
     func observation(_ id: String) async throws -> LaunchObservation?
@@ -23,13 +24,17 @@ protocol LaunchServices: Sendable {
     func acknowledge(_ id: UUID) async throws
 }
 
+extension LaunchServices {
+    func startupReattachment() async throws -> LaunchStartupResult { LaunchStartupResult(sessions: try await reattach()) }
+}
+
 /// The same lazy manager backs launch, startup recovery and GameLibrary's guard.
 /// Construction performs no I/O; callers join startup before any game operation.
 actor LiveLaunchServices: LaunchServices, GameOperationGuard {
     private let paths: AppPaths
     private let log: EventLog?
     private var construction: Task<LaunchManager, any Error>?
-    private var startup: Task<[String: LaunchSession], Never>?
+    private var startup: Task<LaunchStartupResult, Never>?
     init(paths: AppPaths, log: EventLog? = nil) { self.paths = paths; self.log = log }
     private func manager() async throws -> LaunchManager {
         if let construction { return try await construction.value }
@@ -48,12 +53,18 @@ actor LiveLaunchServices: LaunchServices, GameOperationGuard {
         return try await task.value
     }
     func reattach() async throws -> [String: LaunchSession] {
+        try await startupReattachment().sessions
+    }
+    func startupReattachment() async throws -> LaunchStartupResult {
         if let startup { return await startup.value }
         let manager = try await manager()
         if let startup { return await startup.value }
-        let task = Task { await manager.reattachAll() }
+        let task = Task { await manager.reattachStartup() }
         startup = task
-        return await task.value
+        let result = await task.value
+        // Single-flight construction, not a permanent cache of failed recovery.
+        if !result.unresolved.isEmpty { startup = nil }
+        return result
     }
     func willOperate(on game: String) async throws {
         _ = try await reattach()

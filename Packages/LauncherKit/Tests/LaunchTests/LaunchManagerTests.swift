@@ -98,12 +98,70 @@ import TestSupport
         try await f.assertOriginalRestored()
     }
 
+    @Test(arguments: ["steam.exe", "jadeite.exe", "absent", "pending"])
+    func unrecordedSpawningHelpersRetainStartupGrace(helper: String) async throws {
+        let f = try await ManagerFixture.make(initialGame: false), manager = f.manager()
+        _ = try await f.saveSnapshot(state: .spawning, processes: [])
+        if helper == "pending" {
+            try await BlockingIO.run {
+                let journal = LaunchJournal(paths: f.paths)
+                var snapshot = try #require(try journal.read(game: "starrail"))
+                snapshot.state = .recoveryPending; snapshot.startupPending = true
+                try journal.write(snapshot)
+            }
+        } else if helper != "absent" {
+            f.inspector.update { $0.processes = [InspectedProcess(identity: f.spawner.identity,
+                executablePath: "/runtime/lib/wine/x86_64-unix/wine", arguments: ["C:\\windows\\system32\\\(helper)"])] }
+        }
+        _ = await manager.reattachStartup()
+        await f.clock.waitForSleep(1, duration: .seconds(1))
+        f.clock.advance(by: .seconds(59))
+        await f.clock.waitForSleep(2, duration: .seconds(1))
+        try await f.assertHidden(); try await f.assertLocksHeld()
+        await #expect(throws: LauncherError.self) { try await manager.recoverIfNeeded(game: "starrail") }
+        f.inspector.update { $0.processes = [f.gameProcess]; $0.alive = [f.gameProcess.identity] }
+        f.clock.advance(by: .seconds(1))
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        #expect(await manager.liveSession(for: "starrail")?.state == .running)
+        try await f.end(manager); await f.waitForRestore(manager)
+        try await f.assertOriginalRestored()
+    }
+
+    @Test(arguments: ["journal", "lock", "pin"])
+    func startupRetainsUnresolvedOwnershipAndRetries(fault: String) async throws {
+        let f = try await ManagerFixture.make(initialGame: false)
+        _ = try await f.saveSnapshot(state: .running, processes: [])
+        let unreadable = Mutex(fault == "journal")
+        let manager = f.manager(beforeJournalRead: {
+            if unreadable.withLock({ $0 }) { throw LauncherError.io("injected journal read failure") }
+        })
+        var exclusion: InstallLock? = try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: f.paths.root)
+            switch fault {
+            case "lock": return try InstallLock(fs: fs, path: SafeRelativePath("Games/starrail/.session.lock"))
+            case "pin": return try InstallLock(fs: fs, path: SafeRelativePath("Runtimes/.pin-wine-a.lock"))
+            default: return nil
+            }
+        }
+        let first = await manager.reattachStartup()
+        #expect(first.unresolved.contains("starrail")); #expect(first.sessions.isEmpty)
+        try await f.assertHidden()
+        await #expect(throws: LauncherError.self) { _ = try await manager.sessionObservation(for: "starrail") }
+        unreadable.withLock { $0 = false }
+        withExtendedLifetime(exclusion) {}; exclusion = nil
+        let retried = await manager.reattachStartup()
+        #expect(retried.unresolved.isEmpty); #expect(retried.sessions.isEmpty)
+        #expect(try await f.journal() == nil)
+        try await f.assertOriginalRestored()
+    }
+
     @Test func reattachIncompleteScanWithoutWrittenIdentityNeverAuthorizesRestore() async throws {
         let f = try await ManagerFixture.make(initialGame: false), manager = f.manager()
         _ = try await f.saveSnapshot(state: .spawning, processes: [])
         f.inspector.update { $0.failure = true }
         let snapshots = await manager.reattachAll()
         #expect(snapshots["starrail"]?.state == .recoveryPending)
+        #expect(try await f.journal()?.startupPending == true)
         await f.clock.waitForSleep(1, duration: .seconds(1))
         try await f.assertHidden(); try await f.assertLocksHeld()
         #expect(try await f.journal()?.hides.count == 1)
@@ -522,11 +580,23 @@ import TestSupport
         #expect(afterRetry == updated)
     }
 
-    @Test func startupResolvedConflictNoticeSurvivesRestartUntilAcknowledged() async throws {
+    @Test(arguments: [false, true]) func startupResolvedConflictNoticeSurvivesRestartUntilAcknowledged(external: Bool) async throws {
         let f = try await ManagerFixture.make(initialGame: false), manager = f.manager()
         let snapshot = try await f.saveSnapshot(state: .running, processes: [])
         let updated = Data("updated original".utf8)
-        try await BlockingIO.run { try ContainedFileSystem(root: f.installRoot).writeAtomically(updated, to: f.hiddenPath) }
+        try await BlockingIO.run {
+            try ContainedFileSystem(root: f.installRoot).writeAtomically(updated, to: f.hiddenPath)
+            if external {
+                let parentURL = f.installRoot.deletingLastPathComponent(), parent = try ContainedFileSystem(root: parentURL)
+                let relative = try SafeRelativePath(".macgacha-recovery/starrail/\(snapshot.sessionID)")
+                try parent.createDirectoryDurably(at: relative)
+                let root = relative.resolved(against: parentURL)
+                var current = snapshot
+                current.recoveryLocation = LaunchRecoveryLocation(root: root, parentIdentity: try parent.rootIdentity(),
+                    identity: try ContainedFileSystem(root: root).rootIdentity())
+                try LaunchJournal(paths: f.paths).write(current)
+            }
+        }
         #expect(await manager.reattachAll().isEmpty)
         #expect(try await f.journal() == nil)
         let notices = try await manager.pendingRecoveryNotices()
@@ -541,8 +611,10 @@ import TestSupport
             let fs = try ContainedFileSystem(root: f.installRoot)
             #expect(try fs.readFile(at: f.hiddenPath, maxBytes: 100) == updated)
             let recovery = try #require(notice.movedTo.first)
-            let relative = try SafeRelativePath(String(recovery.path.dropFirst(f.paths.root.path.count + 1)))
-            #expect(try ContainedFileSystem(root: f.paths.root).readFile(at: relative, maxBytes: 100) == f.original)
+            let root = notice.recoveryRoot ?? f.paths.root
+            #expect((notice.recoveryRoot != nil) == external)
+            let relative = try SafeRelativePath(String(recovery.path.dropFirst(root.path.count + 1)))
+            #expect(try ContainedFileSystem(root: root).readFile(at: relative, maxBytes: 100) == f.original)
         }
         try await restarted.acknowledgeRecoveryNotice(id: notice.id)
         #expect(try await f.manager().pendingRecoveryNotices().isEmpty)

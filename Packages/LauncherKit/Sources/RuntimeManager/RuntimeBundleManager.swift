@@ -70,14 +70,15 @@ public struct RuntimeBundleManager: Sendable {
             }
             guard candidate == nil || bundle.backend == .d3dmetal else { throw LauncherError.io("Only D3DMetal supports GPTK import") }
             let lease = try RuntimeStoreLease(store: store)
-            defer { withExtendedLifetime(lease) {} }
+            let pins = try RuntimeRemovalLease(paths: store.paths, componentIDs: components.map { $0.id.rawValue })
+            defer { withExtendedLifetime((lease, pins)) {} }
             try store.sweepStaging()
             for c in components {
                 if try componentRecord(c) == nil {
                     guard candidate == nil && c.sourceMode == .download else {
                         throw LauncherError.io("Install the base Wine bundle before importing D3DMetal")
                     }
-                    for try await event in installer.install(c, lease: lease) {
+                    for try await event in installer.install(c, lease: lease, pins: pins) {
                         if event != .phase(.completed) { progress(event) }
                     }
                 }

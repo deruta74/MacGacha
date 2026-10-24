@@ -187,6 +187,7 @@ public struct RuntimeStore: Sendable {
 
     /// Unsafe names throw unsafePath; inspection failures throw io. Repaired/missing entries are ignored.
     public func removeInvalid(_ entry: InvalidRuntimeEntry) throws {
+        try LaunchMutationBarrier.requireNoJournals(paths: paths)
         let name = try SafeRelativePath(entry.rawName)
         guard name.components.count == 1 else { throw LauncherError.unsafePath(entry.rawName) }
         guard entry.removable else { throw LauncherError.io("Runtime entry is report-only") }
@@ -221,6 +222,7 @@ public struct RuntimeStore: Sendable {
 
     func sweepStaging(deleting: (ContainedFileSystem, SafeRelativePath) throws -> Void) throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
+        try LaunchMutationBarrier.requireNoJournals(paths: paths)
         let fs = try ContainedFileSystem(root: paths.root)
         guard let runtimes = try runtimesPath(in: fs) else { return }
         // Invalid kind cleanup stages directly under Runtimes.
@@ -306,11 +308,12 @@ public struct RuntimeStore: Sendable {
 
 /// A bundle preflights every component before removing any published tree and
 /// passes this exclusion through component cleanup without relocking itself.
-final class RuntimeRemovalLease {
+final class RuntimeRemovalLease: Sendable {
     let componentIDs: Set<String>
     private let locks: [InstallLock]
     init(paths: AppPaths, componentIDs: [String]) throws {
         locks = try RuntimeStore.componentLocks(paths: paths, componentIDs: componentIDs, mode: .exclusive)
+        try LaunchMutationBarrier.requireNoJournals(paths: paths)
         self.componentIDs = Set(componentIDs)
     }
 }
