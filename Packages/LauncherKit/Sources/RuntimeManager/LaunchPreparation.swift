@@ -7,22 +7,27 @@ import LauncherCore
 /// and verified file copies stay in this prefix; no certificates are installed.
 /// Shares PrefixManager's lock so initialization and preparation cannot overlap.
 public struct LaunchPreparation: Sendable {
-    public static let provisioningRevision = 1
+    public static let provisioningRevision = 2
     private let paths: AppPaths
     private let runner: any ProcessRunner
+    private let inspector: any ProcessInspector
+    private let serverProbe: WineServerProbe
     private let fileOps: any FileOps
     private let registryWaitTimeout: Duration
     private let timeoutWait: @Sendable (Duration) async throws -> Void
     private static let internetSettings = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
 
-    public init(paths: AppPaths, runner: any ProcessRunner, registryWaitTimeout: Duration = .seconds(60)) {
-        self.init(paths: paths, runner: runner, fileOps: SystemFileOps(), registryWaitTimeout: registryWaitTimeout)
+    public init(paths: AppPaths, runner: any ProcessRunner, registryWaitTimeout: Duration = .seconds(60),
+        inspector: any ProcessInspector = SystemProcessInspector(), wineServerRoot: URL? = nil) {
+        self.init(paths: paths, runner: runner, fileOps: SystemFileOps(), registryWaitTimeout: registryWaitTimeout, inspector: inspector, wineServerRoot: wineServerRoot)
     }
 
     package init(paths: AppPaths, runner: any ProcessRunner, fileOps: any FileOps,
         registryWaitTimeout: Duration = .seconds(60),
-        timeoutWait: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
-        self.paths = paths; self.runner = runner; self.fileOps = fileOps
+        timeoutWait: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        inspector: any ProcessInspector = SystemProcessInspector(), wineServerRoot: URL? = nil) {
+        self.paths = paths; self.runner = runner; self.fileOps = fileOps; self.inspector = inspector
+        self.serverProbe = WineServerProbe(root: wineServerRoot)
         self.registryWaitTimeout = registryWaitTimeout; self.timeoutWait = timeoutWait
     }
 
@@ -59,12 +64,21 @@ public struct LaunchPreparation: Sendable {
         for name in request.dxmtExtras {
             guard try SafeRelativePath(name).components.count == 1 else { throw LauncherError.unsafePath(name) }
         }
+        guard let prefixFS = try fs.pinDirectoryIfPresent(at: path) else { throw LauncherError.io("Prefix is missing") }
+        try PrefixShellFolders.validate(in: prefixFS)
+        try PrefixShellFolders.requireIdle(prefix: prefix, prefixFS: prefixFS, wineBinary: binary, runtimeRoot: paths.runtimes, inspector: inspector, serverProbe: serverProbe)
+        try PrefixShellFolders.repair(in: prefixFS)
         let environment = ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all", "LC_ALL": "C"]
         let needsProvisioning = (marker.provisioningRevision ?? 0) < Self.provisioningRevision
         if needsProvisioning {
             try await run(binary, ["reg", "add", Self.internetSettings, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f"], environment)
             for value in ["ProxyServer", "ProxyOverride"] {
                 try await run(binary, ["reg", "delete", Self.internetSettings, "/v", value, "/f"], environment, allowMissingValue: true)
+            }
+            try await run(binary, ["reg", "add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "winemenubuilder.exe", "/t", "REG_SZ", "/d", "", "/f"], environment)
+            for (value, folder) in PrefixShellFolders.registryValues {
+                try await run(binary, ["reg", "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
+                    "/v", value, "/t", "REG_EXPAND_SZ", "/d", "%USERPROFILE%\\" + folder, "/f"], environment)
             }
         }
         try await run(binary, ["reg", "add", "HKCU\\Software\\Wine\\Mac Driver", "/v", "RetinaMode", "/t", "REG_SZ", "/d", request.retina ? "y" : "n", "/f"], environment)
@@ -104,6 +118,9 @@ public struct LaunchPreparation: Sendable {
             throw LauncherError.processFailed(executable: wineserver.path, exitCode: persisted.exitCode,
                 stderrTail: String(decoding: persisted.stderr.suffix(4096), as: UTF8.self))
         }
+        try PrefixShellFolders.validate(in: prefixFS)
+        try PrefixShellFolders.requireIdle(prefix: prefix, prefixFS: prefixFS, wineBinary: binary, runtimeRoot: paths.runtimes, inspector: inspector, serverProbe: serverProbe)
+        try PrefixShellFolders.repair(in: prefixFS)
         for name in ["system.reg", "user.reg", "userdef.reg"] {
             let registry = try SafeRelativePath("\(path)/\(name)")
             if try fs.itemType(at: registry) != nil { try fs.synchronizeFile(at: registry, durable: false) }

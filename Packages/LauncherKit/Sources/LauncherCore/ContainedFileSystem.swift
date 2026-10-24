@@ -134,6 +134,13 @@ public struct ContainedFileSystem: Sendable, Hashable {
         return try identityProvider.identity(of: fd)
     }
 
+    /// Borrowed synchronously; a pinned root is never reopened by its old path.
+    package func withRootDirectoryDescriptor<Result>(_ body: (Int32) throws -> Result) throws -> Result {
+        guard let fd = try directory([], create: false) else { throw LauncherError.io("Directory is missing") }
+        defer { close(fd) }
+        return try body(fd)
+    }
+
     /// Retains the checked root. Subsequent operations duplicate this descriptor
     /// instead of reopening a pathname that may now name an unrelated directory.
     package func pinRoot() throws -> Self {
@@ -676,6 +683,30 @@ public struct ContainedFileSystem: Sendable, Hashable {
         guard count == info.st_size else { throw LauncherError.io("Import source changed during copy") }
         guard fchmod(output.fileDescriptor, info.st_mode & 0o777) == 0 else { throw LauncherError.fileSystemFailure("Cannot preserve import permissions") }
         return count
+    }
+
+    package enum DirectoryLinkRepair: Sendable { case directory, replaced, unexpected }
+
+    /// The caller holds prefix/session exclusion and has verified Wine absent.
+    /// Concurrent same-user writers outside Wine are outside the threat model:
+    /// this is our prefix, not user game data. Never read or follow a link target.
+    package func replaceDirectoryLink(at path: SafeRelativePath) throws -> DirectoryLinkRepair {
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else {
+            throw LauncherError.io("Shell-folder parent is missing")
+        }
+        defer { close(parent) }
+        let name = path.components.last!
+        let original = try entry(name, parent: parent) // fstatat(AT_SYMLINK_NOFOLLOW)
+        if let original {
+            if original.st_mode & S_IFMT == S_IFDIR { return .directory }
+            guard original.st_mode & S_IFMT == S_IFLNK else { return .unexpected }
+            // No AT_REMOVEDIR: even a directory substituted at this boundary
+            // cannot be removed. No entry is renamed or displaced for recovery.
+            try fileOps.unlink(name, in: parent, isDirectory: false)
+        }
+        guard mkdirat(parent, name, 0o700) == 0 else { throw LauncherError.fileSystemFailure("Cannot create shell folder") }
+        try synchronize(parent)
+        return original == nil ? .directory : .replaced
     }
 
     /// The caller validates the relative target against its whole tree before creating links.

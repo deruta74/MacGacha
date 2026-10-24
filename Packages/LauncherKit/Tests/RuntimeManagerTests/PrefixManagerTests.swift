@@ -19,7 +19,7 @@ func prefixCreationRunsWinebootOnce() async throws {
         #expect(invocation.arguments == ["wineboot", "--init"])
         return prefixTestSuccess()
     }
-    let manager = PrefixManager(paths: paths, runner: runner)
+    let manager = PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector())
     let before = Date().addingTimeInterval(-1)
     let url = try await manager.createPrefix(game: "genshin", backend: .dxmt, wineBinary: wine)
     #expect(url == (try manager.prefixURL(game: "genshin", backend: .dxmt)))
@@ -41,7 +41,7 @@ func prefixCreationRunsWinebootOnce() async throws {
     #expect(created >= before && created <= Date().addingTimeInterval(1))
     // A valid marker is sufficient even if system.reg is absent, across manager instances.
     try fs.removeFile(at: SafeRelativePath("Prefixes/genshin-dxmt/system.reg"))
-    let again = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "genshin", backend: .dxmt, wineBinary: wine)
+    let again = try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "genshin", backend: .dxmt, wineBinary: wine)
     #expect(again == url); #expect(runner.invocations.count == 1)
 }
 
@@ -54,7 +54,7 @@ func failedWinebootLeavesNoMarkerAndRetryRunsAgain() async throws {
         let first = calls.withLock { $0 += 1; return $0 == 1 }
         return first ? ProcessResult(exitCode: 7, stdout: Data(), stderr: Data("wineboot failed".utf8)) : prefixTestSuccess()
     }
-    let manager = PrefixManager(paths: paths, runner: runner)
+    let manager = PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector())
     await #expect(throws: LauncherError.processFailed(executable: wine.path, exitCode: 7, stderrTail: "wineboot failed")) {
         try await manager.createPrefix(game: "starrail", backend: .d3dmetal, wineBinary: wine)
     }
@@ -74,7 +74,7 @@ func halfCreatedPrefixWithoutValidMarkerIsReinitialized(markerBytes: Data?) asyn
         #expect(try fs.itemType(at: marker) == nil)
         return prefixTestSuccess()
     }
-    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "zenless", backend: .dxmt, wineBinary: wine)
+    _ = try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "zenless", backend: .dxmt, wineBinary: wine)
     #expect(runner.invocations.count == 1)
     #expect(try prefixTestJSON(fs, marker)["schemaVersion"] as? Int == 1)
 }
@@ -115,7 +115,7 @@ func incompletePrefixSymlinksAreRemovedBeforeWineboot(markerShape: String) async
         try Data("new registry".utf8).write(to: url.appendingPathComponent("user.reg"))
         return prefixTestSuccess()
     }
-    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "unsafe", backend: .dxmt, wineBinary: wine)
+    _ = try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "unsafe", backend: .dxmt, wineBinary: wine)
     #expect(runner.invocations.count == 1)
     #expect(try Data(contentsOf: outsideSystem) == originalSystem)
     #expect(try Data(contentsOf: outsideRegistry) == originalRegistry)
@@ -129,7 +129,7 @@ func incompletePrefixSymlinksAreRemovedBeforeWineboot(markerShape: String) async
 @Test
 func readyPrefixKeepsItsFilesAndWineLinksUntouched() async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
-    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner)
+    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector())
     let url = try await manager.createPrefix(game: "ready", backend: .dxmt, wineBinary: wine)
     let marker = try prefixTestMarker("ready", .dxmt)
     try fs.writeAtomically(Data("saved game".utf8), to: SafeRelativePath("Prefixes/ready-dxmt/drive_c/game/save.dat"))
@@ -143,7 +143,7 @@ func readyPrefixKeepsItsFilesAndWineLinksUntouched() async throws {
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 946_684_800)], ofItemAtPath: path.path)
     }
     let mtimes = try preserved.map(prefixTestModificationDate)
-    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "ready", backend: .dxmt, wineBinary: wine)
+    _ = try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "ready", backend: .dxmt, wineBinary: wine)
     #expect(runner.invocations.count == 1)
     #expect(try fs.readFile(at: marker, maxBytes: 16_384) == markerBytes)
     #expect(try fs.readFile(at: SafeRelativePath("Prefixes/ready-dxmt/drive_c/game/save.dat"), maxBytes: 64) == Data("saved game".utf8))
@@ -161,14 +161,14 @@ func prefixCancellationPropagatesAndReleasesLock() async throws {
         do { try await Task.sleep(for: .seconds(30)); return prefixTestSuccess() }
         catch { cancelled.withLock { $0 = true }; throw error }
     }
-    let task = Task { try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "cancel", backend: .dxmt, wineBinary: wine) }
+    let task = Task { try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "cancel", backend: .dxmt, wineBinary: wine) }
     defer { task.cancel() }
     try await prefixTestWait { started.withLock { $0 } }
     task.cancel()
     await #expect(throws: LauncherError.cancelled) { try await task.value }
     #expect(cancelled.withLock { $0 })
     #expect(try fs.itemType(at: prefixTestMarker("cancel", .dxmt)) == nil)
-    let retry = Task { try await PrefixManager(paths: paths, runner: FakeProcessRunner()).createPrefix(game: "cancel", backend: .dxmt, wineBinary: wine) }
+    let retry = Task { try await PrefixManager(paths: paths, runner: FakeProcessRunner(), inspector: IdlePrefixInspector()).createPrefix(game: "cancel", backend: .dxmt, wineBinary: wine) }
     let watchdog = Task { try await Task.sleep(for: .seconds(5)); retry.cancel() }
     defer { watchdog.cancel(); retry.cancel() }
     _ = try await retry.value
@@ -177,7 +177,7 @@ func prefixCancellationPropagatesAndReleasesLock() async throws {
 @Test(arguments: ["", "../genshin", "a/b", ".hidden", "a\\b", "white space", String(repeating: "a", count: 129)])
 func prefixInvalidGameIdentifiersAreRejected(game: String) async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let runner = FakeProcessRunner()
-    let manager = PrefixManager(paths: paths, runner: runner)
+    let manager = PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector())
     #expect(throws: LauncherError.unsafePath(game)) { try manager.prefixURL(game: game, backend: .dxmt) }
     await #expect(throws: LauncherError.unsafePath(game)) {
         try await manager.createPrefix(game: game, backend: .dxmt, wineBinary: URL(fileURLWithPath: "/missing/wine"))
@@ -195,7 +195,7 @@ func symlinkedPrefixesAncestorIsRejected(prefixLeaf: Bool) async throws {
     try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside.url)
     let runner = FakeProcessRunner()
     await #expect(throws: LauncherError.unsafePath(link.path)) {
-        try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "genshin", backend: .dxmt, wineBinary: wine)
+        try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "genshin", backend: .dxmt, wineBinary: wine)
     }
     #expect(runner.invocations.isEmpty)
     #expect(try FileManager.default.contentsOfDirectory(atPath: outside.url.path).isEmpty)
@@ -210,10 +210,10 @@ func concurrentPrefixCallsRunWinebootOnce() async throws {
         while !released.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(1)) }
         return prefixTestSuccess()
     }
-    let first = Task { try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "shared", backend: .dxmt, wineBinary: wine) }
+    let first = Task { try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "shared", backend: .dxmt, wineBinary: wine) }
     defer { released.withLock { $0 = true }; first.cancel() }
     try await prefixTestWait { started.withLock { $0 } }
-    let second = Task { try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "shared", backend: .dxmt, wineBinary: wine) }
+    let second = Task { try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "shared", backend: .dxmt, wineBinary: wine) }
     defer { second.cancel() }
     try await Task.sleep(for: .milliseconds(50))
     #expect(runner.invocations.count == 1)
@@ -228,7 +228,7 @@ func concurrentPrefixCallsRunWinebootOnce() async throws {
 @Test(arguments: ["game", "backend"])
 func prefixMarkerForDifferentGameOrBackendIsAnError(field: String) async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
-    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner)
+    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector())
     _ = try await manager.createPrefix(game: "backend", backend: .dxmt, wineBinary: wine)
     let marker = try prefixTestMarker("backend", .dxmt); var json = try prefixTestJSON(fs, marker)
     json[field] = "different"; try fs.writeAtomically(JSONSerialization.data(withJSONObject: json), to: marker)
@@ -244,7 +244,7 @@ func prefixMarkerForDifferentGameOrBackendIsAnError(field: String) async throws 
 func prefixWineIdentityChangesUpgradeInPlace() async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
     let wine = try prefixTestWine(paths)
-    let url = try await PrefixManager(paths: paths, runner: FakeProcessRunner()).createPrefix(game: "upgrade", backend: .dxmt, wineBinary: wine)
+    let url = try await PrefixManager(paths: paths, runner: FakeProcessRunner(), inspector: IdlePrefixInspector()).createPrefix(game: "upgrade", backend: .dxmt, wineBinary: wine)
     let save = try SafeRelativePath("Prefixes/upgrade-dxmt/drive_c/users/player/save.dat")
     let registry = try SafeRelativePath("Prefixes/upgrade-dxmt/user.reg")
     try fs.writeAtomically(Data("saved game".utf8), to: save)
@@ -263,7 +263,7 @@ func prefixWineIdentityChangesUpgradeInPlace() async throws {
         #expect(try prefixTestJSON(fs, marker)["wineBinaryPath"] as? String == invocation.executable.path)
         return prefixTestSuccess()
     }
-    let manager = PrefixManager(paths: paths, runner: runner)
+    let manager = PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector())
     _ = try prefixTestWine(paths, body: "wine-v2")
     _ = try await manager.createPrefix(game: "upgrade", backend: .dxmt, wineBinary: wine)
     #expect(runner.invocations.count == 1)
@@ -295,7 +295,7 @@ func prefixWineIdentityChangesUpgradeInPlace() async throws {
 func failedPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData(changedPath: Bool) async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
     let wine = try prefixTestWine(paths)
-    let url = try await PrefixManager(paths: paths, runner: FakeProcessRunner()).createPrefix(game: "failed-upgrade", backend: .dxmt, wineBinary: wine)
+    let url = try await PrefixManager(paths: paths, runner: FakeProcessRunner(), inspector: IdlePrefixInspector()).createPrefix(game: "failed-upgrade", backend: .dxmt, wineBinary: wine)
     let marker = try prefixTestMarker("failed-upgrade", .dxmt)
     let oldIdentity = try #require(prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String])
     let createdAt = try #require(prefixTestJSON(fs, marker)["createdAt"] as? String)
@@ -321,7 +321,7 @@ func failedPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData(changedPath: Boo
         try fs.writeAtomically(Data("partially upgraded settings".utf8), to: registry)
         return ProcessResult(exitCode: 9, stdout: Data(), stderr: Data("upgrade failed".utf8))
     }
-    let manager = PrefixManager(paths: paths, runner: runner)
+    let manager = PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector())
     await #expect(throws: LauncherError.processFailed(executable: nextWine.path, exitCode: 9, stderrTail: "upgrade failed")) {
         try await manager.createPrefix(game: "failed-upgrade", backend: .dxmt, wineBinary: nextWine)
     }
@@ -343,7 +343,7 @@ func failedPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData(changedPath: Boo
         #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("partially upgraded settings".utf8))
         return prefixTestSuccess()
     }
-    let resumed = PrefixManager(paths: paths, runner: recovery)
+    let resumed = PrefixManager(paths: paths, runner: recovery, inspector: IdlePrefixInspector())
     _ = try await resumed.createPrefix(game: "failed-upgrade", backend: .dxmt, wineBinary: wine)
     #expect(recovery.invocations.count == 1)
     #expect(try prefixTestJSON(fs, marker)["state"] as? String == "ready")
@@ -361,7 +361,7 @@ func failedPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData(changedPath: Boo
 func cancelledPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData() async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
     let wine = try prefixTestWine(paths)
-    _ = try await PrefixManager(paths: paths, runner: FakeProcessRunner()).createPrefix(game: "cancel-upgrade", backend: .dxmt, wineBinary: wine)
+    _ = try await PrefixManager(paths: paths, runner: FakeProcessRunner(), inspector: IdlePrefixInspector()).createPrefix(game: "cancel-upgrade", backend: .dxmt, wineBinary: wine)
     let marker = try prefixTestMarker("cancel-upgrade", .dxmt)
     let oldIdentity = try #require(prefixTestJSON(fs, marker)["wineBinaryIdentity"] as? [String: String])
     let save = try SafeRelativePath("Prefixes/cancel-upgrade-dxmt/drive_c/users/player/save.dat")
@@ -379,7 +379,7 @@ func cancelledPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData() async throw
         try await Task.sleep(for: .seconds(30))
         return prefixTestSuccess()
     }
-    let task = Task { try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "cancel-upgrade", backend: .dxmt, wineBinary: nextWine) }
+    let task = Task { try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "cancel-upgrade", backend: .dxmt, wineBinary: nextWine) }
     defer { task.cancel() }
     try await prefixTestWait { modified.withLock { $0 } }
     let upgradingBytes = try fs.readFile(at: marker, maxBytes: 16_384)
@@ -396,7 +396,7 @@ func cancelledPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData() async throw
         #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("partially upgraded settings".utf8))
         return prefixTestSuccess()
     }
-    _ = try await PrefixManager(paths: paths, runner: recovery).createPrefix(game: "cancel-upgrade", backend: .dxmt, wineBinary: wine)
+    _ = try await PrefixManager(paths: paths, runner: recovery, inspector: IdlePrefixInspector()).createPrefix(game: "cancel-upgrade", backend: .dxmt, wineBinary: wine)
     #expect(recovery.invocations.count == 1)
     #expect(try prefixTestJSON(fs, marker)["state"] as? String == "ready")
     #expect(try prefixTestJSON(fs, marker)["wineBinaryPath"] as? String == wine.path)
@@ -409,7 +409,7 @@ func cancelledPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData() async throw
 func upgradingPrefixWithMatchingWineIdentityRunsAgain() async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
     let wine = try prefixTestWine(paths)
-    _ = try await PrefixManager(paths: paths, runner: FakeProcessRunner()).createPrefix(game: "same-target", backend: .dxmt, wineBinary: wine)
+    _ = try await PrefixManager(paths: paths, runner: FakeProcessRunner(), inspector: IdlePrefixInspector()).createPrefix(game: "same-target", backend: .dxmt, wineBinary: wine)
     let marker = try prefixTestMarker("same-target", .dxmt)
     var json = try prefixTestJSON(fs, marker)
     json["state"] = "upgrading"
@@ -422,7 +422,7 @@ func upgradingPrefixWithMatchingWineIdentityRunsAgain() async throws {
         #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
         return prefixTestSuccess()
     }
-    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "same-target", backend: .dxmt, wineBinary: wine)
+    _ = try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "same-target", backend: .dxmt, wineBinary: wine)
     #expect(runner.invocations.count == 1)
     #expect(try prefixTestJSON(fs, marker)["state"] as? String == "ready")
     #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
@@ -431,7 +431,7 @@ func upgradingPrefixWithMatchingWineIdentityRunsAgain() async throws {
 @Test
 func legacyPrefixMarkerWithoutStateIsReady() async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
-    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner)
+    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector())
     _ = try await manager.createPrefix(game: "legacy", backend: .dxmt, wineBinary: wine)
     let marker = try prefixTestMarker("legacy", .dxmt)
     var json = try prefixTestJSON(fs, marker)
@@ -440,7 +440,7 @@ func legacyPrefixMarkerWithoutStateIsReady() async throws {
     try fs.writeAtomically(legacyBytes, to: marker)
     let save = try SafeRelativePath("Prefixes/legacy-dxmt/drive_c/users/player/save.dat")
     try fs.writeAtomically(Data("saved game".utf8), to: save)
-    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "legacy", backend: .dxmt, wineBinary: wine)
+    _ = try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "legacy", backend: .dxmt, wineBinary: wine)
     #expect(runner.invocations.count == 1)
     #expect(try fs.readFile(at: marker, maxBytes: 16_384) == legacyBytes)
     #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
@@ -457,7 +457,7 @@ func unreadablePrefixMarkerIsReinitialized() async throws {
         #expect(try fs.contentsOfDirectory(at: SafeRelativePath("Prefixes/unreadable-dxmt")).isEmpty)
         return prefixTestSuccess()
     }
-    _ = try await PrefixManager(paths: paths, runner: runner).createPrefix(game: "unreadable", backend: .dxmt, wineBinary: wine)
+    _ = try await PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector()).createPrefix(game: "unreadable", backend: .dxmt, wineBinary: wine)
     #expect(runner.invocations.count == 1)
     #expect(try prefixTestJSON(fs, marker)["schemaVersion"] as? Int == 1)
 }
@@ -465,7 +465,7 @@ func unreadablePrefixMarkerIsReinitialized() async throws {
 @Test
 func invalidPrefixMarkerSchemaReinitializes() async throws {
     let temp = try TempDir(); let paths = AppPaths(root: temp.url); let fs = try ContainedFileSystem(root: paths.root)
-    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner)
+    let wine = try prefixTestWine(paths); let runner = FakeProcessRunner(); let manager = PrefixManager(paths: paths, runner: runner, inspector: IdlePrefixInspector())
     _ = try await manager.createPrefix(game: "schema", backend: .dxmt, wineBinary: wine)
     let marker = try prefixTestMarker("schema", .dxmt); var json = try prefixTestJSON(fs, marker)
     json["schemaVersion"] = 99; try fs.writeAtomically(JSONSerialization.data(withJSONObject: json), to: marker)
