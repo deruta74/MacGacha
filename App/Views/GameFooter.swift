@@ -3,16 +3,18 @@
 import AppKit
 import DownloadEngine
 import GameLibrary
+import Launch
 import SwiftUI
 
 /// Sheets that act on one game, opened from its footer.
 enum GameSheet: Identifiable, Hashable {
-    case install(String), voices(String)
+    case install(String), voices(String), settings(String)
 
     var id: String {
         switch self {
         case .install(let game): "install-\(game)"
         case .voices(let game): "voices-\(game)"
+        case .settings(let game): "settings-\(game)"
         }
     }
 }
@@ -29,18 +31,28 @@ struct GameFooter: View {
     @State private var confirmingUninstall = false
 
     private var state: GameState { model.games[game.id] ?? GameState(status: .unknown) }
-    private var action: PrimaryAction { .resolve(state, runtimesReady: model.runtimesReady) }
+    private var launch: LaunchUIState? { model.launchState(for: game.id) }
+    private var action: PrimaryAction {
+        .resolve(state, runtimesReady: model.runtimesReady, launch: launch, missingComponents: model.missingComponents(for: game.id))
+    }
 
     var body: some View {
         HStack(alignment: .bottom) {
             title
             Spacer(minLength: 24)
             VStack(alignment: .trailing, spacing: 10) {
-                Text(statusLine)
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .shadow(color: .black.opacity(0.4), radius: 3)
-                    .contentTransition(.opacity)
+                HStack(spacing: 8) {
+                    Text(statusLine)
+                        .contentTransition(.opacity)
+                    if case .failed(let failure) = launch, failure.hasLog, model.sessionLogsEnabled {
+                        Button("Open Log") { model.openLaunchLog(game.id) }
+                            .buttonStyle(.link)
+                            .underline()
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.85))
+                .shadow(color: .black.opacity(0.4), radius: 3)
                 if let held = state.spaceShortage?.heldByMacOS {
                     PurgeableSpaceHint(bytes: held)
                         .foregroundStyle(.white.opacity(0.85))
@@ -134,6 +146,7 @@ struct GameFooter: View {
             default: return String(localized: "Keep MacGacha open — you can pause and resume any time")
             }
         }
+        if let launchLine { return launchLine }
         // A disabled button shows no tooltip on macOS, so the reason it waits goes here.
         if let busy = busyElsewhere { return busy }
         switch state.status {
@@ -147,6 +160,51 @@ struct GameFooter: View {
         case .uninstallPaused: return String(localized: "Uninstall didn't finish")
         case .locationUnavailable: return String(localized: "Install location unavailable — connect the drive it's on")
         }
+    }
+
+    /// What the launch is doing, or why it stopped. Nil when the game isn't launching or running.
+    private var launchLine: String? {
+        switch launch {
+        case .starting(let stage):
+            switch stage {
+            case .preflight, .lock, .snapshot: return String(localized: "Checking \(game.name)…", comment: "Launch status; the argument is the game's name")
+            case .prepare: return String(localized: "Preparing Wine…")
+            case .proxy, .spawn: return String(localized: "Starting \(game.name)…", comment: "Launch status; the argument is the game's name")
+            case .watch: return String(localized: "Waiting for the game window…")
+            case .restore, .report: return String(localized: "Restoring game files…")
+            }
+        case .running, .ready:
+            return String(localized: "Keep MacGacha open while you play — it restores the game's files when you quit")
+        case .failed(let failure):
+            let line = failureLine(failure)
+            return failure.unverifiedBuild
+                ? StatusText.joined(line, String(localized: "This game version hasn't been tested with MacGacha yet"))
+                : line
+        case .recoveryNeeded(let reason): return reason
+        case nil:
+            guard let other = playingElsewhere else { return nil }
+            if case .recoveryNeeded = model.launchState(for: other.id) {
+                return String(localized: "Waiting for \(other.name) to put its files back", comment: "The argument is another game's name")
+            }
+            return String(localized: "\(other.name) is running — quit it to play this one", comment: "The argument is another game's name")
+        }
+    }
+
+    /// Names the step that failed in plain words. Checks and locks already carry a message meant for people.
+    private func failureLine(_ failure: LaunchFailureInfo) -> String {
+        switch failure.stage {
+        case .preflight, .lock: failure.message
+        case .watch: String(localized: "\(game.name) closed during startup", comment: "The argument is the game's name")
+        case .prepare, .snapshot: String(localized: "Couldn't prepare Wine for \(game.name)", comment: "The argument is the game's name")
+        case .proxy: String(localized: "Couldn't start the network helper for \(game.name)", comment: "The argument is the game's name")
+        case .spawn, .restore, .report: String(localized: "\(game.name) couldn't start", comment: "The argument is the game's name")
+        }
+    }
+
+    /// Only one game runs at a time, from pressing Play until its files are back.
+    private var playingElsewhere: LauncherGame? {
+        guard let owner = model.launchSlotOwner, owner != game.id else { return nil }
+        return LauncherGame.all.first { $0.id == owner }
     }
 
     /// Set while another game holds the one operation slot and this game is idle.
@@ -205,6 +263,11 @@ struct PrimaryActionButton: View {
     /// (This game's own running operation shows progress instead of a prominent button.)
     private var blocked: Bool { model.isGameOperationRunning }
 
+    /// Another game holds the one launch slot, from pressing Play until its files are back.
+    private var playingElsewhere: Bool {
+        model.launchSlotOwner.map { $0 != game.id } ?? false
+    }
+
     var body: some View {
         switch action {
         case .progress:
@@ -227,9 +290,15 @@ struct PrimaryActionButton: View {
         case .locationUnavailable:
             waiting("Location Unavailable")
                 .help(unavailablePath)
-        case .playUnavailable:
-            waiting("Play")
-                .help("Launching arrives after the compatibility check")
+        case .play:
+            prominent("Play", alwaysEnabled: true) { model.play(game.id) }
+                .disabled(playingElsewhere)
+        case .launching:
+            launching
+        case .playing:
+            waiting("Playing", symbol: "gamecontroller.fill")
+        case .recoveryNeeded:
+            waiting("Restoring Files…", spinner: true)
         }
     }
 
@@ -253,10 +322,11 @@ struct PrimaryActionButton: View {
         .help(blocked && !alwaysEnabled ? Text("Wait for the other game's download to finish or pause it") : Text(verbatim: ""))
     }
 
-    private func waiting(_ title: LocalizedStringKey, spinner: Bool = false) -> some View {
+    private func waiting(_ title: LocalizedStringKey, spinner: Bool = false, symbol: String? = nil) -> some View {
         Button {} label: {
             HStack(spacing: 8) {
                 if spinner { ProgressView().controlSize(.small) }
+                if let symbol { Image(systemName: symbol).accessibilityHidden(true) }
                 Text(title)
             }
             .frame(minWidth: 180, minHeight: labelHeight)
@@ -305,6 +375,23 @@ struct PrimaryActionButton: View {
         .frame(height: 52)
         .foregroundStyle(.white)
         .glassEffect(.regular, in: .capsule)
+    }
+
+    /// Starting has no meaningful fraction, so the bar runs indeterminate in the progress capsule's place.
+    private var launching: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Starting…")
+                .font(.callout.weight(.medium))
+            ProgressView().progressViewStyle(.linear)
+        }
+        .tint(game.tint)
+        .frame(width: 300, alignment: .leading)
+        .padding(.horizontal, 18)
+        .frame(height: 52)
+        .foregroundStyle(.white)
+        .glassEffect(.regular, in: .capsule)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Starting…")
     }
 
     private var phase: OperationPhase? {
@@ -363,7 +450,13 @@ struct GameMenu: View {
 
     var body: some View {
         Menu {
-            if isInstalled, !waitingForApproval, !model.isGameOperationRunning {
+            if case .recoveryNeeded = model.launchState(for: game.id) {
+                Button("Try Restoring Again", systemImage: "arrow.clockwise") { model.retryRecovery(game.id) }
+            }
+            if isInstalled {
+                Button("Game Settings…", systemImage: "slider.horizontal.3") { gameSheet = .settings(game.id) }
+            }
+            if isInstalled, !waitingForApproval, !model.isGameOperationRunning, !isLive {
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
                 Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
             }
@@ -374,7 +467,7 @@ struct GameMenu: View {
             }
             Divider()
             Button("Uninstall…", systemImage: "trash", role: .destructive) { confirmingUninstall = true }
-                .disabled(model.isGameOperationRunning)
+                .disabled(model.isGameOperationRunning || isLive)
         } label: {
             Image(systemName: "ellipsis")
                 .font(.title3)
@@ -387,6 +480,14 @@ struct GameMenu: View {
         .foregroundStyle(.white)
         .help("More for \(game.name)")
         .accessibilityLabel("More for \(game.name)")
+    }
+
+    /// The game is launching, running or still being restored; its files must stay put.
+    private var isLive: Bool {
+        switch model.launchState(for: game.id) {
+        case .starting, .running, .ready, .recoveryNeeded: true
+        case .failed, nil: false
+        }
     }
 
     private var isInstalled: Bool {

@@ -578,6 +578,14 @@ import TestSupport
         #expect(try await f.manager().pendingRecoveryNotices().isEmpty)
     }
 
+    @Test func observationDoesNotFinalizeAnUnattachedJournal() async throws {
+        let f = try await ManagerFixture.make(initialGame: false), manager = f.manager()
+        _ = try await f.saveSnapshot(state: .running, processes: [])
+        await #expect(throws: LauncherError.self) { try await manager.sessionObservation(for: "starrail") }
+        _ = await manager.reattachAll()
+        #expect(try await manager.sessionObservation(for: "starrail") == nil)
+    }
+
     @Test(arguments: [false, true]) func journalDeletionSyncFailureRetriesResolvedFinalization(conflict: Bool) async throws {
         let f = try await ManagerFixture.make(initialGame: false), manager = f.manager()
         let snapshot = try await f.saveSnapshot(state: .running, processes: [])
@@ -591,6 +599,7 @@ import TestSupport
         // The fault is after unlink, rather than the existing pre-unlink seam.
         #expect(try await f.journal() == nil)
         #expect(f.journalOps.deletionSyncFailures == 1)
+        #expect(try await manager.sessionObservation(for: "starrail")?.hasEnded == true)
         #expect(await manager.liveSession(for: "starrail")?.state == .recoveryPending)
         try await f.assertLocksHeld()
         if conflict {

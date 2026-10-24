@@ -43,6 +43,7 @@ DXMT works for every game and stays available as the open-source alternative. Th
 - Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game, and minimizes itself. When the game closes, the launcher returns and puts back any game files it hid.
 - Per-game settings: graphics backend, frame limit, Retina mode, DirectX 12 for Zenless Zone Zero, and a switch for the compatibility workaround.
 - Recovery: if the launcher crashes while a game is running, it finds the game again on restart and restores everything once the game exits.
+- Session logs stay on your Mac and can be turned off in Settings; the launcher then keeps only what it needs to put game files back.
 
 **Next**
 - **Rotating banners and news** like HoYoPlay: several background arts per game, event cards, and Events / Notices / News tabs.

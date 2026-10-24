@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import AppKit
+import Launch
 import Foundation
 import Observation
 import LauncherCore
@@ -52,8 +54,8 @@ final class AppModel {
     private(set) var isStarting = true
     private(set) var installRoot: URL
 
-    @ObservationIgnored private let paths: AppPaths
-    @ObservationIgnored private var manifest: RuntimeManifest?
+    @ObservationIgnored let paths: AppPaths
+    @ObservationIgnored var manifest: RuntimeManifest?
     @ObservationIgnored private let services: any RuntimeServices
     @ObservationIgnored private let artService: any GameArtProviding
     @ObservationIgnored private let defaults: UserDefaults?
@@ -72,7 +74,7 @@ final class AppModel {
     @ObservationIgnored private var generations: [String: UUID] = [:]
     @ObservationIgnored private var working: [String: RowState] = [:]
     @ObservationIgnored private var errors: [String: String] = [:]
-    @ObservationIgnored private var installed: [InstalledComponent] = []
+    @ObservationIgnored var installed: [InstalledComponent] = []
     private(set) var installedBundles: [String: InstalledRuntimeBundle] = [:]
     @ObservationIgnored private var importRuntimeBundle: RuntimeBundle?
     @ObservationIgnored private var invalid: [String: InvalidRuntimeEntry] = [:]
@@ -84,13 +86,57 @@ final class AppModel {
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var searchGeneration = UUID()
     @ObservationIgnored private var scanGeneration = UUID()
+    #if DEBUG
+    var debugLaunchRuntimesReady = false
+    #endif
+    var launchSettingsRevisions: [String: UUID] = [:]
+    var launchStates: [String: LaunchUIState] = [:]
+    @ObservationIgnored var launchFailures: [String: LaunchFailureInfo] = [:]
+    var recoveryNotices: [RecoveryNotice] = []
+    var durableLaunchSettings: [String: LaunchSettings] = [:]
+    var durableGlobalLaunchSettings = GlobalLaunchSettings()
+    var launchSettingsCache: [String: LaunchSettings] = [:]
+    var globalLaunchSettings = GlobalLaunchSettings()
+    var knownEndedLaunchGames: Set<String> = []
+    var liveLaunchGames: Set<String> = []
+    /// Includes preparation and file-only recovery, even after verified game end.
+    var launchSlotOwner: String?
+    @ObservationIgnored var launchObservationGenerations: [String: UUID] = [:]
+    @ObservationIgnored var launchRecoveryConflicts: Set<String> = []
+    @ObservationIgnored var recoveryRetryTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored var recoveryInFlight: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored let recoverySleep: @Sendable (Duration) async throws -> Void
+    @ObservationIgnored let launchPreferences: any LaunchPreferencesPersistence
+    @ObservationIgnored let launchServices: any LaunchServices
+    @ObservationIgnored let launchWindows: LaunchWindowCoordinator
+    @ObservationIgnored let launchSleep: @Sendable () async throws -> Void
+    @ObservationIgnored var launchTaskGenerations: [String: UUID] = [:]
+    @ObservationIgnored var reattachedLaunchMonitors: Set<String> = []
+    @ObservationIgnored var launchRecoveryPolls: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored var launchTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored var launchStartupTask: Task<Void, Never>?
+    @ObservationIgnored var settingsWriteTask: Task<Void, Never>?
+    @ObservationIgnored var settingsWriteErrors: [String: LauncherError] = [:]
+    @ObservationIgnored var launchStartupError: LauncherError?
+    @ObservationIgnored var launchLogURLs: [String: URL] = [:]
+    @ObservationIgnored var launchSettingsRevision = UUID()
+    @ObservationIgnored var quitConfirmation: (@MainActor (String, @escaping @MainActor (NSApplication.TerminateReply) -> Void) -> Void)?
+
 
     init(paths: AppPaths = .standard(), manifest: RuntimeManifest? = nil,
         services: (any RuntimeServices)? = nil, defaults: UserDefaults? = .standard,
         artService: any GameArtProviding = EmptyGameArtProvider(),
         gameServices: any GameServices = PreviewGameServices(),
         purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(),
+        launchServices: any LaunchServices = PreviewLaunchServices(),
+        launchPreferences: (any LaunchPreferencesPersistence)? = nil,
+        launchWindows: LaunchWindowCoordinator = LaunchWindowCoordinator(),
+        launchSleep: @escaping @Sendable () async throws -> Void = { try await ContinuousClock().sleep(for: .milliseconds(500)) },
+        recoverySleep: @escaping @Sendable (Duration) async throws -> Void = { try await ContinuousClock().sleep(for: $0) },
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }) {
+        self.launchPreferences = launchPreferences ?? LiveLaunchPreferencesPersistence(paths: paths)
+        self.recoverySleep = recoverySleep
+        self.launchServices = launchServices; self.launchWindows = launchWindows; self.launchSleep = launchSleep
         self.paths = paths; self.manifest = manifest; self.gameServices = gameServices; self.purgeableSpace = purgeable
         self.services = services ?? LiveRuntimeServices(paths: paths)
         self.defaults = defaults; self.now = now; self.artService = artService; self.gameArt = artService.cached()
@@ -111,11 +157,12 @@ final class AppModel {
         let log = EventLog(directory: paths.logs)
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
+        let launch = LiveLaunchServices(paths: paths)
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artService: GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
                 bundleIdentifier: Bundle.main.bundleIdentifier),
                 // English until the app ships translations; then HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations).
-                language: .enUS, log: log), gameServices: LiveGameServices(paths: paths, log: log))
+                language: .enUS, log: log), gameServices: LiveGameServices(paths: paths, log: log, guard: launch), launchServices: launch)
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -137,6 +184,9 @@ final class AppModel {
     }
 
     var runtimesReady: Bool {
+        #if DEBUG
+        if debugLaunchRuntimesReady { return true }
+        #endif
         if manifest?.bundles.isEmpty == false { return !installedBundles.isEmpty }
         return installed.contains { $0.kind == .wine } && installed.contains { $0.kind == .dxmt || $0.kind == .d3dmetal }
     }
@@ -152,6 +202,10 @@ final class AppModel {
     deinit {
         for task in tasks.values { task.cancel() }
         searchTask?.cancel()
+        for task in launchTasks.values { task.cancel() }
+        for task in launchRecoveryPolls.values { task.cancel() }
+        for task in recoveryRetryTasks.values { task.cancel() }
+        for task in recoveryInFlight.values { task.cancel() }
         gameTask?.cancel(); gameStartupTask?.cancel(); gameActivationTask?.cancel()
     }
 
@@ -159,6 +213,7 @@ final class AppModel {
         guard !started else { return }
         started = true; isStarting = true
         defer { isStarting = false }
+        await reattachOnStart()
         do {
             if manifest == nil { manifest = try await BundledRuntimeManifest.load() }
             try await services.sweepStaging()
@@ -410,7 +465,7 @@ final class AppModel {
         guard !isExporting else { throw LauncherError.busy("Diagnostics export already in progress") }
         isExporting = true
         defer { isExporting = false }
-        do { return try await services.makeDiagnosticBundle() }
+        do { try await flushLaunchSettings(); return try await services.makeDiagnosticBundle() }
         catch { show(error); throw launcherError(error) }
     }
 
@@ -420,6 +475,7 @@ final class AppModel {
         isExporting = true
         defer { isExporting = false }
         do {
+            try await flushLaunchSettings()
             let bundle = try await services.makeDiagnosticBundle()
             do { try await TemporaryDiagnosticBundle.publish(bundle, to: url) }
             catch { await TemporaryDiagnosticBundle.discard(bundle); throw error }

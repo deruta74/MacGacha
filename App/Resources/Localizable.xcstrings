@@ -1,10 +1,28 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ Settings" : {
+      "comment" : "Sheet title; the argument is the game's name"
+    },
     "%@ can't be played until the install finishes." : {
 
     },
+    "%@ closed during startup" : {
+      "comment" : "The argument is the game's name"
+    },
+    "%@ couldn't start" : {
+      "comment" : "The argument is the game's name"
+    },
+    "%@ files were kept aside" : {
+      "comment" : "Alert title; the argument is the game's name"
+    },
     "%@ is downloading — pause it to start this one" : {
+      "comment" : "The argument is another game's name"
+    },
+    "%@ is running" : {
+      "comment" : "Quit confirmation title; the argument is the game's name"
+    },
+    "%@ is running — quit it to play this one" : {
       "comment" : "The argument is another game's name"
     },
     "%@ of %@" : {
@@ -86,6 +104,9 @@
     "Check installed runtimes again" : {
 
     },
+    "Checking %@…" : {
+      "comment" : "Launch status; the argument is the game's name"
+    },
     "Checking for updates…" : {
 
     },
@@ -119,6 +140,9 @@
     "Choose…" : {
 
     },
+    "Compatibility patches" : {
+
+    },
     "Continue in Parts" : {
 
     },
@@ -128,14 +152,26 @@
     "Continue in parts?" : {
 
     },
+    "Couldn't prepare Wine for %@" : {
+      "comment" : "The argument is the game's name"
+    },
     "Couldn't reach HoYoverse to check the size." : {
 
+    },
+    "Couldn't start the network helper for %@" : {
+      "comment" : "The argument is the game's name"
+    },
+    "D3DMetal" : {
+      "comment" : "Graphics backend name; usually not translated"
     },
     "D3DMetal %@" : {
       "comment" : "The argument is a version"
     },
     "D3DMetal, unknown version" : {
 
+    },
+    "DXMT" : {
+      "comment" : "Graphics backend name; usually not translated"
     },
     "Damaged: %@" : {
 
@@ -145,6 +181,12 @@
     },
     "Diagnostics" : {
 
+    },
+    "DirectX 12" : {
+
+    },
+    "DirectX 12 needs D3DMetal. %@" : {
+      "comment" : "The argument is the general note about graphics settings"
     },
     "Done" : {
 
@@ -179,10 +221,16 @@
     "Finishing…" : {
 
     },
+    "Frame limit" : {
+
+    },
     "Free on this volume" : {
 
     },
     "Free up %@ more to install." : {
+
+    },
+    "Game Settings…" : {
 
     },
     "Games need a lot of space. Pick a drive with at least 100 GB free." : {
@@ -191,7 +239,19 @@
     "Games that use this version won't start until you install it again." : {
 
     },
+    "Genshin Impact" : {
+
+    },
     "Get Game Porting Toolkit from Apple" : {
+
+    },
+    "Graphics" : {
+
+    },
+    "Honkai: Star Rail" : {
+
+    },
+    "If you quit MacGacha, the game loses its connection and will need to be restarted." : {
 
     },
     "Import" : {
@@ -248,14 +308,14 @@
     "Japanese" : {
       "comment" : "Voice pack language"
     },
+    "Keep MacGacha open while you play — it restores the game's files when you quit" : {
+
+    },
     "Keep MacGacha open — you can pause and resume any time" : {
 
     },
     "Korean" : {
       "comment" : "Voice pack language"
-    },
-    "Launching arrives after the compatibility check" : {
-
     },
     "Local runtime" : {
 
@@ -266,10 +326,16 @@
     "Location Unavailable" : {
 
     },
+    "Logs of what the game and Wine print while you play. They stay on this Mac and help with bug reports. When off, MacGacha keeps only what it needs to put game files back." : {
+
+    },
     "Looking for Game Porting Toolkit…" : {
 
     },
     "MacGacha" : {
+
+    },
+    "MacGacha is putting the game's files back. You can play when it's done." : {
 
     },
     "MacGacha removes the game files it manages from %@. Other files in that folder are kept." : {
@@ -293,6 +359,12 @@
     "OK" : {
 
     },
+    "Off" : {
+
+    },
+    "Open Log" : {
+
+    },
     "Open the Game Porting Toolkit disk image from Apple, then rescan, or choose the folder that contains it." : {
 
     },
@@ -308,10 +380,19 @@
     "Play" : {
 
     },
+    "Playing" : {
+
+    },
     "Plays the game's animated art when HoYoPlay provides it. Still images use less power." : {
 
     },
+    "Preparing Wine…" : {
+
+    },
     "Preparing…" : {
+
+    },
+    "Quit" : {
 
     },
     "Read Apple's license terms" : {
@@ -342,7 +423,16 @@
     "Rescan" : {
 
     },
+    "Restoring Files…" : {
+
+    },
+    "Restoring game files…" : {
+
+    },
     "Resume" : {
+
+    },
+    "Retina resolution" : {
 
     },
     "Runtime bundles combine Wine with a graphics layer. Jadeite and the Steam shim are separate compatibility components. Each version is kept on its own, so an update never breaks a working one." : {
@@ -354,10 +444,16 @@
     "Save a zip with system details and redacted logs to share in a bug report" : {
 
     },
+    "Save session logs" : {
+
+    },
     "Set Up Runtimes" : {
 
     },
     "Settings" : {
+
+    },
+    "Sharper, but much heavier on the GPU." : {
 
     },
     "Show a still background" : {
@@ -369,7 +465,16 @@
     "Show the animated background" : {
 
     },
+    "Some game files aren't back yet. MacGacha keeps trying — or choose Try Restoring Again in the … menu." : {
+
+    },
     "Something went wrong" : {
+
+    },
+    "Starting %@…" : {
+      "comment" : "Launch status; the argument is the game's name"
+    },
+    "Starting…" : {
 
     },
     "Steam shim" : {
@@ -389,6 +494,12 @@
     },
     "The folder %@ and everything in it will be removed." : {
       "comment" : "The argument is the game's folder"
+    },
+    "The frame limit is set in the graphics layer, not in the game. Changes apply the next time you press Play." : {
+
+    },
+    "The game closed during startup." : {
+
     },
     "The operation could not finish. Check access to the selected folder and try again." : {
 
@@ -420,6 +531,9 @@
     "This folder isn't empty. Choose an empty folder, or use an existing installation." : {
 
     },
+    "This game version hasn't been tested with MacGacha yet" : {
+
+    },
     "This needs %@ at once, but only %@ is free. MacGacha can finish it in parts instead. %@ can't be played until it's done." : {
       "comment" : "Sizes needed and free, then the game's name",
       "localizations" : {
@@ -432,6 +546,9 @@
       }
     },
     "Try Again" : {
+
+    },
+    "Try Restoring Again" : {
 
     },
     "Uninstall" : {
@@ -496,8 +613,23 @@
     "Waiting for %@ to finish" : {
       "comment" : "The argument is another game's name"
     },
+    "Waiting for %@ to put its files back" : {
+      "comment" : "The argument is another game's name"
+    },
+    "Waiting for the game window…" : {
+
+    },
     "Warning" : {
       "comment" : "Diagnostics event level"
+    },
+    "While %@ was running, it made a new copy of a file MacGacha had set aside. The game folder keeps the new file. The older copy is in a recovery folder, so nothing was lost." : {
+      "comment" : "The argument is the game's name"
+    },
+    "Workarounds %@ needs to start on a Mac, such as a small helper that starts the game. They don't change the game's files. With patches off, the game usually doesn't start." : {
+      "comment" : "The argument is the game's name"
+    },
+    "Zenless Zone Zero" : {
+
     },
     "about %@" : {
       "comment" : "An estimated size"

@@ -29,7 +29,7 @@ private struct GameSnapshot: Sendable {
         gameRefreshInFlight = true; gameLastRefresh = time
         defer { gameRefreshInFlight = false }
         await ensureGameStartup().value
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, launchStartupError == nil else { return }
         let revisions = gameRevisions, services = gameServices
         let ids = GameDefinition.all.map(\.id).filter { $0 != gameOperation?.id }
         let results = await withTaskGroup(of: (String, GameSnapshot).self) { group in
@@ -47,6 +47,7 @@ private struct GameSnapshot: Sendable {
     func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate {
         await ensureGameStartup().value
         try Task.checkCancellation()
+        if let launchStartupError { throw launchStartupError }
         let value = try await gameServices.estimate(id, voices: voices, at: location)
         try Task.checkCancellation()
         return value
@@ -80,7 +81,11 @@ private struct GameSnapshot: Sendable {
     private func ensureGameStartup() -> Task<Void, Never> {
         if let task = gameStartupTask { return task }
         let services = gameServices
-        let task = Task { await services.start() }
+        let task = Task { [weak self] in
+            await self?.reattachOnStart()
+            guard self?.launchStartupError == nil else { return }
+            await services.start()
+        }
         gameStartupTask = task
         return task
     }
@@ -106,6 +111,7 @@ private struct GameSnapshot: Sendable {
             do {
                 await startup.value
                 try Task.checkCancellation()
+                if let error = self?.launchStartupError { throw error }
                 let stream = await gameStream(services, id: id, request: request)
                 events: for try await event in stream {
                     try Task.checkCancellation()

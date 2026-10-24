@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import AppKit
+import Launch
 import SwiftUI
 
 enum Panel: String, Identifiable {
@@ -63,6 +65,8 @@ struct RootView: View {
                 InstallSheet(game: Self.game(id), installRoot: model.installRoot)
             case .voices(let id):
                 VoicePacksSheet(game: Self.game(id))
+            case .settings(let id):
+                GameSettingsSheet(game: Self.game(id))
             }
         }
         // While a panel is open, its sheet presents the consent and import flow instead.
@@ -72,7 +76,17 @@ struct RootView: View {
         } message: { message in
             Text(message)
         }
+        .alert(recoveryTitle, isPresented: recoveryBinding, presenting: model.recoveryNotices.first) { notice in
+            Button("Show in Finder") {
+                model.revealRecovery(notice)
+                model.acknowledge(notice)
+            }
+            Button("OK", role: .cancel) { model.acknowledge(notice) }
+        } message: { notice in
+            Text(recoveryMessage(notice))
+        }
         .task { await model.loadGameArt() }
+        .task { model.quitConfirmation = QuitConfirmation.present }
         #if DEBUG
         .onAppear(perform: applyDebugLaunchArguments)
         #endif
@@ -93,6 +107,7 @@ struct RootView: View {
         switch defaults.string(forKey: "MacGachaDebugSheet") {
         case "install": gameSheet = .install(selectedID)
         case "voices": gameSheet = .voices(selectedID)
+        case "settings": gameSheet = .settings(selectedID)
         default: break
         }
     }
@@ -100,6 +115,23 @@ struct RootView: View {
 
     private static func game(_ id: String) -> LauncherGame {
         LauncherGame.all.first { $0.id == id } ?? LauncherGame.all[0]
+    }
+
+    private var recoveryTitle: Text {
+        guard let notice = model.recoveryNotices.first else { return Text(verbatim: "") }
+        return Text("\(Self.game(notice.game).name) files were kept aside", comment: "Alert title; the argument is the game's name")
+    }
+
+    private func recoveryMessage(_ notice: RecoveryNotice) -> String {
+        String(localized: """
+            While \(Self.game(notice.game).name) was running, it made a new copy of a file MacGacha had set aside. \
+            The game folder keeps the new file. The older copy is in a recovery folder, so nothing was lost.
+            """, comment: "The argument is the game's name")
+    }
+
+    // An error alert wins; the notice waits until it's dismissed.
+    private var recoveryBinding: Binding<Bool> {
+        Binding(get: { model.lastError == nil && !model.recoveryNotices.isEmpty }, set: { _ in })
     }
 
     private var errorBinding: Binding<Bool> {
@@ -156,4 +188,17 @@ struct RuntimeFlowSheets: ViewModifier {
     RootView()
         .environment(AppModel.preview())
         .frame(width: 1100, height: 620)
+}
+
+/// Asks before quitting while a game runs: the game's connection goes through MacGacha.
+enum QuitConfirmation {
+    @MainActor static func present(gameName: String, completion: @escaping @MainActor (NSApplication.TerminateReply) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "\(gameName) is running", comment: "Quit confirmation title; the argument is the game's name")
+        alert.informativeText = String(localized: "If you quit MacGacha, the game loses its connection and will need to be restarted.")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "Quit"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        completion(alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel)
+    }
 }

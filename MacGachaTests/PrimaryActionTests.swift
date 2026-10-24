@@ -4,9 +4,57 @@ import Foundation
 import Testing
 import DownloadEngine
 import GameLibrary
+import Launch
 @testable import MacGacha
 
 struct PrimaryActionTests {
+    @Test func installedAndReadyIsPlay() {
+        let action = PrimaryAction.resolve(GameState(status: .installed(tag: "1")), runtimesReady: true)
+        #expect(action == .play)
+    }
+
+    @Test func missingCompatibilityComponentsRequireSetup() {
+        let state = GameState(status: .installed(tag: "1"))
+        #expect(PrimaryAction.resolve(state, runtimesReady: true, missingComponents: true) == .setUpRuntimes)
+        #expect(PrimaryAction.resolve(state, runtimesReady: true, missingComponents: false) == .play)
+    }
+
+    @Test func updateAvailableStaysUpdate() {
+        let state = GameState(status: .updateAvailable(from: "1", to: "2"))
+        for ready in [false, true] {
+            for missing in [false, true] {
+                #expect(PrimaryAction.resolve(state, runtimesReady: ready, missingComponents: missing) == .update(to: "2"))
+            }
+        }
+    }
+
+    @Test func liveSessionIsPlaying() {
+        let state = GameState(status: .installed(tag: "1"))
+        for launch in [LaunchUIState.running, .ready] {
+            #expect(PrimaryAction.resolve(state, runtimesReady: false, launch: launch, missingComponents: true) == .playing)
+        }
+    }
+
+    @Test func launchStagesAreLaunching() {
+        let stages: [LaunchStage] = [.preflight, .lock, .snapshot, .prepare, .proxy, .spawn, .watch, .restore, .report]
+        for stage in stages {
+            #expect(PrimaryAction.resolve(GameState(status: .installed(tag: "1")), runtimesReady: true,
+                launch: .starting(stage)) == .launching)
+        }
+    }
+
+    @Test func recoveryPendingIsRecoveryNeeded() {
+        let state = GameState(status: .installed(tag: "1"), activity: .resolving)
+        #expect(PrimaryAction.resolve(state, runtimesReady: true,
+            launch: .recoveryNeeded("Reconnect the game drive")) == .recoveryNeeded("Reconnect the game drive"))
+    }
+
+    @Test func failedLaunchAllowsRetry() {
+        let failure = LaunchFailureInfo(stage: .spawn, message: "The game could not start.", hasLog: true, unverifiedBuild: false)
+        #expect(PrimaryAction.resolve(GameState(status: .installed(tag: "1")), runtimesReady: true,
+            launch: .failed(failure)) == .play)
+    }
+
     @Test func activityBeatsStatus() {
         let cases: [(GameStatus, GameActivity, PrimaryAction)] = [
             (.notInstalled, .resolving, .preparing),
@@ -33,7 +81,7 @@ struct PrimaryActionTests {
         }
         for status in [GameStatus.installed(tag: "1"), .unknown] {
             #expect(PrimaryAction.resolve(GameState(status: status), runtimesReady: false) == .setUpRuntimes)
-            #expect(PrimaryAction.resolve(GameState(status: status), runtimesReady: true) == .playUnavailable)
+            #expect(PrimaryAction.resolve(GameState(status: status), runtimesReady: true) == .play)
         }
     }
 

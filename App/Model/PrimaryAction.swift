@@ -32,9 +32,17 @@ enum GameActivity: Sendable, Equatable {
 enum PrimaryAction: Sendable, Equatable {
     case preparing, progress, continueInParts, install, resume, finishUninstall
     case update(to: String)
-    case setUpRuntimes, locationUnavailable, playUnavailable
+    case setUpRuntimes, locationUnavailable, play, launching, playing
+    case recoveryNeeded(String)
 
-    static func resolve(_ state: GameState, runtimesReady: Bool) -> Self {
+    static func resolve(_ state: GameState, runtimesReady: Bool,
+        launch: LaunchUIState? = nil, missingComponents: Bool = false) -> Self {
+        switch launch {
+        case .starting: return .launching
+        case .running, .ready: return .playing
+        case .recoveryNeeded(let reason): return .recoveryNeeded(reason)
+        case .failed, nil: break
+        }
         switch state.activity {
         case .resolving: return .preparing
         case .working: return .progress
@@ -47,7 +55,7 @@ enum PrimaryAction: Sendable, Equatable {
         case .paused: return .resume
         case .uninstallPaused: return .finishUninstall
         case .updateAvailable(_, let to): return .update(to: to)
-        case .installed, .unknown: return runtimesReady ? .playUnavailable : .setUpRuntimes
+        case .installed, .unknown: return runtimesReady && !missingComponents ? .play : .setUpRuntimes
         }
     }
 }

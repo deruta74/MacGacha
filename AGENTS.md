@@ -21,7 +21,7 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 
 | Path | What lives there |
 |---|---|
-| `App/` | The SwiftUI app. `Model/`: `AppModel` and service adapters. `Views/`. `Resources/`: `Localizable.xcstrings`, `runtime-manifest.json`, credits. |
+| `App/` | The SwiftUI app. `Model/`: `AppModel`, service adapters and launch integration (observable launch state, per-game/global settings, startup reattachment, recovery notices, a launch-slot reservation through preparation and recovery, guarded recovery retries, and verified-end window lifecycle). `Views/`. `Resources/`: `Localizable.xcstrings`, `runtime-manifest.json`, credits. |
 | `MacGachaTests/` | App unit tests (Swift Testing), run through `xcodebuild test`. |
 | `Packages/LauncherKit/` | SwiftPM package with all logic. The app is a thin layer over it. |
 | `compat/steam-shim/` | Reproducible build inputs, notices and `SHA256SUMS` for the Proton `steam.exe` shim. |
@@ -111,7 +111,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
   - localization groundwork (English only so far).
 - **In progress:** one-click Play.
   - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy, prefix launch preparation, session logs with a global off setting and per-launch copies, session locks and runtime pins, launch manager state machine with exclusive watch/reattach/restore ownership and acknowledged recovery notices.
-  - Next: app integration.
+  - App launch model integration includes guarded recovery retries (5/15/60 seconds, then every minute and on activation), explicit Retry, and a launch reservation through durable finalization; the Play footer, settings and quit/recovery presentation remain pending view-layer integration.
 - **Planned:** HoYoPlay-style rotating banners and news, translations and content language, download ETA, surround and Spatial Audio, signed and notarized releases with Sparkle updates.
 
 Update this section when a milestone task lands.
