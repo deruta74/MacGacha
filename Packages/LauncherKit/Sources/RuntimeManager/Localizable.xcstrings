@@ -1,48 +1,160 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "Cannot inspect runtime entry": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Cannot inspect runtime entry" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查运行环境条目"
+          }
+        }
+      }
     },
-    "Invalid runtime marker JSON": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Invalid runtime marker JSON" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境标记 JSON 无效"
+          }
+        }
+      }
     },
-    "Invalid runtime path component": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Invalid runtime path component" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境路径组成部分无效"
+          }
+        }
+      }
     },
-    "Invalid runtime version identifier": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Invalid runtime version identifier" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境版本标识无效"
+          }
+        }
+      }
     },
-    "Runtime entry disappeared during inspection": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Runtime entry disappeared during inspection" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查期间运行环境条目消失"
+          }
+        }
+      }
     },
-    "Runtime kind path is not a directory": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Runtime kind path is not a directory" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境类型路径不是文件夹"
+          }
+        }
+      }
     },
-    "Runtime marker does not match its directory": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Runtime marker does not match its directory" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境标记与其文件夹不符"
+          }
+        }
+      }
     },
-    "Runtime marker exceeds size limit": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Runtime marker exceeds size limit" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境标记超出大小上限"
+          }
+        }
+      }
     },
-    "Runtime marker is missing": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Runtime marker is missing" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缺少运行环境标记"
+          }
+        }
+      }
     },
-    "Runtime path is not a directory": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Runtime path is not a directory" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境路径不是文件夹"
+          }
+        }
+      }
     },
-    "Too many runtime directory entries": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Too many runtime directory entries" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境文件夹中的条目过多"
+          }
+        }
+      }
     },
-    "Unknown runtime kind": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Unknown runtime kind" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知的运行环境类型"
+          }
+        }
+      }
     },
-    "Unsafe path or symbolic link": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Unsafe path or symbolic link" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不安全的路径或符号链接"
+          }
+        }
+      }
     },
-    "Unsafe runtime marker path": {
-      "comment": "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes."
+    "Unsafe runtime marker path" : {
+      "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不安全的运行环境标记路径"
+          }
+        }
+      }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }

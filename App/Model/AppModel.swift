@@ -161,8 +161,8 @@ final class AppModel {
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artService: GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
                 bundleIdentifier: Bundle.main.bundleIdentifier),
-                // English until the app ships translations; then HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations).
-                language: .enUS, log: log), gameServices: LiveGameServices(paths: paths, log: log, guard: launch), launchServices: launch)
+                // Art and news follow the interface language the app is actually shown in.
+                language: HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations), log: log), gameServices: LiveGameServices(paths: paths, log: log, guard: launch), launchServices: launch)
     }
 
     static func forCurrentProcess() -> AppModel {

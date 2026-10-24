@@ -9,6 +9,9 @@ xcodebuild does not. This script does the same merge into a temporary copy and f
 the committed catalog differs: a new string is missing, or an old one is now stale.
 `--write` updates the committed catalog instead.
 
+Every string must also be translated into each language in TRANSLATIONS, with the same
+format arguments, so a new string can't ship in English only.
+
 It also flags the few code shapes that bypass localization: a String literal returned,
 concatenated or wrapped in Text(verbatim:). SwiftUI shows a String as-is, so such text
 must go through String(localized:) or LocalizedStringResource.
@@ -25,6 +28,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG = ROOT / "App/Resources/Localizable.xcstrings"
 SOURCES = ROOT / "App"
+# Package catalogs aren't synced from code here (SwiftPM builds them), but their
+# translations are checked like the app's.
+PACKAGE_CATALOGS = sorted((ROOT / "Packages/LauncherKit/Sources").glob("*/Localizable.xcstrings"))
+TRANSLATIONS = ["zh-Hans"]
+FORMAT_ARGUMENT = re.compile(r"%(?:\d+\$)?[@dlfs]|%%")
 
 # A user-facing sentence starts with a capital letter and has a space; identifiers,
 # symbol names and log categories don't.
@@ -71,6 +79,22 @@ def catalog_problems(derived: Path) -> list[str]:
     return problems
 
 
+def translation_problems(catalog: Path) -> list[str]:
+    problems = []
+    name = catalog.relative_to(ROOT)
+    for key, entry in sorted(json.loads(catalog.read_text(encoding="utf-8"))["strings"].items()):
+        if entry.get("shouldTranslate") is False:
+            continue
+        for language in TRANSLATIONS:
+            unit = entry.get("localizations", {}).get(language, {}).get("stringUnit", {})
+            if unit.get("state") != "translated" or not unit.get("value"):
+                problems.append(f"{name}: no {language} translation for {key!r}")
+            # Positional forms (%1$@) may reorder arguments, so only the count must match.
+            elif len(FORMAT_ARGUMENT.findall(key)) != len(FORMAT_ARGUMENT.findall(unit["value"])):
+                problems.append(f"{name}: {language} translation of {key!r} has different format arguments")
+    return problems
+
+
 def literal_problems() -> list[str]:
     problems = []
     for path in sorted(SOURCES.rglob("*.swift")):
@@ -98,6 +122,8 @@ def main() -> int:
         sync(CATALOG, stringsdata(args.derived_data))
         return 0
     problems = catalog_problems(args.derived_data) + literal_problems()
+    for catalog in [CATALOG, *PACKAGE_CATALOGS]:
+        problems += translation_problems(catalog)
     for problem in problems:
         print(f"error: {problem}", file=sys.stderr)
     if problems:
