@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
 import Observation
+import Synchronization
 import Testing
 import LauncherCore
 import DownloadEngine
@@ -257,6 +258,24 @@ import Launch
         try complete(plan.items[1].id, fake: fake, manifest: manifest)
         try await setupWait { model.runtimeSetupProgress.isEmpty }
         #expect(fake.snapshot.bundleInstalls == [plan.items[0].id])
+    }
+
+    /// A sheet opened before startup loads the manifest must refresh once it arrives.
+    @Test func planObservesManifestArrival() throws {
+        let (loaded, _, manifest) = try fixture("starrail")
+        let model = AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/Setup")), manifest: nil,
+            services: FakeRuntimeServices(), defaults: nil)
+        model.launchSettingsCache = loaded.launchSettingsCache
+        #expect(model.runtimeSetupPlan(for: "starrail") == nil)
+        let changed = Mutex(false)
+        withObservationTracking {
+            _ = model.runtimeSetupPlan(for: "starrail")
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+        model.manifest = manifest
+        #expect(changed.withLock { $0 })
+        #expect(model.runtimeSetupPlan(for: "starrail")?.items.isEmpty == false)
     }
 
     private func fixture(_ game: String, backend: RuntimeBackend = .dxmt, patches: Bool = true) throws -> (AppModel, FakeRuntimeServices, RuntimeManifest) {
