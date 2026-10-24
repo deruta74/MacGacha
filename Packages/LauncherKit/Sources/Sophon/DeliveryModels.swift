@@ -73,6 +73,8 @@ public struct ManifestRef: Sendable, Codable, Hashable {
 }
 
 public struct BuildCategory: Sendable, Codable, Hashable {
+    /// Persist the policy alongside descriptors, including in paused operations.
+    public let region: Region
     public let id: String
     public let matchingField: String
     public let manifest: ManifestRef
@@ -83,18 +85,19 @@ public struct BuildCategory: Sendable, Codable, Hashable {
     public let compressedSize: Int64
     public let decodedSize: Int64
     public init(id: String, matchingField: String, manifest: ManifestRef, manifestPrefix: URL, manifestSuffix: String,
-        chunkPrefix: URL, chunkSuffix: String, compressedSize: Int64, decodedSize: Int64) {
+        chunkPrefix: URL, chunkSuffix: String, compressedSize: Int64, decodedSize: Int64, region: Region = .global) {
+        self.region = region
         self.id = id; self.matchingField = matchingField; self.manifest = manifest
         self.manifestPrefix = manifestPrefix; self.manifestSuffix = manifestSuffix
         self.chunkPrefix = chunkPrefix; self.chunkSuffix = chunkSuffix
         self.compressedSize = compressedSize; self.decodedSize = decodedSize
     }
 
-    public var manifestURL: URL { get throws { try deliveryURL(prefix: manifestPrefix, id: manifest.id, suffix: manifestSuffix) } }
-    public func chunkURL(id: String) throws -> URL { try deliveryURL(prefix: chunkPrefix, id: id, suffix: chunkSuffix) }
+    public var manifestURL: URL { get throws { try deliveryURL(prefix: manifestPrefix, id: manifest.id, suffix: manifestSuffix, region: region) } }
+    public func chunkURL(id: String) throws -> URL { try deliveryURL(prefix: chunkPrefix, id: id, suffix: chunkSuffix, region: region) }
 
     private enum CodingKeys: String, CodingKey {
-        case id, matchingField, manifest, manifestPrefix, manifestSuffix, chunkPrefix, chunkSuffix, compressedSize, decodedSize
+        case id, matchingField, manifest, manifestPrefix, manifestSuffix, chunkPrefix, chunkSuffix, compressedSize, decodedSize, region
     }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -102,12 +105,12 @@ public struct BuildCategory: Sendable, Codable, Hashable {
             manifest: try c.decode(ManifestRef.self, forKey: .manifest), manifestPrefix: try c.decode(URL.self, forKey: .manifestPrefix),
             manifestSuffix: try c.decode(String.self, forKey: .manifestSuffix), chunkPrefix: try c.decode(URL.self, forKey: .chunkPrefix),
             chunkSuffix: try c.decode(String.self, forKey: .chunkSuffix), compressedSize: try c.decode(Int64.self, forKey: .compressedSize),
-            decodedSize: try c.decode(Int64.self, forKey: .decodedSize))
+            decodedSize: try c.decode(Int64.self, forKey: .decodedSize), region: try c.decodeIfPresent(Region.self, forKey: .region) ?? .global)
         try validate()
     }
 
     func validate() throws {
-        guard DeliveryHostPolicy.allows(manifestPrefix), DeliveryHostPolicy.allows(chunkPrefix) else {
+        guard DeliveryHostPolicy.allows(manifestPrefix, region: region), DeliveryHostPolicy.allows(chunkPrefix, region: region) else {
             throw LauncherError.io("untrusted delivery host")
         }
         try manifest.validate()

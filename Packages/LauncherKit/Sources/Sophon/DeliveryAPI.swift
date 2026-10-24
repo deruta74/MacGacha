@@ -8,11 +8,11 @@ public struct DeliveryAPI: Sendable {
     private let http: any HTTPClient
     private let timeout: Duration
     private let log: EventLog?
+    private let region: Region
     private static let metadataLimit = 2 << 20
-    private static let apiBase = "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/"
 
-    public init(http: any HTTPClient, timeout: Duration = .seconds(30), log: EventLog? = nil) {
-        self.http = http; self.timeout = timeout; self.log = log
+    public init(http: any HTTPClient, region: Region = .global, timeout: Duration = .seconds(30), log: EventLog? = nil) {
+        self.http = http; self.region = region; self.timeout = timeout; self.log = log
     }
 
     public func branch(biz: String) async throws -> GameBranch {
@@ -38,7 +38,7 @@ public struct DeliveryAPI: Sendable {
     }
 
     public func build(_ branch: GameBranch, tag: String? = nil) async throws -> SophonBuild {
-        var components = URLComponents(string: "https://sg-public-api.hoyoverse.com/downloader/sophon_chunk/api/getBuild")!
+        var components = URLComponents(url: region.sophonBuildURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "branch", value: branch.branch),
             URLQueryItem(name: "package_id", value: branch.packageID), URLQueryItem(name: "password", value: branch.password)]
         if let tag { components.queryItems?.append(URLQueryItem(name: "tag", value: tag)) }
@@ -46,10 +46,11 @@ public struct DeliveryAPI: Sendable {
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let url = components.url else { throw LauncherError.io("invalid delivery request") }
         let wire: BuildWire = try await json(url)
-        return try SophonBuild(buildID: wire.build_id, tag: wire.tag, categories: wire.manifests.map { try $0.model() })
+        return try SophonBuild(buildID: wire.build_id, tag: wire.tag, categories: wire.manifests.map { try $0.model(region: region) })
     }
 
     public func manifest(_ category: BuildCategory) async throws -> (compressed: Data, manifest: SophonManifest) {
+        guard category.region == region else { throw LauncherError.io("untrusted delivery host") }
         try category.validate()
         let url = try category.manifestURL
         let data = try await deadline { try await bytes(url, limit: Int(category.manifest.compressedSize), expected: category.manifest.compressedSize) }
@@ -72,9 +73,7 @@ public struct DeliveryAPI: Sendable {
     }
 
     private func endpoint(_ name: String) -> URL {
-        var components = URLComponents(string: Self.apiBase + name)!
-        components.queryItems = [URLQueryItem(name: "launcher_id", value: "VYTpXlbWo8")]
-        return components.url!
+        region.hypAPIURL(name)
     }
 
     private func json<T: Decodable & Sendable>(_ url: URL) async throws -> T {
@@ -85,7 +84,7 @@ public struct DeliveryAPI: Sendable {
     }
 
     private func bytes(_ url: URL, limit: Int, expected: Int64? = nil) async throws -> Data {
-        guard DeliveryHostPolicy.allows(url) else { throw LauncherError.io("untrusted delivery host") }
+        guard DeliveryHostPolicy.allows(url, region: region) else { throw LauncherError.io("untrusted delivery host") }
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         let head: HTTPResponseHead; let body: HTTPBody
         do { (head, body) = try await http.get(url, byteRangeFrom: nil) }
@@ -175,9 +174,9 @@ private struct BuildWire: Decodable, Sendable {
     struct Category: Decodable, Sendable {
         let category_id: String; let matching_field: String; let manifest: Manifest
         let manifest_download: Descriptor; let chunk_download: Descriptor; let stats: Stats
-        func model() throws -> BuildCategory {
-            let (mp, ms) = try manifest_download.validate()
-            let (cp, cs) = try chunk_download.validate()
+        func model(region: Region) throws -> BuildCategory {
+            let (mp, ms) = try manifest_download.validate(region: region)
+            let (cp, cs) = try chunk_download.validate(region: region)
             let digest: Digest
             do { digest = try Digest(algorithm: .md5, hex: manifest.checksum) }
             catch { throw LauncherError.io("invalid delivery checksum") }
@@ -185,7 +184,7 @@ private struct BuildWire: Decodable, Sendable {
                 compressedSize: manifest.compressed_size.value, decodedSize: manifest.uncompressed_size.value)
             let result = BuildCategory(id: category_id, matchingField: matching_field, manifest: ref,
                 manifestPrefix: mp, manifestSuffix: ms, chunkPrefix: cp, chunkSuffix: cs,
-                compressedSize: stats.compressed_size.value, decodedSize: stats.uncompressed_size.value)
+                compressedSize: stats.compressed_size.value, decodedSize: stats.uncompressed_size.value, region: region)
             try result.validate()
             return result
         }
@@ -196,9 +195,9 @@ private struct BuildWire: Decodable, Sendable {
     struct Stats: Decodable, Sendable { let compressed_size: DecimalSize; let uncompressed_size: DecimalSize }
     struct Descriptor: Decodable, Sendable {
         let url_prefix: String; let url_suffix: String; let compression: Int; let encryption: Int; let password: String
-        func validate() throws -> (URL, String) {
+        func validate(region: Region) throws -> (URL, String) {
             guard compression == 1, encryption == 0, password.isEmpty else { throw LauncherError.io("unsupported delivery: descriptor") }
-            guard let prefix = URL(string: url_prefix, encodingInvalidCharacters: false), DeliveryHostPolicy.allows(prefix) else {
+            guard let prefix = URL(string: url_prefix, encodingInvalidCharacters: false), DeliveryHostPolicy.allows(prefix, region: region) else {
                 throw LauncherError.io("untrusted delivery host")
             }
             return (prefix, url_suffix)
