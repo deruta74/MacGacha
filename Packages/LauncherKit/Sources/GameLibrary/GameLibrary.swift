@@ -186,7 +186,11 @@ public actor GameLibrary {
         let fs = try ContainedFileSystem(root: paths.root, fileOps: fileOps)
         try fs.createRootDurably()
         try fs.createDirectoryDurably(at: SafeRelativePath("Games/\(id.rawValue)"))
-        return try InstallLock(fs: fs, path: SafeRelativePath("Games/\(id.rawValue)/.session.lock"))
+        let lock = try InstallLock(fs: fs, path: SafeRelativePath("Games/\(id.rawValue)/.session.lock"))
+        // A different launcher may have launched and died after our guard await.
+        // Revalidate durable ownership while no launcher can acquire this game.
+        try LaunchMutationBarrier.requireNoJournal(paths: paths, game: game)
+        return lock
     }
 
     private func stream(_ game: GameDefinition, _ request: LibraryRequest) -> AsyncThrowingStream<OperationEvent, any Error> {
@@ -218,7 +222,9 @@ public actor GameLibrary {
                 reservedLocations: [paths.root, paths.runtimes]))
         case .adopt(let voices, let location):
             try checkNewLocation(location, records: records, game: game, empty: false)
-            let identity = try ContainedFileSystem(root: location).rootIdentity()
+            let source = try ContainedFileSystem(root: location).pinRoot()
+            try AdoptEditionValidator.validate(game, in: source)
+            let identity = try source.rootIdentity()
             try await store.deleteState(Self.cleanupName, for: game.id)
             let config = try await api.config(biz: game.biz), target = try await resolve(game, voices: voices)
             let record = GameRecord(installPath: location, ownership: .adopted, executable: config.executable, installIdentity: identity)

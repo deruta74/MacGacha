@@ -215,11 +215,12 @@ final class ManagerFixture: Sendable {
         if initialGame { inspector.update { $0.processes = [gameProcess]; $0.alive = [gameProcess.identity] } }
     }
     func manager(hideHooks: LaunchFileHooks = .none, beforeJournalRead: @escaping @Sendable () throws -> Void = {},
-        beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {}, inspector overrideInspector: (any ProcessInspector)? = nil) -> LaunchManager {
+        beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {}, inspector overrideInspector: (any ProcessInspector)? = nil,
+        log: EventLog? = nil, beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) -> LaunchManager {
         LaunchManager(paths: paths, runtimes: runtime, prefixes: prefixes, preparation: preparation,
-            spawner: spawner, inspector: overrideInspector ?? inspector, runner: runner, clock: clock,
+            spawner: spawner, inspector: overrideInspector ?? inspector, runner: runner, clock: clock, log: log,
             proxyFactory: { [proxy] _, log in proxy.start(log: log); return proxy }, baseEnvironment: [:], journalFileOps: journalOps, hideHooks: hideHooks, beforeJournalRead: beforeJournalRead, beforeRecoveryRead: beforeRecoveryRead,
-            sessionProvenance: { (Self.bootSessionUUID, Self.sessionStartTime) })
+            sessionProvenance: { (Self.bootSessionUUID, Self.sessionStartTime) }, beforeSessionLogWrite: beforeSessionLogWrite)
     }
     func consume(_ manager: LaunchManager, events: ManagerEvents, build: String = "4.6.0") async -> Task<Void, Never> {
         let stream = await manager.launch(game: game, installRoot: installRoot, gameBuild: build)

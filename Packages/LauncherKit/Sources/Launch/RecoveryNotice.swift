@@ -10,6 +10,11 @@ public struct RecoveryNotice: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let game: String
     public let movedTo: [URL]
+    public let recoveryRoot: URL?
+
+    public init(id: UUID, game: String, movedTo: [URL], recoveryRoot: URL? = nil) {
+        self.id = id; self.game = game; self.movedTo = movedTo; self.recoveryRoot = recoveryRoot
+    }
 }
 
 /// Synchronous contained I/O; callers run on BlockingIO. The independent lock
@@ -87,8 +92,15 @@ struct RecoveryNoticeStore: Sendable {
 
     private func valid(_ notice: RecoveryNotice, game: String) -> Bool {
         guard notice.game == game, !notice.movedTo.isEmpty else { return false }
-        let recovery = paths.games.appendingPathComponent(game).appendingPathComponent("recovery")
-            .appendingPathComponent(notice.id.uuidString).standardizedFileURL.path + "/"
+        let root = notice.recoveryRoot ?? paths.games.appendingPathComponent(game).appendingPathComponent("recovery")
+            .appendingPathComponent(notice.id.uuidString)
+        if let external = notice.recoveryRoot {
+            let suffix = [".macgacha-recovery", game, notice.id.uuidString]
+            guard external.isFileURL, external.pathComponents.suffix(3).elementsEqual(suffix),
+                external.host == nil || external.host == "" || external.host == "localhost",
+                !external.path.contains("\0"), external == external.standardizedFileURL else { return false }
+        }
+        let recovery = root.standardizedFileURL.path + "/"
         return notice.movedTo.allSatisfy {
             $0.isFileURL && ($0.host == nil || $0.host == "" || $0.host == "localhost")
                 && !$0.path.contains("\0") && $0.standardizedFileURL.path.hasPrefix(recovery)

@@ -11,6 +11,25 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
+    @Test(arguments: ["verify", "update", "uninstall", "startup"])
+    func crashedLaunchBetweenGuardAndExclusionRefusesMutation(operation: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        let before = try await f.store.load(game.id)
+        let paths = f.paths, install = f.install
+        let guardClaim = CrashedSessionLibraryGuard(paths: paths, install: install)
+        let library = f.restarted(operationGuard: guardClaim)
+        if operation == "startup" { await library.start() }
+        else {
+            await #expect(throws: LauncherError.self) {
+                if operation == "uninstall" { try await library.uninstall(game) }
+                else if operation == "update" { _ = try await libraryCollect(await library.update(game, approved: true)) }
+                else { _ = try await libraryCollect(await library.verify(game, mode: .full)) }
+            }
+        }
+        #expect(try await f.store.load(game.id) == before)
+        #expect(try f.fs.itemType(at: SafeRelativePath("GenshinImpact.exe.macgacha-hidden-test")) == .regularFile)
+        #expect(try ContainedFileSystem(root: paths.root).readFile(at: SafeRelativePath("Games/\(game.id)/launch-session.json"), maxBytes: 100) == Data("unfinished launch".utf8))
+    }
     @Test(arguments: ["install", "adopt", "update", "resume", "verify", "voices", "uninstall"])
     func verifyRefusedWhileGuardThrows(operation: String) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
@@ -184,9 +203,22 @@ import TestSupport
 
     @Test func verifyRepairsCorruptedFile() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
-        try f.fs.writeAtomically(Data("bad".utf8), to: SafeRelativePath("Game.exe"))
+        try f.fs.writeAtomically(Data("bad".utf8), to: SafeRelativePath("GenshinImpact.exe"))
         _ = try await libraryCollect(await f.library.verify(game, mode: .full))
         try f.assertFiles(1)
+    }
+
+    @Test func adoptionEditionRefusalPrecedesNetworkAndRecordMutation() async throws {
+        let f = try LibraryFixture(); try f.seedExisting()
+        try f.fs.writeAtomically(Data("[General]\ngame_biz=hk4e_cn\n".utf8), to: SafeRelativePath("config.ini"))
+        let original = try libraryStateFiles(at: f.install)
+        await #expect(throws: LauncherError.gameEditionMismatch) {
+            _ = try await libraryCollect(await f.library.adopt(game, folder: f.install, voices: ["en-us"]))
+        }
+        #expect(f.cdn.requestLog.isEmpty)
+        #expect(try await f.store.load(game.id) == nil)
+        #expect(try await f.store.loadPlan(for: game.id) == nil)
+        #expect(try libraryStateFiles(at: f.install) == original)
     }
 
     @Test func adoptExistingFolderRepairsDifferences() async throws {
@@ -238,7 +270,7 @@ import TestSupport
             if case .fileVerified = event { break }
         }
         #expect(try await f.store.load(game.id)?.pending != nil)
-        #expect(try f.fs.itemType(at: SafeRelativePath("Game.exe")) == nil)
+        #expect(try f.fs.itemType(at: SafeRelativePath("GenshinImpact.exe")) == nil)
         // Dropping a stream cancels workers asynchronously. Uninstall correctly
         // stays busy while they drain; reconcile is the supported drain barrier.
         let runner = OperationRunner(store: f.store, fetcher: ChunkFetcher(http: f.cdn,
@@ -255,7 +287,7 @@ import TestSupport
         _ = try await libraryCollect(await f.library.adopt(game, folder: f.install, voices: ["en-us"]))
         try await f.library.uninstall(game)
         #expect(try f.fs.readFile(at: SafeRelativePath("foreign/note"), maxBytes: 100) == Data("mine".utf8))
-        #expect(try f.fs.itemType(at: SafeRelativePath("Game.exe")) == nil)
+        #expect(try f.fs.itemType(at: SafeRelativePath("GenshinImpact.exe")) == nil)
         #expect(try f.fs.itemType(at: SafeRelativePath("data")) == nil)
         #expect(try await f.store.load(game.id) == nil)
     }
@@ -429,7 +461,7 @@ import TestSupport
         _ = try await libraryCollect(await f.library.adopt(game, folder: f.install, voices: ["en-us"]))
         var record = try #require(try await f.store.load(game.id)); record.uninstalling = true
         try await f.store.save(record, for: game.id)
-        try f.fs.removeFile(at: SafeRelativePath("Game.exe"))
+        try f.fs.removeFile(at: SafeRelativePath("GenshinImpact.exe"))
         try await f.restarted().uninstall(game)
         #expect(try await f.store.load(game.id) == nil)
         #expect(!FileManager.default.fileExists(atPath: f.install.path))
@@ -470,7 +502,7 @@ import TestSupport
             if event == .phase(.checkingSpace) { break }
         }
         #expect(try await f.store.load(game.id)?.pending?.kind == .adopt)
-        try f.fs.removeFile(at: SafeRelativePath("Game.exe"))
+        try f.fs.removeFile(at: SafeRelativePath("GenshinImpact.exe"))
         try await f.library.uninstall(game)
         #expect(try await f.store.load(game.id) == nil)
         #expect(try f.fs.readFile(at: SafeRelativePath("foreign"), maxBytes: 100) == Data("mine".utf8))
@@ -522,11 +554,11 @@ import TestSupport
         if retry { record.uninstalling = true; try await f.store.save(record, for: game.id) }
         let old = f.base.appendingPathComponent("OldInstall")
         try FileManager.default.moveItem(at: f.install, to: old)
-        try f.fs.writeAtomically(Data("unrelated".utf8), to: SafeRelativePath("Game.exe"))
+        try f.fs.writeAtomically(Data("unrelated".utf8), to: SafeRelativePath("GenshinImpact.exe"))
         await #expect(throws: LauncherError.io("install folder was replaced")) { try await f.restarted().uninstall(game) }
-        #expect(try f.fs.readFile(at: SafeRelativePath("Game.exe"), maxBytes: 100) == Data("unrelated".utf8))
+        #expect(try f.fs.readFile(at: SafeRelativePath("GenshinImpact.exe"), maxBytes: 100) == Data("unrelated".utf8))
         #expect(try await f.store.load(game.id) == record)
-        #expect(try ContainedFileSystem(root: old).readFile(at: SafeRelativePath("Game.exe"), maxBytes: 100) == Data(syntheticFiles(1)["Game.exe"]!.utf8))
+        #expect(try ContainedFileSystem(root: old).readFile(at: SafeRelativePath("GenshinImpact.exe"), maxBytes: 100) == Data(syntheticFiles(1)["GenshinImpact.exe"]!.utf8))
     }
 
     @Test func orphanReconciliationLeavesUnknownFilesUntouched() async throws {
@@ -544,7 +576,7 @@ import TestSupport
         try f.fs.writeAtomically(Data("foreign".utf8), to: SafeRelativePath("foreign"))
         let record = try #require(try await f.store.load(game.id))
         let installed = try #require(record.installed), body = Data("new executable".utf8)
-        let path = try SafeRelativePath("Game.exe"), digest = md5Library(body)
+        let path = try SafeRelativePath("GenshinImpact.exe"), digest = md5Library(body)
         let object = ChunkObject(id: "partial", urls: [URL(string: "https://cdn.hoyoverse.com/partial")!],
             transferSize: Int64(body.count), decodedSize: Int64(body.count), decodedDigest: digest)
         let file = FileTask(path: path, size: Int64(body.count), digest: digest, extents: [
@@ -677,7 +709,7 @@ import TestSupport
         try await f.store.deleteManifestCache(for: game.id)
         let offline = MockCDN(); try await f.restarted(http: offline).uninstall(game)
         #expect(offline.requestLog.isEmpty)
-        #expect(try f.fs.itemType(at: SafeRelativePath("Game.exe")) == nil)
+        #expect(try f.fs.itemType(at: SafeRelativePath("GenshinImpact.exe")) == nil)
         #expect(try f.fs.readFile(at: SafeRelativePath("foreign"), maxBytes: 100) == Data("foreign".utf8))
     }
 
@@ -793,7 +825,7 @@ private struct LibraryFixture: ~Copyable {
     func installGame() async throws { _ = try await libraryCollect(await library.install(game, voices: ["en-us"], at: install, approved: true)) }
     func seedExisting() throws {
         for (path, body) in syntheticFiles(1) { try fs.writeAtomically(Data(body.utf8), to: SafeRelativePath(path)) }
-        try fs.writeAtomically(Data("bad".utf8), to: SafeRelativePath("Game.exe"))
+        try fs.writeAtomically(Data("bad".utf8), to: SafeRelativePath("GenshinImpact.exe"))
     }
     func assertFiles(_ version: Int, changedFiles: Int = 1) throws {
         for (path, body) in syntheticFiles(version, changedFiles: changedFiles) { #expect(try fs.readFile(at: SafeRelativePath(path), maxBytes: 100) == Data(body.utf8)) }
@@ -804,17 +836,17 @@ private struct LibraryFixture: ~Copyable {
             "type": id == "voice" ? "CATEGORY_TYPE_AUDIO" : "CATEGORY_TYPE_RESOURCE", "scenarios": ["CATEGORY_SCENARIO_FULL"]] }
         cdn.serve("hyp/hyp-connect/api/getGameBranches", data: try jsonData(["game_branches": games.map { game in ["game": ["id": "test", "biz": game.biz],
             "main": ["package_id": "public-package", "password": "public-selector", "branch": "main", "tag": "\(version).0", "categories": categories]] }]))
-        cdn.serve("hyp/hyp-connect/api/getGameConfigs", data: try jsonData(["launch_configs": games.map { game in ["game": ["id": "test", "biz": game.biz], "installation_dir": "TestGame", "exe_file_name": "Game.exe"] }]))
+        cdn.serve("hyp/hyp-connect/api/getGameConfigs", data: try jsonData(["launch_configs": games.map { game in ["game": ["id": "test", "biz": game.biz], "installation_dir": "TestGame", "exe_file_name": "GenshinImpact.exe"] }]))
         var descriptors: [[String: Any]] = []
         for (id, matching) in groups {
             var manifest = ProtobufWriter()
             for (path, body) in syntheticFiles(version, sharedAcrossFiles: sharedAcrossFiles, changedFiles: changedFiles).sorted(by: { $0.key < $1.key }) {
-                let belongs = id == "base" ? (path == "Game.exe" || (path.hasPrefix("data/") && Int(path.suffix(2))! < 10)) :
+                let belongs = id == "base" ? (path == "GenshinImpact.exe" || (path.hasPrefix("data/") && Int(path.suffix(2))! < 10)) :
                     id == "extra" ? (path == "shared.bin" || (path.hasPrefix("data/") && Int(path.suffix(2))! >= 10)) : (path.hasPrefix("audio/") || path == "shared.bin")
                 if !belongs { continue }
                 let pieces: [String]
                 if sharedAcrossFiles && (path == "data/01" || path == "data/02") { pieces = ["common", String(body.dropFirst(6))] }
-                else { pieces = path == "Game.exe" ? ["common", "v\(version)!!!"] : [body] }
+                else { pieces = path == "GenshinImpact.exe" ? ["common", "v\(version)!!!"] : [body] }
                 var file = ProtobufWriter(); file.string(1, path); var offset: UInt64 = 0
                 for piece in pieces {
                     let decoded = Data(piece.utf8); let checksum = md5Library(decoded); let object = checksum.hex
@@ -842,7 +874,7 @@ private struct LibraryFixture: ~Copyable {
     }
 }
 private func syntheticFiles(_ version: Int, sharedAcrossFiles: Bool = false, changedFiles: Int = 1) -> [String: String] {
-    var files = ["Game.exe": "commonv\(version)!!!", "shared.bin": "shared-resource", "audio/en1": "voice-1", "audio/en2": "voice-2"]
+    var files = ["GenshinImpact.exe": "commonv\(version)!!!", "shared.bin": "shared-resource", "audio/en1": "voice-1", "audio/en2": "voice-2"]
     for i in 1...17 { files[String(format: "data/%02d", i)] = i == 1 ? "edit-\(version)" : (i <= changedFiles ? "edit-\(version)-\(i)" : "file-\(i)") }
     if sharedAcrossFiles {
         files["data/01"] = "common" + String(repeating: "A", count: 100)
@@ -1011,6 +1043,21 @@ private actor SessionClaimingLibraryGuard: GameOperationGuard {
         let paths = paths
         lock = try await BlockingIO.run {
             try InstallLock(fs: ContainedFileSystem(root: paths.games), path: SafeRelativePath("\(game)/.session.lock"))
+        }
+    }
+}
+
+private struct CrashedSessionLibraryGuard: GameOperationGuard {
+    let paths: AppPaths
+    let install: URL
+    func willOperate(on game: String) async throws {
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: paths.root)
+            let lock = try InstallLock(fs: fs, path: SafeRelativePath("Games/\(game)/.session.lock"))
+            defer { withExtendedLifetime(lock) {} }
+            let gameFS = try ContainedFileSystem(root: install)
+            try gameFS.moveRegularFile(at: SafeRelativePath("GenshinImpact.exe"), to: SafeRelativePath("GenshinImpact.exe.macgacha-hidden-test"), in: gameFS)
+            try fs.writeAtomically(Data("unfinished launch".utf8), to: SafeRelativePath("Games/\(game)/launch-session.json"))
         }
     }
 }

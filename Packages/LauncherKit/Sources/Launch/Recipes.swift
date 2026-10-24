@@ -4,26 +4,33 @@ import LauncherCore
 
 public enum Recipes {
     public static func recipe(for game: String) -> LaunchRecipe? { all[game] }
-
     package static var games: [String] { all.keys.sorted() }
 
-    // All paths are fixed recipe literals, not manifest or user input.
-    private static let all: [String: LaunchRecipe] = [
-        "genshin": LaunchRecipe(game: "genshin", recipeVersion: 1, verifiedBuilds: ["7.1"],
-            executable: try! SafeRelativePath("GenshinImpact.exe"), wrapper: .steamShim, blockedHosts: [],
-            hidden: ["GenshinImpact_Data/upload_crash.exe", "GenshinImpact_Data/Plugins/crashreport.exe",
-                "GenshinImpact_Data/Plugins/vulkan-1.dll"].map { try! SafeRelativePath($0) },
-            copyIfPresent: [(try! SafeRelativePath("HoYoKProtect.sys"), "HoYoKProtect.sys")],
-            timeoutFix: true, supportsDirectX12: false, gameLogPaths: LaunchLogFiles.gameLogPaths(for: "genshin")),
-        "starrail": LaunchRecipe(game: "starrail", recipeVersion: 1, verifiedBuilds: ["4.6.0"],
-            executable: try! SafeRelativePath("StarRail.exe"), wrapper: .jadeite,
-            blockedHosts: ["globaldp-prod-os01.starrails.com"],
-            hidden: ["StarRail_Data/Plugins/x86_64/crashreport.exe", "StarRail_Data/Plugins/x86_64/vulkan-1.dll"].map { try! SafeRelativePath($0) },
-            copyIfPresent: [], timeoutFix: false, supportsDirectX12: false, gameLogPaths: LaunchLogFiles.gameLogPaths(for: "starrail")),
-        "zzz": LaunchRecipe(game: "zzz", recipeVersion: 1, verifiedBuilds: ["Phase 0 install of 2026-10-23"],
-            executable: try! SafeRelativePath("ZenlessZoneZero.exe"), wrapper: .steamShim, blockedHosts: [],
-            hidden: [try! SafeRelativePath("ZenlessZoneZero_Data/Plugins/x86_64/vulkan-1.dll")],
-            copyIfPresent: [(try! SafeRelativePath("HoYoKProtect.sys"), "HoYoKProtect.sys")],
-            timeoutFix: true, supportsDirectX12: true, gameLogPaths: LaunchLogFiles.gameLogPaths(for: "zzz")),
-    ]
+    // Edition identities and paths come from the shared, fixed registry.
+    private static let all = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { game in
+        let data = game.dataDirectoryName
+        let hidden: [String]
+        let wrapper: LaunchRecipe.Wrapper
+        let hosts: [String]
+        let verified: Set<String>
+        switch game.family {
+        case .genshin:
+            hidden = ["\(data)/upload_crash.exe", "\(data)/Plugins/crashreport.exe", "\(data)/Plugins/vulkan-1.dll"]
+            wrapper = .steamShim; hosts = []; verified = ["7.1.0"]
+        case .starrail:
+            hidden = ["\(data)/Plugins/x86_64/crashreport.exe", "\(data)/Plugins/x86_64/vulkan-1.dll"]
+            wrapper = .jadeite
+            hosts = [game.region == .global ? "globaldp-prod-os01.starrails.com" : "globaldp-prod-cn01.bhsr.com"]
+            verified = ["4.6.0"]
+        case .zzz:
+            hidden = ["\(data)/Plugins/x86_64/vulkan-1.dll"]
+            wrapper = .steamShim; hosts = []; verified = ["3.3.0"]
+        }
+        return (game.id, LaunchRecipe(game: game.id, recipeVersion: 1,
+            verifiedBuilds: game.region == .global ? verified : [], executable: try! SafeRelativePath(game.executableName),
+            wrapper: wrapper, blockedHosts: hosts, hidden: hidden.map { try! SafeRelativePath($0) },
+            copyIfPresent: game.family == .starrail ? [] : [(try! SafeRelativePath("HoYoKProtect.sys"), "HoYoKProtect.sys")],
+            timeoutFix: game.family != .starrail, supportsDirectX12: game.family == .zzz,
+            gameLogPaths: LaunchLogFiles.gameLogPaths(for: game.id)))
+    })
 }

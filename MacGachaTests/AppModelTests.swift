@@ -12,6 +12,43 @@ import HoYoPlayAPI
 @Suite(.serialized)
 @MainActor
 struct AppModelTests {
+    @Test func recoveryDeferredCleanupStillLoadsInstalledRuntimeRows() async throws {
+        let (model, fake, component) = try fixture()
+        fake.setInstalled(try InstalledComponent(kind: component.kind, version: component.version.rawValue,
+            installedAt: Date(), source: .download))
+        fake.state.withLock { $0.sweepError = .busy("Launch recovery is required") }
+        await model.start()
+        #expect(model.rows.first?.state == .installed(source: .download))
+        #expect(fake.snapshot.calls.contains("scan"))
+    }
+    @Test(arguments: [false, true]) func refusedBusyRemovalKeepsInstalledRow(bundleRemoval: Bool) async throws {
+        if bundleRemoval {
+            let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
+            let manifest = try RuntimeManifest.load(from: url)
+            let bundle = try #require(manifest.bundles.first { $0.backend == .d3dmetal })
+            let fake = FakeRuntimeServices(), paths = testPaths()
+            let installed = InstalledRuntimeBundle(id: bundle.id, root: paths.runtimes,
+                wineBinary: paths.runtimes.appendingPathComponent("bin/wine"),
+                digest: try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)), source: .importFromGPTK)
+            fake.state.withLock { $0.bundles[bundle.id.rawValue] = installed; $0.removeError = .busy("Game running") }
+            let model = AppModel(paths: paths, manifest: manifest, services: fake, defaults: nil)
+            await model.start(); await model.remove(bundle.id.rawValue)
+            #expect(model.rows.first { $0.id == bundle.id.rawValue }?.state == .installed(source: .importFromGPTK))
+            #expect(model.lastError != nil)
+            #expect(fake.snapshot.bundles[bundle.id.rawValue] == installed)
+            return
+        }
+        let (model, fake, component) = try fixture()
+        let installed = try InstalledComponent(kind: component.kind, version: component.version.rawValue,
+            installedAt: Date(), source: .download)
+        fake.setInstalled(installed)
+        await model.start()
+        fake.state.withLock { $0.removeError = .busy("Game running") }
+        await model.remove(component.id.rawValue)
+        #expect(model.rows.first?.state == .installed(source: .download))
+        #expect(model.lastError != nil)
+        #expect(fake.snapshot.components == [installed])
+    }
     @Test func gameArtCacheUsesBundleNamespaceAndFallback() {
         let caches = URL(fileURLWithPath: "/test/Library/Caches", isDirectory: true)
         #expect(AppModel.gameArtCacheDirectory(in: caches, bundleIdentifier: "com.lo7ted.macgacha").path
@@ -464,6 +501,7 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
         var calls: [String] = []
         var installs: [Install] = []
         var components: [InstalledComponent] = []
+        var bundles: [String: InstalledRuntimeBundle] = [:]
         var invalid: [InvalidRuntimeEntry] = []
         var candidates: [GPTKCandidate] = []
         var searchRoots: [[URL]] = []
@@ -475,12 +513,21 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
         var exportError: LauncherError?
         var exportData = completedDiagnosticBytes
         var scanError: LauncherError?
+        var sweepError: LauncherError?
+        var removeError: LauncherError?
         var holdNextScan = false
         var scanWaiter: CheckedContinuation<RuntimeScan, any Error>?
         var heldScan: RuntimeScan?
     }
     let state = Mutex(State())
     var snapshot: State { state.withLock { $0 } }
+    func scanBundles(_ manifest: RuntimeManifest) async throws -> [String: InstalledRuntimeBundle] { snapshot.bundles }
+    func remove(_ bundle: RuntimeBundle, manifest: RuntimeManifest) async throws {
+        try state.withLock {
+            if let error = $0.removeError { throw error }
+            $0.bundles[bundle.id.rawValue] = nil
+        }
+    }
     func scan() async throws -> RuntimeScan {
         try await withCheckedThrowingContinuation { continuation in
             let result: Result<RuntimeScan, any Error>? = state.withLock {
@@ -496,14 +543,23 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
             if let result { continuation.resume(with: result) }
         }
     }
-    func sweepStaging() async throws { state.withLock { $0.calls.append("sweep") } }
+    func sweepStaging() async throws {
+        try state.withLock {
+            $0.calls.append("sweep")
+            if let error = $0.sweepError { throw error }
+        }
+    }
     func install(_ c: RuntimeComponent, from candidate: GPTKCandidate?) -> AsyncThrowingStream<OperationEvent, any Error> {
         AsyncThrowingStream { continuation in
             state.withLock { $0.calls.append("install"); $0.installs.append(Install(component: c, candidate: candidate)); $0.continuation = continuation }
         }
     }
     func remove(_ c: InstalledComponent) async throws {
-        state.withLock { $0.calls.append("remove"); $0.components.removeAll { $0 == c } }
+        try state.withLock {
+            $0.calls.append("remove")
+            if let error = $0.removeError { throw error }
+            $0.components.removeAll { $0 == c }
+        }
     }
     func removeInvalid(_ entry: InvalidRuntimeEntry) async throws {
         state.withLock { $0.calls.append("removeInvalid"); $0.invalid.removeAll { $0 == entry } }

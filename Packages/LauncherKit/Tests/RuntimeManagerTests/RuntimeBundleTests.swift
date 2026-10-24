@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Synchronization
 import Testing
 import LauncherCore
 import DownloadEngine
@@ -293,6 +294,127 @@ func pinnedComponentCannotBeRemoved(bundleRemoval: Bool) async throws {
         #expect(try f.store.installed().count == 2)
         #expect(try await f.manager.installed(f.bundle)?.digest == installedBundle.digest)
     }
+}
+
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
+func pinnedComponentCannotBeReplaced(bundleInstall: Bool) async throws {
+    let f = try BundleFixture()
+    let paths = f.store.paths
+    let prior = try await f.manager.install(f.bundle)
+    let pin = try await BlockingIO.run { try RuntimePin.pin(paths: paths, componentIDs: ["dxmt-1"]) }
+    defer { withExtendedLifetime(pin) {} }
+    await #expect(throws: LauncherError.busy("install root in use")) {
+        if bundleInstall { _ = try await f.manager.install(f.bundle) }
+        else { for try await _ in f.installer.install(f.manifest.components[1]) {} }
+    }
+    #expect(try await f.manager.installed(f.bundle) == prior)
+}
+
+@Test(.timeLimit(.minutes(1))) func publicationRetainsPinsThroughDisplacedTreeCleanup() async throws {
+    try await BlockingIO.run {
+        let f = try BundleFixture(), paths = f.store.paths
+        let prior = try await f.manager.install(f.bundle)
+        let fs = try ContainedFileSystem(root: paths.root)
+        let bundles = try SafeRelativePath("Runtimes/bundles")
+        let sentinel = "retired-tree-only"
+        let oldBytes = Data("old published tree".utf8)
+        try fs.writeAtomically(oldBytes, to: SafeRelativePath("\(bundles)/\(f.bundle.id)/\(sentinel)"))
+        let priorIdentity = try ContainedFileSystem(root: prior.root).rootIdentity()
+        // A fresh component publication invalidates the assembled bundle's
+        // digest, forcing replacement rather than the installed-bundle fast path.
+        for try await _ in f.installer.install(f.manifest.components[1]) {}
+        #expect(try await f.manager.installed(f.bundle) == nil)
+        let checkpoints = Mutex<[String]>([])
+        let componentIDs = ["wine-1", "dxmt-1"]
+        let manager = f.makeManager(failurePoint: { point in
+            for id in componentIDs {
+                #expect(throws: LauncherError.busy("install root in use")) {
+                    try RuntimePin.pin(paths: paths, componentIDs: [id])
+                }
+            }
+            switch point {
+            case .beforePublish:
+                checkpoints.withLock { $0.append("beforePublish") }
+            case .afterPublish:
+                checkpoints.withLock { $0.append("afterPublish") }
+                let displaced = try fs.contentsOfDirectory(at: bundles).filter { $0.components.last!.hasPrefix(".incoming-") }
+                #expect(displaced.count == 1)
+                let oldTree = try #require(displaced.first)
+                #expect(try ContainedFileSystem(root: oldTree.resolved(against: paths.root)).rootIdentity() == priorIdentity)
+                #expect(try fs.readFile(at: SafeRelativePath("\(oldTree)/\(sentinel)"), maxBytes: 100) == oldBytes)
+            }
+        })
+        let replacement = try await manager.install(f.bundle, progress: { event in
+            guard event == .phase(.completed) else { return }
+            // Completion is after displaced-tree removal, but still inside the
+            // mutation lease. Dropping pins before cleanup must fail this check.
+            checkpoints.withLock { $0.append("cleanupComplete") }
+            for id in componentIDs {
+                #expect(throws: LauncherError.busy("install root in use")) {
+                    try RuntimePin.pin(paths: paths, componentIDs: [id])
+                }
+            }
+            do {
+                #expect(try !fs.contentsOfDirectory(at: bundles).contains { $0.components.last!.hasPrefix(".incoming-") })
+                #expect(try fs.itemType(at: SafeRelativePath("\(bundles)/\(prior.id)/\(sentinel)")) == nil)
+            } catch { Issue.record(error) }
+        })
+        #expect(checkpoints.withLock { $0 } == ["beforePublish", "afterPublish", "cleanupComplete"])
+        #expect(replacement.digest != prior.digest)
+        #expect(try ContainedFileSystem(root: replacement.root).rootIdentity() != priorIdentity)
+        let pin = try RuntimePin.pin(paths: paths, componentIDs: componentIDs)
+        withExtendedLifetime(pin) {}
+    }
+}
+
+@Test(.timeLimit(.minutes(1))) func gptkBundleReplacementRefusesLivePin() async throws {
+    try await BlockingIO.run {
+        let f = try BundleFixture(), paths = f.store.paths
+        let component = try RuntimeComponent(id: SafeIdentifier("d3dmetal-1"), kind: .d3dmetal, version: SafeIdentifier("1"),
+            sourceMode: .download, url: URL(string: "https://fixtures.invalid/metal")!, size: 1, installedSize: 1000,
+            sha256: Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)), archive: .tarGZ,
+            license: ComponentLicense(name: "Apple", url: AppleNotice.termsURL, redistributable: false, termsRevision: "1"),
+            consent: .appleGPTK, rootPath: SafeRelativePath("wine"), wineBinary: SafeRelativePath("bin/wine"))
+        let bundle = try RuntimeBundle(id: SafeIdentifier("metal-test"), displayName: "Metal", backend: .d3dmetal, components: [component.id])
+        let manifest = try RuntimeManifest(components: [component], bundles: [bundle])
+        let fs = try ContainedFileSystem(root: paths.root), root = try SafeRelativePath("Runtimes/d3dmetal/1")
+        try fs.writeAtomically(Data("wine".utf8), to: SafeRelativePath("\(root)/bin/wine"))
+        try fs.writeAtomically(Data("bundled metal".utf8), to: SafeRelativePath("\(root)/lib/external/D3DMetal.framework/D3DMetal"))
+        try RuntimePublication.prepare(component, fs: fs, incoming: root)
+        try await f.consent.accept(.appleGPTK, version: "1", termsRevision: "1")
+        let source = try SafeRelativePath("gptk")
+        try fs.writeAtomically(Data("imported metal".utf8), to: SafeRelativePath("\(source)/D3DMetal.framework/D3DMetal"))
+        let candidate = GPTKCandidate(root: source.resolved(against: paths.root),
+            d3dmetalFramework: source.resolved(against: paths.root).appendingPathComponent("D3DMetal.framework"), version: "1")
+        let manager = RuntimeBundleManager(manifest: manifest, store: f.store, consent: f.consent,
+            installer: f.installer, runner: FakeProcessRunner(), disk: FixedDiskSpace(bytes: 10 << 30))
+        let imported = try await manager.install(bundle, from: candidate)
+        let pin = try RuntimePin.pin(paths: paths, componentIDs: [component.id.rawValue])
+        defer { withExtendedLifetime(pin) {} }
+        await #expect(throws: LauncherError.busy("install root in use")) { try await manager.install(bundle, from: candidate) }
+        #expect(try await manager.installed(bundle) == imported)
+        #expect(try Data(contentsOf: imported.root.appendingPathComponent("lib/external/D3DMetal.framework/D3DMetal")) == Data("imported metal".utf8))
+    }
+}
+
+@Test(.timeLimit(.minutes(1)), arguments: ["remove", "removeComponent", "install", "installComponent"])
+func unresolvedLaunchJournalBlocksRuntimeMutation(operation: String) async throws {
+    let f = try BundleFixture()
+    let paths = f.store.paths, store = f.store
+    let prior = try await f.manager.install(f.bundle)
+    try await BlockingIO.run {
+        try ContainedFileSystem(root: paths.root).writeAtomically(Data("unreadable launch snapshot".utf8),
+            to: SafeRelativePath("Games/starrail/launch-session.json"))
+    }
+    await #expect(throws: LauncherError.busy("Launch recovery is required")) {
+        switch operation {
+        case "remove": try await f.manager.remove(f.bundle)
+        case "removeComponent": try await BlockingIO.run { try store.remove(#require(try store.installed().first)) }
+        case "installComponent": for try await _ in f.installer.install(f.manifest.components[0]) {}
+        default: _ = try await f.manager.install(f.bundle)
+        }
+    }
+    #expect(try await f.manager.installed(f.bundle) == prior)
 }
 
 @Test(.timeLimit(.minutes(1)), arguments: [false, true])

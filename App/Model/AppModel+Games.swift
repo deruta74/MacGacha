@@ -31,7 +31,7 @@ private struct GameSnapshot: Sendable {
         await ensureGameStartup().value
         guard !Task.isCancelled, launchStartupError == nil else { return }
         let revisions = gameRevisions, services = gameServices
-        let ids = GameDefinition.all.map(\.id).filter { $0 != gameOperation?.id }
+        let ids = GameDefinition.inRegion(.global).map(\.id).filter { $0 != gameOperation?.id }
         let results = await withTaskGroup(of: (String, GameSnapshot).self) { group in
             for id in ids { group.addTask { (id, await readGame(services, id: id)) } }
             var result: [(String, GameSnapshot)] = []

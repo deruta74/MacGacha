@@ -41,7 +41,7 @@ final class AppModel {
         var downloadSize: Int64? = nil
     }
 
-    private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
+    private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(.global).map { ($0.id, GameState(status: .unknown)) })
     private(set) var gameRecords: [String: GameRecord] = [:]
     var isGameOperationRunning: Bool { gameOperation != nil }
     private(set) var gameArt: [String: GameArt]
@@ -157,12 +157,12 @@ final class AppModel {
         let log = EventLog(directory: paths.logs)
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
-        let launch = LiveLaunchServices(paths: paths)
+        let launch = LiveLaunchServices(paths: paths, log: log)
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artService: GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
                 bundleIdentifier: Bundle.main.bundleIdentifier),
-                // English until the app ships translations; then HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations).
-                language: .enUS, log: log), gameServices: LiveGameServices(paths: paths, log: log, guard: launch), launchServices: launch)
+                // Art and news follow the interface language the app is actually shown in.
+                language: HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations), log: log), gameServices: LiveGameServices(paths: paths, log: log, guard: launch), launchServices: launch)
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -216,7 +216,11 @@ final class AppModel {
         await reattachOnStart()
         do {
             if manifest == nil { manifest = try await BundledRuntimeManifest.load() }
-            try await services.sweepStaging()
+            do { try await services.sweepStaging() }
+            catch LauncherError.busy {
+                // Recovery defers mutation, but installed runtimes remain
+                // inspectable and must not appear available for replacement.
+            }
             try await scanAndApply()
             await refreshLogs()
         } catch { show(error) }
@@ -442,7 +446,11 @@ final class AppModel {
             working[id] = .working(phase: .deleting, fraction: nil); rebuildRows()
             defer { working[id] = nil; rebuildRows() }
             do { try await services.remove(bundle, manifest: manifest); try await scanAndApply(); errors[id] = nil }
-            catch { errors[id] = launcherError(error).userMessage; show(error) }
+            catch {
+                if case LauncherError.busy = error { errors[id] = nil }
+                else { errors[id] = launcherError(error).userMessage }
+                show(error)
+            }
             return
         }
         let component = installed.first { Self.id($0) == id }
@@ -455,7 +463,11 @@ final class AppModel {
             else if let bad { try await services.removeInvalid(bad) }
             try await scanAndApply()
             errors[id] = nil
-        } catch { errors[id] = launcherError(error).userMessage; show(error) }
+        } catch {
+            if case LauncherError.busy = error { errors[id] = nil }
+            else { errors[id] = launcherError(error).userMessage }
+            show(error)
+        }
     }
 
     func refreshLogs() async { logLines = Array((await services.recentLogLines(limit: 200)).suffix(200)) }
@@ -570,9 +582,14 @@ struct BundledRuntimeManifest {
 
 extension AppModel {
     static var sampleGameStates: [String: GameState] {
-        ["genshin": GameState(status: .installed(tag: "7.1.0")),
-         "starrail": GameState(status: .paused(.update)),
-         "zzz": GameState(status: .notInstalled)]
+        Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(.global).map { game in
+            let status: GameStatus = switch game.family {
+            case .genshin: .installed(tag: "7.1.0")
+            case .starrail: .paused(.update)
+            case .zzz: .notInstalled
+            }
+            return (game.id, GameState(status: status))
+        })
     }
     static var sampleRows: [RuntimeRow] {
         [RuntimeRow(id: "dxmt-wine11.0-dxmt0.80", kindName: "DXMT", version: "11.0-yaagl + 0.80", licenseName: "LGPL-2.1 / MIT",

@@ -50,6 +50,126 @@ final class FixtureDirectory {
 }
 
 @Suite(.timeLimit(.minutes(1))) struct HiddenFilesTests {
+    @Test(arguments: [false, true]) func externalVolumeConflictUsesJournaledSameVolumeArea(replay: Bool) async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            try f.fs.writeAtomically(newBytes, to: gamePath); try f.fs.writeAtomically(oldBytes, to: f.hidden)
+            f.session.hides = [f.entry()]; try f.journal.write(f.session)
+            // Simulate EXDEV only when a rename targets the app-data volume.
+            let ops = AppDataCrossVolumeOps(root: f.paths.root, failAfterMove: replay)
+            let worker = HiddenFiles(fileOps: ops, externalRecoveryNeeded: { _, _ in true })
+            if replay { _ = try worker.restore(session: &f.session, journal: f.journal) }
+            let outcome = try worker.restore(session: &f.session, journal: f.journal)
+            let location = try #require(f.session.recoveryLocation)
+            let recovered = gamePath.resolved(against: location.root)
+            #expect(outcome == .conflict(movedTo: [recovered]))
+            #expect(!recovered.path.hasPrefix(f.session.installRoot.path + "/"))
+            #expect(try f.fs.readFile(at: gamePath, maxBytes: 100) == newBytes)
+            #expect(try ContainedFileSystem(root: location.root).readFile(at: gamePath, maxBytes: 100) == oldBytes)
+            #expect(try f.journal.read(game: "starrail") == nil)
+            let parent = try ContainedFileSystem(root: f.session.installRoot.deletingLastPathComponent())
+            try parent.requirePrivateDirectory(at: SafeRelativePath(".macgacha-recovery/starrail/\(f.session.sessionID)"))
+            let notice = RecoveryNotice(id: f.session.sessionID, game: "starrail", movedTo: [recovered], recoveryRoot: location.root)
+            try RecoveryNoticeStore(paths: f.paths).record(notice)
+            #expect(try RecoveryNoticeStore(paths: f.paths).load() == [notice])
+            try RecoveryNoticeStore(paths: f.paths).acknowledge(id: notice.id)
+            #expect(try RecoveryNoticeStore(paths: f.paths).load().isEmpty)
+        }
+    }
+
+    @Test func legacyCrossVolumeFailureCanRecoverOnRetry() async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            try f.fs.writeAtomically(newBytes, to: gamePath); try f.fs.writeAtomically(oldBytes, to: f.hidden)
+            f.session.hides = [f.entry()]; try f.journal.write(f.session)
+            let ops = AppDataCrossVolumeOps(root: f.paths.root)
+            let old = HiddenFiles(fileOps: ops, externalRecoveryNeeded: { _, _ in false })
+            guard case .pending = try old.restore(session: &f.session, journal: f.journal) else { Issue.record("Expected EXDEV"); return }
+            f.session = try #require(try f.journal.read(game: "starrail"))
+            let fixed = HiddenFiles(fileOps: ops, externalRecoveryNeeded: { _, _ in true })
+            guard case .conflict(let urls) = try fixed.restore(session: &f.session, journal: f.journal) else { Issue.record("Expected resolved conflict"); return }
+            #expect(try Data(contentsOf: #require(urls.first)) == oldBytes)
+            #expect(f.session.hides.isEmpty)
+        }
+    }
+
+    @Test(arguments: ["symlink", "permissions", "replacement"])
+    func unsafeSameVolumeRecoveryAreaKeepsBothCopies(attack: String) async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture(), parent = f.session.installRoot.deletingLastPathComponent()
+            try f.fs.writeAtomically(newBytes, to: gamePath); try f.fs.writeAtomically(oldBytes, to: f.hidden)
+            f.session.hides = [f.entry()]; try f.journal.write(f.session)
+            let area = parent.appendingPathComponent(".macgacha-recovery")
+            let parentFS = try ContainedFileSystem(root: parent)
+            if attack == "symlink" {
+                try FileManager.default.createSymbolicLink(at: area, withDestinationURL: f.session.installRoot)
+            } else {
+                try parentFS.createDirectoryDurably(at: SafeRelativePath(".macgacha-recovery"))
+                if attack == "permissions" { try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: area.path) }
+                else {
+                    let relative = try SafeRelativePath(".macgacha-recovery/starrail/\(f.session.sessionID)")
+                    try parentFS.createDirectoryDurably(at: relative)
+                    let location = relative.resolved(against: parent)
+                    f.session.recoveryLocation = LaunchRecoveryLocation(root: location,
+                        parentIdentity: try parentFS.rootIdentity(), identity: try ContainedFileSystem(root: location).rootIdentity())
+                    try f.journal.write(f.session)
+                    try parentFS.moveItem(at: relative, to: SafeRelativePath("preserved-area"))
+                    try parentFS.createDirectoryDurably(at: relative)
+                }
+            }
+            let worker = HiddenFiles(externalRecoveryNeeded: { _, _ in true })
+            guard case .pending = try worker.restore(session: &f.session, journal: f.journal) else { Issue.record("Expected pending"); return }
+            #expect(try f.fs.readFile(at: gamePath, maxBytes: 100) == newBytes)
+            #expect(try f.fs.readFile(at: f.hidden, maxBytes: 100) == oldBytes)
+            #expect(try f.journal.read(game: "starrail") != nil)
+        }
+    }
+
+    @Test(arguments: [false, true]) func cleanRestoreDoesNotPublishEmptyRecoveryReport(noHiddenFiles: Bool) async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            if !noHiddenFiles {
+                try f.fs.writeAtomically(oldBytes, to: f.hidden)
+                f.session.hides = [f.entry()]
+            }
+            let metadata = try ContainedFileSystem(root: f.paths.root)
+            let existing = try SafeRelativePath("Games/starrail/recovery/older-session.json")
+            let sentinel = Data("existing user recovery record".utf8)
+            try metadata.writeAtomically(sentinel, to: existing)
+            try f.journal.write(f.session)
+            #expect(try HiddenFiles().restore(session: &f.session, journal: f.journal) == .clean)
+            #expect(try metadata.itemType(at: SafeRelativePath("Games/starrail/recovery/\(f.session.sessionID.uuidString).json")) == nil)
+            #expect(try metadata.readFile(at: existing, maxBytes: 100) == sentinel)
+        }
+    }
+
+    @Test func preservedCopiesStillHaveRecoveryReport() async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            try f.fs.writeAtomically(newBytes, to: gamePath); try f.fs.writeAtomically(oldBytes, to: f.hidden)
+            f.session.hides = [f.entry()]; try f.journal.write(f.session)
+            #expect(try HiddenFiles().restore(session: &f.session, journal: f.journal) == .conflict(movedTo: [f.recovery]))
+            let data = try ContainedFileSystem(root: f.paths.root).readFile(at: SafeRelativePath("Games/starrail/recovery/\(f.session.sessionID.uuidString).json"), maxBytes: 1 << 20)
+            let report = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            #expect((report["entries"] as? [Any])?.count == 1)
+            #expect(try Data(contentsOf: f.recovery) == oldBytes)
+        }
+    }
+
+    @Test func cleanRestoreLeavesLegacyReportUntouched() async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            try f.fs.writeAtomically(oldBytes, to: f.hidden)
+            f.session.hides = [f.entry()]; try f.journal.write(f.session)
+            let path = try SafeRelativePath("Games/starrail/recovery/\(f.session.sessionID.uuidString).json")
+            let report = Data("{\"sessionID\":\"\(f.session.sessionID.uuidString)\",\"entries\":[],\"message\":\"legacy report\"}".utf8)
+            let metadata = try ContainedFileSystem(root: f.paths.root)
+            try metadata.writeAtomically(report, to: path)
+            #expect(try HiddenFiles().restore(session: &f.session, journal: f.journal) == .clean)
+            #expect(try metadata.readFile(at: path, maxBytes: 1000) == report)
+        }
+    }
+
     // Restore-table row 1.
     @Test func missingOriginalMatchingHiddenIsRestored() async throws {
         try await BlockingIO.run {
@@ -344,7 +464,9 @@ private final class RecoveryNoteDirectorySyncFailure: FileOps {
     }
     func rename(from source: String, in src: Int32, to target: String, in dst: Int32, exclusive: Bool) throws {
         try base.rename(from: source, in: src, to: target, in: dst, exclusive: exclusive)
-        if target.hasSuffix(".json"), UUID(uuidString: String(target.dropLast(5))) != nil { renamed.withLock { $0 = true } }
+        let publicNote = target.hasSuffix(".json") && UUID(uuidString: String(target.dropLast(5))) != nil
+        let privateState = target.hasPrefix(".") && target.hasSuffix(".state") && UUID(uuidString: String(target.dropFirst().dropLast(6))) != nil
+        if publicNote || privateState { renamed.withLock { $0 = true } }
     }
     func unlink(_ name: String, in dir: Int32, isDirectory: Bool) throws { try base.unlink(name, in: dir, isDirectory: isDirectory) }
 }
@@ -396,4 +518,30 @@ struct LaunchFaultOps: FileOps {
         try base.rename(from: source, in: src, to: target, in: dst, exclusive: exclusive)
     }
     func unlink(_ name: String, in dir: Int32, isDirectory: Bool) throws { try base.unlink(name, in: dir, isDirectory: isDirectory) }
+}
+
+/// EXDEV models an app-data destination on another volume; local recovery moves
+/// retain the real exclusive rename and descriptor identity checks.
+private final class AppDataCrossVolumeOps: FileOps, Sendable {
+    let root: URL
+    let failAfterMove: Mutex<Bool>
+    init(root: URL, failAfterMove: Bool = false) { self.root = root.resolvingSymlinksInPath(); self.failAfterMove = Mutex(failAfterMove) }
+    func write(_ fd: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(fd, bytes: bytes) }
+    func synchronize(_ fd: Int32, durable: Bool) throws { try SystemFileOps().synchronize(fd, durable: durable) }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
+        try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
+    }
+    func rename(from source: String, in src: Int32, to target: String, in dst: Int32, exclusive: Bool) throws {
+        var bytes = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard fcntl(dst, F_GETPATH, &bytes) == 0 else { throw LauncherError.io("test directory unavailable") }
+        let path = String(decoding: bytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        if exclusive && target == gamePath.components.last! && path.contains("/" + root.lastPathComponent + "/Games/") {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(EXDEV))
+        }
+        try SystemFileOps().rename(from: source, in: src, to: target, in: dst, exclusive: exclusive)
+        if exclusive && target == gamePath.components.last!,
+            failAfterMove.withLock({ let value = $0; $0 = false; return value }) {
+            throw LauncherError.io("crash after same-volume rename")
+        }
+    }
 }

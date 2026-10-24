@@ -22,12 +22,15 @@ func runLaunchIntegration(root: URL, mode: String, conflict: Bool) async throws 
     let manager = configuration.manager(hooks: hooks, inspector: inspector)
     try await BlockingIO.run { try configuration.recordHandshakePhase("\(mode): starting manager") }
     if mode == "recover" {
-        try await BlockingIO.run { try configuration.recordHandshakePhase("\(mode): waiting for reattachAll") }
-        let sessions = await manager.reattachAll()
+        try await BlockingIO.run { try configuration.recordHandshakePhase("\(mode): waiting for reattachStartup") }
+        let startup = await manager.reattachStartup()
+        guard startup.unresolved.isEmpty else {
+            throw LauncherError.io("Probe recovery has unresolved startup entries: \(startup.unresolved.sorted())")
+        }
         await manager.markReady(game: "starrail")
         try await BlockingIO.run {
             let fs = try ContainedFileSystem(root: configuration.gameRoot)
-            try fs.writeAtomically(JSONEncoder().encode(sessions.mapValues(\.sessionID)), to: SafeRelativePath("recovery-attached.json"))
+            try fs.writeAtomically(JSONEncoder().encode(startup.sessions.mapValues(\.sessionID)), to: SafeRelativePath("recovery-attached.json"))
             try configuration.signal("recovery-ready")
         }
         await manager.waitForSupervision(game: "starrail")

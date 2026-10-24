@@ -8,6 +8,33 @@ import LauncherCore
 import DownloadEngine
 @testable import RuntimeManager
 import TestSupport
+import Launch
+
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
+func gptkImportCannotReplacePinnedOrUnresolvedRuntime(unresolved: Bool) async throws {
+    let temp = try TempDir(), source = try TempDir(), cdn = MockCDN()
+    let candidate = try gptkFixture(in: source.url.appendingPathComponent("external"))
+    let component = try gptkComponent(), paths = AppPaths(root: temp.url)
+    let store = RuntimeStore(paths: paths), consent = ConsentStore(url: paths.consent, root: paths.root)
+    try await consent.accept(.appleGPTK, version: "3.0", termsRevision: "2026-10")
+    let installer = gptkInstaller(store: store, consent: consent, cdn: cdn)
+    for try await _ in installer.install(component, from: candidate) {}
+    let before = try store.installed()
+    let pin: RuntimePin? = try await BlockingIO.run {
+        if unresolved {
+            try ContainedFileSystem(root: paths.root).writeAtomically(Data("unreadable journal".utf8),
+                to: SafeRelativePath("Games/genshin/launch-session.json"))
+            return nil
+        }
+        return try RuntimePin.pin(paths: paths, componentIDs: [component.id.rawValue])
+    }
+    defer { withExtendedLifetime(pin) {} }
+    await #expect(throws: LauncherError.busy(unresolved ? "Launch recovery is required" : "install root in use")) {
+        for try await _ in installer.install(component, from: candidate) {}
+    }
+    #expect(try store.installed() == before)
+    #expect(try Data(contentsOf: store.installURL(for: component).appendingPathComponent("D3DMetal.framework/D3DMetal")) == Data("metal".utf8))
+}
 
 @Test
 func gptkLocateFindsFrameworkAndNearestVersion() throws {

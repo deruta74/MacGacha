@@ -1,0 +1,49 @@
+{
+  "retcode": 0,
+  "data": {
+    "games": [
+      {
+        "biz": "nap_cn",
+        "display": {
+          "background": {
+            "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/10/15/bca19f05a213ae991b0e45a8e83b391a_4777448468433556029.webp"
+          },
+          "icon": {
+            "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/09/02/894b89b5aaea805f6420156c7c07a1a3_1073444568422177775.png"
+          },
+          "logo": {
+            "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/04/09/63f536d767f12f1288b3a0f4bb9e24b0_440224496418550097.png"
+          }
+        }
+      },
+      {
+        "biz": "hkrpg_cn",
+        "display": {
+          "background": {
+            "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/09/21/94b346207176750fb5ff12cd0bd8d108_7038317262925250274.webp"
+          },
+          "icon": {
+            "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/05/14/d824123e77e762a0f350df1b560dcad0_8859327557457118203.png"
+          },
+          "logo": {
+            "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/04/09/8c10964dfd8f0fbac27237527e7ebb7b_7520718333461102699.png"
+          }
+        }
+      },
+      {
+        "biz": "hk4e_cn",
+        "display": {
+          "background": {
+            "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/09/07/544bf0d17e4570f886fd1b731a3274da_2781179287929742503.webp"
+          },
+          "icon": {
+            "url": "https://fastcdn.mihoyo.com/static-resource-v2/2026/09/14/3b21b6aa24dafa7a982d974f9be186d9_2934463407451700391.png"
+          },
+          "logo": {
+            "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/03/30/ff975d44eba6e32d449b5112a4b0eaa9_2796941706357054178.png"
+          }
+        }
+      }
+    ]
+  }
+}

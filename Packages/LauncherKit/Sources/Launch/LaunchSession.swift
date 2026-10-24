@@ -31,6 +31,11 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     public let sessionStartTime: UInt64?
     public var hides: [HideEntry]
     public var proxyPort: UInt16?
+    /// At-most-once best-effort end notification. nil supports older journals.
+    public var endLogged: Bool?
+    /// Retains startup grace when inspection uncertainty changes state to pending.
+    public var startupPending: Bool?
+    public var recoveryLocation: LaunchRecoveryLocation?
     /// Additive recovery context: never rediscover a different launch's log or executable.
     public var sessionLogURL: URL?
     public let gameExecutable: SafeRelativePath?
@@ -41,7 +46,8 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         recipeVersion: Int, settings: LaunchSettings, state: State = .preparing, processes: [ProcessIdentity] = [],
         hides: [HideEntry] = [], proxyPort: UInt16? = nil, createdAt: Date = Date(),
         sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil, processGroupIDs: Set<Int32>? = nil,
-        bootSessionUUID: String? = nil, sessionStartTime: UInt64? = nil) {
+        bootSessionUUID: String? = nil, sessionStartTime: UInt64? = nil, endLogged: Bool? = nil,
+        recoveryLocation: LaunchRecoveryLocation? = nil, startupPending: Bool? = nil) {
         self.sessionID = sessionID; self.game = game; self.installRoot = installRoot; self.installIdentity = installIdentity
         self.prefix = prefix; self.bundleID = bundleID; self.runtimeDigest = runtimeDigest; self.wineBinary = wineBinary
         self.wineserver = wineserver; self.componentIDs = componentIDs; self.recipeVersion = recipeVersion
@@ -49,6 +55,9 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         self.proxyPort = proxyPort; self.createdAt = createdAt
         self.sessionLogURL = sessionLogURL; self.gameExecutable = gameExecutable; self.processGroupIDs = processGroupIDs
         self.bootSessionUUID = bootSessionUUID; self.sessionStartTime = sessionStartTime
+        self.endLogged = endLogged
+        self.recoveryLocation = recoveryLocation
+        self.startupPending = startupPending
     }
 
     func validate() throws {
@@ -66,6 +75,15 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         }
         if let bootSessionUUID, UUID(uuidString: bootSessionUUID) == nil {
             throw LauncherError.journalCorrupt("Invalid launch boot session")
+        }
+        if let location = recoveryLocation {
+            let expected = installRoot.deletingLastPathComponent().appendingPathComponent(".macgacha-recovery/\(game)/\(sessionID.uuidString)")
+            guard location.root.isFileURL, location.root.standardizedFileURL == expected.standardizedFileURL,
+                !location.root.path.contains("\0"),
+                location.root.host == nil || location.root.host == "" || location.root.host == "localhost",
+                !location.root.path.lowercased().hasPrefix(installRoot.standardizedFileURL.path.lowercased() + "/"),
+                location.identity.volume == installIdentity.volume,
+                location.parentIdentity.volume == installIdentity.volume else { throw LauncherError.journalCorrupt("Invalid recovery location") }
         }
         try settings.validate()
         var originals = Set<String>(), hidden = Set<String>()
@@ -91,6 +109,15 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     }
     static func pathKey(_ path: SafeRelativePath) -> String {
         path.description.decomposedStringWithCanonicalMapping.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
+    }
+}
+
+public struct LaunchRecoveryLocation: Codable, Equatable, Sendable {
+    public let root: URL
+    public let parentIdentity: FileSystemIdentity
+    public let identity: FileSystemIdentity
+    public init(root: URL, parentIdentity: FileSystemIdentity, identity: FileSystemIdentity) {
+        self.root = root; self.parentIdentity = parentIdentity; self.identity = identity
     }
 }
 

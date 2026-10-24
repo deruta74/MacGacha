@@ -372,6 +372,9 @@ struct RuntimeErrorLog {
         case .fileTooLarge(_, let limit): name = "fileTooLarge"; fields = ["limit": String(limit)]
         case .consentRequired: name = "consentRequired"
         case .processFailed(_, let exitCode, _): name = "processFailed"; fields = ["exitCode": String(exitCode)]
+        case .gameEditionMismatch: name = "gameEditionMismatch"
+        case .gameEditionUnknown: name = "gameEditionUnknown"
+        case .gameDistributionUnsupported: name = "gameDistributionUnsupported"
         case .cancelled: name = "cancelled"
         case .journalCorrupt: name = "journalCorrupt"
         }

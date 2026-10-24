@@ -25,6 +25,14 @@ import LauncherCore
         client.invalidate()
     }
 
+    @Test(arguments: [Region.global, .mainlandChina]) func redirectsCannotCrossRegion(region: Region) async throws {
+        let client = redirectClient(region: region); defer { client.invalidate() }
+        let host = region == .global ? "cdn.hoyoverse.com" : "cdn.mihoyo.com"
+        let (head, _) = try await client.get(URL(string: "https://\(host)/other-region")!, byteRangeFrom: nil)
+        #expect(head.status == 302)
+        #expect(DeliveryRedirectStub.requests.withLock { $0.map(\.host) } == [host])
+    }
+
     @Test func redirectToForeignHostRejected() async throws {
         let client = redirectClient(); defer { client.invalidate() }
         let (head, _) = try await client.get(URL(string: "https://cdn.hoyoverse.com/foreign")!, byteRangeFrom: nil)
@@ -64,12 +72,12 @@ import LauncherCore
     }
 }
 
-private func redirectClient() -> URLSessionHTTPClient {
+private func redirectClient(region: Region = .global) -> URLSessionHTTPClient {
     DeliveryRedirectStub.requests.withLock { $0 = [] }
     let config = URLSessionConfiguration.ephemeral
     config.timeoutIntervalForRequest = 15; config.timeoutIntervalForResource = 15
     config.protocolClasses = [DeliveryRedirectStub.self]
-    return URLSessionHTTPClient(configuration: config, sessionCount: 2, redirectPolicy: DeliveryHostPolicy.allows)
+    return URLSessionHTTPClient(configuration: config, sessionCount: 2, redirectPolicy: { DeliveryHostPolicy.allows($0, region: region) })
 }
 
 /// URLProtocol intercepts all traffic locally; redirect targets never reach the network.
@@ -83,6 +91,7 @@ private final class DeliveryRedirectStub: URLProtocol, @unchecked Sendable {
         Self.requests.withLock { $0.append(url) }
         let location: String?
         switch url.path {
+        case "/other-region": location = url.host == "cdn.mihoyo.com" ? "https://cdn.hoyoverse.com/ok" : "https://cdn.mihoyo.com/ok"
         case "/foreign": location = "https://evil.test/target"
         case "/http": location = "http://cdn.hoyoverse.com/target"
         case "/relative": location = "/ok"

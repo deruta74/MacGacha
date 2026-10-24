@@ -10,10 +10,13 @@ import DownloadEngine
 public actor GameArtService {
     private static let ttl: TimeInterval = 6 * 3600
     private static let indexLimit = 512 << 10
-    private static let gameIDs = ["hk4e_global": "genshin", "hkrpg_global": "starrail", "nap_global": "zzz"]
+    private static func gameIDs(_ region: Region) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0.id) })
+    }
     private nonisolated let snapshot = Mutex<[String: GameArt]>([:])
     private let directory: URL
     private let language: HoYoPlayLanguage
+    private let region: Region
     private let http: any HTTPClient
     private let ownedHTTP: ArtHTTPSession?
     private let now: @Sendable () -> Date
@@ -23,11 +26,15 @@ public actor GameArtService {
     private var hydrated = false
     private var flight: (id: UUID, task: Task<[String: GameArt], Never>)?
 
-    public init(cacheDirectory: URL, language: HoYoPlayLanguage = .enUS, http: (any HTTPClient)? = nil, log: EventLog? = nil,
+    public init(cacheDirectory: URL, region: Region = .global, language: HoYoPlayLanguage = .enUS, http: (any HTTPClient)? = nil, log: EventLog? = nil,
         now: @escaping @Sendable () -> Date = Date.init, requestTimeout: Duration = .seconds(30)) {
-        self.directory = cacheDirectory; self.language = language; self.log = log; self.now = now; self.requestTimeout = requestTimeout
+        // Preserve the existing Global cache. CN owns its index and assets in a
+        // separate directory, which Global's regular-file pruning leaves alone.
+        self.directory = region == .global ? cacheDirectory : cacheDirectory.appendingPathComponent(region.rawValue, isDirectory: true)
+        self.region = region; self.language = region == .mainlandChina ? .zhCN : language
+        self.log = log; self.now = now; self.requestTimeout = requestTimeout
         if let http { self.http = http; ownedHTTP = nil }
-        else { let session = ArtHTTPSession(); ownedHTTP = session; self.http = session.client }
+        else { let session = ArtHTTPSession(region: region); ownedHTTP = session; self.http = session.client }
     }
 
     /// The last hydrated snapshot. Never performs file I/O or network requests.
@@ -74,11 +81,11 @@ public actor GameArtService {
             // Art fetched in another language is stale however fresh it is.
             if age >= 0 && age < Self.ttl && (index.language ?? .enUS) == language { return cached() }
             let http = http; let log = log; let timeout = requestTimeout
-            let urls = Self.apiURLs(language: language)
+            let urls = Self.apiURLs(region: region, language: language)
             let gamesData = try await Self.deadline(timeout) { try await Self.json(urls.games, http: http, log: log) }
             let basicData = try await Self.deadline(timeout) { try await Self.json(urls.basic, http: http, log: log) }
             let requested: [String: RemoteArt]
-            do { requested = try Self.parse(gamesData, basicData) }
+            do { requested = try Self.parse(gamesData, basicData, region: region) }
             catch { throw ArtFailure.invalidAPIResponse }
             guard !requested.isEmpty else { throw ArtFailure.noSupportedGames }
             var selected = index.games
@@ -104,7 +111,7 @@ public actor GameArtService {
             }
             try Task.checkCancellation()
             let retained = Set(selected.values.flatMap(\.urls).map(\.absoluteString))
-            let next = ArtIndex(fetchedAt: now(), language: language, games: selected, assets: files.filter { retained.contains($0.key) })
+            let next = ArtIndex(fetchedAt: now(), language: language, region: region, games: selected, assets: files.filter { retained.contains($0.key) })
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let bytes = try encoder.encode(next)
             guard bytes.count <= Self.indexLimit else { return cached() }
@@ -121,7 +128,7 @@ public actor GameArtService {
 
     private func asset(_ url: URL, video: Bool, fs: ContainedFileSystem, root: SafeRelativePath,
         files: inout [String: AssetRecord], attempted: inout Set<String>) async -> Bool {
-        guard Self.allowed(url) else {
+        guard Self.allowedAsset(url, region: region) else {
             await log?.log(.info, "game-art", "Asset skipped", metadata: ["reason": "url-not-allowed"])
             return false
         }
@@ -144,10 +151,10 @@ public actor GameArtService {
     private func readIndex(_ fs: ContainedFileSystem, root: SafeRelativePath) throws -> ArtIndex {
         let data = try fs.readFile(at: SafeRelativePath("\(root)/art-index.json"), maxBytes: Self.indexLimit)
         var saved = try JSONDecoder().decode(ArtIndex.self, from: data)
-        guard saved.assets.count <= 18, saved.games.count <= 3, saved.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
-            saved.games.keys.allSatisfy({ Self.gameIDs.values.contains($0) }) else { throw LauncherError.io("Invalid art index") }
+        guard (saved.region ?? .global) == region, saved.assets.count <= 18, saved.games.count <= 3, saved.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
+            saved.games.keys.allSatisfy({ Self.gameIDs(region).values.contains($0) }) else { throw LauncherError.io("Invalid art index") }
         saved.assets = saved.assets.filter { key, record in
-            guard let url = URL(string: key), Self.allowed(url), record.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
+            guard let url = URL(string: key), Self.allowedAsset(url, region: region), record.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
                 ["png", "jpg", "webp", "webm"].contains(URL(fileURLWithPath: record.file).pathExtension),
                 record.file == Self.hash(url) + "." + URL(fileURLWithPath: record.file).pathExtension else { return false }
             do {
@@ -251,10 +258,10 @@ public actor GameArtService {
     }
 
     /// The two HoYoPlay endpoints art comes from, in `language`.
-    public static func apiURLs(language: HoYoPlayLanguage) -> (games: URL, basic: URL) {
+    public static func apiURLs(region: Region = .global, language: HoYoPlayLanguage) -> (games: URL, basic: URL) {
         func endpoint(_ name: String) -> URL {
-            var components = URLComponents(string: "https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/\(name)")!
-            components.queryItems = [URLQueryItem(name: "launcher_id", value: "VYTpXlbWo8"), URLQueryItem(name: "language", value: language.rawValue)]
+            var components = URLComponents(url: region.hypAPIURL(name), resolvingAgainstBaseURL: false)!
+            components.queryItems?.append(URLQueryItem(name: "language", value: region == .mainlandChina ? "zh-cn" : language.rawValue))
             return components.url!
         }
         return (endpoint("getGames"), endpoint("getAllGameBasicInfo"))
@@ -276,15 +283,25 @@ public actor GameArtService {
         }
         return "cache-or-transfer-failed"
     }
-    fileprivate static func allowed(_ url: URL) -> Bool {
-        url.scheme?.lowercased() == "https" && url.host?.lowercased().hasSuffix(".hoyoverse.com") == true
-            && url.user == nil && url.password == nil && url.absoluteString.utf8.count <= 8192
+    fileprivate static func allowed(_ url: URL, region: Region) -> Bool {
+        validURL(url) && (url.host?.lowercased() == region.hypAPIHost || allowedAsset(url, region: region))
+    }
+    private static func validURL(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && url.user == nil && url.password == nil && url.absoluteString.utf8.count <= 8192
+    }
+    private static func allowedAsset(_ url: URL, region: Region) -> Bool {
+        guard validURL(url), let host = url.host?.lowercased() else { return false }
+        switch region {
+        case .global: return region.artDomains.contains { host.hasSuffix("." + $0) }
+        case .mainlandChina: return region.artDomains.contains(host)
+        }
     }
 
-    private static func parse(_ games: Data, _ basic: Data) throws -> [String: RemoteArt] {
+    private static func parse(_ games: Data, _ basic: Data, region: Region) throws -> [String: RemoteArt] {
         let games = try JSONDecoder().decode(Envelope<Games>.self, from: games)
         let basic = try JSONDecoder().decode(Envelope<Basic>.self, from: basic)
         guard games.retcode ?? 0 == 0, basic.retcode ?? 0 == 0 else { throw LauncherError.io("Art API refused request") }
+        let gameIDs = Self.gameIDs(region)
         var result: [String: RemoteArt] = [:]
         for game in games.data.games {
             guard let id = game.biz.flatMap({ gameIDs[$0] }) else { continue }
@@ -306,6 +323,8 @@ private struct ArtIndex: Codable, Sendable {
     var fetchedAt = Date.distantPast
     /// Nil in indexes written before the language was recorded, which were all en-us.
     var language: HoYoPlayLanguage? = nil
+    /// Nil belongs to the legacy Global cache.
+    var region: Region? = nil
     var games: [String: RemoteArt] = [:]
     var assets: [String: AssetRecord] = [:]
 }
@@ -342,6 +361,7 @@ private struct Basic: Decodable { let game_info_list: [BasicGame] }
 private struct BasicGame: Decodable { let game: Game; let backgrounds: [Layer]? }
 private struct Layer: Decodable { let type: String?; let background: Link?; let video: Link?; let theme: Link? }
 private final class ArtHTTPSession: Sendable {
-    let client = URLSessionHTTPClient(redirectPolicy: { GameArtService.allowed($0) })
+    let client: URLSessionHTTPClient
+    init(region: Region) { client = URLSessionHTTPClient(redirectPolicy: { GameArtService.allowed($0, region: region) }) }
     deinit { client.invalidate() }
 }

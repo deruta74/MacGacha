@@ -86,7 +86,7 @@ import LauncherCore
     @Test func knownBuildIsVerified() async throws {
         try await BlockingIO.run {
             let temp = try TempDir()
-            let log = try SessionLog.create(paths: AppPaths(root: temp.url), game: "genshin", header: ["gameBuild": "7.1"])
+            let log = try SessionLog.create(paths: AppPaths(root: temp.url), game: "genshin", header: ["gameBuild": "7.1.0"])
             #expect(try readTestLog(log).contains("buildVerification: verified build"))
         }
     }

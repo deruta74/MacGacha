@@ -41,9 +41,10 @@ let package = Package(
             resources: [.copy("Resources/zstd")]),
         .testTarget(name: "RuntimeManagerTests", dependencies: ["RuntimeManager", "TestSupport", "Launch", "CrashHarness"]),
         .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "LauncherCore", "TestSupport"]),
-        .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"]),
-        .testTarget(name: "SophonTests", dependencies: ["Sophon", "TestSupport"]),
-        .testTarget(name: "GameLibraryTests", dependencies: ["GameLibrary", "TestSupport", "CrashHarness"]),
+        .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"], resources: [.copy("Fixtures/CN")]),
+        .testTarget(name: "SophonTests", dependencies: ["Sophon", "TestSupport"], resources: [.copy("Fixtures/CN")]),
+        .testTarget(name: "GameLibraryTests", dependencies: ["GameLibrary", "TestSupport", "CrashHarness"],
+            resources: [.copy("Fixtures/Adopt")]),
         .testTarget(name: "LaunchTests", dependencies: ["Launch", "TestSupport", "CrashHarness"]),
     ],
     swiftLanguageModes: [.v6]
