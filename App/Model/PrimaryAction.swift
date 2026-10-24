@@ -3,6 +3,7 @@
 import Foundation
 import DownloadEngine
 import GameLibrary
+import LauncherCore
 
 struct GameState: Sendable, Equatable {
     var status: GameStatus
@@ -32,11 +33,11 @@ enum GameActivity: Sendable, Equatable {
 enum PrimaryAction: Sendable, Equatable {
     case preparing, progress, continueInParts, install, resume, finishUninstall
     case update(to: String)
-    case setUpRuntimes, locationUnavailable, play, launching, playing
+    case setUpRuntimes, needsRosetta, locationUnavailable, play, launching, playing
     case recoveryNeeded(String)
 
     static func resolve(_ state: GameState, runtimesReady: Bool,
-        launch: LaunchUIState? = nil, missingComponents: Bool = false) -> Self {
+        launch: LaunchUIState? = nil, missingComponents: Bool = false, rosetta: RosettaStatus = .unknown) -> Self {
         switch launch {
         case .starting: return .launching
         case .running, .ready: return .playing
@@ -55,6 +56,7 @@ enum PrimaryAction: Sendable, Equatable {
         case .paused: return .resume
         case .uninstallPaused: return .finishUninstall
         case .updateAvailable(_, let to): return .update(to: to)
+        case .installed where rosetta == .missing: return .needsRosetta
         case .installed, .unknown: return runtimesReady && !missingComponents ? .play : .setUpRuntimes
         }
     }

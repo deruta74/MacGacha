@@ -89,12 +89,30 @@ enum RuntimeSetupItemState {
     }
 
     func installRecommended(for gameID: String) {
-        guard runtimeSetupChains[gameID] == nil, let plan = runtimeSetupPlan(for: gameID) else { return }
-        runtimeSetupChains[gameID] = RuntimeSetupChain(plan: plan)
-        advanceRuntimeSetups()
+        guard runtimeSetupChains[gameID] == nil, runtimeSetupRosettaChecks[gameID] == nil,
+            let plan = runtimeSetupPlan(for: gameID), let first = plan.items.first else { return }
+        setRuntimeSetupProgress(.installing(item: first.name, step: 1, of: plan.items.count, fraction: nil), for: gameID)
+        let generation = UUID()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer { if self.runtimeSetupRosettaChecks[gameID]?.id == generation { self.runtimeSetupRosettaChecks[gameID] = nil } }
+            await self.refreshRosetta()
+            guard !Task.isCancelled, self.runtimeSetupRosettaChecks[gameID]?.id == generation else { return }
+            if self.rosetta == .missing {
+                self.setRuntimeSetupProgress(.failed(message: LauncherError.rosettaMissing.userMessage), for: gameID)
+                self.show(LauncherError.rosettaMissing)
+                return
+            }
+            self.runtimeSetupChains[gameID] = RuntimeSetupChain(plan: plan)
+            self.advanceRuntimeSetups()
+        }
+        runtimeSetupRosettaChecks[gameID] = (generation, task)
     }
 
     func cancelRuntimeSetup(for gameID: String) {
+        if let check = runtimeSetupRosettaChecks.removeValue(forKey: gameID) {
+            check.task.cancel(); setRuntimeSetupProgress(nil, for: gameID)
+        }
         guard let chain = runtimeSetupChains.removeValue(forKey: gameID) else { return }
         setRuntimeSetupProgress(nil, for: gameID)
         let id = chain.plan.items[chain.index].id

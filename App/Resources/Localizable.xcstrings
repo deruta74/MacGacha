@@ -1,17 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Wine crypt32 fix" : {
-      "comment" : "Runtime component name",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine crypt32 修复"
-          }
-        }
-      }
-    },
     "%@ Settings" : {
       "comment" : "Sheet title; the argument is the game's name",
       "localizations" : {
@@ -133,6 +122,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "访达显示的可用空间中，有 %@ 被 macOS 占用（时间机器快照和缓存），暂时无法使用。macOS 会逐步释放，你也可以在“系统设置 › 通用 › 储存空间”中手动释放。"
+          }
+        }
+      }
+    },
+    "%@ runs through Wine, which is built for Intel processors. Apple's Rosetta 2 translates it on this Mac. It's free from Apple and installs in about a minute." : {
+      "comment" : "Rosetta sheet explanation; the argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@通过 Wine 运行，而 Wine 是为 Intel 处理器构建的。Apple 的 Rosetta 2 会在这台 Mac 上对其进行转译。Rosetta 2 由 Apple 免费提供，安装约需一分钟。"
           }
         }
       }
@@ -897,6 +897,16 @@
         }
       }
     },
+    "If no window appears, open Terminal and run softwareupdate --install-rosetta." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果没有出现窗口，请打开“终端”并运行 softwareupdate --install-rosetta。"
+          }
+        }
+      }
+    },
     "If you quit MacGacha, the game loses its connection and will need to be restarted." : {
       "localizations" : {
         "zh-Hans" : {
@@ -984,6 +994,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "安装%@"
+          }
+        }
+      }
+    },
+    "Install Rosetta 2" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装 Rosetta 2"
+          }
+        }
+      }
+    },
+    "Install Rosetta…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装 Rosetta…"
           }
         }
       }
@@ -1235,6 +1265,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "MacGacha 无法识别此文件夹的地区版本。请选择包含启动器配置的官方安装文件夹。"
+          }
+        }
+      }
+    },
+    "MacGacha couldn't open Apple's Rosetta installer. Open Terminal and run softwareupdate --install-rosetta, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 无法打开 Apple 的 Rosetta 安装程序。请打开“终端”，运行 softwareupdate --install-rosetta，然后重试。"
           }
         }
       }
@@ -1576,6 +1616,36 @@
         }
       }
     },
+    "Rosetta 2 is installed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rosetta 2 已安装。"
+          }
+        }
+      }
+    },
+    "Rosetta 2 is needed to run Windows games on this Mac" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这台 Mac 上运行 Windows 游戏需要 Rosetta 2"
+          }
+        }
+      }
+    },
+    "Rosetta 2 is required to run games. Install it using MacGacha, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行游戏需要 Rosetta 2。请通过 MacGacha 安装，然后重试。"
+          }
+        }
+      }
+    },
     "Runtime bundles combine Wine with a graphics layer. Jadeite and the Steam shim are separate compatibility components. Each version is kept on its own, so an update never breaks a working one." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1664,6 +1734,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "画面更清晰，但 GPU 负担大得多。"
+          }
+        }
+      }
+    },
+    "Show Apple's Window Again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再次显示 Apple 的窗口"
           }
         }
       }
@@ -2263,6 +2343,17 @@
         }
       }
     },
+    "Wine crypt32 fix" : {
+      "comment" : "Runtime component name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine crypt32 修复"
+          }
+        }
+      }
+    },
     "Workarounds %@ needs to start on a Mac, such as a small helper that starts the game. They don't change the game's files. With patches off, the game usually doesn't start." : {
       "comment" : "The argument is the game's name",
       "localizations" : {
@@ -2302,6 +2393,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "其所在文件夹"
+          }
+        }
+      }
+    },
+    "macOS asks whether to install Rosetta. Click Install in that window and accept Apple's license; MacGacha continues on its own." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 会询问是否安装 Rosetta。请在该窗口中点按“安装”并同意 Apple 的许可协议，MacGacha 会自动继续。"
+          }
+        }
+      }
+    },
+    "macOS shows its own window to install Rosetta and may ask for your Mac password. MacGacha never sees it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 会显示自己的窗口来安装 Rosetta，可能会要求输入你的 Mac 密码。MacGacha 不会看到你的密码。"
           }
         }
       }

@@ -23,6 +23,8 @@ public extension LauncherError {
         case .gameEditionMismatch: "gameEditionMismatch"
         case .gameEditionUnknown: "gameEditionUnknown"
         case .gameDistributionUnsupported: "gameDistributionUnsupported"
+        case .rosettaMissing: "rosettaMissing"
+        case .rosettaInstallerUnavailable: "rosettaInstallerUnavailable"
         case .cancelled: "cancelled"
         case .journalCorrupt: "journalCorrupt"
         }
