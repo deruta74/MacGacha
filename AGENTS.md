@@ -6,7 +6,7 @@ Read this before you change anything. **Keep it current:** when you add a module
 
 ## What this is
 
-MacGacha is a native macOS launcher for Genshin Impact, Honkai: Star Rail and Zenless Zone Zero (Global servers) on Apple Silicon.
+MacGacha is a native macOS launcher for Genshin Impact, Honkai: Star Rail and Zenless Zone Zero on Apple Silicon, for Global servers and, in beta, Mainland China.
 
 - **What it does:**
   - installs, updates, verifies and repairs games through HoYoverse's official Sophon delivery;
@@ -116,12 +116,11 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
   - runtime manager with Wine, DXMT and D3DMetal bundles plus jadeite and Steam shim components;
   - HoYoPlay art;
   - diagnostics;
-  - localization: English and Simplified Chinese; HoYoPlay art and news follow the interface language.
-- Recommended runtime setup model: `runtimeSetupPlan(for:)`, `installRecommended(for:)`, `cancelRuntimeSetup(for:)`, observable per-game progress and failure dismissal. Plans share the launch requirement check; consent uses the existing sheet and accepted-state cache. Chains serialize downloads, join existing items, preserve completed installs after failure, and survive region/game changes. The footer's "Set Up…" opens `RuntimeSetupSheet` (item list, sizes, Apple-terms note, Choose Manually… to the Runtimes panel) and shows chain progress with a stop button and a failure line.
-- **In progress:** one-click Play.
-  - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy, prefix launch preparation, session logs with a global off setting and per-launch copies, session locks and runtime pins, launch manager state machine with exclusive watch/reattach/restore ownership and acknowledged recovery notices; milestone safety fixes add under-lock journal barriers, unresolved-startup protection, pinned runtime replacement and same-volume external-install recovery.
-  - App launch model integration includes guarded recovery retries (5/15/60 seconds, then every minute and on activation), explicit Retry, and a launch reservation through durable finalization; the Play footer, settings and quit/recovery presentation remain pending view-layer integration.
-- Region endpoint, delivery policy and art-cache foundations support Mainland China; all six game definitions, independent install folders, CN recipes/log paths and edition-aware adopt checks are implemented. CN-3 model APIs now provide locale-based persisted region selection, three visible games per region, independent lazy art/status refresh and other-region activity without cancelling operations or sessions. The region picker and rail presentation are pending Claude’s view-layer integration.
-- **Planned:** HoYoPlay-style rotating banners and news, more translations, mainland China region picker and live verification, download ETA, surround and Spatial Audio, signed and notarized releases with Sparkle updates.
+  - localization: English and Simplified Chinese; HoYoPlay art and news follow the interface language;
+  - one-click Play (M2b): process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy, prefix launch preparation, session logs, locks and runtime pins, the launch manager with watch/reattach/restore and recovery notices, and the app's Play footer, game settings, quit confirmation and recovery presentation. Owner acceptance passed on 2026-10-24 for all three Global games on D3DMetal and DXMT; Star Rail's in-game hotfix restart waits for a real hotfix;
+  - recommended runtime setup: `runtimeSetupPlan(for:)` / `installRecommended(for:)` share the launch requirement check; the footer's "Set Up…" opens `RuntimeSetupSheet` and shows chain progress with a stop button and a failure line;
+  - app icon (`App/Resources/Assets.xcassets`).
+- **In progress:** Mainland China editions. Region selection, the three CN editions with their own IDs, folders, recipes and edition-aware adopt, and the region picker are done. ZZZ CN installs from the live CN CDN and reaches the login screen, then crashes after about 90 s under Wine 11.20 because of a crypt32 signature-verification bug (fixed upstream in Wine MR 11824); a pinned fixed `crypt32.dll` component is next.
+- **Planned:** first beta release (unsigned DMG via `scripts/package-dmg.sh` once that lands), HoYoPlay-style rotating banners and news, more translations, display choice, download ETA, surround and Spatial Audio, signed and notarized releases with Sparkle updates.
 
 Update this section when a milestone task lands.
