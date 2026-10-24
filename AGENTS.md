@@ -64,7 +64,7 @@ swift test --package-path Packages/LauncherKit --filter <Suite>   # one package 
 - The gated live Wine inspector probe runs only with `MACGACHA_LIVE_WINE=/absolute/path/to/wine`; it explicitly initializes an isolated temporary prefix with `wineboot --init`, polls the inspector for rewritten `cmd.exe` on a bounded clock deadline, then shuts down that prefix and reaps its direct child.
 - The build must have **zero Swift warnings**.
 - `scripts/check-headers.sh`: every Swift file starts with the two-line SPDX and project header (copy it from any existing file). Python and shell scripts carry it as comments.
-- `scripts/check-strings.py <derived-data>`: the string catalog must match the code. Run with `--write` to update `Localizable.xcstrings` after adding strings.
+- `scripts/check-strings.py <derived-data>`: the string catalog must match the code, and every string (app and package catalogs) needs a Simplified Chinese (`zh-Hans`) translation with the same number of format arguments. Run with `--write` to add new strings to `Localizable.xcstrings`, then translate them.
 - The Steam shim has its own manual workflow (`steam-shim.yml`) and scripts (`build-steam-shim.sh`, `install-steam-shim-toolchain.py`). Its output must match `compat/steam-shim/SHA256SUMS` byte for byte.
 
 ## Code conventions
@@ -73,7 +73,7 @@ swift test --package-path Packages/LauncherKit --filter <Suite>   # one package 
 - Tests use Swift Testing (`@Test`, `#expect`). New behavior comes with a test; bugs get a regression test first. Tests must be deterministic: no wall-clock pacing or sleeps that decide correctness. Use handshakes (`TestEvent`) and injected clocks and seams.
 - **All file access goes through `ContainedFileSystem`.** Never build paths by string concatenation from untrusted input; use `SafeRelativePath`.
 - Network access is limited to allowlisted HTTPS hosts (see `Sophon/DeliveryHostPolicy.swift` and the runtime manifest). Downloads are verified by size and SHA-256 before use.
-- **User-visible text is localizable.** SwiftUI literals are automatic. Text built in code uses `String(localized:)` or `LocalizedStringResource` with format arguments, never concatenation. Sizes, dates and percentages go through formatters. Log and diagnostic text stays plain English.
+- **User-visible text is localizable.** SwiftUI literals are automatic. Text built in code uses `String(localized:)` or `LocalizedStringResource` with format arguments, never concatenation. Sizes, dates and percentages go through formatters. Log and diagnostic text stays plain English. New strings ship with their `zh-Hans` translation; use the games' official Chinese terms (原神, 崩坏：星穹铁道, 绝区零, 开始游戏, 校验, 语音包).
 - Errors shown to users go through `LauncherError` and `LauncherError+UserMessage.swift`, never raw payloads, URLs with tokens or paths with personal data.
 
 ## Product rules (hard requirements)
@@ -110,10 +110,10 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
   - runtime manager with Wine, DXMT and D3DMetal bundles plus jadeite and Steam shim components;
   - HoYoPlay art;
   - diagnostics;
-  - localization groundwork (English only so far).
+  - localization: English and Simplified Chinese; HoYoPlay art and news follow the interface language.
 - **In progress:** one-click Play.
   - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy, prefix launch preparation, session logs with a global off setting and per-launch copies, session locks and runtime pins, launch manager state machine with exclusive watch/reattach/restore ownership and acknowledged recovery notices.
   - App launch model integration includes guarded recovery retries (5/15/60 seconds, then every minute and on activation), explicit Retry, and a launch reservation through durable finalization; the Play footer, settings and quit/recovery presentation remain pending view-layer integration.
-- **Planned:** HoYoPlay-style rotating banners and news, translations and content language, download ETA, surround and Spatial Audio, signed and notarized releases with Sparkle updates.
+- **Planned:** HoYoPlay-style rotating banners and news, more translations, mainland China servers, download ETA, surround and Spatial Audio, signed and notarized releases with Sparkle updates.
 
 Update this section when a milestone task lands.

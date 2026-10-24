@@ -2,28 +2,91 @@
   "sourceLanguage" : "en",
   "strings" : {
     "%@ Settings" : {
-      "comment" : "Sheet title; the argument is the game's name"
+      "comment" : "Sheet title; the argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 设置"
+          }
+        }
+      }
     },
     "%@ can't be played until the install finishes." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装完成前无法游玩%@。"
+          }
+        }
+      }
     },
     "%@ closed during startup" : {
-      "comment" : "The argument is the game's name"
+      "comment" : "The argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 在启动过程中关闭"
+          }
+        }
+      }
     },
     "%@ couldn't start" : {
-      "comment" : "The argument is the game's name"
+      "comment" : "The argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 无法启动"
+          }
+        }
+      }
     },
     "%@ files were kept aside" : {
-      "comment" : "Alert title; the argument is the game's name"
+      "comment" : "Alert title; the argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的文件已另行保存"
+          }
+        }
+      }
     },
     "%@ is downloading — pause it to start this one" : {
-      "comment" : "The argument is another game's name"
+      "comment" : "The argument is another game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 正在下载 — 请先暂停再开始此游戏"
+          }
+        }
+      }
     },
     "%@ is running" : {
-      "comment" : "Quit confirmation title; the argument is the game's name"
+      "comment" : "Quit confirmation title; the argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 正在运行"
+          }
+        }
+      }
     },
     "%@ is running — quit it to play this one" : {
-      "comment" : "The argument is another game's name"
+      "comment" : "The argument is another game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 正在运行 — 请先退出再玩这款游戏"
+          }
+        }
+      }
     },
     "%@ of %@" : {
       "comment" : "Downloaded so far of the total, e.g. 18.3 of 136.5 GB",
@@ -33,11 +96,24 @@
             "state" : "new",
             "value" : "%1$@ of %2$@"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ / %2$@"
+          }
         }
       }
     },
     "%@ of the free space Finder shows is held by macOS (Time Machine snapshots and caches) and can't be used yet. macOS frees it over time, or you can free it in System Settings › General › Storage." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "访达显示的可用空间中，有 %@ 被 macOS 占用（时间机器快照和缓存），暂时无法使用。macOS 会逐步释放，你也可以在“系统设置 › 通用 › 储存空间”中手动释放。"
+          }
+        }
+      }
     },
     "%@ · %@" : {
       "comment" : "Joins two parts of a status line",
@@ -47,368 +123,1230 @@
             "state" : "new",
             "value" : "%1$@ · %2$@"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
+          }
         }
       }
     },
     "%@/s" : {
-      "comment" : "Download speed, e.g. 47 MB/s"
+      "comment" : "Download speed, e.g. 47 MB/s",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@/秒"
+          }
+        }
+      }
     },
     "A file exceeds the supported size limit. Choose another source." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有文件超出支持的大小上限。请选择其他来源。"
+          }
+        }
+      }
     },
     "A required tool could not finish. Check Diagnostics for details." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所需的工具未能完成。详情请查看诊断信息。"
+          }
+        }
+      }
     },
     "About %@ to download" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "约需下载 %@"
+          }
+        }
+      }
     },
     "Accept and Download" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接受并下载"
+          }
+        }
+      }
     },
     "Accept and Import" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接受并导入"
+          }
+        }
+      }
     },
     "Accept the license terms before installing this component." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装此组件前请先接受许可条款。"
+          }
+        }
+      }
     },
     "Added packs are downloaded; removed ones free their space. Keep at least one." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增的语音包会被下载，移除的会释放空间。至少保留一个。"
+          }
+        }
+      }
     },
     "Animated backgrounds" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "动态背景"
+          }
+        }
+      }
     },
     "Another game is busy — this one can start when it finishes" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另一款游戏正忙 — 完成后即可开始此游戏"
+          }
+        }
+      }
     },
     "Another operation is already running. Wait for it to finish and try again." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已有其他操作正在进行。请等待完成后重试。"
+          }
+        }
+      }
     },
     "Apple license" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 许可"
+          }
+        }
+      }
     },
     "Apply" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用"
+          }
+        }
+      }
     },
     "Cancel" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
+        }
+      }
     },
     "Cancelled" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已取消"
+          }
+        }
+      }
     },
     "Change…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改…"
+          }
+        }
+      }
     },
     "Check Again" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新检查"
+          }
+        }
+      }
     },
     "Check installed runtimes again" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新检查已安装的运行环境"
+          }
+        }
+      }
     },
     "Checking %@…" : {
-      "comment" : "Launch status; the argument is the game's name"
+      "comment" : "Launch status; the argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查%@…"
+          }
+        }
+      }
     },
     "Checking for updates…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查更新…"
+          }
+        }
+      }
     },
     "Checking free space…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查可用空间…"
+          }
+        }
+      }
     },
     "Checking installed runtimes…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查已安装的运行环境…"
+          }
+        }
+      }
     },
     "Checking size and free space…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查大小和可用空间…"
+          }
+        }
+      }
     },
     "Chinese" : {
-      "comment" : "Voice pack language"
+      "comment" : "Voice pack language",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中文"
+          }
+        }
+      }
     },
     "Choose Folder…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择文件夹…"
+          }
+        }
+      }
     },
     "Choose a folder that already has %@. MacGacha checks it and downloads only what's missing." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择已包含%@的文件夹。MacGacha 会进行校验，只下载缺少的部分。"
+          }
+        }
+      }
     },
     "Choose a voice pack to see the size." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择语音包以查看大小。"
+          }
+        }
+      }
     },
     "Choose another location to see the size." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择其他位置以查看大小。"
+          }
+        }
+      }
     },
     "Choose at least one. You can change voice packs later." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "至少选择一个。之后可以更改语音包。"
+          }
+        }
+      }
     },
     "Choose…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择…"
+          }
+        }
+      }
     },
     "Compatibility patches" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "兼容性补丁"
+          }
+        }
+      }
     },
     "Continue in Parts" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分批继续"
+          }
+        }
+      }
     },
     "Continue in Parts…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分批继续…"
+          }
+        }
+      }
     },
     "Continue in parts?" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要分批继续吗？"
+          }
+        }
+      }
     },
     "Couldn't prepare Wine for %@" : {
-      "comment" : "The argument is the game's name"
+      "comment" : "The argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法为%@准备 Wine"
+          }
+        }
+      }
     },
     "Couldn't reach HoYoverse to check the size." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接 HoYoverse 获取大小。"
+          }
+        }
+      }
     },
     "Couldn't start the network helper for %@" : {
-      "comment" : "The argument is the game's name"
+      "comment" : "The argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法为%@启动网络助手"
+          }
+        }
+      }
     },
     "D3DMetal" : {
-      "comment" : "Graphics backend name; usually not translated"
+      "comment" : "Graphics backend name; usually not translated",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D3DMetal"
+          }
+        }
+      }
     },
     "D3DMetal %@" : {
-      "comment" : "The argument is a version"
+      "comment" : "The argument is a version",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D3DMetal %@"
+          }
+        }
+      }
     },
     "D3DMetal, unknown version" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D3DMetal（版本未知）"
+          }
+        }
+      }
     },
     "DXMT" : {
-      "comment" : "Graphics backend name; usually not translated"
+      "comment" : "Graphics backend name; usually not translated",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DXMT"
+          }
+        }
+      }
     },
     "Damaged: %@" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已损坏：%@"
+          }
+        }
+      }
     },
     "Decline" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒绝"
+          }
+        }
+      }
     },
     "Diagnostics" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "诊断"
+          }
+        }
+      }
     },
     "DirectX 12" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DirectX 12"
+          }
+        }
+      }
     },
     "DirectX 12 needs D3DMetal. %@" : {
-      "comment" : "The argument is the general note about graphics settings"
+      "comment" : "The argument is the general note about graphics settings",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DirectX 12 需要 D3DMetal。%@"
+          }
+        }
+      }
     },
     "Done" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成"
+          }
+        }
+      }
     },
     "Download" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载"
+          }
+        }
+      }
     },
     "Downloading" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载"
+          }
+        }
+      }
     },
     "Downloading %@" : {
-      "comment" : "The argument is a percentage, e.g. 42%"
+      "comment" : "The argument is a percentage, e.g. 42%",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载 %@"
+          }
+        }
+      }
     },
     "English" : {
-      "comment" : "Voice pack language"
+      "comment" : "Voice pack language",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "英语"
+          }
+        }
+      }
     },
     "Error" : {
-      "comment" : "Diagnostics event level"
+      "comment" : "Diagnostics event level",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "错误"
+          }
+        }
+      }
     },
     "Export Diagnostic Bundle…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出诊断包…"
+          }
+        }
+      }
     },
     "Failed" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败"
+          }
+        }
+      }
     },
     "Finish Uninstall" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成卸载"
+          }
+        }
+      }
     },
     "Finishing up — this can't be paused" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在收尾 — 此步骤无法暂停"
+          }
+        }
+      }
     },
     "Finishing…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成…"
+          }
+        }
+      }
     },
     "Frame limit" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帧率上限"
+          }
+        }
+      }
     },
     "Free on this volume" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此宗卷可用空间"
+          }
+        }
+      }
     },
     "Free up %@ more to install." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还需释放 %@ 才能安装。"
+          }
+        }
+      }
     },
     "Game Settings…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏设置…"
+          }
+        }
+      }
     },
     "Games need a lot of space. Pick a drive with at least 100 GB free." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏需要大量空间。请选择至少有 100 GB 可用空间的磁盘。"
+          }
+        }
+      }
     },
     "Games that use this version won't start until you install it again." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此版本的游戏在重新安装前将无法启动。"
+          }
+        }
+      }
     },
     "Genshin Impact" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原神"
+          }
+        }
+      }
     },
     "Get Game Porting Toolkit from Apple" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从 Apple 获取 Game Porting Toolkit"
+          }
+        }
+      }
     },
     "Graphics" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图形"
+          }
+        }
+      }
     },
     "Honkai: Star Rail" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "崩坏：星穹铁道"
+          }
+        }
+      }
     },
     "If you quit MacGacha, the game loses its connection and will need to be restarted." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果退出 MacGacha，游戏会断开连接，需要重新启动。"
+          }
+        }
+      }
     },
     "Import" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入"
+          }
+        }
+      }
     },
     "Import D3DMetal" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入 D3DMetal"
+          }
+        }
+      }
     },
     "Import D3DMetal from Apple's Game Porting Toolkit" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从 Apple 的 Game Porting Toolkit 导入 D3DMetal"
+          }
+        }
+      }
     },
     "Imported from Game Porting Toolkit" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从 Game Porting Toolkit 导入"
+          }
+        }
+      }
     },
     "Import…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入…"
+          }
+        }
+      }
     },
     "Info" : {
-      "comment" : "Diagnostics event level"
+      "comment" : "Diagnostics event level",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信息"
+          }
+        }
+      }
     },
     "Install" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装"
+          }
+        }
+      }
     },
     "Install %@" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装%@"
+          }
+        }
+      }
     },
     "Install games in" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏安装位置"
+          }
+        }
+      }
     },
     "Install in Parts" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分批安装"
+          }
+        }
+      }
     },
     "Install in Parts…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分批安装…"
+          }
+        }
+      }
     },
     "Install in parts?" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要分批安装吗？"
+          }
+        }
+      }
     },
     "Install location unavailable — connect the drive it's on" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装位置不可用 — 请连接所在的磁盘"
+          }
+        }
+      }
     },
     "Installed" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装"
+          }
+        }
+      }
     },
     "Installed runtime" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装的运行环境"
+          }
+        }
+      }
     },
     "Installing…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在安装…"
+          }
+        }
+      }
     },
     "Installs, updates and errors are recorded here." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装、更新和错误都会记录在这里。"
+          }
+        }
+      }
     },
     "Japanese" : {
-      "comment" : "Voice pack language"
+      "comment" : "Voice pack language",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日语"
+          }
+        }
+      }
     },
     "Keep MacGacha open while you play — it restores the game's files when you quit" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游玩期间请保持 MacGacha 打开 — 退出游戏后它会还原游戏文件"
+          }
+        }
+      }
     },
     "Keep MacGacha open — you can pause and resume any time" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请保持 MacGacha 打开 — 可随时暂停和继续"
+          }
+        }
+      }
     },
     "Korean" : {
-      "comment" : "Voice pack language"
+      "comment" : "Voice pack language",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "韩语"
+          }
+        }
+      }
     },
     "Local runtime" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地运行环境"
+          }
+        }
+      }
     },
     "Location" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位置"
+          }
+        }
+      }
     },
     "Location Unavailable" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位置不可用"
+          }
+        }
+      }
     },
     "Logs of what the game and Wine print while you play. They stay on this Mac and help with bug reports. When off, MacGacha keeps only what it needs to put game files back." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游玩时游戏和 Wine 输出的日志。日志只保存在这台 Mac 上，有助于反馈问题。关闭后，MacGacha 只保留还原游戏文件所需的信息。"
+          }
+        }
+      }
     },
     "Looking for Game Porting Toolkit…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查找 Game Porting Toolkit…"
+          }
+        }
+      }
     },
     "MacGacha" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha"
+          }
+        }
+      }
     },
     "MacGacha is putting the game's files back. You can play when it's done." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 正在还原游戏文件，完成后即可游玩。"
+          }
+        }
+      }
     },
     "MacGacha removes the game files it manages from %@. Other files in that folder are kept." : {
-      "comment" : "The argument is the game's folder"
+      "comment" : "The argument is the game's folder",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 会从 %@ 中删除它管理的游戏文件，该文件夹中的其他文件会保留。"
+          }
+        }
+      }
     },
     "More for %@" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的更多选项"
+          }
+        }
+      }
     },
     "Needs on disk" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所需磁盘空间"
+          }
+        }
+      }
     },
     "No Game Porting Toolkit found" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未找到 Game Porting Toolkit"
+          }
+        }
+      }
     },
     "No events yet" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无事件"
+          }
+        }
+      }
     },
     "Not installed" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未安装"
+          }
+        }
+      }
     },
     "OK" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
+          }
+        }
+      }
     },
     "Off" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关"
+          }
+        }
+      }
     },
     "Open Log" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开日志"
+          }
+        }
+      }
     },
     "Open the Game Porting Toolkit disk image from Apple, then rescan, or choose the folder that contains it." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Apple 的 Game Porting Toolkit 磁盘映像后重新扫描，或选择包含它的文件夹。"
+          }
+        }
+      }
     },
     "Pause" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂停"
+          }
+        }
+      }
     },
     "Paused" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停"
+          }
+        }
+      }
     },
     "Paused — Not enough free disk space" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停 — 磁盘空间不足"
+          }
+        }
+      }
     },
     "Play" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始游戏"
+          }
+        }
+      }
     },
     "Playing" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏中"
+          }
+        }
+      }
     },
     "Plays the game's animated art when HoYoPlay provides it. Still images use less power." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HoYoPlay 提供动态画面时播放游戏动态背景。静态图片更省电。"
+          }
+        }
+      }
     },
     "Preparing Wine…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备 Wine…"
+          }
+        }
+      }
     },
     "Preparing…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备…"
+          }
+        }
+      }
     },
     "Quit" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出"
+          }
+        }
+      }
     },
     "Read Apple's license terms" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "阅读 Apple 的许可条款"
+          }
+        }
+      }
     },
     "Recent MacGacha events. Tokens and account details are removed before anything is written here." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 的近期事件。写入前会移除令牌和账号信息。"
+          }
+        }
+      }
     },
     "Refresh" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刷新"
+          }
+        }
+      }
     },
     "Reload recent events" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新载入近期事件"
+          }
+        }
+      }
     },
     "Remove" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        }
+      }
     },
     "Remove %@ %@?" : {
       "localizations" : {
@@ -417,122 +1355,399 @@
             "state" : "new",
             "value" : "Remove %1$@ %2$@?"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要移除 %1$@ %2$@ 吗？"
+          }
         }
       }
     },
     "Rescan" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新扫描"
+          }
+        }
+      }
     },
     "Restoring Files…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在还原文件…"
+          }
+        }
+      }
     },
     "Restoring game files…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在还原游戏文件…"
+          }
+        }
+      }
     },
     "Resume" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续"
+          }
+        }
+      }
     },
     "Retina resolution" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retina 分辨率"
+          }
+        }
+      }
     },
     "Runtime bundles combine Wine with a graphics layer. Jadeite and the Steam shim are separate compatibility components. Each version is kept on its own, so an update never breaks a working one." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境包将 Wine 与图形层组合在一起。Jadeite 和 Steam 兼容层是独立的兼容性组件。每个版本单独保存，更新不会破坏可用的旧版本。"
+          }
+        }
+      }
     },
     "Runtimes" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境"
+          }
+        }
+      }
     },
     "Save a zip with system details and redacted logs to share in a bug report" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存包含系统信息和已脱敏日志的 zip 文件，用于反馈问题"
+          }
+        }
+      }
     },
     "Save session logs" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存会话日志"
+          }
+        }
+      }
     },
     "Set Up Runtimes" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置运行环境"
+          }
+        }
+      }
     },
     "Settings" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置"
+          }
+        }
+      }
     },
     "Sharper, but much heavier on the GPU." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画面更清晰，但 GPU 负担大得多。"
+          }
+        }
+      }
     },
     "Show a still background" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示静态背景"
+          }
+        }
+      }
     },
     "Show in Finder" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在访达中显示"
+          }
+        }
+      }
     },
     "Show the animated background" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示动态背景"
+          }
+        }
+      }
     },
     "Some game files aren't back yet. MacGacha keeps trying — or choose Try Restoring Again in the … menu." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "部分游戏文件尚未还原。MacGacha 会持续重试 — 也可以在 … 菜单中选择“重新尝试还原”。"
+          }
+        }
+      }
     },
     "Something went wrong" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出现问题"
+          }
+        }
+      }
     },
     "Starting %@…" : {
-      "comment" : "Launch status; the argument is the game's name"
+      "comment" : "Launch status; the argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动%@…"
+          }
+        }
+      }
     },
     "Starting…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动…"
+          }
+        }
+      }
     },
     "Steam shim" : {
-      "comment" : "Runtime component name"
+      "comment" : "Runtime component name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steam 兼容层"
+          }
+        }
+      }
     },
     "The download could not finish. Check your connection and try again." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载未能完成。请检查网络连接后重试。"
+          }
+        }
+      }
     },
     "The download information is invalid. Try again after updating MacGacha." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载信息无效。请更新 MacGacha 后重试。"
+          }
+        }
+      }
     },
     "The download server could not complete the request. Please try again later." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载服务器无法完成请求。请稍后重试。"
+          }
+        }
+      }
     },
     "The downloaded files failed verification. Please try again." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载的文件未通过校验。请重试。"
+          }
+        }
+      }
     },
     "The folder %@ and everything in it will be removed." : {
-      "comment" : "The argument is the game's folder"
+      "comment" : "The argument is the game's folder",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件夹 %@ 及其中的所有内容将被删除。"
+          }
+        }
+      }
     },
     "The frame limit is set in the graphics layer, not in the game. Changes apply the next time you press Play." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帧率上限在图形层中设置，而不是在游戏内。更改将在下次点击“开始游戏”时生效。"
+          }
+        }
+      }
     },
     "The game closed during startup." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏在启动过程中关闭。"
+          }
+        }
+      }
     },
     "The operation could not finish. Check access to the selected folder and try again." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作未能完成。请检查所选文件夹的访问权限后重试。"
+          }
+        }
+      }
     },
     "The operation was cancelled." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作已取消。"
+          }
+        }
+      }
     },
     "The paused operation is discarded. %@" : {
-      "comment" : "The argument is the sentence about what is removed"
+      "comment" : "The argument is the sentence about what is removed",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂停的操作将被放弃。%@"
+          }
+        }
+      }
     },
     "The saved operation could not be recovered. Check Diagnostics for details." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法恢复已保存的操作。详情请查看诊断信息。"
+          }
+        }
+      }
     },
     "The selected files contain an unsafe path or link. Choose another source." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选文件包含不安全的路径或链接。请选择其他来源。"
+          }
+        }
+      }
     },
     "There is not enough free disk space. Free some space and try again." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁盘空间不足。请释放一些空间后重试。"
+          }
+        }
+      }
     },
     "There isn't room to install in one go, so MacGacha will install in parts. The game can't be played until it's done." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空间不足以一次完成安装，MacGacha 将分批安装。完成前无法游玩。"
+          }
+        }
+      }
     },
     "This finishes the uninstall that was interrupted. %@" : {
-      "comment" : "The argument is the sentence about what is removed"
+      "comment" : "The argument is the sentence about what is removed",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这将完成之前中断的卸载。%@"
+          }
+        }
+      }
     },
     "This folder can't be used: it overlaps another game or a protected location, or it's a link." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法使用此文件夹：它与其他游戏或受保护的位置重叠，或者是一个链接。"
+          }
+        }
+      }
     },
     "This folder isn't empty. Choose an empty folder, or use an existing installation." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件夹不是空的。请选择空文件夹，或使用已有的安装。"
+          }
+        }
+      }
     },
     "This game version hasn't been tested with MacGacha yet" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此游戏版本尚未在 MacGacha 上测试"
+          }
+        }
+      }
     },
     "This needs %@ at once, but only %@ is free. MacGacha can finish it in parts instead. %@ can't be played until it's done." : {
       "comment" : "Sizes needed and free, then the game's name",
@@ -542,50 +1757,156 @@
             "state" : "new",
             "value" : "This needs %1$@ at once, but only %2$@ is free. MacGacha can finish it in parts instead. %3$@ can't be played until it's done."
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这需要一次性占用 %1$@，但只有 %2$@ 可用。MacGacha 可以改为分批完成。完成前无法游玩%3$@。"
+          }
         }
       }
     },
     "Try Again" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重试"
+          }
+        }
+      }
     },
     "Try Restoring Again" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新尝试还原"
+          }
+        }
+      }
     },
     "Uninstall" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载"
+          }
+        }
+      }
     },
     "Uninstall %@?" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要卸载%@吗？"
+          }
+        }
+      }
     },
     "Uninstall didn't finish" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载未完成"
+          }
+        }
+      }
     },
     "Uninstall…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载…"
+          }
+        }
+      }
     },
     "Unknown" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知"
+          }
+        }
+      }
     },
     "Unknown runtime" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知运行环境"
+          }
+        }
+      }
     },
     "Update to %@" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新到 %@"
+          }
+        }
+      }
     },
     "Use an Existing Installation…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用已有的安装…"
+          }
+        }
+      }
     },
     "Verify Files" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "校验文件"
+          }
+        }
+      }
     },
     "Verifying" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在校验"
+          }
+        }
+      }
     },
     "Verifying %@" : {
-      "comment" : "The argument is a percentage, e.g. 42%"
+      "comment" : "The argument is a percentage, e.g. 42%",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在校验 %@"
+          }
+        }
+      }
     },
     "Version %@ · Installed" : {
-      "comment" : "Game status; the argument is the game version"
+      "comment" : "Game status; the argument is the game version",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本 %@ · 已安装"
+          }
+        }
+      }
     },
     "Version %@ · Version %@ is available" : {
       "comment" : "Game status: installed version, then the newer one",
@@ -595,47 +1916,151 @@
             "state" : "new",
             "value" : "Version %1$@ · Version %2$@ is available"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本 %1$@ · 可更新到版本 %2$@"
+          }
         }
       }
     },
     "Voice Packs" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音包"
+          }
+        }
+      }
     },
     "Voice Packs…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音包…"
+          }
+        }
+      }
     },
     "Wait for the current download to finish or pause it" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请等待当前下载完成或将其暂停"
+          }
+        }
+      }
     },
     "Wait for the other game's download to finish or pause it" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请等待另一款游戏下载完成或将其暂停"
+          }
+        }
+      }
     },
     "Waiting for %@ to finish" : {
-      "comment" : "The argument is another game's name"
+      "comment" : "The argument is another game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待%@完成"
+          }
+        }
+      }
     },
     "Waiting for %@ to put its files back" : {
-      "comment" : "The argument is another game's name"
+      "comment" : "The argument is another game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待%@还原其文件"
+          }
+        }
+      }
     },
     "Waiting for the game window…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待游戏窗口…"
+          }
+        }
+      }
     },
     "Warning" : {
-      "comment" : "Diagnostics event level"
+      "comment" : "Diagnostics event level",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "警告"
+          }
+        }
+      }
     },
     "While %@ was running, it made a new copy of a file MacGacha had set aside. The game folder keeps the new file. The older copy is in a recovery folder, so nothing was lost." : {
-      "comment" : "The argument is the game's name"
+      "comment" : "The argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 运行期间，为 MacGacha 已移开的一个文件新建了副本。游戏文件夹保留新文件，旧副本保存在恢复文件夹中，没有丢失任何内容。"
+          }
+        }
+      }
     },
     "Workarounds %@ needs to start on a Mac, such as a small helper that starts the game. They don't change the game's files. With patches off, the game usually doesn't start." : {
-      "comment" : "The argument is the game's name"
+      "comment" : "The argument is the game's name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 在 Mac 上启动所需的变通方案，例如一个用于启动游戏的小型辅助程序。它们不会修改游戏文件。关闭补丁后，游戏通常无法启动。"
+          }
+        }
+      }
     },
     "Zenless Zone Zero" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "绝区零"
+          }
+        }
+      }
     },
     "about %@" : {
-      "comment" : "An estimated size"
+      "comment" : "An estimated size",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "约 %@"
+          }
+        }
+      }
     },
     "its folder" : {
-      "comment" : "Stands in for a folder path"
+      "comment" : "Stands in for a folder path",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其所在文件夹"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
