@@ -46,6 +46,21 @@ struct CrashHarness {
     static func main() async {
         do {
             let args = CommandLine.arguments
+            if args.count == 6, args[1] == "hold-wine-server-lock" {
+                try await BlockingIO.run {
+                    let fs = try ContainedFileSystem(root: URL(fileURLWithPath: args[2]))
+                    let file = try fs.openForWriting(at: SafeRelativePath(args[3]), truncate: false)
+                    defer { try? file.close() }
+                    var record = flock()
+                    record.l_type = Int16(F_WRLCK); record.l_whence = Int16(SEEK_SET)
+                    guard fcntl(file.fileDescriptor, F_SETLK, &record) == 0 else { throw LauncherError.io("Cannot hold Wine server lock") }
+                    let release = try FileAppearanceEvent(URL(fileURLWithPath: args[5]))
+                    let ready = URL(fileURLWithPath: args[4])
+                    try ContainedFileSystem(root: ready.deletingLastPathComponent()).writeAtomically(Data(), to: SafeRelativePath(ready.lastPathComponent))
+                    try await release.wait()
+                }
+                return
+            }
             if args.count == 4, args[1] == "launch-journal-write" {
                 try await BlockingIO.run {
                     let paths = AppPaths(root: URL(fileURLWithPath: args[2]))
