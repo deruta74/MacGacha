@@ -6,6 +6,7 @@ import LauncherCore
 import DownloadEngine
 @testable import RuntimeManager
 import TestSupport
+import Launch
 
 @Test func schemaTwoBundlesDecodeAndRejectOldSchema() throws {
     let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: bundleManifestData())
@@ -274,4 +275,69 @@ func rootedArchiveNormalizesMembersAndHardlinkTargets(hardlink: Bool) async thro
     #expect(try fs.itemType(at: SafeRelativePath("out/wine")) == nil)
     #expect(try fs.itemType(at: SafeRelativePath("out/wine-other")) == nil)
     if hardlink { #expect(try fs.readFile(at: SafeRelativePath("out/bin/linked"), maxBytes: 10) == Data("wine".utf8)) }
+}
+
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
+func pinnedComponentCannotBeRemoved(bundleRemoval: Bool) async throws {
+    try await BlockingIO.run {
+        let f = try BundleFixture()
+        let installedBundle = try await f.manager.install(f.bundle)
+        let component = try #require(f.store.installed().first { $0.kind == .dxmt })
+        let pin = try RuntimePin.pin(paths: f.store.paths, componentIDs: ["dxmt-1"])
+        defer { withExtendedLifetime(pin) {} }
+        if bundleRemoval {
+            await #expect(throws: LauncherError.busy("install root in use")) { try await f.manager.remove(f.bundle) }
+        } else {
+            #expect(throws: LauncherError.busy("install root in use")) { try f.store.remove(component) }
+        }
+        #expect(try f.store.installed().count == 2)
+        #expect(try await f.manager.installed(f.bundle)?.digest == installedBundle.digest)
+    }
+}
+
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
+func unpinnedComponentRemoves(bundleRemoval: Bool) async throws {
+    try await BlockingIO.run {
+        let f = try BundleFixture()
+        _ = try await f.manager.install(f.bundle)
+        do {
+            let pin = try RuntimePin.pin(paths: f.store.paths, componentIDs: ["wine-1", "dxmt-1"])
+            withExtendedLifetime(pin) {}
+        }
+        if bundleRemoval { try await f.manager.remove(f.bundle) }
+        else { try f.store.remove(#require(f.store.installed().first { $0.kind == .dxmt })) }
+        #expect(try !f.store.installed().contains { $0.kind == .dxmt })
+    }
+}
+
+@Test(.timeLimit(.minutes(1)))
+func removalExclusionIsHeldUntilDeletionCompletes() async throws {
+    try await BlockingIO.run {
+        let f = try BundleFixture()
+        _ = try await f.manager.install(f.bundle)
+        let component = try #require(f.store.installed().first { $0.kind == .dxmt })
+        try f.store.remove(component, deleting: { fs, path in
+            #expect(throws: LauncherError.busy("install root in use")) {
+                try RuntimePin.pin(paths: f.store.paths, componentIDs: ["dxmt-1"])
+            }
+            try fs.removeItem(at: path)
+        })
+        let pin = try RuntimePin.pin(paths: f.store.paths, componentIDs: ["dxmt-1"])
+        withExtendedLifetime(pin) {}
+    }
+}
+
+@Test(.timeLimit(.minutes(1)))
+func pinnedComponentWithDamagedMetadataCannotBeRemovedAsInvalid() async throws {
+    try await BlockingIO.run {
+        let f = try BundleFixture()
+        _ = try await f.manager.install(f.bundle)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        try fs.writeAtomically(Data("corrupt".utf8), to: SafeRelativePath("Runtimes/dxmt/1/.macgacha-component.json"))
+        let invalid = try #require(f.store.scan().invalid.first { $0.kind == .dxmt && $0.rawName == "1" })
+        let pin = try RuntimePin.pin(paths: f.store.paths, componentIDs: ["dxmt-1"])
+        defer { withExtendedLifetime(pin) {} }
+        #expect(throws: LauncherError.busy("install root in use")) { try f.store.removeInvalid(invalid) }
+        #expect(try fs.itemType(at: SafeRelativePath("Runtimes/dxmt/1")) == .directory)
+    }
 }

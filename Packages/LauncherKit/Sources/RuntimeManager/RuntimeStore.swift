@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
 import LauncherCore
+import DownloadEngine
 
 public struct InstalledComponent: Codable, Sendable, Equatable {
     public let kind: ComponentKind
@@ -142,18 +143,36 @@ public struct RuntimeStore: Sendable {
         return RuntimeScan(components: result, invalid: invalid)
     }
 
+    /// The shared pin and exclusive removal paths must use identical stable files.
+    /// Validate every ID before creating anything; a failed multi-lock attempt
+    /// releases its earlier locks. Sorting gives every caller the same order.
+    package static func componentLocks(paths: AppPaths, componentIDs: [String], mode: InstallLock.Mode) throws -> [InstallLock] {
+        let ids = try Set(componentIDs.map { try SafeIdentifier($0).rawValue }).sorted()
+        let fs = try ContainedFileSystem(root: paths.root)
+        return try ids.map { try InstallLock(fs: fs, path: SafeRelativePath("Runtimes/.pin-\($0).lock"), mode: mode) }
+    }
+
     public func remove(_ c: InstalledComponent) throws {
         let lease = try RuntimeStoreLease(store: self)
         defer { withExtendedLifetime(lease) {} }
         try removeUnderLease(c)
     }
 
-    func removeUnderLease(_ c: InstalledComponent) throws {
-        try remove(c, deleting: { try $0.removeItem(at: $1) })
+    func removeUnderLease(_ c: InstalledComponent, componentLease: RuntimeRemovalLease? = nil) throws {
+        try remove(c, componentLease: componentLease, deleting: { try $0.removeItem(at: $1) })
     }
 
     // A synchronous deletion boundary allows deterministic cancellation/failure tests.
     func remove(_ c: InstalledComponent, deleting: (ContainedFileSystem, SafeRelativePath) throws -> Void) throws {
+        try remove(c, componentLease: nil, deleting: deleting)
+    }
+
+    private func remove(_ c: InstalledComponent, componentLease: RuntimeRemovalLease?,
+        deleting: (ContainedFileSystem, SafeRelativePath) throws -> Void) throws {
+        let id = "\(c.kind.idPrefix)-\(c.version)"
+        let pins = try componentLease ?? RuntimeRemovalLease(paths: paths, componentIDs: [id])
+        guard pins.componentIDs.contains(id) else { throw LauncherError.io("Missing runtime removal exclusion") }
+        defer { withExtendedLifetime(pins) {} }
         let fs = try ContainedFileSystem(root: paths.root)
         let runtimes = try RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root)
         let kind = runtimes.description + "/" + c.kind.rawValue
@@ -174,6 +193,11 @@ public struct RuntimeStore: Sendable {
         let current = try scan().invalid.first { $0.kind == entry.kind && $0.rawName == entry.rawName }
         guard let current else { return }
         guard current.removable else { throw LauncherError.io("Runtime entry is report-only") }
+        let componentLease: RuntimeRemovalLease?
+        if let kind = entry.kind, let version = try? SafeIdentifier(entry.rawName) {
+            componentLease = try RuntimeRemovalLease(paths: paths, componentIDs: ["\(kind.idPrefix)-\(version)"])
+        } else { componentLease = nil }
+        defer { withExtendedLifetime(componentLease) {} }
         let fs = try ContainedFileSystem(root: paths.root)
         let runtimes = try RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root)
         let parent = entry.kind.map { runtimes.description + "/" + $0.rawValue } ?? runtimes.description
@@ -277,5 +301,16 @@ public struct RuntimeStore: Sendable {
         case is DecodingError: return String(localized: "Invalid runtime marker JSON", bundle: .module)
         default: return String(localized: "Cannot inspect runtime entry", bundle: .module)
         }
+    }
+}
+
+/// A bundle preflights every component before removing any published tree and
+/// passes this exclusion through component cleanup without relocking itself.
+final class RuntimeRemovalLease {
+    let componentIDs: Set<String>
+    private let locks: [InstallLock]
+    init(paths: AppPaths, componentIDs: [String]) throws {
+        locks = try RuntimeStore.componentLocks(paths: paths, componentIDs: componentIDs, mode: .exclusive)
+        self.componentIDs = Set(componentIDs)
     }
 }

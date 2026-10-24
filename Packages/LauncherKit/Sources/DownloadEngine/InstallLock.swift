@@ -8,14 +8,15 @@ import LauncherCore
 /// unlock before closing: a concurrent spawn can temporarily retain the open-file
 /// description even with CLOEXEC. Retain the lock file so its inode stays stable.
 public final class InstallLock: Sendable {
+    public enum Mode: Sendable { case exclusive, shared }
     private let handle: FileHandle
 
-    public init(fs: ContainedFileSystem, path: SafeRelativePath) throws {
+    public init(fs: ContainedFileSystem, path: SafeRelativePath, mode: Mode = .exclusive) throws {
         let opened = try fs.openForWriting(at: path, truncate: false)
         do {
             while true {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
-                if flock(opened.fileDescriptor, LOCK_EX | LOCK_NB) == 0 { break }
+                if flock(opened.fileDescriptor, (mode == .exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB) == 0 { break }
                 if errno == EWOULDBLOCK || errno == EAGAIN { throw LauncherError.busy("install root in use") }
                 guard errno == EINTR else { throw LauncherError.io("Cannot lock install root") }
             }

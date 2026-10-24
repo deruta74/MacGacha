@@ -181,6 +181,9 @@ public actor GameRecordStore {
             // Launch preferences outlive installations and may be saved before
             // the first record. They are persistent user data, not orphan state.
             if path.components.last == "launch-settings.json", try fs.itemType(at: path) == .regularFile { continue }
+            // Session locks retain a stable inode across installs and uninstalls;
+            // removing one could let a second process lock a different inode.
+            if path.components.last == ".session.lock", try fs.itemType(at: path) == .regularFile { continue }
             // Session recovery is owned by Launch, including after uninstall or
             // before a game record exists. Never retire user recovery copies.
             if path.components.last == "launch-session.json", try fs.itemType(at: path) == .regularFile { continue }

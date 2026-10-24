@@ -23,6 +23,12 @@ public struct GameEstimate: Sendable, Equatable {
     }
 }
 
+/// Application policy for live sessions and unfinished launch recovery. Called
+/// before an operation takes a lease or changes any persistent game state.
+public protocol GameOperationGuard: Sendable {
+    func willOperate(on game: String) async throws
+}
+
 public actor GameLibrary {
     // Synchronous filesystem/cache work must not occupy a cooperative worker.
     nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.game-library")
@@ -35,14 +41,16 @@ public actor GameLibrary {
     private let disk: any DiskSpaceProbe
     private let purgeable: any PurgeableSpaceProbe
     private let log: EventLog?
+    private let operationGuard: (any GameOperationGuard)?
     private let hooks: CrashHooks
     private let fileOps: any FileOps
     private var started = false
     private static let cleanupName = "uninstall-cleaned.json"
 
     public init(paths: AppPaths, api: DeliveryAPI, runner: OperationRunner, store: GameRecordStore,
-        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe()) {
+        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(), guard operationGuard: (any GameOperationGuard)? = nil) {
         self.paths = paths; self.api = api; self.runner = runner; self.store = store
+        self.operationGuard = operationGuard
         self.disk = disk; self.purgeable = purgeable; self.log = log; hooks = crashHooks; self.fileOps = fileOps
     }
 
@@ -105,6 +113,7 @@ public actor GameLibrary {
     public func setVoices(_ game: GameDefinition, _ voices: Set<String>) -> AsyncThrowingStream<OperationEvent, any Error> { stream(game, .voices(voices)) }
 
     public func uninstall(_ game: GameDefinition) async throws {
+        try await operationGuard?.willOperate(on: game.id)
         let lease = try await store.acquireOperationLease(); defer { withExtendedLifetime(lease) {} }
         let records = try await store.records()
         try GameRecordRules.check(.uninstall, record: records[game.id], others: others(records, game))
@@ -171,6 +180,7 @@ public actor GameLibrary {
     }
 
     fileprivate func prepare(_ game: GameDefinition, request: LibraryRequest) async throws -> LibraryPrepared {
+        try await operationGuard?.willOperate(on: game.id)
         let resumes = if case .resume = request { true } else { false }
         let lease = try await store.acquireOperationLease(waitForPipelineDrain: resumes)
         let records = try await store.records(); let record = records[game.id]

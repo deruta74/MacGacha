@@ -134,6 +134,19 @@ struct CrashHarness {
                 try await store.writeCacheState(Data("{\"interrupted\":true}".utf8), named: "branch.json", for: "genshin")
                 _exit(1) // The rename seam must terminate the process first.
             }
+            if args.count == 6, ["hold-session-lock", "hold-runtime-pin"].contains(args[1]) {
+                try await BlockingIO.run {
+                    let paths = AppPaths(root: URL(fileURLWithPath: args[2]))
+                    let release = try FileAppearanceEvent(URL(fileURLWithPath: args[5]))
+                    let sessionLock = args[1] == "hold-session-lock" ? try SessionLock.acquire(paths: paths, game: args[3]) : nil
+                    let runtimePin = args[1] == "hold-runtime-pin" ? try RuntimePin.pin(paths: paths, componentIDs: [args[3]]) : nil
+                    defer { withExtendedLifetime((sessionLock, runtimePin)) {} }
+                    let ready = URL(fileURLWithPath: args[4])
+                    try ContainedFileSystem(root: ready.deletingLastPathComponent()).writeAtomically(Data(), to: SafeRelativePath(ready.lastPathComponent))
+                    try await release.wait()
+                }
+                return
+            }
             if args.count == 5, args[1] == "hold-game-store" {
                 let store = GameRecordStore(directory: URL(fileURLWithPath: args[2]))
                 let lease = try await store.acquireOperationLease()

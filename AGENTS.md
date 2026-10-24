@@ -38,10 +38,10 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 | `CZstd` | Vendored zstd decoder (decompression only). Don't edit upstream files. |
 | `DownloadEngine` | Resumable, verified downloads: plans, crash-safe journal, staging, disk-space budget, parallel fetch pipeline, `URLSessionHTTPClient` with bounded buffering. |
 | `Sophon` | HoYoverse delivery API client, host policy, protobuf manifest reader, install/update/voice planner. |
-| `GameLibrary` | Game records, operation lease (one game operation at a time), install/update/verify/adopt/uninstall bridge to the engine. |
-| `RuntimeManager` | Runtime manifest (schema 3), components (Wine, DXMT, D3DMetal, jadeite, Steam shim), bundles, safe archive extraction, Wine prefixes and revisioned launch preparation (WinINet, Retina and NVIDIA registry settings, a wineserver/registry persistence barrier and verified prefix-only copies; no third-party certificates), GPTK import, Apple consent. |
+| `GameLibrary` | Game records, operation lease (one game operation at a time), install/update/verify/adopt/uninstall bridge to the engine, with an optional `GameOperationGuard` checked before every per-game operation takes a lease or changes state. |
+| `RuntimeManager` | Runtime manifest (schema 3), components (Wine, DXMT, D3DMetal, jadeite, Steam shim), bundles, safe archive extraction, Wine prefixes and revisioned launch preparation (WinINet, Retina and NVIDIA registry settings, a wineserver/registry persistence barrier and verified prefix-only copies; no third-party certificates), GPTK import, Apple consent, and component-pin exclusion held across runtime removal. |
 | `HoYoPlayAPI` | HoYoPlay game list and art (banners, backgrounds), with the content language as a parameter. |
-| `Launch` | Per-game launch recipes, `LaunchSettings` and its store, `LaunchResolver` (exact Wine command and environment), `LaunchSession` and `LaunchJournal`, `HiddenFiles` (inode-bound hiding and restoring of game files, with recovery for conflicts), `SessionLog` (optional private Wine output, retained inode ownership, a five-second cap ticker and per-game retention), `LaunchCopies` (verified per-launch prefix copies), and `SessionProxy` (loopback HTTP/CONNECT proxy that blocks a recipe's hosts by exact name, with bounded buffers and deadlines). |
+| `Launch` | Per-game launch recipes, `LaunchSettings` and its store, `LaunchResolver` (exact Wine command and environment), `LaunchSession` and `LaunchJournal`, cross-process `SessionLock` ownership and shared `RuntimePin` component locks, `HiddenFiles` (inode-bound hiding and restoring of game files, with recovery for conflicts), `SessionLog` (optional private Wine output, retained inode ownership, a five-second cap ticker and per-game retention), `LaunchCopies` (verified per-launch prefix copies), and `SessionProxy` (loopback HTTP/CONNECT proxy that blocks a recipe's hosts by exact name, with bounded buffers and deadlines). |
 | `Diagnostics` | Diagnostics bundles with redacted event logs and caller-supplied session/game-log inputs; no dependency on Launch. Event and session logs are enumerated and opened through a Logs descriptor pinned from the app-data root; unsafe Logs roots are reported and skipped. Optional log discovery is best-effort and passes fixed-scope skip notices to the bundle. Optional logs are read completely within a 64 MiB safety limit and redacted before any tail/head selection; oversized, missing or unsafe inputs are reported and skipped. |
 | `TestSupport`, `CrashHarness`, `ThroughputBenchmark` | Test helpers (`TestEvent`, fault injection), a child process for crash and kill tests, a benchmark. |
 
@@ -109,8 +109,8 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
   - diagnostics;
   - localization groundwork (English only so far).
 - **In progress:** one-click Play.
-  - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy, prefix launch preparation, session logs with a global off setting and per-launch copies.
-  - Next: session lock, launch manager state machine, then app integration.
+  - Done so far: process spawner and inspector, recipes and resolver, session journal and file hiding, session proxy, prefix launch preparation, session logs with a global off setting and per-launch copies, session locks and runtime pins.
+  - Next: launch manager state machine, then app integration.
 - **Planned:** HoYoPlay-style rotating banners and news, translations and content language, download ETA, surround and Spatial Audio, signed and notarized releases with Sparkle updates.
 
 Update this section when a milestone task lands.
