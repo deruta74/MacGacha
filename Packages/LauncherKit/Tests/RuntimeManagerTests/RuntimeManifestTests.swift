@@ -6,6 +6,23 @@ import LauncherCore
 import RuntimeManager
 import TestSupport
 
+@Test func crypt32KindRoundTripsAndLegacySchemaStillDecodes() throws {
+    let legacy = try JSONDecoder().decode(RuntimeManifest.self, from: manifestFixtureData())
+    #expect(legacy.schemaVersion == 2)
+    let old = legacy.components[0]
+    let component = try RuntimeComponent(id: SafeIdentifier("crypt32-fix-wine-11.20-1"), kind: .crypt32Fix,
+        version: SafeIdentifier("wine-11.20-1"), sourceMode: .download, url: old.url, size: old.size,
+        installedSize: old.installedSize, sha256: old.sha256, archive: .zip,
+        license: ComponentLicense(name: "LGPL-2.1-or-later", url: URL(string: "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html")!,
+            redistributable: true, termsRevision: "1"))
+    let encoded = try JSONEncoder().encode(RuntimeManifest(components: [component]))
+    let decoded = try JSONDecoder().decode(RuntimeManifest.self, from: encoded)
+    #expect(decoded.schemaVersion == 3)
+    #expect(decoded.components.first?.kind == .crypt32Fix)
+    #expect(decoded.components.first?.id.rawValue == "crypt32-fix-wine-11.20-1")
+    #expect(decoded.components.first?.license.name == "LGPL-2.1-or-later")
+}
+
 @Test
 func loadsBundledShapeManifest() throws {
     let directory = try TempDir()

@@ -9,6 +9,19 @@ import TestSupport
 @testable import RuntimeManager
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchPreparationTests {
+    @Test(arguments: [false, true]) func crypt32RegistryPolicyIsScopedAndUsesPersistenceBarrier(enabled: Bool) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let runner = FakeProcessRunner()
+            let request = PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, crypt32Native: enabled)
+            try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: request)
+            let arguments = runner.invocations.map(\.arguments)
+            let override = ["reg", "add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "crypt32", "/t", "REG_SZ", "/d", "native,builtin", "/f"]
+            #expect(arguments.contains(override) == enabled)
+            #expect(arguments.last == ["-w"])
+        }
+    }
+
     @Test(arguments: ["drive_c", "drive_c/users", "drive_c/users/player"], [false, true])
     func unsafeProfileAncestorsFailBeforeWine(ancestor: String, symlink: Bool) async throws {
         try await BlockingIO.run {

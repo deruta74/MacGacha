@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+name: Crypt32 fix (manual build)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: write # Only the final explicit draft-release step uses this token.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install the locked toolchain, including Bison
+        run: |
+          set -euo pipefail
+          export STEAM_SHIM_TOOLCHAIN_PREFIX="$RUNNER_TEMP/crypt32-toolchain"
+          echo "STEAM_SHIM_TOOLCHAIN_PREFIX=$STEAM_SHIM_TOOLCHAIN_PREFIX" >> "$GITHUB_ENV"
+          python3 -I scripts/test-steam-shim-toolchain.py
+          python3 -I scripts/install-steam-shim-toolchain.py "$STEAM_SHIM_TOOLCHAIN_PREFIX" --lock compat/crypt32-fix/toolchain.lock
+          echo "$STEAM_SHIM_TOOLCHAIN_PREFIX/bin" >> "$GITHUB_PATH"
+      - name: Fetch both independent source caches
+        run: |
+          CRYPT32_FIX_CACHE_DIR="$RUNNER_TEMP/cache-a" scripts/build-crypt32-fix.sh out-a --fetch-only
+          CRYPT32_FIX_CACHE_DIR="$RUNNER_TEMP/cache-b" scripts/build-crypt32-fix.sh out-b --fetch-only
+      - name: Build twice without networking or Homebrew fallback
+        run: |
+          set -euo pipefail
+          export PATH="$STEAM_SHIM_TOOLCHAIN_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          profile='(version 1) (allow default) (deny network*) (deny file-read* (subpath "/opt/homebrew")) (deny file-write* (subpath "/opt/homebrew"))'
+          CRYPT32_FIX_CACHE_DIR="$RUNNER_TEMP/cache-a" sandbox-exec -p "$profile" scripts/build-crypt32-fix.sh out-a --offline --verify
+          CRYPT32_FIX_CACHE_DIR="$RUNNER_TEMP/cache-b" sandbox-exec -p "$profile" scripts/build-crypt32-fix.sh out-b --offline --verify
+          cmp out-a/x86_64-windows/crypt32.dll out-b/x86_64-windows/crypt32.dll
+          cmp out-a/crypt32-fix-wine-11.20-1.zip out-b/crypt32-fix-wine-11.20-1.zip
+          python3 -I - <<'PY'
+          import hashlib, json, pathlib
+          manifest = json.loads(pathlib.Path('App/Resources/runtime-manifest.json').read_text())
+          component = next(c for c in manifest['components'] if c['id'] == 'crypt32-fix-wine-11.20-1')
+          data = pathlib.Path('out-a/crypt32-fix-wine-11.20-1.zip').read_bytes()
+          assert len(data) == component['size']
+          assert hashlib.sha256(data).hexdigest() == component['sha256']['hex']
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crypt32-fix-wine-11.20-1
+          path: |
+            out-a/
+            out-b/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Attach binary and corresponding Wine source to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=crypt32-fix-wine-11.20-1
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --draft --title "$tag" --target "$GITHUB_SHA" --notes-file compat/crypt32-fix/NOTICE.md
+          fi
+          gh release upload "$tag" out-a/crypt32-fix-wine-11.20-1.zip "$RUNNER_TEMP/cache-a/wine-11.20.tar.xz" --clobber

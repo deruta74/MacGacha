@@ -71,17 +71,19 @@ enum RuntimeSetupItemState {
             result.append(RuntimeSetupRequirement(item: .init(id: bundle.id.rawValue, name: bundle.displayName,
                 size: RuntimeSetupPlan.total(components.map(\.size))), components: components))
         }
-        guard launchSettings(for: gameID).compatibilityPatches else { return result }
         guard let recipe = Recipes.recipe(for: gameID) else { return nil }
-        let kind: ComponentKind, name: String
-        switch recipe.wrapper {
-        case .none: return result
-        case .jadeite: kind = .jadeite; name = String(localized: "Jadeite", comment: "Runtime component name")
-        case .steamShim: kind = .steamShim; name = String(localized: "Steam shim", comment: "Runtime component name")
-        }
-        guard let component = manifest.components.first(where: { $0.kind == kind }) else { return nil }
-        if !installed.contains(where: { $0.kind == kind && $0.version == component.version.rawValue }) {
-            result.append(RuntimeSetupRequirement(item: .init(id: component.id.rawValue, name: name, size: component.size), components: [component]))
+        let required = LaunchResolver.requiredComponents(recipe: recipe, settings: launchSettings(for: gameID),
+            runtimeBundleID: bundle.id.rawValue)
+        // Keep the ABI-specific Wine correction beside its bundle, before optional wrappers.
+        let kinds = required.filter { $0 == .crypt32Fix } + required.filter { $0 != .crypt32Fix }
+        for kind in kinds {
+            guard let component = manifest.components.first(where: {
+                $0.kind == kind && (kind != .crypt32Fix || $0.id.rawValue == Crypt32Fix.componentID)
+            }) else { return nil }
+            if !installed.contains(where: { $0.kind == kind && $0.version == component.version.rawValue }) {
+                result.append(RuntimeSetupRequirement(item: .init(id: component.id.rawValue, name: Self.kindName(kind),
+                    size: component.size), components: [component]))
+            }
         }
         return result
     }
