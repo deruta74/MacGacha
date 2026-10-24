@@ -210,7 +210,7 @@ public actor LaunchManager {
             let bundle = selection.bundle
             let prefix = try await prefixes.prefixURL(game: game.id, bundle: bundle)
             let preview = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment)
+                wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue)
             guard !selection.componentIDs.isEmpty else { throw LauncherError.io("The runtime bundle has no pinnable components") }
             let compatibilityIDs = try preview.requiredComponents.map { kind in
                 guard let id = selection.compatibilityComponentIDs[kind] else { throw LauncherError.io("Required compatibility component has no pin identity") }
@@ -266,6 +266,10 @@ public actor LaunchManager {
                 var snapshot = original
                 try LaunchCopies.copyIfPresent(preview.copyIfPresent, installRoot: installRoot,
                     system32: prefix.appendingPathComponent("drive_c/windows/system32"), log: log)
+                for copy in preview.componentCopies {
+                    try LaunchCopies.copyRequired([(copy.source, copy.toSystem32)], componentRoot: copy.root,
+                        system32: prefix.appendingPathComponent("drive_c/windows/system32"), log: log)
+                }
                 let result = Result { try HiddenFiles(hooks: hideHooks).hide(preview.hidden, session: &snapshot,
                     journal: LaunchJournal(paths: paths, fileOps: journalFileOps, sessionOwned: true, beforeRead: beforeJournalRead)) }
                 return (snapshot, result)
@@ -283,7 +287,7 @@ public actor LaunchManager {
             context.proxy = try await proxyFactory(preview.blockedHosts, logger)
             context.session.proxyPort = context.proxy?.port
             let resolved = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment)
+                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue)
             stage = .spawn; events.yield(.stage(stage)); note(context, "stage spawn")
             context.session.state = .spawning; try await persist(context.session)
             let spawner = spawner, output = context.log?.processOutput ?? .discard

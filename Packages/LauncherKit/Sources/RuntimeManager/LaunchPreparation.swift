@@ -107,6 +107,11 @@ public struct LaunchPreparation: Sendable {
             }
             try await run(binary, ["reg", "add", "HKLM\\SOFTWARE\\NVIDIA Corporation\\Global\\NGXCore", "/v", "FullPath", "/t", "REG_SZ", "/d", "C:\\Windows\\System32", "/f"], environment)
         }
+        if request.crypt32Native {
+            // The pinned yaagl wrapper removes WINEDLLOVERRIDES. Persist the
+            // same policy in this game/bundle's prefix, not in the runtime.
+            try await run(binary, ["reg", "add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "crypt32", "/t", "REG_SZ", "/d", "native,builtin", "/f"], environment)
+        }
         // reg.exe success only acknowledges wineserver's in-memory state. Wait
         // for the server to save it, then flush the files and directory before
         // the marker's full-sync boundary can certify this provisioning revision.

@@ -143,6 +143,26 @@
         "termsRevision": "steam-shim-proton-10.0-4"
       },
       "rootPath": "steam-shim-proton-10.0-4"
+    },
+    {
+      "id": "crypt32-fix-wine-11.20-1",
+      "kind": "crypt32Fix",
+      "version": "wine-11.20-1",
+      "sourceMode": "download",
+      "url": "https://github.com/deruta74/MacGacha/releases/download/crypt32-fix-wine-11.20-1/crypt32-fix-wine-11.20-1.zip",
+      "size": 365755,
+      "installedSize": 1104123,
+      "sha256": {
+        "algorithm": "sha256",
+        "hex": "42b5998cb54409d5329f3e23281c0de765147e7bb20708ae877b8c5fef330b0a"
+      },
+      "archive": "zip",
+      "license": {
+        "name": "LGPL-2.1-or-later",
+        "url": "https://github.com/deruta74/MacGacha/blob/main/compat/crypt32-fix/NOTICE.md",
+        "redistributable": true,
+        "termsRevision": "crypt32-fix-wine-11.20-1"
+      }
     }
   ],
   "bundles": [

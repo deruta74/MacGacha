@@ -181,7 +181,7 @@ def extract_bottle(archive, destination, name, version):
             destination.joinpath(*path).chmod(entry.mode & 0o777)
 
 
-def install(prefix, cache):
+def install(prefix, cache, lock=None):
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise ValueError("The locked bottles require arm64 macOS 27")
     if not platform.mac_ver()[0].startswith("27."):
@@ -192,7 +192,7 @@ def install(prefix, cache):
     prefix = prefix.resolve()
     prefix.parent.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
-    entries = checker().read_lock()
+    entries = checker().read_lock(lock)
     with tempfile.TemporaryDirectory(prefix=prefix.name + ".install-", dir=prefix.parent) as temporary:
         stage = Path(temporary)
         (stage / "Cellar").mkdir()
@@ -242,7 +242,7 @@ def install(prefix, cache):
                         path.write_bytes(data)
         for tool in (stage / "opt/mingw-w64/bin").iterdir():
             (stage / "bin" / tool.name).symlink_to("../opt/mingw-w64/bin/" + tool.name)
-        # These wrappers are for the pinned C shim build, not a general GCC
+        # These wrappers are for the pinned C builds, not a general GCC
         # installation. Explicit specs select the same pinned assembler and BFD
         # linker, bypassing absolute --with-as/--with-ld defaults (and collect2's
         # hard-coded linker). The resulting PE bytes must still match SHA256SUMS.
@@ -258,6 +258,21 @@ def install(prefix, cache):
             for tool in ("as", "ld"):
                 (stage / "libexec" / f"shim-{target}-{tool}").symlink_to(
                     f"../opt/mingw-w64/toolchain-{target}/bin/{target}-w64-mingw32-{tool}")
+            # Direct assembler inputs bypass *invoke_as and even -B because
+            # this GCC has an absolute configured AS. Intercept that command
+            # through GCC's driver wrapper (Wine's import-library builder uses it).
+            driver = stage / "libexec" / f"shim-{target}-driver"
+            driver.write_text(
+                '#!/bin/bash\n'
+                '# SPDX-License-Identifier: GPL-3.0-only\n'
+                '# MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).\n'
+                'set -euo pipefail\n'
+                'prefix=$(cd "$(dirname "$0")/.." && pwd -P)\n'
+                'tool=$1; shift\n'
+                f'if [[ "$tool" == */{target}-w64-mingw32-as ]]; then\n'
+                f'  exec "$prefix/opt/mingw-w64/toolchain-{target}/bin/{target}-w64-mingw32-as" "$@"\n'
+                'fi\nexec "$tool" "$@"\n')
+            driver.chmod(0o755)
             wrapper = stage / "bin" / f"{target}-w64-mingw32-gcc"
             wrapper.unlink()
             wrapper.write_text(
@@ -267,7 +282,8 @@ def install(prefix, cache):
                 'set -euo pipefail\n'
                 'prefix=$(cd "$(dirname "$0")/.." && pwd -P)\n'
                 f'exec "$prefix/opt/mingw-w64/toolchain-{target}/bin/{target}-w64-mingw32-gcc" '
-                f'"-B$prefix/libexec/" "-specs=$prefix/libexec/{target}.specs" "$@"\n')
+                f'"-B$prefix/libexec/" "-specs=$prefix/libexec/{target}.specs" '
+                f'-wrapper "$prefix/libexec/shim-{target}-driver" "$@"\n')
             wrapper.chmod(0o755)
         metadata = {name: {"version": version, "sha256": digest,
                            "runtime_dependencies": sorted(dependencies[name])}
@@ -326,8 +342,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("prefix", type=Path)
     parser.add_argument("--cache", type=Path, help="Verified download cache (defaults to PREFIX-bottles)")
+    parser.add_argument("--lock", type=Path, help="Alternate checked-in bottle lock (default: Steam shim)")
     args = parser.parse_args()
-    install(args.prefix, args.cache or Path(str(args.prefix) + "-bottles"))
+    install(args.prefix, args.cache or Path(str(args.prefix) + "-bottles"), args.lock)
 
 
 if __name__ == "__main__":

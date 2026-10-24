@@ -152,6 +152,13 @@ class RedirectTests(unittest.TestCase):
 
 
 class IsolationTests(unittest.TestCase):
+    def test_crypt32_lock_extends_default_without_changing_steam_inputs(self):
+        checker = INSTALLER.checker()
+        default = checker.read_lock()
+        crypt32 = checker.read_lock(Path(__file__).resolve().parent.parent / "compat/crypt32-fix/toolchain.lock")
+        self.assertEqual({key: value for key, value in crypt32.items() if key != "bison"}, default)
+        self.assertEqual(crypt32["bison"][0], "3.8.2")
+
     def test_direct_entrypoints_ignore_environment_startup_code(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

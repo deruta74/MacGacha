@@ -8,8 +8,11 @@ public enum LaunchCopies {
     public static func copyIfPresent(_ items: [(SafeRelativePath, String)], installRoot: URL, system32: URL, log: SessionLog?) throws {
         try copyIfPresent(items, installRoot: installRoot, system32: system32, log: log, fileOps: SystemFileOps())
     }
+    public static func copyRequired(_ items: [(SafeRelativePath, String)], componentRoot: URL, system32: URL, log: SessionLog?) throws {
+        try copyIfPresent(items, installRoot: componentRoot, system32: system32, log: log, fileOps: SystemFileOps(), required: true)
+    }
     package static func copyIfPresent(_ items: [(SafeRelativePath, String)], installRoot: URL, system32: URL, log: SessionLog?,
-        fileOps: any FileOps, beforePublication: @Sendable (SafeRelativePath) -> Void = { _ in }) throws {
+        fileOps: any FileOps, beforePublication: @Sendable (SafeRelativePath) -> Void = { _ in }, required: Bool = false) throws {
         guard Array(system32.pathComponents.suffix(3)) == ["drive_c", "windows", "system32"] else { throw LauncherError.unsafePath(system32.path) }
         let prefix = system32.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let destination = try ContainedFileSystem(root: prefix, fileOps: fileOps).pinRoot()
@@ -17,7 +20,10 @@ public enum LaunchCopies {
         let source = try ContainedFileSystem(root: installRoot).pinRoot()
         for (input, name) in items {
             guard try SafeRelativePath(name).components.count == 1 else { throw LauncherError.unsafePath(name) }
-            guard try source.itemType(at: input) != nil else { log?.append(line: "skip \(input.components.last!) (not present)"); continue }
+            guard try source.itemType(at: input) != nil else {
+                if required { throw LauncherError.io("Required launch component file is missing") }
+                log?.append(line: "skip \(input.components.last!) (not present)"); continue
+            }
             try source.withClaimedFile(at: input, permitHardLinks: true) { sourceClaim in
                 let size = sourceClaim.stamp.size, digest = sourceClaim.sha256
                 let final = try SafeRelativePath("drive_c/windows/system32/\(name)")
