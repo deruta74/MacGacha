@@ -34,6 +34,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lo7ted.macgacha
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ARCHS: arm64
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_IDENTITY: "-"
