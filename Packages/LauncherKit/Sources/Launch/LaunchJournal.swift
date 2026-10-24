@@ -9,8 +9,17 @@ public struct LaunchJournal: Sendable {
     private static let maximumBytes = 1 << 20
     let paths: AppPaths
     let fileOps: any FileOps
+    private let sessionOwned: Bool
+    private let beforeRead: @Sendable () throws -> Void
     public init(paths: AppPaths) { self.init(paths: paths, fileOps: SystemFileOps()) }
-    package init(paths: AppPaths, fileOps: any FileOps) { self.paths = paths; self.fileOps = fileOps }
+    /// Only the launch manager may opt out of the global operation lease, while
+    /// retaining this game's SessionLock until restoration is finished.
+    package init(paths: AppPaths, sessionOwned: Bool) {
+        self.init(paths: paths, fileOps: SystemFileOps(), sessionOwned: sessionOwned)
+    }
+    package init(paths: AppPaths, fileOps: any FileOps, sessionOwned: Bool = false, beforeRead: @escaping @Sendable () throws -> Void = {}) {
+        self.paths = paths; self.fileOps = fileOps; self.sessionOwned = sessionOwned; self.beforeRead = beforeRead
+    }
     public func write(_ s: LaunchSession) throws {
         try s.validate()
         let data = try encode(s)
@@ -22,6 +31,7 @@ public struct LaunchJournal: Sendable {
         }
     }
     public func read(game: String) throws -> LaunchSession? {
+        try beforeRead()
         guard let data = try readData(at: relative(game, "launch-session.json")) else { return nil }
         do {
             let session = try JSONDecoder().decode(LaunchSession.self, from: data)
@@ -32,10 +42,13 @@ public struct LaunchJournal: Sendable {
     }
     public func delete(game: String) throws {
         try withOwnership { fs in
-            guard let s = try read(game: game) else { return }
-            guard s.hides.isEmpty, s.state == .done || s.state == .recoveryConflict else {
-                throw LauncherError.busy("Launch recovery is not resolved")
+            if let s = try read(game: game) {
+                guard s.hides.isEmpty, s.state == .done || s.state == .recoveryConflict else {
+                    throw LauncherError.busy("Launch recovery is not resolved")
+                }
             }
+            // removeFile also syncs the parent when the leaf is absent: a prior
+            // unlink may have succeeded before its directory fsync failed.
             try fs.removeFile(at: relative(game, "launch-session.json"))
         }
     }
@@ -56,11 +69,13 @@ public struct LaunchJournal: Sendable {
     }
     func writeMetadata(_ data: Data, to path: SafeRelativePath, in fs: ContainedFileSystem) throws {
         try fs.createDirectoryDurably(at: SafeRelativePath(path.components.dropLast().joined(separator: "/")))
-        try fs.writeAtomically(data, to: path)
+        if sessionOwned { try fs.writeLaunchAtomically(data, to: path) }
+        else { try fs.writeAtomically(data, to: path) }
     }
     func withOwnership<T>(_ body: (ContainedFileSystem) throws -> T) throws -> T {
         let fs = try ContainedFileSystem(root: paths.root, fileOps: fileOps)
         try fs.createRootDurably(); try fs.createDirectoryDurably(at: SafeRelativePath("Games"))
+        if sessionOwned { return try body(fs) }
         let games = try ContainedFileSystem(root: paths.games, fileOps: fileOps)
         let lease = try GameOperationLease.acquire(fs: games)
         defer { withExtendedLifetime(lease) {} }

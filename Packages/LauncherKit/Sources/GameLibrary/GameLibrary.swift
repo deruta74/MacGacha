@@ -59,7 +59,13 @@ public actor GameLibrary {
         do {
             for id in try await store.gameDirectories().sorted() {
                 guard !Task.isCancelled else { return }
-                do { _ = try await runner.reconcile(id) }
+                do {
+                    try await operationGuard?.willOperate(on: id)
+                    try await store.waitForPipelineDrain()
+                    let gameLock = try acquireGameLock(id)
+                    defer { withExtendedLifetime(gameLock) {} }
+                    _ = try await runner.reconcile(id)
+                }
                 catch { await log?.log(.error, "game-library", "Reconciliation failed", metadata: ["game": id]) }
             }
         } catch { await log?.log(.error, "game-library", "Record discovery failed") }
@@ -114,7 +120,8 @@ public actor GameLibrary {
 
     public func uninstall(_ game: GameDefinition) async throws {
         try await operationGuard?.willOperate(on: game.id)
-        let lease = try await store.acquireOperationLease(); defer { withExtendedLifetime(lease) {} }
+        let gameLock = try acquireGameLock(game.id)
+        let lease = try await store.acquireOperationLease(retainedGameLock: gameLock); defer { withExtendedLifetime(lease) {} }
         let records = try await store.records()
         try GameRecordRules.check(.uninstall, record: records[game.id], others: others(records, game))
         guard var record = records[game.id] else { throw LauncherError.io("game is not installed") }
@@ -174,6 +181,14 @@ public actor GameLibrary {
         try await store.deleteGameDirectory(game.id)
     }
 
+    private func acquireGameLock(_ game: String) throws -> InstallLock {
+        let id = try SafeIdentifier(game)
+        let fs = try ContainedFileSystem(root: paths.root, fileOps: fileOps)
+        try fs.createRootDurably()
+        try fs.createDirectoryDurably(at: SafeRelativePath("Games/\(id.rawValue)"))
+        return try InstallLock(fs: fs, path: SafeRelativePath("Games/\(id.rawValue)/.session.lock"))
+    }
+
     private func stream(_ game: GameDefinition, _ request: LibraryRequest) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = LibrarySession(owner: self, game: game, request: request)
         return AsyncThrowingStream(unfolding: { try await session.next() })
@@ -182,7 +197,11 @@ public actor GameLibrary {
     fileprivate func prepare(_ game: GameDefinition, request: LibraryRequest) async throws -> LibraryPrepared {
         try await operationGuard?.willOperate(on: game.id)
         let resumes = if case .resume = request { true } else { false }
-        let lease = try await store.acquireOperationLease(waitForPipelineDrain: resumes)
+        // A cancelled pipeline retains both locks until it drains. Resume joins
+        // that drainage before trying the per-game lock, rather than failing busy.
+        if resumes { try await store.waitForPipelineDrain() }
+        let gameLock = try acquireGameLock(game.id)
+        let lease = try await store.acquireOperationLease(retainedGameLock: gameLock)
         let records = try await store.records(); let record = records[game.id]
         try GameRecordRules.check(request.action, record: record, others: others(records, game))
         if let record { try requireGameLocationAvailable(record.installPath) }

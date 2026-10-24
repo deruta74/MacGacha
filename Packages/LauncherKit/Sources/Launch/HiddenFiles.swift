@@ -55,6 +55,9 @@ public struct HiddenFiles: Sendable {
         }
     }
     public func restore(session: inout LaunchSession, journal: LaunchJournal) throws -> RestoreOutcome {
+        try restore(session: &session, journal: journal, retainResolvedJournal: false)
+    }
+    package func restore(session: inout LaunchSession, journal: LaunchJournal, retainResolvedJournal: Bool) throws -> RestoreOutcome {
         // Never turn caller-supplied or stale entries into ownership of files.
         guard let persisted = try journal.read(game: session.game), persisted.sessionID == session.sessionID else {
             return .pending(reason: "The launch journal is missing or belongs to another session")
@@ -95,7 +98,7 @@ public struct HiddenFiles: Sendable {
             try journal.write(session)
             hooks.reach(.afterFinalWrite)
             hooks.reach(.beforeJournalDelete)
-            try journal.delete(game: session.game)
+            if !retainResolvedJournal { try journal.delete(game: session.game) }
             hooks.reach(.afterJournalDelete)
             return conflicts.isEmpty ? .clean : .conflict(movedTo: conflicts)
         } catch let changed as ChangedSource {

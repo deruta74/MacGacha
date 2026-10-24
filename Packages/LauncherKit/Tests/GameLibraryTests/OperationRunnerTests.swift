@@ -413,6 +413,40 @@ import TestSupport
         #expect(try fs.itemType(at: directory) == ((!existingRecord && old) ? nil : .directory))
     }
 
+    @Test(arguments: [false, true], [false, true])
+    func launchWriteTemporariesAreAgedAndLiveSessionWritesAreNeverSwept(old: Bool, held: Bool) async throws {
+        let records = try TempDir(), fs = try ContainedFileSystem(root: records.url)
+        let path = try SafeRelativePath("genshin/.macgacha-launch-write-\(UUID().uuidString)")
+        try fs.writeAtomically(Data("launch snapshot".utf8), to: path)
+        if old {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7200)],
+                ofItemAtPath: path.resolved(against: records.url).path)
+        }
+        let lock = held ? try InstallLock(fs: fs, path: SafeRelativePath("genshin/.session.lock")) : nil
+        defer { withExtendedLifetime(lock) {} }
+        let store = GameRecordStore(directory: records.url)
+        try await store.savePlan(bridgePlan(), for: "genshin")
+        #expect(try await bridgeRunner(store, MockCDN()).reconcile("genshin") == nil)
+        #expect(try await store.loadPlan(for: "genshin") == nil)
+        #expect(try fs.itemType(at: path) == ((old && !held) ? nil : .regularFile))
+    }
+
+    @Test func gameOperationLeaseRetainsSessionLockUntilFinalOwnerReleasesIt() async throws {
+        let records = try TempDir(), fs = try ContainedFileSystem(root: records.url)
+        let path = try SafeRelativePath("genshin/.session.lock")
+        let store = GameRecordStore(directory: records.url)
+        var lease: GameOperationLease?
+        do {
+            let lock = try InstallLock(fs: fs, path: path)
+            lease = try await store.acquireOperationLease(retainedGameLock: lock)
+        }
+        #expect(throws: LauncherError.busy("install root in use")) { try InstallLock(fs: fs, path: path) }
+        withExtendedLifetime(lease) {}
+        lease = nil
+        let retry = try InstallLock(fs: fs, path: path)
+        withExtendedLifetime(retry) {}
+    }
+
     @Test func recordlessReconciliationKeepsSessionLockAndCleansOrphanPlan() async throws {
         let records = try TempDir(), fs = try ContainedFileSystem(root: records.url)
         let path = try SafeRelativePath("genshin/.session.lock")

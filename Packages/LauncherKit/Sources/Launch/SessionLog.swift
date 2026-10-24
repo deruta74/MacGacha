@@ -154,13 +154,16 @@ public struct SessionLog: Sendable {
     /// Recovery never adopts a pathname alone. A missing/mismatched sidecar or
     /// replaced inode is left untouched; a verified stale log is capped once.
     public static func recover(at url: URL) throws -> SessionLog? {
+        try recover(at: url, ticker: SystemSessionLogTicker())
+    }
+    package static func recover(at url: URL, ticker: any SessionLogTicker) throws -> SessionLog? {
         guard LaunchLogFiles.parseName(url.lastPathComponent) != nil else { return nil }
         let fs = try ContainedFileSystem(root: url.deletingLastPathComponent()).pinRoot()
         let path = try SafeRelativePath(url.lastPathComponent)
         guard let record = try readOwnership(fs, path), let file = try fs.openOwnedFile(at: path, matching: record.identity) else { return nil }
         let log = SessionLog(url: url, storage: Storage(fs: fs, path: path, file: file, limit: record.limit))
         log.enforceCap()
-        log.storage.start(SystemSessionLogTicker())
+        log.storage.start(ticker)
         return log
     }
 

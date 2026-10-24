@@ -8,6 +8,25 @@ import TestSupport
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchJournalTests {
+    @Test func ownedJournalHidesAndRestoresWhileOtherGameOwnsOperationLease() async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            let lock = try SessionLock.acquire(paths: f.paths, game: "starrail")
+            let store = GameRecordStore(directory: f.paths.games)
+            let lease = try await store.acquireOperationLease()
+            defer { withExtendedLifetime((lock, lease)) {} }
+            let owned = LaunchJournal(paths: f.paths, sessionOwned: true)
+            try f.fs.writeAtomically(oldBytes, to: gamePath)
+            try owned.write(f.session)
+            try HiddenFiles().hide([gamePath], session: &f.session, journal: owned)
+            #expect(try f.fs.itemType(at: gamePath) == nil)
+            #expect(try HiddenFiles().restore(session: &f.session, journal: owned) == .clean)
+            #expect(try f.fs.readFile(at: gamePath, maxBytes: 100) == oldBytes)
+            #expect(try owned.read(game: "starrail") == nil)
+            #expect(throws: LauncherError.self) { try f.journal.write(f.session) }
+        }
+    }
+
     @Test func snapshotRoundTripsWithoutConsultingCurrentSettings() async throws {
         try await BlockingIO.run {
             let f = try LaunchFixture()
@@ -20,6 +39,41 @@ import TestSupport
             let read = try #require(try f.journal.read(game: "starrail"))
             #expect(read == f.session)
             #expect(read.settings != changed)
+        }
+    }
+    @Test func legacySnapshotWithoutGroupsDecodesAndSpawnGroupsRoundTrip() async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            // The optional additive field is omitted by older journal writers.
+            let legacy = try JSONEncoder().encode(f.session)
+            #expect(!String(decoding: legacy, as: UTF8.self).contains("processGroupIDs"))
+            let decoded = try JSONDecoder().decode(LaunchSession.self, from: legacy)
+            #expect(decoded.processGroupIDs == nil)
+            #expect(decoded.bootSessionUUID == nil)
+            #expect(decoded.sessionStartTime == nil)
+            #expect(decoded.inspectionScope(runtimesRoot: f.paths.runtimes).processGroupIDs.isEmpty)
+            f.session.processGroupIDs = [42]
+            try f.journal.write(f.session)
+            #expect(try f.journal.read(game: "starrail")?.processGroupIDs == [42])
+            f.session.processGroupIDs = [0]
+            #expect(throws: LauncherError.self) { try f.journal.write(f.session) }
+        }
+    }
+    @Test func inspectionScopeRetainsSnapshotBootTimeAndIdentities() async throws {
+        try await BlockingIO.run {
+            let f = try LaunchFixture()
+            let session = LaunchSession(sessionID: f.session.sessionID, game: f.session.game,
+                installRoot: f.session.installRoot, installIdentity: f.session.installIdentity, prefix: f.session.prefix,
+                bundleID: f.session.bundleID, runtimeDigest: f.session.runtimeDigest, wineBinary: f.session.wineBinary,
+                wineserver: f.session.wineserver, componentIDs: f.session.componentIDs,
+                recipeVersion: 1, settings: f.session.settings, processes: [ProcessIdentity(pid: 42, startTime: 123)],
+                processGroupIDs: [42], bootSessionUUID: "D164F328-C268-4D08-B56C-547FA90745CA", sessionStartTime: 100)
+            try f.journal.write(session)
+            let decoded = try #require(try f.journal.read(game: "starrail"))
+            let scope = decoded.inspectionScope(runtimesRoot: f.paths.runtimes)
+            #expect(scope.identities == Set(session.processes))
+            #expect(scope.bootSessionUUID == session.bootSessionUUID)
+            #expect(scope.sessionStartTime == 100)
         }
     }
     @Test func corruptJournalThrowsAndIsNotRemoved() async throws {
