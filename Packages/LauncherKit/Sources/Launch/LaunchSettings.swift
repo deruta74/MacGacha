@@ -17,8 +17,8 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
     }
 
     public static func defaults(for game: String) -> Self {
-        Self(backend: .d3dmetal, retina: false, frameLimit: game == "zzz" ? nil : 60,
-            directX12: game == "zzz", compatibilityPatches: true)
+        Self(backend: .d3dmetal, retina: false, frameLimit: GameDefinition.find(game)?.family == .zzz ? nil : 60,
+            directX12: GameDefinition.find(game)?.family == .zzz, compatibilityPatches: true)
     }
 
     private enum CodingKeys: CodingKey { case backend, retina, frameLimit, directX12, compatibilityPatches }
@@ -26,7 +26,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
     // A standalone decoder uses the shared defaults (60 FPS, DirectX 12 off).
     static let gameKey = CodingUserInfoKey(rawValue: "MacGacha.launchSettings.game")!
     public init(from decoder: any Decoder) throws {
-        let defaults = Self.defaults(for: decoder.userInfo[Self.gameKey] as? String ?? "genshin")
+        let defaults = Self.defaults(for: decoder.userInfo[Self.gameKey] as? String ?? "")
         let c = try decoder.container(keyedBy: CodingKeys.self)
         backend = try c.decodeIfPresent(RuntimeBackend.self, forKey: .backend) ?? defaults.backend
         retina = try c.decodeIfPresent(Bool.self, forKey: .retina) ?? defaults.retina

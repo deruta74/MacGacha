@@ -41,7 +41,7 @@ final class AppModel {
         var downloadSize: Int64? = nil
     }
 
-    private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
+    private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(.global).map { ($0.id, GameState(status: .unknown)) })
     private(set) var gameRecords: [String: GameRecord] = [:]
     var isGameOperationRunning: Bool { gameOperation != nil }
     private(set) var gameArt: [String: GameArt]
@@ -582,9 +582,14 @@ struct BundledRuntimeManifest {
 
 extension AppModel {
     static var sampleGameStates: [String: GameState] {
-        ["genshin": GameState(status: .installed(tag: "7.1.0")),
-         "starrail": GameState(status: .paused(.update)),
-         "zzz": GameState(status: .notInstalled)]
+        Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(.global).map { game in
+            let status: GameStatus = switch game.family {
+            case .genshin: .installed(tag: "7.1.0")
+            case .starrail: .paused(.update)
+            case .zzz: .notInstalled
+            }
+            return (game.id, GameState(status: status))
+        })
     }
     static var sampleRows: [RuntimeRow] {
         [RuntimeRow(id: "dxmt-wine11.0-dxmt0.80", kindName: "DXMT", version: "11.0-yaagl + 0.80", licenseName: "LGPL-2.1 / MIT",

@@ -27,7 +27,7 @@ struct InstallSheet: View {
 
     init(game: LauncherGame, installRoot: URL) {
         self.game = game
-        _location = State(initialValue: installRoot.appendingPathComponent(game.name, isDirectory: true))
+        _location = State(initialValue: installRoot.appendingPathComponent(game.defaultInstallDirectoryName, isDirectory: true))
     }
 
     private var definition: GameDefinition? { GameDefinition.all.first { $0.id == game.id } }
@@ -109,7 +109,7 @@ struct InstallSheet: View {
             guard case .success(let folder) = result else { return }
             switch pickMode {
             case .location:
-                location = folder.appendingPathComponent(game.name, isDirectory: true)
+                location = folder.appendingPathComponent(game.defaultInstallDirectoryName, isDirectory: true)
             case .existing:
                 guard !voices.isEmpty, !blocked else { return }
                 model.adoptGame(game.id, folder: folder, voices: voices)

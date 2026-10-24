@@ -24,67 +24,73 @@ protocol GameServices: Sendable {
 }
 
 /// Construction does no filesystem work. All core work runs on service/core
-/// executors, and API requests and chunk transfers share one host-policy client.
+/// executors, and API requests and chunk transfers share one host-policy client per region.
 final class LiveGameServices: GameServices, Sendable {
-    private let library: GameLibrary
+    private let libraries: [Region: GameLibrary]
     private let store: GameRecordStore
     private let log: EventLog
-    private let session: DeliveryHTTPSession?
+    private let sessions: [Region: DeliveryHTTPSession]
 
     init(paths: AppPaths = .standard(), http: (any HTTPClient)? = nil,
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), retry: RetryPolicy = RetryPolicy(),
         sleeper: any Sleeper = ContinuousSleeper(), log: EventLog? = nil,
         guard operationGuard: (any GameOperationGuard)? = nil) {
-        let client: any HTTPClient
-        if let http { client = http; session = nil }
-        else { let owned = DeliveryHTTPSession(); session = owned; client = owned.client }
         let store = GameRecordStore(directory: paths.games), eventLog = log ?? EventLog(directory: paths.logs)
         self.store = store; self.log = eventLog
-        let fetcher = ChunkFetcher(http: client, retry: retry, sleeper: sleeper)
-        library = GameLibrary(paths: paths, api: DeliveryAPI(http: client),
-            runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog),
-            store: store, disk: disk, log: eventLog, guard: operationGuard)
+        var libraries: [Region: GameLibrary] = [:], sessions: [Region: DeliveryHTTPSession] = [:]
+        for region in Region.allCases {
+            let client: any HTTPClient
+            if let http { client = http }
+            else { let owned = DeliveryHTTPSession(region: region); sessions[region] = owned; client = owned.client }
+            let fetcher = ChunkFetcher(http: client, retry: retry, sleeper: sleeper)
+            libraries[region] = GameLibrary(paths: paths, api: DeliveryAPI(http: client, region: region),
+                runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog),
+                store: store, disk: disk, log: eventLog, guard: operationGuard)
+        }
+        self.libraries = libraries; self.sessions = sessions
     }
+    private func library(for game: GameDefinition) -> GameLibrary { libraries[game.region]! }
 
-    func start() async { await library.start() }
+    func start() async { await libraries[.global]!.start() }
     func status(_ id: String) async -> GameStatus {
         guard let game = Self.game(id) else { return .unknown }
-        return await library.status(game)
+        return await library(for: game).status(game)
     }
     func record(_ id: String) async throws -> GameRecord? {
         do { _ = try Self.requireGame(id); return try await store.load(id) }
         catch { throw await failure(error, id: id) }
     }
     @concurrent func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate {
-        do { return try await library.estimate(Self.requireGame(id), voices: voices, at: location) }
+        do { let game = try Self.requireGame(id)
+            return try await library(for: game).estimate(game, voices: voices, at: location) }
         catch { throw await failure(error, id: id) }
     }
     func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
-        return logged(await library.install(game, voices: voices, at: location, approved: approved), id: id)
+        return logged(await library(for: game).install(game, voices: voices, at: location, approved: approved), id: id)
     }
     func adopt(_ id: String, folder: URL, voices: Set<String>) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
-        return logged(await library.adopt(game, folder: folder, voices: voices), id: id)
+        return logged(await library(for: game).adopt(game, folder: folder, voices: voices), id: id)
     }
     func update(_ id: String, approved: Bool) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
-        return logged(await library.update(game, approved: approved), id: id)
+        return logged(await library(for: game).update(game, approved: approved), id: id)
     }
     func resume(_ id: String, approved: Bool) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
-        return logged(await library.resume(game, approved: approved), id: id)
+        return logged(await library(for: game).resume(game, approved: approved), id: id)
     }
     func verify(_ id: String, mode: Verifier.Mode) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
-        return logged(await library.verify(game, mode: mode), id: id)
+        return logged(await library(for: game).verify(game, mode: mode), id: id)
     }
     func setVoices(_ id: String, _ voices: Set<String>) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
-        return logged(await library.setVoices(game, voices), id: id)
+        return logged(await library(for: game).setVoices(game, voices), id: id)
     }
     func uninstall(_ id: String) async throws {
-        do { try await library.uninstall(Self.requireGame(id)) }
+        do { let game = try Self.requireGame(id); try await library(for: game).uninstall(game) }
         catch { throw await failure(error, id: id) }
     }
     private static func game(_ id: String) -> GameDefinition? { GameDefinition.all.first { $0.id == id } }
@@ -94,7 +100,7 @@ final class LiveGameServices: GameServices, Sendable {
     }
     private func invalidGame() -> GameEventStream { GameEventStream { $0.finish(throwing: LauncherError.io("Unknown game")) } }
     private func logged(_ source: GameEventStream, id: String) -> GameEventStream {
-        let pull = LoggedGameOperation(source: source, id: Self.game(id)?.id ?? "unknown", log: log, session: session)
+        let pull = LoggedGameOperation(source: source, id: Self.game(id)?.id ?? "unknown", log: log, session: Self.game(id).flatMap { sessions[$0.region] })
         return GameEventStream(unfolding: { try await pull.next() })
     }
     private func failure(_ error: any Error, id: String) async -> LauncherError {
@@ -105,7 +111,8 @@ final class LiveGameServices: GameServices, Sendable {
 }
 
 private final class DeliveryHTTPSession: Sendable {
-    let client = DeliveryHostPolicy.makeHTTPClient()
+    let client: URLSessionHTTPClient
+    init(region: Region) { client = DeliveryHostPolicy.makeHTTPClient(region: region) }
     deinit { client.invalidate() }
 }
 private func logGameFailure(_ error: LauncherError, id: String, log: EventLog) async {

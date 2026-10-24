@@ -20,7 +20,7 @@ struct GameSettingsSheet: View {
     }
 
     /// Only Zenless Zone Zero has a DirectX 12 renderer, and only D3DMetal runs it.
-    private var offersDirectX12: Bool { game.id == "zzz" }
+    private var offersDirectX12: Bool { Recipes.recipe(for: game.id)?.supportsDirectX12 == true }
 
     var body: some View {
         NavigationStack {

@@ -1097,6 +1097,16 @@
         }
       }
     },
+    "MacGacha could not identify this folder’s edition. Select an official installation with its launcher configuration." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 无法识别此文件夹的地区版本。请选择包含启动器配置的官方安装文件夹。"
+          }
+        }
+      }
+    },
     "MacGacha is putting the game's files back. You can play when it's done." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1708,6 +1718,16 @@
         }
       }
     },
+    "This distribution, including Bilibili, is not supported yet. Use an official Global or Mainland China installation." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂不支持此发行版本（包括哔哩哔哩服）。请使用官方国际服或中国大陆服的安装文件夹。"
+          }
+        }
+      }
+    },
     "This finishes the uninstall that was interrupted. %@" : {
       "comment" : "The argument is the sentence about what is removed",
       "localizations" : {
@@ -1715,6 +1735,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这将完成之前中断的卸载。%@"
+          }
+        }
+      }
+    },
+    "This folder belongs to a different game or edition. Choose the matching game and region." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件夹属于其他游戏或地区版本。请选择对应的游戏和地区。"
           }
         }
       }
@@ -2058,6 +2088,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "其所在文件夹"
+          }
+        }
+      }
+    },
+    "原神" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原神"
+          }
+        }
+      }
+    },
+    "崩坏：星穹铁道" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "崩坏：星穹铁道"
+          }
+        }
+      }
+    },
+    "绝区零" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "绝区零"
           }
         }
       }

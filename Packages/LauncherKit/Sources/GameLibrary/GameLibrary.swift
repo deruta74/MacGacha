@@ -222,7 +222,9 @@ public actor GameLibrary {
                 reservedLocations: [paths.root, paths.runtimes]))
         case .adopt(let voices, let location):
             try checkNewLocation(location, records: records, game: game, empty: false)
-            let identity = try ContainedFileSystem(root: location).rootIdentity()
+            let source = try ContainedFileSystem(root: location).pinRoot()
+            try AdoptEditionValidator.validate(game, in: source)
+            let identity = try source.rootIdentity()
             try await store.deleteState(Self.cleanupName, for: game.id)
             let config = try await api.config(biz: game.biz), target = try await resolve(game, voices: voices)
             let record = GameRecord(installPath: location, ownership: .adopted, executable: config.executable, installIdentity: identity)
