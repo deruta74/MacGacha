@@ -60,7 +60,7 @@ public enum LaunchResolver {
         for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] { environment[key] = proxy }
         if settings.compatibilityPatches && recipe.timeoutFix { environment["WINE_ENABLE_TIMEOUT_FIX"] = "1" }
 
-        let dxmt = settings.backend == .dxmt, starRail = recipe.game == "starrail"
+        let dxmt = settings.backend == .dxmt, starRail = GameDefinition.find(recipe.game)?.family == .starrail
         switch settings.backend {
         case .d3dmetal:
             environment["WINEESYNC"] = "1"

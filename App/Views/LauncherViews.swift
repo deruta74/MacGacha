@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import AppKit
 import SwiftUI
+import LauncherCore
 
 /// The games MacGacha knows. Art is never bundled: it comes from the official
 /// HoYoPlay API at run time and is cached locally (see `AppModel.gameArt`).
@@ -14,11 +15,26 @@ struct LauncherGame: Identifiable, Hashable {
 }
 
 extension LauncherGame {
-    static let all: [LauncherGame] = [
-        LauncherGame(id: "genshin", name: String(localized: "Genshin Impact"), tint: Color(red: 0.98, green: 0.78, blue: 0.46), deepTint: Color(red: 0.16, green: 0.22, blue: 0.38)),
-        LauncherGame(id: "starrail", name: String(localized: "Honkai: Star Rail"), tint: Color(red: 0.69, green: 0.66, blue: 0.93), deepTint: Color(red: 0.10, green: 0.08, blue: 0.24)),
-        LauncherGame(id: "zzz", name: String(localized: "Zenless Zone Zero"), tint: Color(red: 0.85, green: 0.93, blue: 0.30), deepTint: Color(red: 0.10, green: 0.10, blue: 0.10)),
-    ]
+    // CN-3 adds the picker; keep the visible rail Global-only meanwhile.
+    static let all: [LauncherGame] = GameDefinition.inRegion(.global).map { definition in
+        let name: String, tint: Color, deepTint: Color
+        switch definition.family {
+        case .genshin:
+            name = String(localized: "Genshin Impact")
+            tint = Color(red: 0.98, green: 0.78, blue: 0.46); deepTint = Color(red: 0.16, green: 0.22, blue: 0.38)
+        case .starrail:
+            name = String(localized: "Honkai: Star Rail")
+            tint = Color(red: 0.69, green: 0.66, blue: 0.93); deepTint = Color(red: 0.10, green: 0.08, blue: 0.24)
+        case .zzz:
+            name = String(localized: "Zenless Zone Zero")
+            tint = Color(red: 0.85, green: 0.93, blue: 0.30); deepTint = Color(red: 0.10, green: 0.10, blue: 0.10)
+        }
+        return LauncherGame(id: definition.id, name: name, tint: tint, deepTint: deepTint)
+    }
+    var defaultInstallDirectoryName: String {
+        GameDefinition.find(id)?.defaultInstallDirectoryName ?? name
+    }
+
 }
 
 // MARK: - Images

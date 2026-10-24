@@ -207,11 +207,18 @@ import RuntimeManager
     }
     var liveSessionGameName: String? {
         guard let id = liveLaunchGames.sorted().first else { return nil }
-        switch id {
-        case "genshin": return String(localized: "Genshin Impact")
-        case "starrail": return String(localized: "Honkai: Star Rail")
-        case "zzz": return String(localized: "Zenless Zone Zero")
-        default: return nil
+        guard let game = GameDefinition.find(id) else { return nil }
+        if game.region == .mainlandChina {
+            switch game.family {
+            case .genshin: return String(localized: "原神")
+            case .starrail: return String(localized: "崩坏：星穹铁道")
+            case .zzz: return String(localized: "绝区零")
+            }
+        }
+        switch game.family {
+        case .genshin: return String(localized: "Genshin Impact")
+        case .starrail: return String(localized: "Honkai: Star Rail")
+        case .zzz: return String(localized: "Zenless Zone Zero")
         }
     }
     func openLaunchLog(_ id: String) {

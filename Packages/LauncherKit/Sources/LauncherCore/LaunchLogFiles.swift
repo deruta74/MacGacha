@@ -5,11 +5,12 @@ import Foundation
 /// Plain log locations shared by recipe data and diagnostics callers. All enumeration
 /// is blocking I/O: async callers use BlockingIO.run. Recovery metadata is not a log.
 public enum LaunchLogFiles {
-    public static let games = ["genshin", "starrail", "zzz"]
+    public static let games = GameDefinition.all.map(\.id)
     public static func gameLogPaths(for game: String) -> [SafeRelativePath] {
-        let products = ["genshin": "Genshin Impact", "starrail": "Star Rail", "zzz": "ZenlessZoneZero"]
-        guard let product = products[game] else { return [] }
-        return ["miHoYo", "Cognosphere"].flatMap { company in
+        guard let definition = GameDefinition.find(game) else { return [] }
+        let product = definition.unityLogProductName
+        let companies = definition.region == .global ? ["miHoYo", "Cognosphere"] : ["miHoYo"]
+        return companies.flatMap { company in
             ["Player.log", "output_log.txt"].map { try! SafeRelativePath("AppData/LocalLow/\(company)/\(product)/\($0)") }
         }
     }
@@ -37,7 +38,9 @@ public enum LaunchLogFiles {
         let roots = try fs.contentsOfRootDirectory()
         var result: [String: [SafeRelativePath]] = [:]
         for game in games {
-            for root in roots.filter({ $0.description.hasPrefix(game + "-") }).prefix(128) {
+            for root in roots.filter({ root in
+                games.filter { root.description.hasPrefix($0 + "-") }.max(by: { $0.count < $1.count }) == game
+            }).prefix(128) {
                 guard try fs.itemType(at: root, allowingLeafSymlink: true) == .directory else { continue }
                 let users = try SafeRelativePath("\(root)/drive_c/users")
                 guard (try? fs.itemType(at: users, allowingLeafSymlink: true)) == .directory else { continue }

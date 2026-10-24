@@ -15,6 +15,9 @@ public enum LauncherError: Error, Sendable, Equatable {
     case fileTooLarge(path: String, limit: Int)
     case consentRequired(String)
     case processFailed(executable: String, exitCode: Int32, stderrTail: String)
+    case gameEditionMismatch
+    case gameEditionUnknown
+    case gameDistributionUnsupported
     case cancelled
     case journalCorrupt(String)
 }

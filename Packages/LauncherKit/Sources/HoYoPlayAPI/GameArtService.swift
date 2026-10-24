@@ -11,10 +11,7 @@ public actor GameArtService {
     private static let ttl: TimeInterval = 6 * 3600
     private static let indexLimit = 512 << 10
     private static func gameIDs(_ region: Region) -> [String: String] {
-        switch region {
-        case .global: ["hk4e_global": "genshin", "hkrpg_global": "starrail", "nap_global": "zzz"]
-        case .mainlandChina: ["hk4e_cn": "genshin-cn", "hkrpg_cn": "starrail-cn", "nap_cn": "zzz-cn"]
-        }
+        Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0.id) })
     }
     private nonisolated let snapshot = Mutex<[String: GameArt]>([:])
     private let directory: URL

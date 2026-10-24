@@ -75,7 +75,7 @@ import TestSupport
         #expect(Recipes.recipe(for: "zzz")?.verifiedBuilds == ["3.3.0"])
         for game in Recipes.games {
             let recipe = try #require(Recipes.recipe(for: game))
-            #expect(!recipe.verifiedBuilds.isEmpty)
+            #expect(recipe.verifiedBuilds.isEmpty == (GameDefinition.find(game)?.region == .mainlandChina))
             for build in recipe.verifiedBuilds {
                 let parts = build.split(separator: ".", omittingEmptySubsequences: false)
                 #expect(parts.count >= 2)

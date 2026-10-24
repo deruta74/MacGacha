@@ -15,6 +15,41 @@ import Sophon
 
 @Suite(.serialized) @MainActor
 struct AppModelGamesTests {
+    @Test func visibleRailRemainsGlobalAndInstallFoldersAreEditionSpecific() throws {
+        #expect(LauncherGame.all.map(\.id) == GameDefinition.inRegion(.global).map(\.id))
+        #expect(LauncherGame.all.count == 3)
+        let style = try #require(LauncherGame.all.first)
+        for definition in GameDefinition.inRegion(.mainlandChina) {
+            let game = LauncherGame(id: definition.id, name: "Unrelated interface name", tint: style.tint, deepTint: style.deepTint)
+            #expect(game.defaultInstallDirectoryName == definition.defaultInstallDirectoryName)
+        }
+        for game in LauncherGame.all { #expect(game.defaultInstallDirectoryName == GameDefinition.find(game.id)?.defaultInstallDirectoryName) }
+        let localizedGlobal = LauncherGame(id: "genshin", name: "原神", tint: style.tint, deepTint: style.deepTint)
+        #expect(localizedGlobal.defaultInstallDirectoryName == "Genshin Impact")
+    }
+
+    @Test(arguments: GameDefinition.all.map(\.id))
+    func liveGameServicesSelectEditionEndpoints(id: String) async throws {
+        let game = try #require(GameDefinition.find(id))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CN2-Services-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let http = GameFailingHTTP(error: .transport("injected metadata failure"))
+        let services = LiveGameServices(paths: AppPaths(root: root.appendingPathComponent("app")), http: http)
+        await #expect(throws: LauncherError.transport("delivery request failed")) {
+            _ = try await services.estimate(id, voices: ["zh-cn"], at: root.appendingPathComponent("install"))
+        }
+        let request = try #require(http.requests.first)
+        #expect(request.host == game.region.hypAPIHost)
+        #expect(URLComponents(url: request, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "launcher_id" }?.value == game.region.launcherID)
+    }
+
+    @Test func adoptionErrorsHaveSpecificSafeMessages() {
+        let messages = [LauncherError.gameEditionMismatch.userMessage, LauncherError.gameEditionUnknown.userMessage,
+            LauncherError.gameDistributionUnsupported.userMessage]
+        #expect(Set(messages).count == 3)
+        #expect(messages.allSatisfy { !$0.isEmpty && !$0.contains("/Users/") })
+    }
+
     @Test func installEmitsWorkingThenInstalled() async throws {
         let (model, fake, _) = try gameFixture(); defer { fake.finish() }
         model.installGame("genshin", voices: ["en-us"], at: gameLocation, approved: false)

@@ -9,15 +9,15 @@ import TestSupport
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchSettingsStoreTests {
-    @Test(arguments: ["genshin", "starrail", "zzz"]) func settingsStoreRoundTripAndDefaults(game: String) async throws {
+    @Test(arguments: GameDefinition.all.map(\.id)) func settingsStoreRoundTripAndDefaults(game: String) async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), paths = AppPaths(root: temp.url)
             let store = LaunchSettingsStore(paths: paths)
             let defaults = try store.load(game)
             #expect(defaults == .defaults(for: game))
             #expect(defaults.backend == .d3dmetal && !defaults.retina && defaults.compatibilityPatches)
-            #expect(defaults.frameLimit == (game == "zzz" ? nil : 60))
-            #expect(defaults.directX12 == (game == "zzz"))
+            #expect(defaults.frameLimit == (GameDefinition.find(game)?.family == .zzz ? nil : 60))
+            #expect(defaults.directX12 == (GameDefinition.find(game)?.family == .zzz))
             #expect(!FileManager.default.fileExists(atPath: paths.games.path))
             var settings = defaults
             settings.backend = .dxmt; settings.retina = true; settings.frameLimit = nil
@@ -32,7 +32,7 @@ import TestSupport
         }
     }
 
-    @Test(arguments: ["genshin", "starrail", "zzz"]) func partialJSONUsesGameDefaultsAndIgnoresFutureFields(game: String) async throws {
+    @Test(arguments: GameDefinition.all.map(\.id)) func partialJSONUsesGameDefaultsAndIgnoresFutureFields(game: String) async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), paths = AppPaths(root: temp.url)
             let fs = try ContainedFileSystem(root: temp.url)

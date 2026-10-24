@@ -548,7 +548,7 @@ public actor LaunchManager {
         LaunchFailure(stage: stage, message: String(localized: "Launch failed during \(stage.rawValue)."), logURL: log, unverifiedBuild: unverified)
     }
     private static func name(_ game: String) -> String {
-        ["starrail": "Star Rail", "genshin": "Genshin Impact", "zzz": "Zenless Zone Zero"][game] ?? "A game"
+        GameDefinition.find(game)?.defaultInstallDirectoryName ?? "A game"
     }
 
     /// Startup recovery reads only durable snapshots. No proxy is recreated:

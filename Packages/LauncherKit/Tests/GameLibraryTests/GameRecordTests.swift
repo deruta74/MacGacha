@@ -11,16 +11,37 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite struct GameRecordTests {
+    @Test func globalAndChinaRecordsCoexistUnderOneInstallRoot() async throws {
+        let temp = try TempDir(), paths = AppPaths(root: temp.url.appendingPathComponent("app"))
+        let store = GameRecordStore(directory: paths.games)
+        let installParent = temp.url.appendingPathComponent("installed")
+        var expected: [String: GameRecord] = [:]
+        for game in GameDefinition.all {
+            let record = try await BlockingIO.run {
+                let root = installParent.appendingPathComponent(game.defaultInstallDirectoryName)
+                let fs = try ContainedFileSystem(root: root); try fs.createRootDurably()
+                return GameRecord(installPath: root, ownership: .created, executable: try SafeRelativePath(game.executableName),
+                    installed: InstalledBuild(tag: "1.0.0", buildID: game.id, categories: [], voices: ["zh-cn"]),
+                    installIdentity: try fs.rootIdentity())
+            }
+            try await store.save(record, for: game.id); expected[game.id] = record
+        }
+        let reopened = GameRecordStore(directory: paths.games)
+        #expect(try await reopened.records() == expected)
+        #expect(Set(expected.values.map(\.installPath)).count == 6)
+        #expect(try await reopened.gameDirectories().count == 6)
+    }
+
     @Test func globalDefinitionsCarryRegionAndHYPIdentifiers() {
-        #expect(GameDefinition.all.map(\.region) == [.global, .global, .global])
-        #expect(GameDefinition.all.map(\.gameID) == ["gopR6Cufr3", "4ziysqXOQ8", "U5hbdsT9W7"])
+        #expect(GameDefinition.inRegion(.global).map(\.region) == [.global, .global, .global])
+        #expect(GameDefinition.inRegion(.global).map(\.gameID) == ["gopR6Cufr3", "4ziysqXOQ8", "U5hbdsT9W7"])
         let cn = GameDefinition(id: "genshin-cn", biz: "hk4e_cn", region: .mainlandChina, gameID: "1Z8W5NHUQb", voices: [])
         #expect(cn.region == .mainlandChina && cn.gameID == "1Z8W5NHUQb")
-        #expect(!GameDefinition.all.contains { $0.id == cn.id })
+        #expect(GameDefinition.find(cn.id)?.biz == cn.biz)
     }
     @Test func gameDefinitionsCoverGlobalGamesAndVoices() {
-        #expect(GameDefinition.all.map(\.id) == ["genshin", "starrail", "zzz"])
-        #expect(GameDefinition.all.map(\.biz) == ["hk4e_global", "hkrpg_global", "nap_global"])
+        #expect(GameDefinition.inRegion(.global).map(\.id) == ["genshin", "starrail", "zzz"])
+        #expect(GameDefinition.inRegion(.global).map(\.biz) == ["hk4e_global", "hkrpg_global", "nap_global"])
         for game in GameDefinition.all {
             #expect(game.voices.map(\.code) == ["zh-cn", "en-us", "ja-jp", "ko-kr"])
             #expect(game.voices.allSatisfy { !$0.name.isEmpty })
