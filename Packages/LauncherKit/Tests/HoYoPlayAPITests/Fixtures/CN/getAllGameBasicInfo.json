@@ -1,0 +1,64 @@
+{
+  "retcode": 0,
+  "data": {
+    "game_info_list": [
+      {
+        "game": {
+          "biz": "nap_cn"
+        },
+        "backgrounds": [
+          {
+            "type": "BACKGROUND_TYPE_VIDEO",
+            "background": {
+              "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/10/16/7fed3cc9957dc9d9ee124489ca986432_1550543220783447346.webp"
+            },
+            "video": {
+              "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/10/16/d9666bfb6df441d244dc24dfdfac5a58_5474892735456403014.webm"
+            },
+            "theme": {
+              "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/10/16/d0a76a9569c6f890a98dbc5f42275ca9_6405846093481309961.webp"
+            }
+          }
+        ]
+      },
+      {
+        "game": {
+          "biz": "hkrpg_cn"
+        },
+        "backgrounds": [
+          {
+            "type": "BACKGROUND_TYPE_VIDEO",
+            "background": {
+              "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/09/21/b067c095be4ca6c516284042152e4551_2832655077208782996.webp"
+            },
+            "video": {
+              "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/09/21/c305e408c4adabc857e4cc98f91bbbea_7946121228482848149.webm"
+            },
+            "theme": {
+              "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/09/21/d73f4e7ebf1b4ce21c4bbea423bf965e_1861339428946601911.webp"
+            }
+          }
+        ]
+      },
+      {
+        "game": {
+          "biz": "hk4e_cn"
+        },
+        "backgrounds": [
+          {
+            "type": "BACKGROUND_TYPE_UNSPECIFIED",
+            "background": {
+              "url": "https://launcher-webstatic.mihoyo.com/launcher-public/2026/09/23/f409ab8ea48fce4bc700210e7683eba2_9111069675118525593.webp"
+            },
+            "video": {
+              "url": ""
+            },
+            "theme": {
+              "url": ""
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

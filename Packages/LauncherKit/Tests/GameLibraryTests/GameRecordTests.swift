@@ -11,6 +11,13 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite struct GameRecordTests {
+    @Test func globalDefinitionsCarryRegionAndHYPIdentifiers() {
+        #expect(GameDefinition.all.map(\.region) == [.global, .global, .global])
+        #expect(GameDefinition.all.map(\.gameID) == ["gopR6Cufr3", "4ziysqXOQ8", "U5hbdsT9W7"])
+        let cn = GameDefinition(id: "genshin-cn", biz: "hk4e_cn", region: .mainlandChina, gameID: "1Z8W5NHUQb", voices: [])
+        #expect(cn.region == .mainlandChina && cn.gameID == "1Z8W5NHUQb")
+        #expect(!GameDefinition.all.contains { $0.id == cn.id })
+    }
     @Test func gameDefinitionsCoverGlobalGamesAndVoices() {
         #expect(GameDefinition.all.map(\.id) == ["genshin", "starrail", "zzz"])
         #expect(GameDefinition.all.map(\.biz) == ["hk4e_global", "hkrpg_global", "nap_global"])
