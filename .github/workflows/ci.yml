@@ -13,8 +13,10 @@ concurrency:
 permissions:
   contents: read
 
+# Three independent jobs run in parallel; each builds what it needs from a
+# clean checkout, so no job waits for another.
 jobs:
-  build-test:
+  package-tests:
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
@@ -23,9 +25,6 @@ jobs:
 
       - name: Show Xcode version
         run: xcodebuild -version
-
-      - name: Install XcodeGen
-        run: brew install xcodegen
 
       - name: Check license headers
         run: scripts/check-headers.sh
@@ -47,6 +46,26 @@ jobs:
             --skip PlanScaleTests --skip operationStagesOneThousandBatchesWithLinearWork \
             --parallel --num-workers 2 --xunit-output test-results/strict-engine.xml
 
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-test-results-${{ github.sha }}
+          path: |
+            test-results/*.xml
+            test-results/*.jsonl
+            test-results/*.sample-*.txt
+
+  app-tests:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
       - name: Generate Xcode project
         run: scripts/bootstrap.sh
 
@@ -64,6 +83,26 @@ jobs:
 
       - name: Check string catalog
         run: python3 scripts/check-strings.py .build/xcode
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-results-${{ github.sha }}
+          path: test-results/*.xcresult
+
+  release-build:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: scripts/bootstrap.sh
 
       - name: Build app
         run: >-
@@ -85,14 +124,3 @@ jobs:
           name: MacGacha-${{ github.sha }}
           path: MacGacha.zip
           retention-days: 14
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ github.sha }}
-          path: |
-            test-results/*.xml
-            test-results/*.jsonl
-            test-results/*.sample-*.txt
-            test-results/*.xcresult
