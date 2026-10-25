@@ -63,7 +63,7 @@ targets:
         SPARKLE_PUBLIC_ED_KEY: "twDFIWAvlw1lBPC12GhgVqHMvPTpgYCUstqhuVJ/vPg="
         INFOPLIST_KEY_CFBundleDisplayName: MacGacha
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 deruta74. GPL-3.0."
-        MARKETING_VERSION: 0.1.0
+        MARKETING_VERSION: 0.1.1
         CURRENT_PROJECT_VERSION: 1
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.games
         SWIFT_VERSION: "6.0"
