@@ -8,6 +8,11 @@ set -euo pipefail
 name="${1:?usage: scripts/package-dmg.sh <release-name> [output-dir]}"
 output_dir="${2:-.build/release}"
 derived_data_path="${MACGACHA_DERIVED_DATA_PATH:-.build/xcode-release}"
+build_number="${MACGACHA_BUILD_NUMBER-1}"
+if [[ ! "$build_number" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'error: MACGACHA_BUILD_NUMBER must be a positive integer\n' >&2
+  exit 1
+fi
 
 if [[ ! "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
   printf 'error: release name must look like 0.1.0 or 0.1.0-beta, got: %s\n' "$name" >&2
@@ -28,6 +33,7 @@ xcodebuild \
   -configuration Release \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$derived_data_path" \
+  CURRENT_PROJECT_VERSION="$build_number" \
   build
 
 app="$derived_data_path/Build/Products/Release/MacGacha.app"

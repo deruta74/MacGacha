@@ -39,6 +39,7 @@ This only changes MacGacha itself, not any system setting. The first launch can 
 ## Roadmap
 
 **Done**
+- **Automatic updates** (Sparkle). **Check for Updates…** in the MacGacha menu and a switch in Settings. MacGacha asks before it downloads an update and installs it only when no game, recovery or installation is running.
 - **Download engine.** Resumable, verified downloads with a crash-safe journal. A file reaches the game folder only after its hash matches. Files are downloaded and assembled in parallel, close to the full speed of a 2.5 Gbit link.
 - **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space".
 - **Runtimes.** Wine, DXMT and D3DMetal are downloaded and kept side by side, so an update never breaks a working version. D3DMetal is installed only after you accept Apple's terms, or imported from an existing Game Porting Toolkit. The default DXMT build now uses CrossOver's Wine, which needs about 2.5× less CPU than the previous one.
@@ -69,13 +70,12 @@ DXMT works for every game and stays available as the open-source alternative. Th
 - **Interface in every HoYoPlay language.** Besides English and Simplified Chinese: Traditional Chinese, Japanese, Korean, Russian, German, French, Spanish, Portuguese, Indonesian, Thai and Vietnamese. Game news and art already follow the interface language.
 
 **Next**
-1. **Automatic updates** (Sparkle), so you get fixes without downloading DMGs by hand.
-2. **Wine 11.21 runtime**, which has the crypt32 fix built in. Our separate fix then goes away.
-3. **Display choice.** Pick the monitor a game opens on, the main display by default.
-4. **FPS unlocker (opt-in)** for games capped at 60 fps, off by default, with a ban-risk warning before you enable it.
-5. **Downloads.** Estimated time remaining and pre-downloading the next version before release.
-6. **Rotating banners and news** like HoYoPlay.
-7. **Audio.** Surround output, including Spatial Audio on AirPods.
+1. **Wine 11.21 runtime**, which has the crypt32 fix built in. Our separate fix then goes away.
+2. **Display choice.** Pick the monitor a game opens on, the main display by default.
+3. **FPS unlocker (opt-in)** for games capped at 60 fps, off by default, with a ban-risk warning before you enable it.
+4. **Downloads.** Estimated time remaining and pre-downloading the next version before release.
+5. **Rotating banners and news** like HoYoPlay.
+6. **Audio.** Surround output, including Spatial Audio on AirPods.
 
 ## Feedback
 

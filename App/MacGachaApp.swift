@@ -30,6 +30,12 @@ struct MacGachaApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1280, height: 720)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { model.checkForUpdates() }
+                    .disabled(!model.canCheckForUpdates)
+            }
+        }
 
         Settings {
             SettingsView()

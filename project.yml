@@ -4,6 +4,9 @@ options:
   deploymentTarget:
     macOS: "27.0"
 packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
   LauncherKit:
     path: Packages/LauncherKit
 settings:
@@ -20,7 +23,11 @@ targets:
         excludes: [Resources]
       - path: App/Resources
         buildPhase: resources
+      - path: THIRD_PARTY_NOTICES
+        buildPhase: resources
     dependencies:
+      - package: Sparkle
+        product: Sparkle
       - target: Rosetta Prompt
         embed: true
         link: false
@@ -51,6 +58,9 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_ENTITLEMENTS: App/MacGacha.entitlements
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: App/Info.plist
+        # Sparkle Ed25519 public key. The private key is the SPARKLE_ED_PRIVATE_KEY secret.
+        SPARKLE_PUBLIC_ED_KEY: "twDFIWAvlw1lBPC12GhgVqHMvPTpgYCUstqhuVJ/vPg="
         INFOPLIST_KEY_CFBundleDisplayName: MacGacha
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 deruta74. GPL-3.0."
         MARKETING_VERSION: 0.1.0
