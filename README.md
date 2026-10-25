@@ -8,6 +8,20 @@ A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenl
 
 Code and documentation in this repository may be written or modified with assistance from large language models (LLMs) and AI agents. The software is provided under the [GPL-3.0 license](LICENSE), as is, without warranty.
 
+## Install
+
+1. Download `MacGacha-<version>.dmg` from [Releases](https://github.com/deruta74/MacGacha/releases), open it and drag **MacGacha** to **Applications**.
+2. Open MacGacha. Beta builds aren't signed or notarized yet, so macOS says it can't verify the developer; click **Done**.
+3. Open **System Settings → Privacy & Security**, scroll down to the MacGacha message and click **Open Anyway**, then confirm.
+
+If there's no **Open Anyway** button, or macOS still refuses to open the app, remove the download quarantine flag in Terminal and open MacGacha again:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/MacGacha.app
+```
+
+This only changes MacGacha itself, not any system setting. The first launch can take a while as macOS checks the app.
+
 ## Screenshots
 
 ![Launcher with the current Honkai: Star Rail banner, ready to play](assets/screenshots/launcher.jpg)
