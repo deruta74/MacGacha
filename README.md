@@ -100,10 +100,8 @@ MacGacha is an unofficial, community project. It is not affiliated with, endorse
 
 ## Related projects
 
-- [yaagl](https://github.com/yaagl/yet-another-anime-game-launcher): another macOS launcher for the same games.
-- [an-anime-team](https://github.com/an-anime-team) launchers: An Anime Game Launcher, The Honkers Railway Launcher and Sleepy Launcher, for Linux.
-- [DXMT](https://github.com/3Shain/dxmt): a Metal-based Direct3D 11 translation layer.
-- [jadeite](https://codeberg.org/mkrsym1/jadeite): the anti-cheat workaround for Star Rail.
+- [DXMT](https://github.com/3Shain/dxmt): a Metal-based Direct3D 11 translation layer, one of MacGacha's two graphics backends.
+- [jadeite](https://codeberg.org/mkrsym1/jadeite): the anti-cheat workaround MacGacha uses for Star Rail.
 
 ## Special thanks
 
