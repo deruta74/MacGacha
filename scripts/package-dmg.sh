@@ -38,6 +38,7 @@ xcodebuild \
 
 app="$derived_data_path/Build/Products/Release/MacGacha.app"
 codesign --verify --strict "$app"
+scripts/check-app-loads.sh "$app"
 
 staging=$(mktemp -d)
 trap 'rm -rf "$staging"' EXIT
