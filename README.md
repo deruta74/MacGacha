@@ -37,15 +37,15 @@ Code and documentation in this repository may be written or modified with assist
 - **Privacy.** Games run in their own Wine prefix with no links to your Desktop, Documents or other home folders. Session logs stay on your Mac and can be turned off in Settings.
 - **Languages.** English and Simplified Chinese interface; game news and art follow the interface language.
 
-**Verified by hand on an M5 Pro (macOS 27)**
+**Verified by hand (macOS 27.0.1)**
 
-All three games start and play with a community anti-cheat workaround. None of them needs `/etc/hosts` changes or administrator rights.
+All three games start and play with a community anti-cheat workaround. None of them needs `/etc/hosts` changes or administrator rights. Measured on a MacBook Pro 14″ with M5 Pro (48 GB) and on a base M5 (16 GB); Zenless Zone Zero used the same graphics preset on both.
 
-| Game | Default backend | Result |
-|---|---|---|
-| Honkai: Star Rail 4.6 | D3DMetal, 60 fps cap | 60 fps on Ultra. About half the CPU of DXMT, GPU time about 6.5 ms against 9 ms. |
-| Zenless Zone Zero | D3DMetal, DirectX 12 | 120 fps on High, battle dips stay above 115. Full ray tracing holds 116–120 fps. |
-| Genshin Impact 7.1 | D3DMetal, 60 fps cap | Steady 60 fps on Ultra with an even frame time. |
+| Game | Default backend | M5 Pro, 48 GB | M5, 16 GB |
+|---|---|---|---|
+| Honkai: Star Rail 4.6 | D3DMetal, 60 fps cap | 60 fps on Ultra. About half the CPU of DXMT, GPU time about 6.5 ms against 9 ms. | Not measured yet. |
+| Zenless Zone Zero | D3DMetal, DirectX 12 | 120 fps on High, battle dips stay above 115. With ray tracing on Low, 70–90 fps. | 70–110 fps on High in battle, depending on how many enemies and effects are on screen. With ray tracing on Low, 50–60 fps. |
+| Genshin Impact 7.1 | D3DMetal, 60 fps cap | Steady 60 fps on Ultra with an even frame time. | 60 fps at 1512×982 with render scale 1.2. |
 
 DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin; it can be changed per game.
 
