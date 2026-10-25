@@ -100,7 +100,8 @@ class PackageBuildNumberTests(unittest.TestCase):
             folder = Path(temp)
             tools = {
                 "xcodegen": "exit 0",
-                "xcodebuild": 'printf "%s\\n" "$@" > "$RECORDED_BUILD_ARGS"',
+                "xcodebuild": 'printf "%s\\n" "$@" > "$RECORDED_BUILD_ARGS"; '
+                              'mkdir -p "$MACGACHA_DERIVED_DATA_PATH/Build/Products/Release/MacGacha.app"',
                 "codesign": "exit 0",
                 "ditto": 'mkdir -p "$2"',
                 "hdiutil": 'if [[ "$1" == create ]]; then touch "${@: -1}"; fi',

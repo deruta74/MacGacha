@@ -120,6 +120,9 @@ jobs:
           CODE_SIGN_IDENTITY=-
           build
 
+      - name: Check that the app can load its frameworks
+        run: scripts/check-app-loads.sh .build/xcode/Build/Products/Release/MacGacha.app
+
       - name: Archive app
         run: ditto -c -k --keepParent .build/xcode/Build/Products/Release/MacGacha.app MacGacha.zip
 
