@@ -66,6 +66,7 @@ DXMT works for every game and stays available as the open-source alternative. Th
 **In progress**
 - **Mainland China editions (beta).** A region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and runs past the login screen with our [Wine crypt32 fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 and 崩坏：星穹铁道 still need in-game testing, and login hasn't been tested on any mainland edition. Testers with mainland accounts are welcome.
 - **Star Rail's in-game hotfix restart**, which hasn't been tested yet.
+- **Interface in every HoYoPlay language.** Besides English and Simplified Chinese: Traditional Chinese, Japanese, Korean, Russian, German, French, Spanish, Portuguese, Indonesian, Thai and Vietnamese. Game news and art already follow the interface language.
 
 **Next**
 1. **Automatic updates** (Sparkle), so you get fixes without downloading DMGs by hand.
@@ -74,8 +75,7 @@ DXMT works for every game and stays available as the open-source alternative. Th
 4. **FPS unlocker (opt-in)** for games capped at 60 fps, off by default, with a ban-risk warning before you enable it.
 5. **Downloads.** Estimated time remaining and pre-downloading the next version before release.
 6. **Rotating banners and news** like HoYoPlay.
-7. **More languages** for the interface.
-8. **Audio.** Surround output, including Spatial Audio on AirPods.
+7. **Audio.** Surround output, including Spatial Audio on AirPods.
 
 ## Feedback
 
