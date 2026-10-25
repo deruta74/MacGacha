@@ -51,6 +51,8 @@ final class AppModel {
     private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
     private(set) var gameRecords: [String: GameRecord] = [:]
     var isGameOperationRunning: Bool { gameOperation != nil }
+    private(set) var isRuntimeOperationRunning = false
+    @ObservationIgnored let updater: any AppUpdating
     private(set) var gameArt: [String: GameArt]
     private(set) var rows: [RuntimeRow] = []
     private(set) var consentRequest: ConsentRequest?
@@ -174,7 +176,9 @@ final class AppModel {
         launchWindows: LaunchWindowCoordinator = LaunchWindowCoordinator(),
         launchSleep: @escaping @Sendable () async throws -> Void = { try await ContinuousClock().sleep(for: .milliseconds(500)) },
         recoverySleep: @escaping @Sendable (Duration) async throws -> Void = { try await ContinuousClock().sleep(for: $0) },
-        now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }) {
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
+        updater: any AppUpdating = InertAppUpdater()) {
+        self.updater = updater
         self.launchPreferences = launchPreferences ?? LiveLaunchPreferencesPersistence(paths: paths)
         self.rosettaProbe = rosettaProbe; self.rosettaClock = rosettaClock
         self.activationCenter = activationCenter
@@ -224,7 +228,7 @@ final class AppModel {
         })
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artServices: art, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
-            rosettaProbe: SystemRosettaProbe(), launchServices: launch)
+            rosettaProbe: SystemRosettaProbe(), launchServices: launch, updater: SparkleUpdaterService())
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -285,6 +289,7 @@ final class AppModel {
             await refreshLogs()
         } catch { show(error) }
         await refreshGames()
+        updater.start { [weak self] in self?.isBusyForUpdates ?? true }
     }
 
     func refreshRuntimes() async {
@@ -321,6 +326,7 @@ final class AppModel {
     }
 
     private func request(_ id: String, mode: ConsentMode) {
+        guard canBeginGameOrRuntimeOperation() else { return }
         guard tasks[id] == nil, consentRequest == nil,
             let component = requestedComponent(id),
             mode != .importGPTK || component.kind == .d3dmetal else { return }
@@ -437,6 +443,7 @@ final class AppModel {
     }
 
     private func beginOperation(_ component: RuntimeComponent, from candidate: GPTKCandidate?, bundle: RuntimeBundle? = nil) {
+        guard canBeginGameOrRuntimeOperation() else { return }
         let id = bundle?.id.rawValue ?? component.id.rawValue; let generation = UUID(); generations[id] = generation
         let services = services
         errors[id] = nil; progressTimes[id] = nil
@@ -515,6 +522,7 @@ final class AppModel {
     }
 
     func remove(_ id: String) async {
+        guard canBeginGameOrRuntimeOperation() else { return }
         guard tasks[id] == nil, working[id] == nil else { return }
         if let bundle = bundle(id), let manifest {
             working[id] = .working(phase: .deleting, fraction: nil); rebuildRows()
@@ -589,6 +597,7 @@ final class AppModel {
     }
 
     private func rebuildRows() {
+        isRuntimeOperationRunning = !tasks.isEmpty || !working.isEmpty
         var result: [RuntimeRow] = []
         let covered = Set((manifest?.bundles ?? []).flatMap(\.components))
         for bundle in manifest?.bundles ?? [] {

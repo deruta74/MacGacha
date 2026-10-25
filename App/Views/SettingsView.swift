@@ -23,6 +23,16 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Automatically check for updates", isOn: Binding(
+                    get: { model.automaticallyChecksForUpdates },
+                    set: { model.automaticallyChecksForUpdates = $0 }
+                ))
+            } footer: {
+                Text("MacGacha asks before it downloads an update and waits until no game or download is running to install it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Animated backgrounds", isOn: Binding(
                     get: { animatedBackgrounds },
                     set: { animatedBackgrounds = $0; animatedChosen = true }

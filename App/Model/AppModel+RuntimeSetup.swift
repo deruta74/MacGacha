@@ -89,6 +89,7 @@ enum RuntimeSetupItemState {
     }
 
     func installRecommended(for gameID: String) {
+        guard canBeginGameOrRuntimeOperation() else { return }
         guard runtimeSetupChains[gameID] == nil, runtimeSetupRosettaChecks[gameID] == nil,
             let plan = runtimeSetupPlan(for: gameID), let first = plan.items.first else { return }
         setRuntimeSetupProgress(.installing(item: first.name, step: 1, of: plan.items.count, fraction: nil), for: gameID)

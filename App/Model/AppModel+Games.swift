@@ -126,6 +126,7 @@ private struct GameSnapshot: Sendable {
     }
 
     private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity) -> GameOperationToken? {
+        guard canBeginGameOrRuntimeOperation() else { return nil }
         guard GameDefinition.all.contains(where: { $0.id == id }) else { show(LauncherError.io("Unknown game")); return nil }
         guard gameOperation == nil else { show(LauncherError.busy("another game operation is running")); return nil }
         let token = GameOperationToken(id: id, generation: UUID(), kind: kind)

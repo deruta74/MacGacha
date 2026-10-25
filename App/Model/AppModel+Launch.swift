@@ -101,6 +101,7 @@ import RuntimeManager
     }
 
     func play(_ id: String) {
+        guard canBeginGameOrRuntimeOperation() else { return }
         guard launchSlotOwner == nil, launchTasks.isEmpty, gameOperation?.id != id,
             let game = GameDefinition.all.first(where: { $0.id == id }) else { return }
         if case .recoveryNeeded = launchStates[id] { return }
