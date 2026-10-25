@@ -1,6 +1,6 @@
 # MacGacha — universal launcher for HoYoverse games on Apple Silicon
 
-> 🚧 **Work in progress.** Games can be installed, updated, verified and started with one click in all three games. The first beta release is being prepared.
+> 🧪 **Beta.** [MacGacha 0.1.0 beta](https://github.com/deruta74/MacGacha/releases/tag/v0.1.0-beta) is out: install, update and play all three games with one click. Expect rough edges, and please [report what you find](#feedback).
 
 A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenless Zone Zero** on Apple Silicon. It aims to provide reliable resumable downloads, file verification, and managed Wine / DXMT / D3DMetal runtimes.
 
@@ -11,7 +11,7 @@ Code and documentation in this repository may be written or modified with assist
 ## Install
 
 1. Download `MacGacha-<version>.dmg` from [Releases](https://github.com/deruta74/MacGacha/releases), open it and drag **MacGacha** to **Applications**.
-2. Open MacGacha. Beta builds aren't signed or notarized yet, so macOS says it can't verify the developer; click **Done**.
+2. Open MacGacha. MacGacha isn't signed or notarized by Apple, so macOS says it can't verify the developer. Click **Done**.
 3. Open **System Settings → Privacy & Security**, scroll down to the MacGacha message and click **Open Anyway**, then confirm.
 
 If there's no **Open Anyway** button, or macOS still refuses to open the app, remove the download quarantine flag in Terminal and open MacGacha again:
@@ -49,11 +49,11 @@ This only changes MacGacha itself, not any system setting. The first launch can 
 - **Per-game settings:** graphics backend, frame limit, Retina mode, DirectX 12 for Zenless Zone Zero, and a switch for the compatibility workaround.
 - **Recovery.** If the launcher crashes or is quit while a game runs, it finds the game again on restart and restores everything once the game exits. Quitting during a game asks first.
 - **Privacy.** Games run in their own Wine prefix with no links to your Desktop, Documents or other home folders. Session logs stay on your Mac and can be turned off in Settings.
-- **Languages.** English and Simplified Chinese interface; game news and art follow the interface language.
+- **Languages.** English and Simplified Chinese interface. Game news and art follow the interface language.
 
 **Verified by hand (macOS 27.0.1)**
 
-All three games start and play with a community anti-cheat workaround. None of them needs `/etc/hosts` changes or administrator rights. Measured on a MacBook Pro 14″ with M5 Pro (48 GB) and on a base M5 (16 GB); Zenless Zone Zero used the same graphics preset on both.
+All three games start and play with a community anti-cheat workaround. None of them needs `/etc/hosts` changes or administrator rights. Measured on a MacBook Pro 14″ with M5 Pro (48 GB) and on a base M5 (16 GB). Zenless Zone Zero used the same graphics preset on both.
 
 | Game | Default backend | M5 Pro, 48 GB | M5, 16 GB |
 |---|---|---|---|
@@ -61,28 +61,57 @@ All three games start and play with a community anti-cheat workaround. None of t
 | Zenless Zone Zero | D3DMetal, DirectX 12 | 120 fps on High, battle dips stay above 115. With ray tracing on Low, 70–90 fps. | 70–110 fps on High in battle, depending on how many enemies and effects are on screen. With ray tracing on Low, 50–60 fps. |
 | Genshin Impact 7.1 | D3DMetal, 60 fps cap | Steady 60 fps on Ultra at 1800×1169 with render scale 1.2, even frame time. | 60 fps at 1512×982 with render scale 1.2. |
 
-DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin; it can be changed per game.
+DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin, and it can be changed per game.
 
 **In progress**
-- **Mainland China editions (beta):** a region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and reaches the login screen; CN Genshin/ZZZ on Wine 11.20 use a scoped Wine signature-verification fix, installed through Set Up without changing game files (component release publication pending).
-- **First beta release** as a downloadable disk image.
+- **Mainland China editions (beta).** A region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and runs past the login screen with our [Wine crypt32 fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 and 崩坏：星穹铁道 still need in-game testing, and login hasn't been tested on any mainland edition. Testers with mainland accounts are welcome.
+- **Star Rail's in-game hotfix restart**, which hasn't been tested yet.
+- **Interface in every HoYoPlay language.** Besides English and Simplified Chinese: Traditional Chinese, Japanese, Korean, Russian, German, French, Spanish, Portuguese, Indonesian, Thai and Vietnamese. Game news and art already follow the interface language.
 
 **Next**
-- **Display choice:** pick the monitor a game opens on when several are connected; the main display by default.
-- **Rotating banners and news** like HoYoPlay: several background arts per game, event cards, and Events / Notices / News tabs.
-- **More languages** for the interface.
-- **Downloads:** estimated time remaining; pre-downloading the next version before release; smaller patch-based updates.
-- **Audio:** surround output from the games, including Spatial Audio on AirPods.
-- **Releases:** signed and notarized builds with automatic updates.
+1. **Automatic updates** (Sparkle), so you get fixes without downloading DMGs by hand.
+2. **Wine 11.21 runtime**, which has the crypt32 fix built in. Our separate fix then goes away.
+3. **Display choice.** Pick the monitor a game opens on, the main display by default.
+4. **FPS unlocker (opt-in)** for games capped at 60 fps, off by default, with a ban-risk warning before you enable it.
+5. **Downloads.** Estimated time remaining and pre-downloading the next version before release.
+6. **Rotating banners and news** like HoYoPlay.
+7. **Audio.** Surround output, including Spatial Audio on AirPods.
+
+## Feedback
+
+Found a bug or have an idea? [Open an issue](https://github.com/deruta74/MacGacha/issues) and say what you did and what happened, with your Mac model, macOS version, the game and its graphics backend. For problems with installing or launching, attach a diagnostics bundle: **Diagnostics** in the sidebar → **Export Diagnostic Bundle…**. It removes paths and tokens.
+
+## Is it safe?
+
+Use at your own risk. To run under Wine, MacGacha uses community anti-cheat workarounds (jadeite, a Steam launcher shim). They may conflict with HoYoverse's Terms of Service, and a ban is possible, even if unlikely. If you're worried, try it first with a new free-to-play account.
+
+By default MacGacha downloads games only from HoYoverse's official servers and verifies every file. It doesn't change the game process, never edits `/etc/hosts` and never asks for your password. Each game runs in its own Wine prefix with no access to your Desktop or Documents.
+
+Optional features that do change the game process, such as an FPS unlocker, are **off by default**. Before you turn one on, MacGacha warns you about the extra ban risk.
 
 ## Disclaimer
 
 MacGacha is an unofficial, community project. It is not affiliated with, endorsed by, or supported by HoYoverse (COGNOSPHERE) or Apple Inc. All game names and trademarks belong to their respective owners.
 
 - Using third-party launchers may conflict with HoYoverse's Terms of Service. Use at your own risk.
-- Under Wine, the games' anti-cheat stops them from starting. To launch them, MacGacha uses community workarounds: [jadeite](https://codeberg.org/mkrsym1/jadeite) for Star Rail, which also blocks one game server through a local proxy while the game runs, and a Steam launcher shim for Genshin Impact and Zenless Zone Zero. These workarounds may conflict with the Terms of Service and could lead to an account ban. MacGacha doesn't inject cheats, FPS unlockers or other mods into the game. Any future option that changes the game process will be off by default and will warn you about the ban risk first.
+- Under Wine, the games' anti-cheat stops them from starting. To launch them, MacGacha uses community workarounds: [jadeite](https://codeberg.org/mkrsym1/jadeite) for Star Rail, which also blocks one game server through a local proxy while the game runs, and a Steam launcher shim for Genshin Impact and Zenless Zone Zero. These workarounds may conflict with the Terms of Service and could lead to an account ban. By default, MacGacha doesn't change the game process. Optional features that do, such as an FPS unlocker, are off by default, and MacGacha warns you about the ban risk before you enable them.
 - The software is provided as is. The authors aren't responsible for account bans, data loss or any other damage.
 - D3DMetal and the Game Porting Toolkit are © Apple Inc. and licensed under Apple's terms. The launcher will ask you to accept those terms before it downloads the component.
+
+## Related projects
+
+- [DXMT](https://github.com/3Shain/dxmt): a Metal-based Direct3D 11 translation layer, one of MacGacha's two graphics backends.
+- [jadeite](https://codeberg.org/mkrsym1/jadeite): the anti-cheat workaround MacGacha uses for Star Rail.
+
+## Special thanks
+
+- The [Wine](https://www.winehq.org) project, and CodeWeavers for CrossOver's open-source Wine.
+- 3Shain for DXMT and yaagl, whose launch research MacGacha builds on.
+- dbc-hbin for the Wine 11.20 + D3DMetal builds.
+- mkrsym1 for jadeite.
+- Valve for Proton, the source of our Steam launcher shim.
+- an-anime-team, whose bug tracker traced the Mainland China crash ([AAGL #572](https://github.com/an-anime-team/an-anime-game-launcher/issues/572)), and Michael Nelson for the upstream Wine fix ([MR 11824](https://gitlab.winehq.org/wine/wine/-/merge_requests/11824)).
+- Apple for D3DMetal and the Game Porting Toolkit.
 
 ## License
 
