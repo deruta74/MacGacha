@@ -228,13 +228,14 @@ private struct GameSnapshot: Sendable {
     }
     private func updateGameProgress(_ id: String, downloaded: Int64, network: Int64, staged: Int64, totalStaged: Int64) {
         if case .needsApproval = games[id]?.activity { return }
-        guard let value = gameProgress.update(at: now(), downloaded: downloaded, network: network, staged: staged, totalStaged: totalStaged) else { return }
         let phase: OperationPhase
         if case .working(let current, _, _, _, _) = games[id]?.activity { phase = current } else { phase = .staging }
+        guard let value = gameProgress.update(at: now(), downloaded: downloaded, network: network, staged: staged,
+            totalStaged: totalStaged, phase: phase) else { return }
         let downloading = phase == .staging && network > 0
         setGameState(id, GameState(status: games[id]?.status ?? .unknown,
             activity: .working(phase, fraction: value.fraction, bytesPerSecond: value.speed,
-                downloaded: downloading ? downloaded : nil, total: downloading ? network : nil)))
+                downloaded: downloading ? downloaded : nil, total: downloading ? network : nil), timing: value.timing))
     }
 }
 
@@ -250,45 +251,4 @@ private func gameStream(_ services: any GameServices, id: String, request: GameR
         do { try await services.uninstall(id); return GameEventStream { $0.yield(.phase(.completed)); $0.finish() } }
         catch { return GameEventStream { $0.finish(throwing: error) } }
     }
-}
-
-/// At most 4 UI updates/s and 32 samples. One sample preceding the five-second
-/// window is retained for interpolation; byte counters reset between batches.
-struct GameProgress {
-    struct Value { let fraction: Double?; let speed: Int64? }
-    private struct Sample { let time: ContinuousClock.Instant; let bytes: Int64 }
-    private var lastUpdate: ContinuousClock.Instant?
-    private var lastObservedBytes: Int64?
-    private var samples: [Sample] = []
-    mutating func update(at time: ContinuousClock.Instant, downloaded: Int64, network: Int64, staged: Int64, totalStaged: Int64) -> Value? {
-        let bytes = max(0, downloaded)
-        // Observe every event, including those hidden by the UI throttle: a
-        // new batch can reset and exceed the old counter within one interval.
-        if network <= 0 || lastObservedBytes.map({ bytes < $0 }) == true { samples = [] }
-        lastObservedBytes = network > 0 ? bytes : nil
-        if let previous = lastUpdate, previous.duration(to: time) < .milliseconds(250) { return nil }
-        lastUpdate = time
-        let total = network > 0 ? network : totalStaged, count = max(0, network > 0 ? downloaded : staged)
-        let fraction = total > 0 ? min(1, Double(count) / Double(total)) : nil
-        guard network > 0 else { samples = []; return Value(fraction: fraction, speed: nil) }
-        samples.append(Sample(time: time, bytes: bytes))
-        let cutoff = time.advanced(by: .seconds(-5))
-        while samples.count > 2 && samples[1].time <= cutoff { samples.removeFirst() }
-        if samples.count > 32 { samples.removeFirst(samples.count - 32) }
-        guard let first = samples.first, samples.count > 1 else { return Value(fraction: fraction, speed: nil) }
-        var start = first.time, startBytes = Double(first.bytes)
-        if start < cutoff {
-            let next = samples[1], span = seconds(start.duration(to: next.time))
-            if span > 0 {
-                startBytes += (Double(next.bytes) - startBytes) * seconds(start.duration(to: cutoff)) / span
-                start = cutoff
-            }
-        }
-        let elapsed = seconds(start.duration(to: time))
-        guard elapsed > 0 else { return Value(fraction: fraction, speed: nil) }
-        let rate = max(0, (Double(bytes) - startBytes) / elapsed)
-        let speed = rate >= Double(Int64.max) ? Int64.max : Int64(rate)
-        return Value(fraction: fraction, speed: speed)
-    }
-    private func seconds(_ duration: Duration) -> Double { Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18 }
 }

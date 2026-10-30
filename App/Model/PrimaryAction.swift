@@ -9,6 +9,7 @@ struct GameState: Sendable, Equatable {
     var status: GameStatus
     var activity: GameActivity? = nil
     var spaceShortage: GameSpaceShortage? = nil
+    var timing: GameTiming? = nil
 }
 
 struct GameSpaceShortage: Sendable, Equatable {

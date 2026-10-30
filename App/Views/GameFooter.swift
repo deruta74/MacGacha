@@ -32,6 +32,7 @@ struct GameFooter: View {
     @Binding var animated: Bool
     @State private var confirmingParts = false
     @State private var confirmingUninstall = false
+    @State private var progressHovered = false
 
     private var state: GameState { model.games[game.id] ?? GameState(status: .unknown) }
     private var launch: LaunchUIState? { model.launchState(for: game.id) }
@@ -49,7 +50,9 @@ struct GameFooter: View {
                     OtherRegionNote(text: note.text) { model.region = note.region }
                 }
                 HStack(spacing: 8) {
-                    Text(statusLine)
+                    // Hovering the progress capsule swaps the hint for the numbers, as HoYoPlay does.
+                    Text(action == .progress && progressHovered ? state.progressDetail ?? statusLine : statusLine)
+                        .monospacedDigit()
                         .contentTransition(.opacity)
                     if case .failed(let failure) = launch, failure.hasLog, model.sessionLogsEnabled {
                         Button("Open Log") { model.openLaunchLog(game.id) }
@@ -73,7 +76,8 @@ struct GameFooter: View {
                         GameMenu(game: game, state: state, gameSheet: $gameSheet, confirmingUninstall: $confirmingUninstall)
                     }
                     PrimaryActionButton(game: game, action: action, state: state, panel: $panel,
-                        gameSheet: $gameSheet, confirmingParts: $confirmingParts, confirmingUninstall: $confirmingUninstall)
+                        gameSheet: $gameSheet, confirmingParts: $confirmingParts, confirmingUninstall: $confirmingUninstall,
+                        progressHovered: $progressHovered)
                 }
                 // Every action fits this height, so switching states never moves the footer.
                 .frame(height: 52)
@@ -281,6 +285,7 @@ struct PrimaryActionButton: View {
     @Binding var gameSheet: GameSheet?
     @Binding var confirmingParts: Bool
     @Binding var confirmingUninstall: Bool
+    @Binding var progressHovered: Bool
 
     /// Another game's operation holds the one slot; starting this one would only fail as busy.
     /// (This game's own running operation shows progress instead of a prominent button.)
@@ -371,24 +376,30 @@ struct PrimaryActionButton: View {
 
     private var progress: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(progressLabel)
-                    .font(.callout.weight(.medium))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    // The capsule grows with the label instead of truncating the speed.
-                    .fixedSize(horizontal: true, vertical: false)
-                if let fraction {
-                    ProgressView(value: fraction)
-                } else {
-                    ProgressView().progressViewStyle(.linear)
+            // Ticks every second so the elapsed timer and the "longer than usual"
+            // note appear even when no progress event arrives.
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                let label = progressLabel(at: .now)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(label)
+                        .font(.callout.weight(.medium))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        // The capsule grows with the label instead of truncating it.
+                        .fixedSize(horizontal: true, vertical: false)
+                    if let fraction {
+                        ProgressView(value: fraction)
+                    } else {
+                        ProgressView().progressViewStyle(.linear)
+                    }
                 }
+                .tint(game.tint)
+                .frame(minWidth: canPause ? 300 : Self.buttonlessWidth, alignment: .leading)
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityElement(children: .ignore)
+                // The size and speed only show on hover, so VoiceOver reads them here.
+                .accessibilityLabel(state.progressDetail.map { StatusText.joined(label, $0) } ?? label)
             }
-            .tint(game.tint)
-            .frame(minWidth: 300, alignment: .leading)
-            .fixedSize(horizontal: true, vertical: false)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(progressLabel)
             if canPause {
                 Button {
                     model.pauseGame(game.id)
@@ -407,6 +418,8 @@ struct PrimaryActionButton: View {
         .frame(height: 52)
         .foregroundStyle(.white)
         .glassEffect(.regular, in: .capsule)
+        .onHover { progressHovered = $0 }
+        .onDisappear { progressHovered = false }
     }
 
     /// The recommended runtimes install one after another; the label says which one and how far along the list.
@@ -457,7 +470,7 @@ struct PrimaryActionButton: View {
             ProgressView().progressViewStyle(.linear)
         }
         .tint(game.tint)
-        .frame(width: 300, alignment: .leading)
+        .frame(width: Self.buttonlessWidth, alignment: .leading)
         .padding(.horizontal, 18)
         .frame(height: 52)
         .foregroundStyle(.white)
@@ -465,6 +478,9 @@ struct PrimaryActionButton: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Starting…")
     }
+
+    /// Without a pause or stop button the bar takes that room, so every progress capsule is one width.
+    private static let buttonlessWidth: CGFloat = 340
 
     private var phase: OperationPhase? {
         if case .working(let phase, _, _, _, _) = state.activity { return phase }
@@ -484,18 +500,22 @@ struct PrimaryActionButton: View {
         return nil
     }
 
-    private var progressLabel: String {
-        guard case .working(let phase, let fraction, let speed, let downloaded, let total) = state.activity else { return "" }
-        var label = RuntimeRowView.label(for: phase, fraction: fraction)
-        if phase == .staging, let downloaded, let total, total > 0 {
-            let amount = String(localized: "\(ByteSize.number(downloaded, unitOf: total)) of \(ByteSize.text(total))",
-                comment: "Downloaded so far of the total, e.g. 18.3 of 136.5 GB")
-            label = StatusText.joined(label, amount)
+    private func progressLabel(at now: ContinuousClock.Instant) -> String {
+        guard case .working(let phase, let fraction, _, _, _) = state.activity else { return "" }
+        let label = RuntimeRowView.label(for: phase, fraction: fraction)
+        switch state.timing?.display(at: now) ?? .none {
+        case .none:
+            return label
+        case .remaining(let remaining):
+            return StatusText.joined(label, TimeText.remaining(remaining))
+        case .elapsed(let elapsed):
+            return StatusText.joined(label, TimeText.elapsed(elapsed))
+        case .slow(let elapsed):
+            let slow = String(localized: "Taking longer than usual",
+                comment: "Shown when an operation has made no progress for a while")
+            guard let elapsed else { return StatusText.joined(label, slow) }
+            return StatusText.joined(StatusText.joined(label, TimeText.elapsed(elapsed)), slow)
         }
-        if phase == .staging, let speed, speed > 0 {
-            label = StatusText.joined(label, String(localized: "\(ByteSize.text(speed))/s", comment: "Download speed, e.g. 47 MB/s"))
-        }
-        return label
     }
 
     private var unavailablePath: String {
@@ -574,6 +594,42 @@ struct GameMenu: View {
 enum StatusText {
     static func joined(_ first: String, _ second: String) -> String {
         String(localized: "\(first) · \(second)", comment: "Joins two parts of a status line")
+    }
+}
+
+extension GameState {
+    /// Downloaded size and speed, shown while the pointer is over the progress capsule.
+    var progressDetail: String? {
+        guard case .working(.staging, _, let speed, let downloaded, let total) = activity else { return nil }
+        var detail: String?
+        if let downloaded, let total, total > 0 {
+            detail = String(localized: "\(ByteSize.number(downloaded, unitOf: total)) of \(ByteSize.text(total))",
+                comment: "Downloaded so far of the total, e.g. 18.3 of 136.5 GB")
+        }
+        if let speed, speed > 0 {
+            let rate = String(localized: "\(ByteSize.text(speed))/s", comment: "Download speed, e.g. 47 MB/s")
+            detail = detail.map { StatusText.joined($0, rate) } ?? rate
+        }
+        return detail
+    }
+}
+
+/// Progress times, coarse on purpose: a smoothed estimate still wobbles by seconds.
+enum TimeText {
+    static func remaining(_ duration: Duration) -> String {
+        let seconds = max(0, duration.components.seconds)
+        guard seconds >= 60 else {
+            return String(localized: "Less than a minute left", comment: "Estimated time remaining under one minute")
+        }
+        // Round up so the estimate never reaches "0 min" before the work ends.
+        let minutes = Duration.seconds((seconds + 59) / 60 * 60)
+        let text = minutes.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
+        return String(localized: "\(text) left", comment: "Estimated time remaining, e.g. 12 min left")
+    }
+
+    /// A running clock, e.g. 1:05, so a phase without a percentage visibly moves.
+    static func elapsed(_ duration: Duration) -> String {
+        duration.formatted(.time(pattern: duration >= .seconds(3600) ? .hourMinuteSecond : .minuteSecond))
     }
 }
 

@@ -30,10 +30,17 @@ extension AppModel {
     }
 
     private static func debugGameState(_ name: String) -> GameState? {
-        switch name {
+        let time = ContinuousClock.now
+        let eta = GameTiming(phaseStarted: time.advanced(by: .seconds(-60)), lastAdvance: time,
+            remaining: .seconds(12 * 60), hasFraction: true)
+        return switch name {
         case "preparing": GameState(status: .notInstalled, activity: .resolving)
-        case "progress": GameState(status: .notInstalled, activity: .working(.staging, fraction: 0.42, bytesPerSecond: 47_000_000, downloaded: 57_300_000_000, total: 136_500_000_000))
-        case "verifying": GameState(status: .installed(tag: "7.1.0"), activity: .working(.verifying, fraction: nil, bytesPerSecond: nil))
+        case "progress": GameState(status: .notInstalled, activity: .working(.staging, fraction: 0.42, bytesPerSecond: 47_000_000, downloaded: 57_300_000_000, total: 136_500_000_000), timing: eta)
+        case "verifying": GameState(status: .installed(tag: "7.1.0"), activity: .working(.verifying, fraction: 0.42, bytesPerSecond: nil), timing: eta)
+        case "installingSlow": GameState(status: .notInstalled, activity: .working(.committing, fraction: nil, bytesPerSecond: nil),
+            timing: GameTiming(phaseStarted: time.advanced(by: .seconds(-180)), lastAdvance: time.advanced(by: .seconds(-180)), remaining: nil, hasFraction: false))
+        case "downloadStalled": GameState(status: .notInstalled, activity: .working(.staging, fraction: 0.42, bytesPerSecond: 0, downloaded: 57_300_000_000, total: 136_500_000_000),
+            timing: GameTiming(phaseStarted: time.advanced(by: .seconds(-60)), lastAdvance: time.advanced(by: .seconds(-45)), remaining: .seconds(12 * 60), hasFraction: true))
         case "parts": GameState(status: .paused(.install), activity: .needsApproval(required: 150_000_000_000, available: 60_000_000_000))
         case "install": GameState(status: .notInstalled)
         case "resume": GameState(status: .paused(.update))

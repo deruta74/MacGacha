@@ -15,6 +15,26 @@ import Sophon
 
 @Suite(.serialized) @MainActor
 struct AppModelGamesTests {
+    @Test func verifyByteProgressReachesGameTimingAndPauseClearsIt() async throws {
+        let (model, fake, clock) = try gameFixture(); defer { fake.finish() }
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        model.verifyGame("genshin")
+        let worker = try #require(model.gameTask)
+        for await _ in fake.opened.stream { break }
+        fake.emit(.phase(.verifying))
+        fake.emit(.progress(downloaded: 0, totalNetwork: 0, staged: 0, totalStaged: 2000))
+        try await timingEventually { model.games["genshin"]?.timing?.hasFraction == true }
+        #expect(model.games["genshin"]?.timing?.remaining == nil)
+        clock.advance(.seconds(10))
+        fake.emit(.progress(downloaded: 0, totalNetwork: 0, staged: 1000, totalStaged: 2000))
+        try await timingEventually { model.games["genshin"]?.timing?.remaining != nil }
+        let state = try #require(model.games["genshin"])
+        #expect(state.activity == .working(.verifying, fraction: 0.5, bytesPerSecond: nil))
+        #expect(state.timing?.remaining == .seconds(10))
+        fake.finish(); await worker.value
+        #expect(model.games["genshin"]?.timing == nil)
+    }
+
     @Test func editionRegistryAndInstallFoldersAreEditionSpecific() throws {
         #expect(LauncherGame.all.map(\.id) == GameDefinition.all.map(\.id))
         #expect(LauncherGame.all.count == 6)
@@ -458,6 +478,7 @@ private struct GameCall: Sendable, Equatable {
     var voices: Set<String> = []
 }
 private final class FakeGameServices: GameServices, Sendable {
+    let opened = AsyncStream<Void>.makeStream()
     private let approvalTerminalRead: GameReadGate?
     private let snapshotRead: GameReadGate?
     private let estimateReads: [Set<String>: GameReadGate]
@@ -526,6 +547,7 @@ private final class FakeGameServices: GameServices, Sendable {
         let pair = AsyncThrowingStream<OperationEvent, any Error>.makeStream()
         pair.continuation.onTermination = { [weak self] _ in self?.state.withLock { $0.terminations += 1 } }
         state.withLock { $0.calls.append(call); $0.active = call.id; $0.statuses[call.id] = .paused(kind); $0.continuation = pair.continuation }
+        opened.continuation.yield(())
         if call.action == "install", let approvalTerminalRead {
             let source = SuspendedApprovalEvents(terminal: approvalTerminalRead)
             return GameEventStream(unfolding: { try await source.next() })
@@ -536,6 +558,16 @@ private final class FakeGameServices: GameServices, Sendable {
     func progress(_ count: Int64) { emit(.progress(downloaded: count, totalNetwork: 1000, staged: 0, totalStaged: 1000)) }
     func fail(_ error: LauncherError) { state.withLock { $0.continuation }?.finish(throwing: error) }
     func finish() { let continuation = state.withLock { let c = $0.continuation; $0.continuation = nil; return c }; continuation?.finish() }
+}
+
+@MainActor private func timingEventually(_ condition: @escaping @MainActor () -> Bool) async throws {
+    while !condition() {
+        let events = AsyncStream<Void> { continuation in
+            withObservationTracking { _ = condition() } onChange: { continuation.yield(()); continuation.finish() }
+        }
+        for await _ in events { break }
+        try Task.checkCancellation()
+    }
 }
 
 private final class GameReadGate: Sendable {
