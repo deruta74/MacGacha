@@ -148,6 +148,14 @@ import HoYoPlayAPI
         next.update(region: .global, gameID: "genshin", backgrounds: [a, replacedImage, b], animated: true, reduceMotion: false)
         #expect(next.slides?.current == b)
     }
+    @Test func ordinaryStillExposesOnlyItsOwnTheme() {
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        let themed = GameBackground(id: "themed", image: a.image, theme: movie.theme)
+        model.update(region: .global, gameID: "genshin", backgrounds: [themed, b], animated: false, reduceMotion: true)
+        #expect(model.theme == themed.theme && model.video == nil)
+        model.clickDot("b")
+        #expect(model.theme == nil)
+    }
     @Test func videoStaysInServerOrderAndFailureKeepsItsStillAndTheme() throws {
         var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
         model.update(region: .global, gameID: "starrail", backgrounds: [a, movie, b], animated: true, reduceMotion: false)
