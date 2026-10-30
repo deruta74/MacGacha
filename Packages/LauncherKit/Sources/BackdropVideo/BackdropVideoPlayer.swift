@@ -69,6 +69,7 @@ public enum BackdropVideoState: Sendable, Equatable { case stopped, preparing, p
         pump = Task { [weak self] in
             defer { self?.pumpFinished(token, id: id) }
             do {
+                guard self?.current(token) == true, !Task.isCancelled else { return }
                 if self?.takePreparation() == true { await sink.prepare() }
                 guard self?.current(token) == true, !Task.isCancelled else { return }
                 while !Task.isCancelled && self?.current(token) == true && self?.isPaused == false {

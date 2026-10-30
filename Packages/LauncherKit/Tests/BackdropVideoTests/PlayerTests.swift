@@ -28,6 +28,30 @@ import LauncherCore
         let work = player.workTask; player.stop(); await work?.value
         #expect(player.state == .stopped && source.stops == 1)
     }
+    @Test func cancelledPumpCannotConsumeReplacementPreparation() async throws {
+        let old = TestFrameSource(), replacement = TestFrameSource(), sink = TestVideoSink()
+        let a = URL(fileURLWithPath: "/a.webm"), b = URL(fileURLWithPath: "/b.webm")
+        let player = BackdropVideoPlayer(sink: sink, makeSource: { $0 == a ? old : replacement })
+        // Park B synchronously before its pump starts so only A can consume preparation.
+        player.onStateChange = { [weak player] url, state in
+            if url == b && state == .preparing { player?.pause() }
+        }
+        player.play(a)
+        let cancelled = player.workTask
+        player.play(b)
+        await cancelled?.value
+        #expect(sink.preparations == 0)
+        #expect(old.count == 0 && replacement.count == 0)
+        #expect(player.sourceURL == b && player.state == .preparing)
+
+        var requests = replacement.requests.stream.makeAsyncIterator()
+        player.resume(); _ = await requests.next()
+        #expect(sink.preparations == 1)
+        replacement.send(.success(try testFrame())); _ = await requests.next()
+        sink.makeReady()
+        #expect(player.sourceURL == b && player.state == .playing)
+        let work = player.workTask; player.stop(); await work?.value
+    }
     @Test func pauseStopsFeedingAndResumeRetainsPendingFrame() async throws {
         let source = TestFrameSource(), sink = TestVideoSink(), player = BackdropVideoPlayer(sink: sink, makeSource: { _ in source })
         var requests = source.requests.stream.makeAsyncIterator()
