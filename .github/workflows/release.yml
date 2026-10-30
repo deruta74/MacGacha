@@ -37,6 +37,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Validate release notes
+        run: |
+          set -euo pipefail
+          numeric_version="${VERSION%%-*}"
+          notes_file="ReleaseNotes/$numeric_version.md"
+          python3 -I scripts/make-appcast.py --check-notes "$notes_file"
+          echo "RELEASE_NOTES=$notes_file" >> "$GITHUB_ENV"
+
       # A draft creates its tag only when published, so check both.
       - name: Check that the release does not exist yet
         run: |
@@ -101,7 +109,7 @@ jobs:
           public_key=$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$MACGACHA_DERIVED_DATA_PATH/Build/Products/Release/MacGacha.app/Contents/Info.plist")
           xcrun swift -warnings-as-errors scripts/verify-sparkle-signature.swift "out/MacGacha-$VERSION.dmg" "$public_key" "$signature"
           python3 -I scripts/make-appcast.py --release "$VERSION" --build-number "$MACGACHA_BUILD_NUMBER" \
-            --dmg "out/MacGacha-$VERSION.dmg" --signature "$signature" --output out/appcast.xml
+            --dmg "out/MacGacha-$VERSION.dmg" --signature "$signature" --notes "$RELEASE_NOTES" --output out/appcast.xml
           python3 -I -c 'import xml.etree.ElementTree as ET; ET.parse("out/appcast.xml")'
 
       - name: Create the draft release
@@ -109,6 +117,6 @@ jobs:
           set -euo pipefail
           tag="v$VERSION"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft \
-            --title "MacGacha ${VERSION/-/ }" --target "$GITHUB_SHA" --generate-notes \
+            --title "MacGacha ${VERSION/-/ }" --target "$GITHUB_SHA" --notes-file "$RELEASE_NOTES" \
             "out/MacGacha-$VERSION.dmg" "out/MacGacha-$VERSION.dmg.sha256" "out/appcast.xml"
           echo "Draft release $tag is ready. Edit its notes and publish it on GitHub." >> "$GITHUB_STEP_SUMMARY"
