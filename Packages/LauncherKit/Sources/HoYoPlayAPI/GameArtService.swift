@@ -9,6 +9,9 @@ import DownloadEngine
 /// this actor, off the main actor. No failure is surfaced to the user.
 public actor GameArtService {
     private static let ttl: TimeInterval = 6 * 3600
+    // Three games × (16 backgrounds × 5 assets + icon + logo), plus headroom.
+    public static let maximumBackgroundsPerGame = 16
+    public static let maximumAssets = 320
     private static let indexLimit = 512 << 10
     private static func gameIDs(_ region: Region) -> [String: String] {
         Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0.id) })
@@ -78,8 +81,10 @@ public actor GameArtService {
             try fs.createDirectory(at: root)
             hydrate(fs, root: root)
             let age = now().timeIntervalSince(index.fetchedAt)
-            // Art fetched in another language is stale however fresh it is.
-            if age >= 0 && age < Self.ttl && (index.language ?? .enUS) == language { return cached() }
+            // Art fetched in another language is stale however fresh it is, and so is an index from
+            // before background lists, so an app update shows every background without waiting.
+            if age >= 0 && age < Self.ttl && (index.language ?? .enUS) == language,
+                index.games.values.allSatisfy({ $0.backgrounds != nil }) { return cached() }
             let http = http; let log = log; let timeout = requestTimeout
             let urls = Self.apiURLs(region: region, language: language)
             let gamesData = try await Self.deadline(timeout) { try await Self.json(urls.games, http: http, log: log) }
@@ -107,6 +112,30 @@ public actor GameArtService {
                         else if old.video == url { next.theme = old.theme }
                     } else { next.video = old.video; next.theme = old.theme }
                 }
+                var backgrounds: [RemoteBackground] = []
+                for layer in remote.layers {
+                    let previous = old.layers.first { $0.id == layer.id }
+                    var saved = RemoteBackground(id: layer.id)
+                    for key in RemoteBackground.images {
+                        if let url = layer[keyPath: key] {
+                            if await asset(url, video: false, fs: fs, root: root, files: &files, attempted: &attempted) {
+                                saved[keyPath: key] = url
+                            } else { saved[keyPath: key] = previous?[keyPath: key] }
+                        }
+                    }
+                    // An absent API icon removes the button; fallback never crosses slides.
+                    saved.link = layer.link.flatMap(GameHighlights.browserLink)
+                    if let url = layer.video {
+                        if await asset(url, video: true, fs: fs, root: root, files: &files, attempted: &attempted) {
+                            saved.video = url
+                            if let theme = layer.theme, await asset(theme, video: false, fs: fs, root: root, files: &files, attempted: &attempted) {
+                                saved.theme = theme
+                            } else if previous?.video == url { saved.theme = previous?.theme }
+                        } else { saved.video = previous?.video; saved.theme = previous?.theme }
+                    }
+                    backgrounds.append(saved)
+                }
+                next.backgrounds = backgrounds
                 selected[id] = next
             }
             try Task.checkCancellation()
@@ -151,7 +180,7 @@ public actor GameArtService {
     private func readIndex(_ fs: ContainedFileSystem, root: SafeRelativePath) throws -> ArtIndex {
         let data = try fs.readFile(at: SafeRelativePath("\(root)/art-index.json"), maxBytes: Self.indexLimit)
         var saved = try JSONDecoder().decode(ArtIndex.self, from: data)
-        guard (saved.region ?? .global) == region, saved.assets.count <= 18, saved.games.count <= 3, saved.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
+        guard (saved.region ?? .global) == region, saved.assets.count <= Self.maximumAssets, saved.games.count <= 3, saved.games.values.allSatisfy({ $0.layers.count <= Self.maximumBackgroundsPerGame }), saved.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
             saved.games.keys.allSatisfy({ Self.gameIDs(region).values.contains($0) }) else { throw LauncherError.io("Invalid art index") }
         saved.assets = saved.assets.filter { key, record in
             guard let url = URL(string: key), Self.allowedAsset(url, region: region), record.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
@@ -179,7 +208,15 @@ public actor GameArtService {
         return index.games.mapValues { remote in
             let video = local(remote.video, video: true)
             return GameArt(background: local(remote.background), video: video,
-                theme: video == nil ? nil : local(remote.theme), icon: local(remote.icon), logo: local(remote.logo))
+                theme: video == nil ? nil : local(remote.theme), icon: local(remote.icon), logo: local(remote.logo),
+                backgrounds: remote.layers.map { layer in
+                    let highlights = local(layer.highlight).map {
+                        GameHighlights(image: $0, hoverImage: local(layer.hover), link: layer.link)
+                    }
+                    let clip = local(layer.video, video: true)
+                    return GameBackground(id: layer.id, image: local(layer.background), video: clip,
+                        theme: clip == nil ? nil : local(layer.theme), highlights: highlights)
+                })
         }
     }
 
@@ -303,6 +340,17 @@ public actor GameArtService {
             var art = result[id] ?? RemoteArt()
             art.background = layer.background?.url ?? art.background
             if layer.type == "BACKGROUND_TYPE_VIDEO" { art.video = layer.video?.url; art.theme = layer.theme?.url }
+            var ids: Set<String> = []
+            art.backgrounds = (game.backgrounds ?? []).prefix(Self.maximumBackgroundsPerGame).compactMap { layer in
+                let stableID = layer.id.flatMap { $0.isEmpty ? nil : $0 }
+                    ?? RemoteBackground.legacyID(layer.background?.url)
+                guard ids.insert(stableID).inserted else { return nil }
+                return RemoteBackground(id: stableID, background: layer.background?.url,
+                    video: layer.type == "BACKGROUND_TYPE_VIDEO" ? layer.video?.url : nil,
+                    theme: layer.type == "BACKGROUND_TYPE_VIDEO" ? layer.theme?.url : nil,
+                    highlight: layer.icon?.url, hover: layer.icon?.hover_url,
+                    link: layer.icon?.link.flatMap(GameHighlights.browserLink))
+            }
             result[id] = art
         }
         return result
@@ -322,7 +370,23 @@ private struct ArtIndex: Codable, Sendable {
 private struct RemoteArt: Codable, Sendable {
     var background: URL?; var icon: URL?; var logo: URL?; var video: URL?; var theme: URL?
     static let images: [WritableKeyPath<RemoteArt, URL?> & Sendable] = [\.background, \.icon, \.logo]
-    var urls: [URL] { [background, icon, logo, video, theme].compactMap { $0 } }
+    var backgrounds: [RemoteBackground]?
+    var layers: [RemoteBackground] {
+        backgrounds ?? (background == nil && video == nil ? [] : [RemoteBackground(
+            id: RemoteBackground.legacyID(background), background: background, video: video, theme: theme)])
+    }
+    var urls: [URL] { [background, icon, logo, video, theme].compactMap { $0 } + layers.flatMap(\.urls) }
+}
+private struct RemoteBackground: Codable, Sendable {
+    var id: String
+    var background: URL?; var video: URL?; var theme: URL?
+    var highlight: URL?; var hover: URL?; var link: URL?
+    static let images: [WritableKeyPath<RemoteBackground, URL?> & Sendable] = [\.background, \.highlight, \.hover]
+    var urls: [URL] { [background, video, theme, highlight, hover].compactMap { $0 } }
+    static func legacyID(_ url: URL?) -> String {
+        var hash = StreamingHasher(.sha256); hash.update(Data((url?.absoluteString ?? "missing").utf8))
+        return "legacy-" + hash.finalize().hex
+    }
 }
 private struct Envelope<T: Decodable>: Decodable { let retcode: Int?; let data: T }
 private struct Link: Decodable {
@@ -350,7 +414,18 @@ private struct Game: Decodable { let biz: String?; let display: Display? }
 private struct Games: Decodable { let games: [Game] }
 private struct Basic: Decodable { let game_info_list: [BasicGame] }
 private struct BasicGame: Decodable { let game: Game; let backgrounds: [Layer]? }
-private struct Layer: Decodable { let type: String?; let background: Link?; let video: Link?; let theme: Link? }
+private struct Highlight: Decodable {
+    let url: URL?; let hover_url: URL?; let link: URL?
+    private enum CodingKeys: String, CodingKey { case url, hover_url, link }
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func read(_ key: CodingKeys) throws -> URL? {
+            try c.decodeIfPresent(String.self, forKey: key).flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        }
+        url = try read(.url); hover_url = try read(.hover_url); link = try read(.link)
+    }
+}
+private struct Layer: Decodable { let id: String?; let icon: Highlight?; let type: String?; let background: Link?; let video: Link?; let theme: Link? }
 private final class ArtHTTPSession: Sendable {
     let client: URLSessionHTTPClient
     init(region: Region) { client = URLSessionHTTPClient(redirectPolicy: { GameArtService.allowed($0, region: region) }) }

@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import AppKit
 import Launch
+import LauncherCore
 import SwiftUI
 
 enum Panel: String, Identifiable {
@@ -20,9 +21,16 @@ struct RootView: View {
     @AppStorage("animatedBackgrounds") private var animatedSetting = true
     @AppStorage("animatedBackgroundsChosen") private var animatedChosen = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.controlActiveState) private var activeState
+    @Environment(\.scenePhase) private var scenePhase
     #if DEBUG
     @Environment(\.openSettings) private var openSettings
     #endif
+    @State private var selection = BackgroundSelection(clock: ContinuousClock())
+    @State private var images = ArtImageCache()
+    /// The slide on screen: it follows the selection only once its image has loaded,
+    /// so the background and its highlights button always change together.
+    @State private var shownSlide: GameBackground?
 
     /// The rail shows one region; a selection from the other region falls back to its first game.
     private var game: LauncherGame {
@@ -37,24 +45,70 @@ struct RootView: View {
         )
     }
 
+    private struct SelectionInputs: Equatable {
+        let region: Region
+        let gameID: String
+        let backgrounds: [GameBackground]
+        let animated: Bool
+        let reduceMotion: Bool
+    }
+
+    private var selectionInputs: SelectionInputs {
+        SelectionInputs(region: model.region, gameID: game.id, backgrounds: model.gameArt[game.id]?.backgrounds ?? [],
+            animated: animated.wrappedValue, reduceMotion: reduceMotion)
+    }
+
+    /// The selected slide once its image is decoded; until then the previous slide stays.
+    private var readySlide: GameBackground? {
+        guard let current = selection.slides?.current, images.image(current.image) != nil else { return nil }
+        return current
+    }
+
+    private func updateWindowState() {
+        selection.setWindow(active: activeState != .inactive, visible: scenePhase == .active)
+    }
+
     var body: some View {
         ZStack {
-            GameBackdrop(game: game, art: model.gameArt[game.id], animated: animated.wrappedValue)
+            GameBackdrop(game: game, art: model.gameArt[game.id], video: selection.video, slide: shownSlide,
+                images: images, crossfade: selection.allowsCrossfade) { selection.setPlaybackState($0, for: $1) }
                 .id(game.id)
                 .transition(.opacity)
+            if let slides = selection.slides, !slides.dotIDs.isEmpty, let shown = shownSlide {
+                BackgroundDots(ids: slides.dotIDs, current: shown.id,
+                    onEnter: { selection.pointerEnteredDots() }, onSelect: { selection.clickDot($0) })
+                    .frame(maxHeight: .infinity, alignment: .top)
+            }
             HStack(alignment: .bottom, spacing: 0) {
                 GameRail(selectedID: Binding(get: { game.id }, set: { selectedID = $0 }), panel: $panel)
                     .padding(.leading, 12)
                     .padding(.top, 40) // below the window's traffic lights
                     .padding(.bottom, 12)
                     .frame(maxHeight: .infinity)
-                GameFooter(game: game, art: model.gameArt[game.id], panel: $panel, gameSheet: $gameSheet, animated: animated)
+                GameFooter(game: game, art: model.gameArt[game.id], highlights: shownSlide?.highlights ?? selection.video?.background.highlights,
+                    images: images, panel: $panel, gameSheet: $gameSheet, animated: animated)
                     // A fresh footer per game, so a confirmation opened for one game can't act on another.
                     .id(game.id)
                     .padding(24)
             }
         }
         .animation(.smooth(duration: 0.35), value: selectedID)
+        .onChange(of: selectionInputs, initial: true) { old, new in
+            if old.gameID != new.gameID || old.region != new.region { shownSlide = nil }
+            images.preload(new.backgrounds.flatMap { [$0.image, $0.theme, $0.highlights?.image, $0.highlights?.hoverImage].compactMap { $0 } })
+            selection.update(region: new.region, gameID: new.gameID, backgrounds: new.backgrounds,
+                animated: new.animated, reduceMotion: new.reduceMotion)
+        }
+        .onChange(of: readySlide, initial: true) {
+            if let readySlide { shownSlide = readySlide } else if selection.slides == nil { shownSlide = nil }
+        }
+        .onChange(of: activeState, initial: true) { updateWindowState() }
+        .onChange(of: scenePhase) { updateWindowState() }
+        .task(id: selection.rotation) {
+            guard let rotation = selection.rotation else { return }
+            do { try await ContinuousClock().sleep(until: rotation.deadline) } catch { return }
+            selection.advance(if: rotation)
+        }
         .ignoresSafeArea()
         .frame(minWidth: 960, minHeight: 540)
         .sheet(item: $panel) { panel in
@@ -90,10 +144,8 @@ struct RootView: View {
         } message: { notice in
             Text(recoveryMessage(notice))
         }
-        .task { await model.loadGameArt() }
         // A sheet belongs to one game; once its region is hidden it must not act on it.
         .onChange(of: model.region) { gameSheet = nil }
-        .task { model.quitConfirmation = QuitConfirmation.present }
         #if DEBUG
         .onAppear(perform: applyDebugLaunchArguments)
         #endif

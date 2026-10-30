@@ -45,6 +45,7 @@ final class AppModel {
         didSet {
             guard region != oldValue else { return }
             defaults?.set(region.rawValue, forKey: "region")
+            updateArtReveal()
             if started && regionLoadingEnabled { loadRegion(region) }
         }
     }
@@ -53,6 +54,14 @@ final class AppModel {
     var isGameOperationRunning: Bool { gameOperation != nil }
     private(set) var isRuntimeOperationRunning = false
     @ObservationIgnored let updater: any AppUpdating
+    private(set) var launcherRevealed = false
+    private(set) var artCacheStates: [Region: ArtCacheState] = [:]
+    var artCacheState: ArtCacheState { artCacheStates[region] ?? .notChecked }
+    @ObservationIgnored let artClock: any Clock<Duration>
+    @ObservationIgnored var artStartupTask: Task<Void, Never>?
+    @ObservationIgnored var artRevealTask: Task<Void, Never>?
+    @ObservationIgnored var artStartupBegan = false
+    @ObservationIgnored var artRefreshFinished: Set<Region> = []
     private(set) var gameArt: [String: GameArt]
     var connectedDisplays: [ConnectedDisplay] = []
     @ObservationIgnored let displayProbe: any DisplayProbe
@@ -72,7 +81,7 @@ final class AppModel {
     var manifest: RuntimeManifest?
     @ObservationIgnored private let services: any RuntimeServices
     @ObservationIgnored let artServices: [Region: any GameArtProviding]
-    @ObservationIgnored var artHydrationTask: Task<Void, Never>?
+    @ObservationIgnored var artHydrationTasks: [Region: Task<Void, Never>] = [:]
     @ObservationIgnored var artTasks: [Region: Task<Void, Never>] = [:]
     @ObservationIgnored var regionLoadTasks: [Region: Task<Void, Never>] = [:]
     @ObservationIgnored var regionLoadingEnabled = true
@@ -183,7 +192,8 @@ final class AppModel {
         launchSleep: @escaping @Sendable () async throws -> Void = { try await ContinuousClock().sleep(for: .milliseconds(500)) },
         recoverySleep: @escaping @Sendable (Duration) async throws -> Void = { try await ContinuousClock().sleep(for: $0) },
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
-        updater: any AppUpdating = InertAppUpdater()) {
+        updater: any AppUpdating = InertAppUpdater(), artClock: any Clock<Duration> = ContinuousClock()) {
+        self.artClock = artClock
         self.updater = updater
         self.displayProbe = displayProbe; self.displayNames = displayNames
         self.launchPreferences = launchPreferences ?? LiveLaunchPreferencesPersistence(paths: paths)
@@ -231,6 +241,16 @@ final class AppModel {
     func setGameRecord(_ id: String, _ record: GameRecord?) { gameRecords[id] = record }
     func setRosetta(_ status: RosettaStatus) { rosetta = status }
     func setRosettaInstallInProgress(_ inProgress: Bool) { rosettaInstallInProgress = inProgress }
+    func setArtCacheState(_ state: ArtCacheState, in region: Region) {
+        artCacheStates[region] = state
+        updateArtReveal()
+    }
+
+    func revealLauncher() {
+        launcherRevealed = true
+        artRevealTask?.cancel()
+    }
+
     func applyArt(_ art: [String: GameArt], in region: Region) {
         gameArt = gameArt.filter { GameDefinition.find($0.key)?.region != region }
             .merging(art.filter { GameDefinition.find($0.key)?.region == region }) { _, new in new }
@@ -292,13 +312,15 @@ final class AppModel {
         for task in recoveryInFlight.values { task.cancel() }
         for task in regionLoadTasks.values { task.cancel() }
         for task in artTasks.values { task.cancel() }
-        artHydrationTask?.cancel()
+        for task in artHydrationTasks.values { task.cancel() }
+        artStartupTask?.cancel(); artRevealTask?.cancel()
         gameTask?.cancel(); gameStartupTask?.cancel(); gameActivationTask?.cancel()
     }
 
     func start() async {
         guard !started else { return }
         started = true; isStarting = true
+        startArtStartup()
         defer { isStarting = false }
         refreshConnectedDisplays()
         await reattachOnStart()
@@ -754,7 +776,7 @@ extension AppModel {
             return try? InstalledComponent(kind: kind, version: row.version, installedAt: Date(), source: source)
         }
         model.lastError = lastError; model.logLines = Array(logLines.suffix(200))
-        model.isStarting = false; model.started = true; model.installRoot = root.appendingPathComponent("Games")
+        model.isStarting = false; model.started = true; model.launcherRevealed = true; model.installRoot = root.appendingPathComponent("Games")
         return model
     }
 }

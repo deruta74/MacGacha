@@ -20,8 +20,9 @@ struct MacGachaApp: App {
 
     var body: some Scene {
         Window("MacGacha", id: "launcher") {
-            RootView()
+            LauncherWindowContent()
                 .environment(model)
+                // Startup belongs to the window, not to the launcher view the loading screen replaces.
                 .task {
                     delegate.bind(model)
                     await model.start()
@@ -82,5 +83,27 @@ extension AppModel {
     func confirmQuit(gameName: String, completion: @escaping @MainActor (NSApplication.TerminateReply) -> Void) {
         if let quitConfirmation { quitConfirmation(gameName, completion) }
         else { completion(.terminateNow) }
+    }
+}
+
+/// Holds the loading screen until HoYoPlay's art is ready, then the launcher itself.
+private struct LauncherWindowContent: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            if model.launcherRevealed {
+                RootView()
+                    .transition(.opacity)
+            } else {
+                LaunchLoadingView()
+                    .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.4), value: model.launcherRevealed)
+        .frame(minWidth: 960, minHeight: 540)
+        // Installed here, not in RootView: startup can reattach a running game while the loading screen shows.
+        .task { model.quitConfirmation = QuitConfirmation.present }
     }
 }
