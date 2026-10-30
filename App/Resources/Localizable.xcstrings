@@ -357,6 +357,16 @@
         }
       }
     },
+    "Check Now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即检查"
+          }
+        }
+      }
+    },
     "Check for Updates…" : {
       "localizations" : {
         "zh-Hans" : {
