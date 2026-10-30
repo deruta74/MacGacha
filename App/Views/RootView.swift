@@ -70,7 +70,9 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            GameBackdrop(game: game, video: selection.video, slide: shownSlide,
+            // An entry's video joins only once its own still is on screen, so the still, theme
+            // and highlights never lag behind the motion.
+            GameBackdrop(game: game, video: selection.video.flatMap { $0.background.id == shownSlide?.id ? $0 : nil }, slide: shownSlide,
                 images: images, crossfade: selection.allowsCrossfade) { selection.setPlaybackState($0, for: $1) }
                 .id(game.id)
                 .transition(.opacity)

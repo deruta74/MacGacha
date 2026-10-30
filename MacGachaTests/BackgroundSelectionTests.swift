@@ -193,6 +193,34 @@ import HoYoPlayAPI
         model.update(region: .global, gameID: "genshin", backgrounds: [replacement], animated: true, reduceMotion: false)
         #expect(model.slides?.current == replacement)
     }
+    @Test func failedStartupStillContinuesToNextEntryInServerOrder() throws {
+        let c = GameBackground(id: "c", image: URL(fileURLWithPath: "/tmp/c.png"))
+        let d = GameBackground(id: "d", image: URL(fileURLWithPath: "/tmp/d.png"))
+        let store = MemoryBackgroundSelectionStore(["genshin": "b"])
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: store))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b, c, d], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == c && store.values["genshin"] == "c")
+
+        model.setStillImageFailed(try #require(c.image))
+
+        #expect(model.slides?.current == d && model.slides?.dotIDs == ["a", "b", "d"])
+        #expect(store.writes == ["genshin:c", "genshin:d"])
+    }
+    @Test func failedStartupStillWrapsWhenEveryLaterEntryHasFailed() throws {
+        let c = GameBackground(id: "c", image: URL(fileURLWithPath: "/tmp/c.png"))
+        let d = GameBackground(id: "d", image: URL(fileURLWithPath: "/tmp/d.png"))
+        let store = MemoryBackgroundSelectionStore(["genshin": "b"])
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: store))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b, c, d], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == c)
+
+        model.setStillImageFailed(try #require(d.image))
+        #expect(model.slides?.current == c && store.writes == ["genshin:c"])
+        model.setStillImageFailed(try #require(c.image))
+
+        #expect(model.slides?.current == a && model.slides?.dotIDs == ["a", "b"])
+        #expect(store.writes == ["genshin:c", "genshin:a"])
+    }
     @Test func singleBackgroundHasNoDotsAndAnimationDoesNotChangeSelection() {
         var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
         for (animated, reduced) in [(true, false), (false, false), (true, true)] {

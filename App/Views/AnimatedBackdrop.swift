@@ -92,6 +92,8 @@ struct GameBackdrop: View {
                     case .stopped: break
                     }
                 }
+                // Keyed by the whole token: entries sharing one file still get a fresh player.
+                .id(video.token)
                 .opacity(showing ? 1 : 0)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: showing)
                 .allowsHitTesting(false)

@@ -121,7 +121,14 @@ struct BackgroundVideo: Sendable, Equatable {
         let previousSource = videoCandidate?.1
         dotHover = nil
         failedStills.insert(url)
-        currentID = session.selection(for: gameID, availableIDs: available.map(\.id))
+        let availableIDs = available.map(\.id)
+        var orderedIDs = availableIDs
+        // Keep the failed choice as the anchor while resolving its successor.
+        if let index = backgrounds.firstIndex(where: { $0.id == currentID }) {
+            let successors = backgrounds.dropFirst(index + 1) + backgrounds.prefix(index + 1)
+            orderedIDs = successors.map(\.id).filter { availableIDs.contains($0) }
+        }
+        currentID = session.selection(for: gameID, availableIDs: orderedIDs)
         reconcileVideo(previousSource)
     }
     mutating func setWindow(active: Bool, visible: Bool) {
