@@ -42,6 +42,14 @@ func tinyVideo() async throws -> WebMVideo { try await BlockingIO.run { try WebM
         #expect(abs(video.samples[1].presentationTime.seconds - 0.4) < 0.000001)
         #expect(video.samples.allSatisfy { $0.isKeyframe })
     }
+    @Test func unknownSegmentInsideHeaderIsNotMistakenForAnAllowedMaster() async throws {
+        let frame = try #require(try await tinyVideo().samples.first).data
+        let cluster = ebml(0x1f43b675, ebml(0xe7, Data([0])) + ebml(0xa3, Data([0x81, 0, 0, 0x80]) + frame))
+        let good = container(frameBlocks: cluster)
+        let oldHeader = ebml(0x1a45dfa3, ebml(0x4282, Data("webm".utf8)))
+        let badHeader = ebml(0x1a45dfa3, ebml(0x4282, Data("webm".utf8)) + Data([0x18, 0x53, 0x80, 0x67, 0xff]))
+        #expect(throws: (any Error).self) { try WebMDemuxer.parse(badHeader + good.dropFirst(oldHeader.count)) }
+    }
     @Test func videoLacingOtherCodecsAndMultipleVideoTracksAreRefused() async throws {
         let frame = try #require(try await tinyVideo().samples.first).data
         let laced = ebml(0x1f43b675, ebml(0xe7, Data([0])) + ebml(0xa3, Data([0x81, 0, 0, 0x82]) + frame))

@@ -44,14 +44,14 @@ private struct WebMParser {
     var blocks: [Block] = []
     var scale: Int64 = 1_000_000
     let segmentChildren: Set<UInt64> = [0x114d9b74, 0x1549a966, 0x1654ae6b, 0x1f43b675, 0x1c53bb6b, 0x1941a469, 0x1043a770, 0x1254c367]
-    mutating func element(_ offset: Int, limit: Int) throws -> Element {
+    mutating func element(_ offset: Int, limit: Int, allowUnknownMaster: Bool = false) throws -> Element {
         elements += 1
         guard elements <= 100_000 else { throw WebMDemuxer.invalid() }
         var cursor = offset
         let id = try vint(&cursor, limit: limit, identifier: true)
         let size = try vint(&cursor, limit: limit)
         let unknown = size.value == (UInt64(1) << (7 * size.width)) - 1
-        guard !unknown || id.value == 0x18538067 || id.value == 0x1f43b675 else { throw WebMDemuxer.invalid() }
+        guard !unknown || (allowUnknownMaster && (id.value == 0x18538067 || id.value == 0x1f43b675)) else { throw WebMDemuxer.invalid() }
         guard unknown || size.value <= UInt64(limit - cursor) else { throw WebMDemuxer.invalid() }
         return Element(id: id.value, body: cursor, end: unknown ? limit : cursor + Int(size.value), unknown: unknown)
     }
@@ -76,11 +76,12 @@ private struct WebMParser {
             offset = e.end
         }
         guard webm else { throw WebMDemuxer.invalid() }
-        let segment = try element(header.end, limit: bytes.count)
+        let segment = try element(header.end, limit: bytes.count, allowUnknownMaster: true)
         guard segment.id == 0x18538067, segment.end == bytes.count else { throw WebMDemuxer.invalid() }
         offset = segment.body
         while offset < segment.end {
-            let e = try element(offset, limit: segment.end)
+            let e = try element(offset, limit: segment.end, allowUnknownMaster: true)
+            guard e.id != 0x18538067 else { throw WebMDemuxer.invalid() }
             switch e.id {
             case 0x1549a966: try info(e)
             case 0x1654ae6b: try trackList(e)
@@ -180,8 +181,12 @@ private struct WebMParser {
     mutating func cluster(_ parent: Element) throws -> Int {
         var offset = parent.body, ticks: Int64 = 0
         while offset < parent.end {
-            let e = try element(offset, limit: parent.end)
-            if parent.unknown && segmentChildren.contains(e.id) { return offset }
+            let e = try element(offset, limit: parent.end, allowUnknownMaster: true)
+            if segmentChildren.contains(e.id) {
+                guard parent.unknown else { throw WebMDemuxer.invalid() }
+                return offset
+            }
+            guard !e.unknown, e.id != 0x18538067 else { throw WebMDemuxer.invalid() }
             switch e.id {
             case 0xe7: let n = try uint(e); guard n <= UInt64(Int64.max) else { throw WebMDemuxer.invalid() }; ticks = Int64(n)
             case 0xa3: blocks.append(Block(range: e.body..<e.end, ticks: ticks, key: true))
