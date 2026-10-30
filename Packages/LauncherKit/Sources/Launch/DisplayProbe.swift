@@ -25,22 +25,32 @@ public struct FixedDisplayProbe: DisplayProbe {
 /// CoreGraphics-only: callers on launch supervision never need the main actor.
 /// The app enriches names from NSScreen on the main actor.
 public struct SystemDisplayProbe: DisplayProbe {
-    public init() {}
-    public func connectedDisplays() -> [ConnectedDisplay] {
+    package enum DisplayList: Sendable, Equatable { case active, online }
+    package typealias Enumeration = @Sendable (DisplayList) -> [(display: ConnectedDisplay, mirrors: Bool)]
+    private let enumerate: Enumeration
+    public init() { enumerate = Self.systemDisplays }
+    package init(enumerate: @escaping Enumeration) { self.enumerate = enumerate }
+
+    // Wine's cocoa_display.m enumerates online displays, including sleeping ones.
+    public func connectedDisplays() -> [ConnectedDisplay] { Self.ordered(enumerate(.online)) }
+
+    private static func systemDisplays(_ list: DisplayList) -> [(display: ConnectedDisplay, mirrors: Bool)] {
+        let getDisplayList = list == .online ? CGGetOnlineDisplayList : CGGetActiveDisplayList
         var count: UInt32 = 0
-        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        guard getDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        guard getDisplayList(count, &ids, &count) == .success else { return [] }
         let main = CGMainDisplayID()
         var candidates: [(display: ConnectedDisplay, mirrors: Bool)] = []
         for id in ids.prefix(Int(count)) {
             let mirrors = CGDisplayMirrorsDisplay(id) != kCGNullDirectDisplay
+            // Keep the mirror source; only displays mirroring another are skipped.
             if mirrors { continue }
             guard let uuid = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue(),
                 let name = CFUUIDCreateString(nil, uuid) else { return [] }
             candidates.append((ConnectedDisplay(id: name as String, name: "", isMain: id == main), false))
         }
-        return Self.ordered(candidates)
+        return candidates
     }
 
     /// Stable partition: preserve CoreGraphics order among the non-main displays.

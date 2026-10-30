@@ -44,6 +44,15 @@ import RuntimeManager
         #expect(model.launchSettings(for: "genshin-cn").display == nil)
     }
 
+    @Test func missingSleepingDisplayNamePreservesMonitorPosition() throws {
+        let main = ConnectedDisplay(id: "00000000-0000-0000-0000-000000000001", name: "", isMain: true)
+        let sleeping = ConnectedDisplay(id: "00000000-0000-0000-0000-000000000002", name: "", isMain: false)
+        let awake = ConnectedDisplay(id: "00000000-0000-0000-0000-000000000003", name: "", isMain: false)
+        let model = try fixture(ModelDisplayProbe([main, sleeping, awake]), names: { [main.id: "Main", awake.id: "Awake"] })
+        #expect(model.connectedDisplays.map(\.id) == [main.id, sleeping.id, awake.id])
+        #expect(model.connectedDisplays.map(\.name) == ["Main", "", "Awake"])
+    }
+
     @Test func saveRejectsInvalidChoiceBeforeChangingCache() throws {
         let model = try fixture(ModelDisplayProbe([]))
         var settings = model.launchSettings(for: "genshin")
