@@ -31,19 +31,26 @@ import RuntimeManager
 
     var sessionLogsEnabled: Bool {
         get { globalLaunchSettings.sessionLogsEnabled }
-        set {
-            // No settings writes may enter behind the restart's final flush.
-            guard languageRestart == nil else { show(LauncherError.busy("Application language restart is in progress")); return }
-            let preferences = launchPreferences
-            globalLaunchSettings.sessionLogsEnabled = newValue
-            let settings = globalLaunchSettings, revision = UUID()
-            launchSettingsRevision = revision; launchSettingsRevisions["global"] = revision
-            enqueueSettingsWrite(key: "global") { try preferences.saveGlobal(settings) } didCommit: { [weak self] in
-                self?.durableGlobalLaunchSettings = settings
-            } rollback: { [weak self] in
-                guard let self, self.launchSettingsRevisions["global"] == revision else { return }
-                self.globalLaunchSettings = self.durableGlobalLaunchSettings
-            }
+        set { setGlobalLaunchPreference(\.sessionLogsEnabled, to: newValue) }
+    }
+
+    var gameModeEnabled: Bool {
+        get { globalLaunchSettings.gameModeEnabled }
+        set { setGlobalLaunchPreference(\.gameModeEnabled, to: newValue) }
+    }
+
+    private func setGlobalLaunchPreference(_ key: WritableKeyPath<GlobalLaunchSettings, Bool>, to value: Bool) {
+        // No settings writes may enter behind the restart's final flush.
+        guard languageRestart == nil else { show(LauncherError.busy("Application language restart is in progress")); return }
+        let preferences = launchPreferences
+        globalLaunchSettings[keyPath: key] = value
+        let settings = globalLaunchSettings, revision = UUID()
+        launchSettingsRevision = revision; launchSettingsRevisions["global"] = revision
+        enqueueSettingsWrite(key: "global") { try preferences.saveGlobal(settings) } didCommit: { [weak self] in
+            self?.durableGlobalLaunchSettings = settings
+        } rollback: { [weak self] in
+            guard let self, self.launchSettingsRevisions["global"] == revision else { return }
+            self.globalLaunchSettings = self.durableGlobalLaunchSettings
         }
     }
 

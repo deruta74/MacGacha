@@ -40,6 +40,8 @@ import GameLibrary
                 try f.model.saveLaunchSettings(f.model.launchSettings(for: "genshin"), for: "genshin")
             }
             f.model.sessionLogsEnabled = false
+            f.model.gameModeEnabled = false
+            #expect(f.model.gameModeEnabled)
             #expect(f.model.sessionLogsEnabled)
             #expect(preferences.writeCount == 0)
         }

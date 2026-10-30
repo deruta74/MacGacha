@@ -46,6 +46,20 @@ struct AppModelLaunchTests {
         #expect(other == original)
     }
 
+    @Test func gameModeDefaultOnPersistsWithoutChangingOtherLaunchSettings() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        await fixture.model.reattachOnStart()
+        #expect(fixture.model.gameModeEnabled)
+        fixture.model.gameModeEnabled = false
+        fixture.model.sessionLogsEnabled = false
+        try await fixture.model.flushLaunchSettings()
+        let next = fixture.makeModel()
+        await next.reattachOnStart()
+        #expect(!next.gameModeEnabled)
+        #expect(!next.sessionLogsEnabled)
+        #expect(next.launchSettings(for: "genshin") == .defaults(for: "genshin"))
+    }
+
     @Test func sessionLogsDefaultOnAndRoundTrip() async throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
         await fixture.model.reattachOnStart()
