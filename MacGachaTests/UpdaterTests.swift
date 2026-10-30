@@ -88,10 +88,18 @@ import RuntimeManager
         #expect(!model.isBusyForUpdates)
     }
 
+    @Test func debugConfigurationNeverStartsSparkle() {
+        #if DEBUG
+        #expect(!SparkleUpdaterService.permitsStartup(environment: [:], testBundleLoaded: false))
+        #endif
+    }
+
     @Test func testHostsNeverStartSparkle() {
-        #expect(!SparkleUpdaterService.permitsStartup(environment: ["XCTestConfigurationFilePath": "/test"], testBundleLoaded: false))
-        #expect(!SparkleUpdaterService.permitsStartup(environment: [:], testBundleLoaded: true))
-        #expect(SparkleUpdaterService.permitsStartup(environment: [:], testBundleLoaded: false))
+        #expect(!SparkleUpdaterService.permitsStartup(environment: ["XCTestConfigurationFilePath": "/test"], testBundleLoaded: false, debugBuild: false))
+        #expect(!SparkleUpdaterService.permitsStartup(environment: ["XCTestBundlePath": "/test"], testBundleLoaded: false, debugBuild: false))
+        #expect(!SparkleUpdaterService.permitsStartup(environment: [:], testBundleLoaded: true, debugBuild: false))
+        #expect(SparkleUpdaterService.permitsStartup(environment: [:], testBundleLoaded: false, debugBuild: false))
+        #expect(!SparkleUpdaterService.permitsStartup(environment: [:], testBundleLoaded: false, debugBuild: true))
     }
 
     @Test func installingUpdateRefusesNewGameAndRuntimeWork() async throws {
