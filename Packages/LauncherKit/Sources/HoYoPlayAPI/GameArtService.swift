@@ -128,10 +128,12 @@ public actor GameArtService {
                     if let url = layer.video {
                         if await asset(url, video: true, fs: fs, root: root, files: &files, attempted: &attempted) {
                             saved.video = url
-                            if let theme = layer.theme, await asset(theme, video: false, fs: fs, root: root, files: &files, attempted: &attempted) {
-                                saved.theme = theme
-                            } else if previous?.video == url { saved.theme = previous?.theme }
-                        } else { saved.video = previous?.video; saved.theme = previous?.theme }
+                        } else { saved.video = previous?.video }
+                    }
+                    if let theme = layer.theme {
+                        if await asset(theme, video: false, fs: fs, root: root, files: &files, attempted: &attempted) {
+                            saved.theme = theme
+                        } else if previous?.theme == theme { saved.theme = previous?.theme }
                     }
                     backgrounds.append(saved)
                 }
@@ -215,7 +217,7 @@ public actor GameArtService {
                     }
                     let clip = local(layer.video, video: true)
                     return GameBackground(id: layer.id, image: local(layer.background), video: clip,
-                        theme: clip == nil ? nil : local(layer.theme), highlights: highlights)
+                        theme: local(layer.theme), highlights: highlights)
                 })
         }
     }
@@ -347,7 +349,7 @@ public actor GameArtService {
                 guard ids.insert(stableID).inserted else { return nil }
                 return RemoteBackground(id: stableID, background: layer.background?.url,
                     video: layer.type == "BACKGROUND_TYPE_VIDEO" ? layer.video?.url : nil,
-                    theme: layer.type == "BACKGROUND_TYPE_VIDEO" ? layer.theme?.url : nil,
+                    theme: layer.theme?.url,
                     highlight: layer.icon?.url, hover: layer.icon?.hover_url,
                     link: layer.icon?.link.flatMap(GameHighlights.browserLink))
             }

@@ -70,13 +70,16 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            GameBackdrop(game: game, art: model.gameArt[game.id], video: selection.video, slide: shownSlide,
+            // An entry's video joins only once its own still is on screen, so the still, theme
+            // and highlights never lag behind the motion.
+            GameBackdrop(game: game, video: selection.video.flatMap { $0.background == shownSlide ? $0 : nil }, slide: shownSlide,
                 images: images, crossfade: selection.allowsCrossfade) { selection.setPlaybackState($0, for: $1) }
                 .id(game.id)
                 .transition(.opacity)
             if let slides = selection.slides, !slides.dotIDs.isEmpty, let shown = shownSlide {
                 BackgroundDots(ids: slides.dotIDs, current: shown.id,
-                    onEnter: { selection.pointerEnteredDots() }, onSelect: { selection.clickDot($0) })
+                    onHover: { id, inside in if inside { selection.hoverDot(id) } else { selection.leaveDot(id) } },
+                    onSelect: { selection.clickDot($0) })
                     .frame(maxHeight: .infinity, alignment: .top)
             }
             HStack(alignment: .bottom, spacing: 0) {
@@ -85,7 +88,7 @@ struct RootView: View {
                     .padding(.top, 40) // below the window's traffic lights
                     .padding(.bottom, 12)
                     .frame(maxHeight: .infinity)
-                GameFooter(game: game, art: model.gameArt[game.id], highlights: shownSlide?.highlights ?? selection.video?.background.highlights,
+                GameFooter(game: game, art: model.gameArt[game.id], highlights: shownSlide?.highlights,
                     images: images, panel: $panel, gameSheet: $gameSheet, animated: animated)
                     // A fresh footer per game, so a confirmation opened for one game can't act on another.
                     .id(game.id)
@@ -102,13 +105,17 @@ struct RootView: View {
         .onChange(of: readySlide, initial: true) {
             if let readySlide { shownSlide = readySlide } else if selection.slides == nil { shownSlide = nil }
         }
+        // Resting on a dot selects it after a short delay; moving away cancels the token.
+        .task(id: selection.dotHover) {
+            guard let hover = selection.dotHover else { return }
+            do { try await ContinuousClock().sleep(until: hover.deadline) } catch { return }
+            selection.selectHoveredDot(if: hover)
+        }
+        .onChange(of: images.failed) { _, failed in
+            for url in failed { selection.setStillImageFailed(url) }
+        }
         .onChange(of: activeState, initial: true) { updateWindowState() }
         .onChange(of: scenePhase) { updateWindowState() }
-        .task(id: selection.rotation) {
-            guard let rotation = selection.rotation else { return }
-            do { try await ContinuousClock().sleep(until: rotation.deadline) } catch { return }
-            selection.advance(if: rotation)
-        }
         .ignoresSafeArea()
         .frame(minWidth: 960, minHeight: 540)
         .sheet(item: $panel) { panel in

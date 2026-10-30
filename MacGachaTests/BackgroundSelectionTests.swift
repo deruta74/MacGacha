@@ -6,122 +6,281 @@ import LauncherCore
 import HoYoPlayAPI
 @testable import MacGacha
 
-@MainActor struct BackgroundSelectionTests {
-    private let a = GameBackground(id: "a", image: URL(fileURLWithPath: "/tmp/a.png"),
-        highlights: GameHighlights(image: URL(fileURLWithPath: "/tmp/a-icon.png"), link: URL(string: "https://hoyo.link/a")))
+@Suite @MainActor struct BackgroundSelectionTests {
+    private let a = GameBackground(id: "a", image: URL(fileURLWithPath: "/tmp/a.png"))
     private let b = GameBackground(id: "b", image: URL(fileURLWithPath: "/tmp/b.png"))
+    private var movie: GameBackground { GameBackground(id: "movie", image: URL(fileURLWithPath: "/tmp/movie.png"),
+        video: URL(fileURLWithPath: "/tmp/movie.webm"), theme: URL(fileURLWithPath: "/tmp/theme.png"),
+        highlights: GameHighlights(image: URL(fileURLWithPath: "/tmp/icon.png"))) }
 
-    @Test func rotationPointerEntryAndDotClicks() throws {
-        let clock = NativeWindowClock()
-        var model = BackgroundSelection(clock: clock)
+    @Test func hoverSelectsAtExactlyOneHundredMilliseconds() throws {
+        let clock = NativeWindowClock(), store = MemoryBackgroundSelectionStore()
+        var model = BackgroundSelection(clock: clock, session: BackgroundSelectionSession(store: store))
         model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
-        #expect(model.slides?.current == a && model.slides?.dotIDs == ["a", "b"])
-        let first = try #require(model.rotation)
-        clock.advance(by: .seconds(6)); model.advance(if: first)
-        #expect(model.slides?.current.id == "a")
-        clock.advance(by: .seconds(1)); model.advance(if: first)
-        #expect(model.slides?.current == b)
-        model.pointerEnteredDots()
-        #expect(!model.userAllowsAuto && model.rotation == nil)
+        model.hoverDot("b")
+        let hover = try #require(model.dotHover)
+        #expect(clock.now.duration(to: hover.deadline) == .milliseconds(100))
+        clock.advance(by: .milliseconds(99)); model.selectHoveredDot(if: hover)
+        #expect(model.slides?.current == a && model.dotHover == hover)
+        clock.advance(by: .milliseconds(1)); model.selectHoveredDot(if: hover)
+        #expect(model.slides?.current == b && model.dotHover == nil)
+        #expect(store.writes == ["genshin:a", "genshin:b"])
+    }
+    @Test func leavingBeforeDeadlineCancelsHover() throws {
+        let clock = NativeWindowClock(), store = MemoryBackgroundSelectionStore()
+        var model = BackgroundSelection(clock: clock, session: BackgroundSelectionSession(store: store))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        model.hoverDot("b"); let hover = try #require(model.dotHover)
+        clock.advance(by: .milliseconds(99)); model.leaveDot("b")
+        clock.advance(by: .milliseconds(1)); model.selectHoveredDot(if: hover)
+        #expect(model.slides?.current == a && model.dotHover == nil && store.writes == ["genshin:a"])
+    }
+    @Test func clickSelectsImmediatelyAndCancelsPendingHover() throws {
+        let clock = NativeWindowClock(), store = MemoryBackgroundSelectionStore()
+        var model = BackgroundSelection(clock: clock, session: BackgroundSelectionSession(store: store))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, movie, b], animated: true, reduceMotion: false)
+        model.hoverDot("movie"); let old = try #require(model.dotHover)
         model.clickDot("b")
-        #expect(model.userAllowsAuto && model.rotation != nil)
-        model.clickDot("a")
-        #expect(model.slides?.current == a && !model.userAllowsAuto && model.rotation == nil)
-        model.clickDot("a")
-        #expect(model.userAllowsAuto)
-        let resumed = try #require(model.rotation)
-        #expect(clock.now.duration(to: resumed.deadline) == .seconds(7))
-        model.advance(if: first)
+        #expect(model.slides?.current == b && model.dotHover == nil)
+        clock.advance(by: .milliseconds(100)); model.selectHoveredDot(if: old)
+        #expect(model.slides?.current == b && store.writes == ["genshin:a", "genshin:b"])
+    }
+    @Test func replacingHoverUsesNewDeadlineAndIgnoresLateLeave() throws {
+        let clock = NativeWindowClock()
+        var model = BackgroundSelection(clock: clock, session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, movie, b], animated: true, reduceMotion: false)
+        model.hoverDot("movie"); let old = try #require(model.dotHover)
+        clock.advance(by: .milliseconds(50)); model.hoverDot("b")
+        let new = try #require(model.dotHover)
+        model.leaveDot("movie"); #expect(model.dotHover == new)
+        clock.advance(by: .milliseconds(50)); model.selectHoveredDot(if: old)
+        clock.advance(by: .milliseconds(49)); model.selectHoveredDot(if: new)
         #expect(model.slides?.current == a)
+        clock.advance(by: .milliseconds(1)); model.selectHoveredDot(if: new)
+        #expect(model.slides?.current == b)
     }
-
-    @Test func inactiveRefreshAndReduceMotionNeverReenableAuto() throws {
+    @Test func repeatedHoverDoesNotPushItsDeadlineBack() throws {
         let clock = NativeWindowClock()
-        var model = BackgroundSelection(clock: clock)
-        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: false, reduceMotion: true)
-        #expect(!model.userAllowsAuto && !model.allowsCrossfade && model.rotation == nil)
-        model.clickDot("b")
-        model.update(region: .global, gameID: "genshin", backgrounds: [b, a], animated: false, reduceMotion: true)
-        #expect(model.slides?.current == b && !model.userAllowsAuto)
-        model.clickDot("b")
-        model.setWindow(active: false, visible: true)
-        #expect(model.userAllowsAuto && !model.canAutoAdvance && model.rotation == nil)
-        clock.advance(by: .seconds(100))
-        model.setWindow(active: true, visible: true)
-        #expect(clock.now.duration(to: try #require(model.rotation).deadline) == .seconds(7))
-        model.pointerEnteredDots()
-        model.setWindow(active: true, visible: false)
-        model.setWindow(active: true, visible: true)
-        #expect(model.rotation == nil)
-        model.update(region: .global, gameID: "genshin", backgrounds: [a], animated: false, reduceMotion: false)
-        #expect(model.slides?.current == a && model.slides?.dotIDs == [] && model.rotation == nil)
-        model.update(region: .global, gameID: "starrail", backgrounds: [a, b], animated: false, reduceMotion: false)
-        #expect(model.userAllowsAuto && model.slides?.current == a)
+        var model = BackgroundSelection(clock: clock, session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        model.hoverDot("a"); #expect(model.dotHover == nil)
+        model.hoverDot("b"); let hover = try #require(model.dotHover)
+        clock.advance(by: .milliseconds(99)); model.hoverDot("b")
+        #expect(model.dotHover == hover)
+        clock.advance(by: .milliseconds(1)); model.selectHoveredDot(if: hover)
+        #expect(model.slides?.current == b)
     }
-
-    @Test func videoFailureIsSourceScopedAndOldGenerationsAreIgnored() throws {
+    @Test func refreshAndGameChangeInvalidatePendingHover() throws {
         let clock = NativeWindowClock()
-        var model = BackgroundSelection(clock: clock)
-        let video = GameBackground(id: "movie", image: a.image, video: URL(fileURLWithPath: "/tmp/video.webm"), theme: b.image, highlights: a.highlights)
-        model.update(region: .global, gameID: "starrail", backgrounds: [a, video, b], animated: true, reduceMotion: false)
+        var model = BackgroundSelection(clock: clock, session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        model.hoverDot("b"); let old = try #require(model.dotHover)
+        model.update(region: .global, gameID: "genshin", backgrounds: [a], animated: true, reduceMotion: false)
+        clock.advance(by: .milliseconds(100)); model.selectHoveredDot(if: old)
+        #expect(model.slides?.current == a && model.dotHover == nil)
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        model.hoverDot("b"); let previousGame = try #require(model.dotHover)
+        model.update(region: .mainlandChina, gameID: "genshin-cn", backgrounds: [a, b], animated: true, reduceMotion: false)
+        clock.advance(by: .milliseconds(100)); model.selectHoveredDot(if: previousGame)
+        #expect(model.slides?.current == a && model.dotHover == nil)
+    }
+    @Test func failedStillAndSingleBackgroundHaveNoHoverTarget() throws {
+        let clock = NativeWindowClock()
+        var model = BackgroundSelection(clock: clock, session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        model.hoverDot("b"); let hover = try #require(model.dotHover)
+        model.setStillImageFailed(try #require(b.image))
+        clock.advance(by: .milliseconds(100)); model.selectHoveredDot(if: hover)
+        model.hoverDot("a"); model.hoverDot("missing")
+        #expect(model.dotHover == nil && model.slides?.current == a && model.slides?.dotIDs == [])
+    }
+    @Test func firstShowSelectsNextAfterSavedAndWraps() {
+        for (saved, expected) in [("a", "movie"), ("movie", "b"), ("b", "a")] {
+            let store = MemoryBackgroundSelectionStore(["genshin": saved])
+            var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: store))
+            model.update(region: .global, gameID: "genshin", backgrounds: [a, movie, b], animated: true, reduceMotion: false)
+            #expect(model.slides?.current.id == expected)
+            #expect(store.values["genshin"] == expected)
+        }
+    }
+    @Test func missingOrAbsentSavedEntryStartsAtFirst() {
+        for values in [[:], ["genshin": "gone"]] {
+            var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore(values)))
+            model.update(region: .global, gameID: "genshin", backgrounds: [a, movie, b], animated: true, reduceMotion: false)
+            #expect(model.slides?.current == a && model.video == nil)
+        }
+    }
+    @Test func returningAndRemountingWithinSessionKeepsSelection() {
+        let session = BackgroundSelectionSession(store: MemoryBackgroundSelectionStore())
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: session)
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        model.clickDot("b")
+        model.update(region: .global, gameID: "zzz", backgrounds: [a, b], animated: true, reduceMotion: false)
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == b)
+        var remounted = BackgroundSelection(clock: NativeWindowClock(), session: session)
+        remounted.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        #expect(remounted.slides?.current == b)
+    }
+    @Test func eachSelectionPersistsAndEditionsStaySeparate() {
+        let store = MemoryBackgroundSelectionStore(), session = BackgroundSelectionSession(store: store)
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: session)
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        model.clickDot("b"); model.clickDot("b"); model.clickDot("missing")
+        #expect(store.writes == ["genshin:a", "genshin:b"])
+        model.update(region: .mainlandChina, gameID: "genshin-cn", backgrounds: [a, b], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == a)
+        #expect(store.values == ["genshin": "b", "genshin-cn": "a"])
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == b && store.writes.count == 3)
+    }
+    @Test func defaultsPersistenceSurvivesNewSessionUsingStableIDs() throws {
+        let domain = "background-selection-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        var first = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: UserDefaultsBackgroundSelectionStore(defaults: defaults)))
+        first.update(region: .global, gameID: "genshin", backgrounds: [a, movie, b], animated: true, reduceMotion: false)
+        first.clickDot("movie")
+        #expect(defaults.persistentDomain(forName: domain)?["lastBackgroundID.genshin"] as? String == "movie")
+        let freshDefaults = try #require(UserDefaults(suiteName: domain))
+        var next = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: UserDefaultsBackgroundSelectionStore(defaults: freshDefaults)))
+        let replacedImage = GameBackground(id: movie.id, image: URL(fileURLWithPath: "/tmp/refreshed-cache/movie.png"))
+        next.update(region: .global, gameID: "genshin", backgrounds: [a, replacedImage, b], animated: true, reduceMotion: false)
+        #expect(next.slides?.current == b)
+    }
+    @Test func ordinaryStillExposesOnlyItsOwnTheme() {
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        let themed = GameBackground(id: "themed", image: a.image, theme: movie.theme)
+        model.update(region: .global, gameID: "genshin", backgrounds: [themed, b], animated: false, reduceMotion: true)
+        #expect(model.theme == themed.theme && model.video == nil)
+        model.clickDot("b")
+        #expect(model.theme == nil)
+    }
+    @Test func videoStaysInServerOrderAndFailureKeepsItsStillAndTheme() throws {
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        model.update(region: .global, gameID: "starrail", backgrounds: [a, movie, b], animated: true, reduceMotion: false)
+        #expect(model.slides?.dotIDs == ["a", "movie", "b"] && model.slides?.current == a && model.video == nil)
+        model.clickDot("movie")
         let token = try #require(model.video?.token)
-        #expect(model.video?.state == .preparing && model.slides == nil && model.rotation == nil)
+        #expect(model.slides?.current == movie && model.theme == movie.theme && model.video?.state == .preparing)
         model.setPlaybackState(.playing, for: token)
-        #expect(model.video?.state == .playing)
+        #expect(model.theme == movie.theme)
         model.setPlaybackState(.failed, for: token)
-        #expect(model.video == nil && model.slides?.dotIDs.count == 3)
-        #expect(model.slides?.current.highlights == video.highlights)
-        model.update(region: .mainlandChina, gameID: "starrail-cn", backgrounds: [video], animated: true, reduceMotion: false)
-        #expect(model.video?.state == .preparing)
-        model.setPlaybackState(.failed, for: token)
-        #expect(model.video != nil)
-        let old = try #require(model.video?.token)
-        // An identical refresh keeps the player, so its in-flight callback still counts.
-        model.update(region: .mainlandChina, gameID: "starrail-cn", backgrounds: [video], animated: true, reduceMotion: false)
-        model.setPlaybackState(.playing, for: old)
-        #expect(model.video?.state == .playing)
-        model.update(region: .mainlandChina, gameID: "starrail-cn", backgrounds: [video], animated: false, reduceMotion: false)
-        #expect(model.video == nil && model.slides?.dotIDs == [] && model.rotation == nil)
-        // Turning animation back on mounts a new player, so the old one's callbacks are ignored.
-        model.update(region: .mainlandChina, gameID: "starrail-cn", backgrounds: [video], animated: true, reduceMotion: false)
-        model.setPlaybackState(.failed, for: old)
-        #expect(model.video != nil && model.video?.token != old)
+        #expect(model.video == nil && model.slides?.current == movie && model.theme == movie.theme)
+        #expect(model.slides?.dotIDs == ["a", "movie", "b"])
+        #expect(model.slides?.current.highlights == movie.highlights)
     }
+    @Test func emptyArtDoesNotConsumeFirstVisit() {
+        let store = MemoryBackgroundSelectionStore(["genshin": "a"])
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: store))
+        model.update(region: .global, gameID: "genshin", backgrounds: [], animated: true, reduceMotion: false)
+        #expect(model.slides == nil && store.writes.isEmpty)
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == b)
+    }
+    @Test func failedAndMissingStillsAreExcludedFromSelectionAndDots() throws {
+        let store = MemoryBackgroundSelectionStore(["genshin": "movie"])
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: store))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, GameBackground(id: "missing", image: nil), movie, b], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == b)
+        model.setStillImageFailed(try #require(b.image))
+        #expect(model.slides?.current == a && model.slides?.dotIDs == ["a", "movie"])
+        model.setStillImageFailed(try #require(a.image))
+        #expect(model.slides?.current == movie && model.slides?.dotIDs == [])
+        model.setStillImageFailed(try #require(movie.image))
+        #expect(model.slides == nil && model.video == nil)
+        let replacement = GameBackground(id: "a", image: URL(fileURLWithPath: "/tmp/new-a.png"))
+        model.update(region: .global, gameID: "genshin", backgrounds: [replacement], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == replacement)
+    }
+    @Test func failedStartupStillContinuesToNextEntryInServerOrder() throws {
+        let c = GameBackground(id: "c", image: URL(fileURLWithPath: "/tmp/c.png"))
+        let d = GameBackground(id: "d", image: URL(fileURLWithPath: "/tmp/d.png"))
+        let store = MemoryBackgroundSelectionStore(["genshin": "b"])
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: store))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b, c, d], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == c && store.values["genshin"] == "c")
 
-    @Test func missingStillsAndStaleImageTokens() throws {
+        model.setStillImageFailed(try #require(c.image))
+
+        #expect(model.slides?.current == d && model.slides?.dotIDs == ["a", "b", "d"])
+        #expect(store.writes == ["genshin:c", "genshin:d"])
+    }
+    @Test func failedStartupStillWrapsWhenEveryLaterEntryHasFailed() throws {
+        let c = GameBackground(id: "c", image: URL(fileURLWithPath: "/tmp/c.png"))
+        let d = GameBackground(id: "d", image: URL(fileURLWithPath: "/tmp/d.png"))
+        let store = MemoryBackgroundSelectionStore(["genshin": "b"])
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: store))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b, c, d], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == c)
+
+        model.setStillImageFailed(try #require(d.image))
+        #expect(model.slides?.current == c && store.writes == ["genshin:c"])
+        model.setStillImageFailed(try #require(c.image))
+
+        #expect(model.slides?.current == a && model.slides?.dotIDs == ["a", "b"])
+        #expect(store.writes == ["genshin:c", "genshin:a"])
+    }
+    @Test func singleBackgroundHasNoDotsAndAnimationDoesNotChangeSelection() {
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        for (animated, reduced) in [(true, false), (false, false), (true, true)] {
+            model.update(region: .global, gameID: "genshin", backgrounds: [movie], animated: animated, reduceMotion: reduced)
+            #expect(model.slides?.dotIDs == [] && model.slides?.current == movie && model.theme == movie.theme)
+            #expect((model.video != nil) == (animated && !reduced))
+            #expect(model.allowsCrossfade == !reduced)
+        }
+    }
+    @Test func elapsedTimeAndWindowChangesNeverRotateSelection() {
         let clock = NativeWindowClock()
-        var model = BackgroundSelection(clock: clock)
-        model.update(region: .global, gameID: "genshin", backgrounds: [GameBackground(id: "empty", image: nil)], animated: false, reduceMotion: false)
-        #expect(model.slides == nil && model.video == nil && model.rotation == nil)
-        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: false, reduceMotion: false)
-        let content = model.contentGeneration
-        model.clickDot("b")
-        #expect(model.contentGeneration != content)
-        model.update(region: .global, gameID: "genshin", backgrounds: [a], animated: false, reduceMotion: false)
-        #expect(model.slides?.current.id == "a" && !model.userAllowsAuto)
+        var model = BackgroundSelection(clock: clock, session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        clock.advance(by: .seconds(3600))
+        model.setWindow(active: false, visible: false); model.setWindow(active: true, visible: true)
+        model.update(region: .global, gameID: "genshin", backgrounds: [a, b], animated: true, reduceMotion: false)
+        #expect(model.slides?.current == a && clock.activeSleeps == 0)
+    }
+    @Test func windowStateOnlyPausesVideo() throws {
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        model.update(region: .global, gameID: "genshin", backgrounds: [movie, b], animated: true, reduceMotion: false)
+        let token = try #require(model.video?.token)
+        model.setPlaybackState(.playing, for: token)
+        model.setWindow(active: false, visible: true)
+        #expect(model.video?.isPaused == true && model.slides?.current == movie && model.video?.token == token)
+        model.setWindow(active: true, visible: false)
+        #expect(model.video?.isPaused == true)
+        model.setWindow(active: true, visible: true)
+        #expect(model.video?.isPaused == false && model.video?.token == token)
+    }
+    @Test func staleVideoCallbacksCannotAffectAnotherSelectionOrNewSource() throws {
+        var model = BackgroundSelection(clock: NativeWindowClock(), session: BackgroundSelectionSession(store: MemoryBackgroundSelectionStore()))
+        model.update(region: .global, gameID: "genshin", backgrounds: [movie, b], animated: true, reduceMotion: false)
+        let original = try #require(model.video?.token)
+        model.setPlaybackState(.playing, for: original)
+        model.update(region: .global, gameID: "genshin", backgrounds: [movie, b], animated: true, reduceMotion: false)
+        #expect(model.video?.token == original && model.video?.state == .playing)
+        model.clickDot("b"); model.clickDot("movie")
+        #expect(model.video?.token != original && model.video?.state == .preparing)
+        model.setPlaybackState(.failed, for: original)
+        #expect(model.video?.state == .preparing)
+        let current = try #require(model.video?.token)
+        model.setPlaybackState(.failed, for: current); model.setPlaybackState(.playing, for: current)
+        #expect(model.video == nil && model.slides?.current == movie)
+        let replacement = GameBackground(id: movie.id, image: movie.image, video: URL(fileURLWithPath: "/tmp/new-video.webm"))
+        model.update(region: .global, gameID: "genshin", backgrounds: [replacement, b], animated: true, reduceMotion: false)
+        #expect(model.video?.state == .preparing)
+        model.setPlaybackState(.failed, for: current)
+        #expect(model.video?.state == .preparing)
+        let old = try #require(model.video?.token)
+        model.update(region: .mainlandChina, gameID: "genshin-cn", backgrounds: [replacement, b], animated: true, reduceMotion: false)
+        model.setPlaybackState(.failed, for: old)
+        #expect(model.video?.state == .preparing)
     }
 }
 
-@MainActor struct BackgroundSourceRefreshTests {
-    @Test func replacementAssetRetriesAndRefreshRejectsOldTimerAndCallback() throws {
-        let clock = NativeWindowClock()
-        var model = BackgroundSelection(clock: clock)
-        let first = GameBackground(id: "one", image: URL(fileURLWithPath: "/tmp/a.png"), video: URL(fileURLWithPath: "/tmp/one.webm"))
-        let second = GameBackground(id: "two", image: URL(fileURLWithPath: "/tmp/b.png"))
-        model.update(region: .global, gameID: "zzz", backgrounds: [first, second], animated: true, reduceMotion: false)
-        let failed = try #require(model.video?.token)
-        model.setPlaybackState(.failed, for: failed)
-        model.setPlaybackState(.playing, for: failed)
-        #expect(model.video == nil)
-        let timer = try #require(model.rotation)
-        model.update(region: .global, gameID: "zzz", backgrounds: [first, second], animated: true, reduceMotion: false)
-        #expect(model.video == nil)
-        clock.advance(by: .seconds(7)); model.advance(if: timer)
-        #expect(model.slides?.current.id == "one")
-        let replacement = GameBackground(id: "one", image: first.image, video: URL(fileURLWithPath: "/tmp/replaced.webm"))
-        model.update(region: .global, gameID: "zzz", backgrounds: [replacement, second], animated: true, reduceMotion: false)
-        #expect(model.video?.state == .preparing)
-        model.setPlaybackState(.failed, for: failed)
-        #expect(model.video?.state == .preparing)
-    }
+@MainActor private final class MemoryBackgroundSelectionStore: BackgroundSelectionStore {
+    var values: [String: String]
+    var writes: [String] = []
+    init(_ values: [String: String] = [:]) { self.values = values }
+    func lastShownID(for gameID: String) -> String? { values[gameID] }
+    func setLastShownID(_ id: String, for gameID: String) { values[gameID] = id; writes.append("\(gameID):\(id)") }
 }

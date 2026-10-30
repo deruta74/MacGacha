@@ -2,13 +2,12 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import SwiftUI
 
-/// HoYoPlay's background picker: one dot per still, the current one ringed. The dots show
-/// only while the pointer is over them. Pointing at them stops automatic switching,
-/// clicking the current dot turns it back on.
+/// HoYoPlay's background picker: one dot per background, the current one ringed. The dots
+/// show only while the pointer is over them. Resting on a dot selects it, as does a click.
 struct BackgroundDots: View {
     let ids: [String]
     let current: String
-    let onEnter: () -> Void
+    let onHover: (String, Bool) -> Void
     let onSelect: (String) -> Void
     @State private var hovered = false
 
@@ -17,6 +16,7 @@ struct BackgroundDots: View {
             ForEach(Array(ids.enumerated()), id: \.element) { index, id in
                 Button { onSelect(id) } label: { dot(selected: id == current) }
                     .buttonStyle(.plain)
+                    .onHover { onHover(id, $0) }
                     .accessibilityLabel(Text("Background \(index + 1) of \(ids.count)",
                         comment: "Accessibility label of a background picker dot; the arguments are its position and the count"))
                     .accessibilityAddTraits(id == current ? .isSelected : [])
@@ -28,11 +28,7 @@ struct BackgroundDots: View {
         .padding(.horizontal, 40)
         .padding(.vertical, 14)
         .contentShape(Rectangle())
-        .onHover { inside in
-            hovered = inside
-            // Entry only, so a click on the current dot can resume while the pointer is still here.
-            if inside { onEnter() }
-        }
+        .onHover { hovered = $0 }
     }
 
     private func dot(selected: Bool) -> some View {
