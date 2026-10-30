@@ -63,6 +63,11 @@ enum OtherRegionActivity: Sendable, Equatable {
     func loadGameArt() async { await loadGameArt(in: region) }
 
     func loadGameArt(in region: Region) async {
+        beginGameEventsLoad(in: region)
+        await refreshGameArt(in: region)
+    }
+
+    private func refreshGameArt(in region: Region) async {
         if let task = artTasks[region] { await task.value; return }
         guard let provider = artServices[region], !Task.isCancelled else { return }
         let hydration = hydrateGameArt(in: region)

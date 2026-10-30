@@ -795,6 +795,16 @@
         }
       }
     },
+    "Events" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "活动"
+          }
+        }
+      }
+    },
     "Everything %@ needs is installed." : {
       "localizations" : {
         "zh-Hans" : {
