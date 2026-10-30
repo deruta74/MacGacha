@@ -139,3 +139,20 @@ private func resolve(_ game: String, settings: LaunchSettings? = nil, components
     var settings = LaunchSettings.defaults(for: "genshin"); settings.frameLimit = nil
     #expect(try resolve("genshin", settings: settings).environment["D3DM_MAX_FPS"] == nil)
 }
+
+@Test func gameModeUsesMirroredWrapperLoaderAndServerOnlyWhenEnabled() throws {
+    let root = URL(fileURLWithPath: "/Runtimes/GameMode/bundle/MacGacha Game.app/Contents")
+    let helper = GameModeRuntime(root: root, wineBinary: root.appendingPathComponent("MacOS/wine"))
+    let recipe = try #require(Recipes.recipe(for: "starrail"))
+    for enabled in [true, false] {
+        let result = try LaunchResolver.resolve(recipe: recipe, settings: .defaults(for: "starrail"), installRoot: installRoot,
+            prefix: prefix, wineBinary: wine, proxyPort: 1, componentRoots: roots, baseEnvironment: ["WINELOADER": "/inherited/bad"],
+            gameModeRuntime: helper, gameModeEnabled: enabled)
+        #expect(result.executable == (enabled ? helper.wineBinary : wine))
+        #expect(result.environment["WINELOADER"] == (enabled ? helper.wineBinary.path : nil))
+        #expect(result.environment["WINESERVER"] == (enabled ? helper.wineserver.path : nil))
+        #expect(result.arguments == [WinePath.windowsPath(for: roots[.jadeite]!.appendingPathComponent("jadeite.exe")),
+            WinePath.windowsPath(for: installRoot.appendingPathComponent("StarRail.exe"))])
+    }
+    #expect(try resolve("starrail").environment["WINELOADER"] == nil)
+}
