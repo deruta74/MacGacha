@@ -31,16 +31,16 @@ public struct LaunchPreparation: Sendable {
         self.registryWaitTimeout = registryWaitTimeout; self.timeoutWait = timeoutWait
     }
 
-    public func ensure(prefix: URL, wineBinary: URL, request: PreparationRequest) async throws {
+    @discardableResult public func ensure(prefix: URL, wineBinary: URL, request: PreparationRequest) async throws -> PreparationOutcome {
         do {
-            try await BlockingIO.run { try await ensureOnIO(prefix: prefix, wineBinary: wineBinary, request: request) }
+            return try await BlockingIO.run { try await ensureOnIO(prefix: prefix, wineBinary: wineBinary, request: request) }
         } catch {
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
             throw error
         }
     }
 
-    private func ensureOnIO(prefix: URL, wineBinary: URL, request: PreparationRequest) async throws {
+    private func ensureOnIO(prefix: URL, wineBinary: URL, request: PreparationRequest) async throws -> PreparationOutcome {
         let fs = try ContainedFileSystem(root: paths.root, fileOps: fileOps)
         let path = try RuntimeJSONFile.relativePath(prefix, root: paths.root)
         guard path.components.count == 2, path.components.first == "Prefixes" else { throw LauncherError.unsafePath(prefix.path) }
@@ -112,6 +112,7 @@ public struct LaunchPreparation: Sendable {
             // same policy in this game/bundle's prefix, not in the runtime.
             try await run(binary, ["reg", "add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "crypt32", "/t", "REG_SZ", "/d", "native,builtin", "/f"], environment)
         }
+        let frameRate = try await applyStarRailFrameRate(request, binary: binary, environment: environment)
         // reg.exe success only acknowledges wineserver's in-memory state. Wait
         // for the server to save it, then flush the files and directory before
         // the marker's full-sync boundary can certify this provisioning revision.
@@ -135,6 +136,44 @@ public struct LaunchPreparation: Sendable {
         if needsProvisioning {
             marker.provisioningRevision = Self.provisioningRevision
             try PrefixManager.writeMarker(marker, fs: fs, to: markerPath, pending: SafeRelativePath("\(path)/.macgacha-prefix.pending"))
+        }
+        return PreparationOutcome(starRailFrameRate: frameRate)
+    }
+
+    private func applyStarRailFrameRate(_ request: PreparationRequest, binary: URL,
+        environment: [String: String]) async throws -> StarRailFrameRateOutcome? {
+        guard let mode = request.starRailFrameRate else { return nil }
+        let key = StarRailFrameRate.registryKey(for: request.starRailRegion)
+        do {
+            let query = try await runner.run(binary, arguments: ["reg", "query", key], environment: environment,
+                currentDirectory: nil, timeout: .seconds(10), timeoutWait: timeoutWait)
+            try Task.checkCancellation()
+            let diagnostic = String(decoding: query.stdout + query.stderr, as: UTF8.self).lowercased()
+            guard query.exitCode == 0 else {
+                return query.exitCode == 1 && (diagnostic.contains("unable to find the specified registry") ||
+                    diagnostic.contains("the system was unable to find the specified registry key or value")) ? .missing : .unreadable
+            }
+            guard query.stdout.count <= StarRailFrameRate.maximumPayloadBytes * 2 else { return .unreadable }
+            let values = StarRailFrameRate.parseQuery(String(decoding: query.stdout, as: UTF8.self))
+            guard !values.isEmpty else { return .missing }
+            var applied = false, unreadable = false
+            for value in values {
+                guard let payload = StarRailFrameRate.decodeHex(value.hex), let oldFPS = StarRailFrameRate.currentFPS(payload) else {
+                    unreadable = true; continue
+                }
+                let fps = mode == .unlock120 ? 120 : 60
+                if oldFPS == Double(fps) || (mode == .restore && oldFPS != 120) { continue }
+                guard let rewritten = StarRailFrameRate.rewrite(payload, fps: fps) else { unreadable = true; continue }
+                let result = try await runner.run(binary, arguments: ["reg", "add", key, "/v", value.name,
+                    "/t", "REG_BINARY", "/d", StarRailFrameRate.encodeHex(rewritten), "/f"], environment: environment,
+                    currentDirectory: nil, timeout: .seconds(10), timeoutWait: timeoutWait)
+                try Task.checkCancellation()
+                if result.exitCode == 0 { applied = true } else { unreadable = true }
+            }
+            return applied ? .applied : unreadable ? .unreadable : .unchanged
+        } catch {
+            if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled { throw LauncherError.cancelled }
+            return .unreadable
         }
     }
 

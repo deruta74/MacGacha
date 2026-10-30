@@ -149,8 +149,9 @@ struct ManagerPrefixProvider: LaunchPrefixProviding {
 final class ManagerPreparation: LaunchPreparing, Sendable {
     private let failure = Mutex<LauncherError?>(nil)
     func fail(_ error: LauncherError = .io("injected preparation failure")) { failure.withLock { $0 = error } }
-    func ensure(prefix: URL, wineBinary: URL, request: PreparationRequest) async throws {
+    func ensure(prefix: URL, wineBinary: URL, request: PreparationRequest) async throws -> PreparationOutcome {
         if let error = failure.withLock({ $0 }) { throw error }
+        return PreparationOutcome()
     }
 }
 
