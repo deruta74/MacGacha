@@ -63,49 +63,45 @@ struct AnimatedBackdrop: NSViewRepresentable {
     }
 }
 
-/// The window's background for one game: the selected video with its overlay once it plays,
-/// otherwise the current still (crossfading between slides), otherwise the game's fallback tint.
+/// The window's background for one game: the selected entry's still (crossfading between
+/// entries), its video on top once a frame plays, and its theme layer above both, as HoYoPlay
+/// layers them. Without art, the game's fallback tint.
 struct GameBackdrop: View {
     let game: LauncherGame
-    let art: GameArt?
     let video: BackgroundVideo?
     let slide: GameBackground?
     let images: ArtImageCache
     let crossfade: Bool
     let onPlayback: @MainActor (BackgroundPlaybackState, BackgroundVideoToken) -> Void
 
-    @Environment(\.controlActiveState) private var activeState
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .bottom) {
             LinearGradient(colors: [game.deepTint, game.deepTint.mix(with: .black, by: 0.5)], startPoint: .top, endPoint: .bottom)
+            if let slide { still(slide) }
             if let video {
-                still(video.background)
-                // The video and its overlay appear together as one layer, only once a frame is on
-                // screen. The overlay stays mounted (decoded ahead of time) so it never lags the
-                // video; the still stays underneath until then, and a failure falls back to stills.
+                // The video appears only once a frame is on screen; the still stays underneath
+                // until then, and a failure leaves the still.
                 let showing = video.state == .playing
-                ZStack {
-                    AnimatedBackdrop(video: video.token.source.assetURL,
-                        paused: activeState == .inactive || scenePhase != .active) { state in
-                        switch state {
-                        case .preparing: onPlayback(.preparing, video.token)
-                        case .playing: onPlayback(.playing, video.token)
-                        case .failed: onPlayback(.failed, video.token)
-                        case .stopped: break
-                        }
-                    }
-                    if let theme = images.image(video.background.theme ?? art?.theme) {
-                        fill(theme)
+                AnimatedBackdrop(video: video.token.source.assetURL, paused: video.isPaused) { state in
+                    switch state {
+                    case .preparing: onPlayback(.preparing, video.token)
+                    case .playing: onPlayback(.playing, video.token)
+                    case .failed: onPlayback(.failed, video.token)
+                    case .stopped: break
                     }
                 }
                 .opacity(showing ? 1 : 0)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: showing)
                 .allowsHitTesting(false)
-            } else if let slide {
-                still(slide)
+            }
+            // The theme follows the shown still, so the two always switch together.
+            if let theme = slide?.theme, let image = images.image(theme) {
+                fill(image)
+                    .id(theme)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
             }
             // A scrim only behind the footer keeps the art clean while text stays legible.
             LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)

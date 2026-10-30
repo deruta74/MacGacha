@@ -7,6 +7,8 @@ import Observation
 /// switch together and never show a background whose image is still loading.
 @MainActor @Observable final class ArtImageCache {
     private(set) var images: [URL: NSImage] = [:]
+    /// Images that couldn't be decoded, so their slides can be skipped as HoYoPlay does.
+    private(set) var failed: Set<URL> = []
     @ObservationIgnored private var loading: Set<URL> = []
 
     func image(_ url: URL?) -> NSImage? { url.flatMap { images[$0] } }
@@ -16,13 +18,14 @@ import Observation
         let wanted = Set(urls)
         if images.keys.contains(where: { !wanted.contains($0) }) { images = images.filter { wanted.contains($0.key) } }
         loading.formIntersection(wanted)
-        for url in wanted where images[url] == nil && !loading.contains(url) {
+        if failed.contains(where: { !wanted.contains($0) }) { failed.formIntersection(wanted) }
+        for url in wanted where images[url] == nil && !loading.contains(url) && !failed.contains(url) {
             loading.insert(url)
             Task {
                 let image = await Self.load(url)
                 // A load that is no longer wanted is dropped rather than repopulating the cache.
-                guard loading.remove(url) != nil, let image else { return }
-                images[url] = image
+                guard loading.remove(url) != nil else { return }
+                if let image { images[url] = image } else { failed.insert(url) }
             }
         }
     }

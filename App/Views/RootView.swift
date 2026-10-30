@@ -70,13 +70,14 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            GameBackdrop(game: game, art: model.gameArt[game.id], video: selection.video, slide: shownSlide,
+            GameBackdrop(game: game, video: selection.video, slide: shownSlide,
                 images: images, crossfade: selection.allowsCrossfade) { selection.setPlaybackState($0, for: $1) }
                 .id(game.id)
                 .transition(.opacity)
             if let slides = selection.slides, !slides.dotIDs.isEmpty, let shown = shownSlide {
                 BackgroundDots(ids: slides.dotIDs, current: shown.id,
-                    onEnter: {}, onSelect: { selection.clickDot($0) })
+                    onHover: { id, inside in if inside { selection.hoverDot(id) } else { selection.leaveDot(id) } },
+                    onSelect: { selection.clickDot($0) })
                     .frame(maxHeight: .infinity, alignment: .top)
             }
             HStack(alignment: .bottom, spacing: 0) {
@@ -101,6 +102,15 @@ struct RootView: View {
         }
         .onChange(of: readySlide, initial: true) {
             if let readySlide { shownSlide = readySlide } else if selection.slides == nil { shownSlide = nil }
+        }
+        // Resting on a dot selects it after a short delay; moving away cancels the token.
+        .task(id: selection.dotHover) {
+            guard let hover = selection.dotHover else { return }
+            do { try await ContinuousClock().sleep(until: hover.deadline) } catch { return }
+            selection.selectHoveredDot(if: hover)
+        }
+        .onChange(of: images.failed) { _, failed in
+            for url in failed { selection.setStillImageFailed(url) }
         }
         .onChange(of: activeState, initial: true) { updateWindowState() }
         .onChange(of: scenePhase) { updateWindowState() }
