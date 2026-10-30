@@ -228,14 +228,14 @@ public actor GameLibrary {
             try await store.deleteState(Self.cleanupName, for: game.id)
             let config = try await api.config(biz: game.biz), target = try await resolve(game, voices: voices)
             let record = GameRecord(installPath: location, ownership: .adopted, executable: config.executable, installIdentity: identity)
-            return LibraryPrepared(lease: lease, stream: verification {
-                try await self.verifyAndRun(game, record: record, target: target, kind: .adopt, mode: .full, lease: lease)
+            return LibraryPrepared(lease: lease, stream: verification { progress in
+                try await self.verifyAndRun(game, record: record, target: target, kind: .adopt, mode: .full, lease: lease, progress: progress)
             })
         case .verify(let mode):
             guard let record, let installed = record.installed else { throw LauncherError.io("game is not installed") }
             let target = LibraryTarget(build: installed, categories: try await planned(installed.categories, game: game))
-            return LibraryPrepared(lease: lease, stream: verification {
-                try await self.verifyAndRun(game, record: record, target: target, kind: .repair, mode: mode, lease: lease)
+            return LibraryPrepared(lease: lease, stream: verification { progress in
+                try await self.verifyAndRun(game, record: record, target: target, kind: .repair, mode: mode, lease: lease, progress: progress)
             })
         case .update(let approved):
             guard let record, let installed = record.installed else { throw LauncherError.io("game is not installed") }
@@ -267,13 +267,25 @@ public actor GameLibrary {
     }
 
     private func verifyAndRun(_ game: GameDefinition, record: GameRecord, target: LibraryTarget, kind: PendingOperation.Kind,
-        mode: Verifier.Mode, lease: GameOperationLease) async throws -> AsyncThrowingStream<OperationEvent, any Error> {
+        mode: Verifier.Mode, lease: GameOperationLease, progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> AsyncThrowingStream<OperationEvent, any Error> {
         let full = try SophonPlanner.fullPlan(id: planID(game, kind: kind, build: target.build, categories: target.categories), target: target.categories)
         if kind == .adopt, !full.files.contains(where: { $0.path == record.executable }),
             try ContainedFileSystem(root: record.installPath).itemType(at: record.executable) != .regularFile {
             throw LauncherError.io("game executable missing")
         }
-        let report = try await Verifier().verify(fs: ContainedFileSystem(root: record.installPath, expectedRootIdentity: record.installIdentity), files: full.files.map(ManifestFile.init), mode: mode)
+        // Exactly the selected manifest entries are inspected. Quick mode only
+        // checks metadata and must not claim that any file bytes were read.
+        let total = try full.files.reduce(Int64(0)) { total, file in
+            let (sum, overflow) = total.addingReportingOverflow(file.size)
+            guard !overflow else { throw LauncherError.io("verification byte count overflow") }
+            return sum
+        }
+        let bytes = mode == .full && total > 0 ? VerificationByteProgress(total: total, publish: progress) : nil
+        bytes?.flush()
+        let report = try await Verifier().verify(fs: ContainedFileSystem(root: record.installPath, expectedRootIdentity: record.installIdentity),
+            files: full.files.map(ManifestFile.init), mode: mode, progress: { bytes?.advance($0) })
+        bytes?.flush()
+        try Task.checkCancellation()
         if report.isClean, kind == .repair {
             return AsyncThrowingStream { continuation in continuation.yield(.phase(.completed)); continuation.finish() }
         }
@@ -415,22 +427,6 @@ private actor LibrarySession {
             return event
         } catch { done = true; iterator = nil; lease = nil; throw error }
     }
-}
-private actor VerificationStream {
-    var builder: (@Sendable () async throws -> AsyncThrowingStream<OperationEvent, any Error>)?
-    var iterator: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
-    var first = true
-    init(_ builder: @escaping @Sendable () async throws -> AsyncThrowingStream<OperationEvent, any Error>) { self.builder = builder }
-    func next() async throws -> OperationEvent? {
-        guard !Task.isCancelled else { throw LauncherError.cancelled }
-        if first { first = false; return .phase(.verifying) }
-        if let builder { iterator = try await builder().makeAsyncIterator(); self.builder = nil }
-        guard var current = iterator else { return nil }
-        iterator = nil; let event = try await current.next(isolation: self); iterator = current; return event
-    }
-}
-private func verification(_ builder: @escaping @Sendable () async throws -> AsyncThrowingStream<OperationEvent, any Error>) -> AsyncThrowingStream<OperationEvent, any Error> {
-    let session = VerificationStream(builder); return AsyncThrowingStream(unfolding: { try await session.next() })
 }
 private func planID(_ game: GameDefinition, kind: PendingOperation.Kind, build: InstalledBuild,
     categories: [PlannedCategory], repaired: [SafeRelativePath] = []) throws -> SafeIdentifier {

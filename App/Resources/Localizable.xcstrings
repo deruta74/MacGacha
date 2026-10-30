@@ -99,6 +99,17 @@
         }
       }
     },
+    "%@ left" : {
+      "comment" : "Estimated time remaining, e.g. 12 min left",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "剩余 %@"
+          }
+        }
+      }
+    },
     "%@ of %@" : {
       "comment" : "Downloaded so far of the total, e.g. 18.3 of 136.5 GB",
       "localizations" : {
@@ -1209,6 +1220,17 @@
         }
       }
     },
+    "Less than a minute left" : {
+      "comment" : "Estimated time remaining under one minute",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "剩余不到 1 分钟"
+          }
+        }
+      }
+    },
     "Local runtime" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1896,6 +1918,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切换到中国大陆"
+          }
+        }
+      }
+    },
+    "Taking longer than usual" : {
+      "comment" : "Shown when an operation has made no progress for a while",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "耗时比平常更长"
           }
         }
       }

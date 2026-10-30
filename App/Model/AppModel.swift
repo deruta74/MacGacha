@@ -204,7 +204,21 @@ final class AppModel {
         observeGameActivation()
     }
 
-    func setGameState(_ id: String, _ state: GameState) { games[id] = state }
+    func setGameState(_ id: String, _ state: GameState) {
+        var state = state
+        if case .working(let phase, let fraction, _, _, _) = state.activity {
+            if case .working(let previous, _, _, _, _) = games[id]?.activity, previous != phase { state.timing = nil }
+            if state.timing == nil, case .working(let previous, _, _, _, _) = games[id]?.activity, previous == phase {
+                state.timing = games[id]?.timing
+            }
+            let time = now()
+            if gameOperation?.id == id { gameProgress.beginPhase(phase, at: time) }
+            state.timing = state.timing ?? GameTiming(phaseStarted: time, lastAdvance: time, remaining: nil, hasFraction: fraction != nil)
+            state.timing?.hasFraction = fraction != nil
+            if fraction == nil { state.timing?.remaining = nil }
+        } else { state.timing = nil }
+        games[id] = state
+    }
     func setGameRecord(_ id: String, _ record: GameRecord?) { gameRecords[id] = record }
     func setRosetta(_ status: RosettaStatus) { rosetta = status }
     func setRosettaInstallInProgress(_ inProgress: Bool) { rosettaInstallInProgress = inProgress }
@@ -720,7 +734,8 @@ extension AppModel {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacGacha-Preview-\(UUID().uuidString)")
         let model = AppModel(paths: AppPaths(root: root), manifest: try? RuntimeManifest(components: []),
             services: PreviewRuntimeServices(), defaults: nil, gameServices: PreviewGameServices(states: games))
-        model.regionLoadingEnabled = false; model.region = region; model.games = games
+        model.regionLoadingEnabled = false; model.region = region; model.games = [:]
+        for (id, state) in games { model.setGameState(id, state) }
         model.rows = rows; model.consentRequest = consent; model.importState = importState
         model.installed = rows.compactMap { row in
             guard case .installed(let source) = row.state,

@@ -11,6 +11,30 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
+    @Test func fullVerifyEmitsMonotonicByteProgressInsideVerifyingPhase() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        try f.fs.writeAtomically(Data("not part of the manifest".utf8), to: SafeRelativePath("unmanaged.bin"))
+        let events = try await libraryCollect(await f.library.verify(game, mode: .full))
+        let total = Int64(syntheticFiles(1).values.reduce(0) { $0 + $1.utf8.count })
+        var verifying = false, values: [Int64] = []
+        for event in events {
+            if case .phase(let phase) = event { verifying = phase == .verifying }
+            if case .progress(let downloaded, let network, let bytes, let expected) = event {
+                #expect(verifying)
+                #expect(downloaded == 0 && network == 0 && expected == total)
+                #expect(values.last.map { bytes >= $0 } ?? true)
+                values.append(bytes)
+            }
+        }
+        #expect(!values.isEmpty && values.last == total)
+    }
+
+    @Test func quickVerifyDoesNotPretendMetadataChecksReadBytes() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        let events = try await libraryCollect(await f.library.verify(game, mode: .quick))
+        #expect(events.contains(.phase(.verifying)))
+        #expect(!events.contains { if case .progress = $0 { true } else { false } })
+    }
     @Test(arguments: ["verify", "update", "uninstall", "startup"])
     func crashedLaunchBetweenGuardAndExclusionRefusesMutation(operation: String) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()

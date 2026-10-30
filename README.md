@@ -39,6 +39,7 @@ This only changes MacGacha itself, not any system setting. The first launch can 
 ## Roadmap
 
 **Done**
+- **Progress timing.** An estimated time remaining for downloads and full verification, elapsed time for phases without a percentage, and a signal when progress is taking longer than usual.
 - **Automatic updates** (Sparkle). **Check for Updates…** in the MacGacha menu and a switch in Settings. MacGacha asks before it downloads an update and installs it only when no game, recovery or installation is running.
 - **Download engine.** Resumable, verified downloads with a crash-safe journal. A file reaches the game folder only after its hash matches. Files are downloaded and assembled in parallel, close to the full speed of a 2.5 Gbit link.
 - **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space".
@@ -73,7 +74,7 @@ DXMT works for every game and stays available as the open-source alternative. Th
 1. **Wine 11.21 runtime**, which has the crypt32 fix built in. Our separate fix then goes away.
 2. **Display choice.** Pick the monitor a game opens on, the main display by default.
 3. **FPS unlocker (opt-in)** for games capped at 60 fps, off by default, with a ban-risk warning before you enable it.
-4. **Downloads.** Estimated time remaining and pre-downloading the next version before release.
+4. **Pre-download.** Downloading the next version before release.
 5. **Rotating banners and news** like HoYoPlay.
 6. **Audio.** Surround output, including Spatial Audio on AirPods.
 
