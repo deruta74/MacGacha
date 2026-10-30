@@ -65,33 +65,35 @@ enum OtherRegionActivity: Sendable, Equatable {
     func loadGameArt(in region: Region) async {
         if let task = artTasks[region] { await task.value; return }
         guard let provider = artServices[region], !Task.isCancelled else { return }
-        let hydration = hydrateGameArt()
+        let hydration = hydrateGameArt(in: region)
         let task = Task { [weak self] in
             await hydration.value
             guard !Task.isCancelled else { return }
             let updated = await provider.refresh()
-            if !Task.isCancelled { self?.applyArt(updated, in: region) }
+            if !Task.isCancelled {
+                self?.applyArt(updated, in: region)
+                self?.setArtCacheState(await Self.hasUsableArt(updated, in: region) ? .usable : .none, in: region)
+                self?.artRefreshFinished.insert(region)
+                self?.updateArtReveal()
+            }
         }
         artTasks[region] = task
         await task.value
         artTasks[region] = nil
     }
 
-    private func hydrateGameArt() -> Task<Void, Never> {
-        if let task = artHydrationTask { return task }
-        let providers = artServices
-        let task = Task { [weak self] in
-            await withTaskGroup(of: (Region, [String: GameArt]).self) { group in
-                for (region, provider) in providers {
-                    group.addTask { (region, await provider.loadCached()) }
-                }
-                for await (region, cached) in group {
-                    if !Task.isCancelled { self?.applyArt(cached, in: region) }
-                }
+    private func hydrateGameArt(in selected: Region) -> Task<Void, Never> {
+        for (region, provider) in artServices where artHydrationTasks[region] == nil {
+            artHydrationTasks[region] = Task { [weak self] in
+                let cached = await provider.loadCached()
+                guard !Task.isCancelled else { return }
+                self?.applyArt(cached, in: region)
+                self?.setArtCacheState(await Self.hasUsableArt(cached, in: region) ? .usable : .none, in: region)
             }
         }
-        artHydrationTask = task
-        return task
+        // Only local caches hydrate eagerly; a slow other-region disk read must
+        // not hold up the selected region's remote art.
+        return artHydrationTasks[selected] ?? Task {}
     }
 
 }
