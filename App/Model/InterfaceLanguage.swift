@@ -22,7 +22,7 @@ enum InterfaceLanguage: String, CaseIterable, Identifiable, Sendable {
         case .pt: "Português"
         case .id: "Bahasa Indonesia" // comment: Language endonyms do not change with the interface.
         case .th: "ไทย"
-        case .vi: "Tiếng Việt"
+        case .vi: "Tiếng Việt" // comment: Language endonyms do not change with the interface.
         }
     }
     init?(localization: String) {

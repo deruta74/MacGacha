@@ -4,6 +4,7 @@ set -euo pipefail
 derived_data_path="${MACGACHA_DERIVED_DATA_PATH:-.build/xcode}"
 
 scripts/check-headers.sh
+python3 -I scripts/check-strings.py --self-check
 python3 -I scripts/make-appcast.py --self-check
 xcrun swift -warnings-as-errors scripts/verify-sparkle-signature.swift --self-check
 swift test --package-path Packages/LauncherKit
