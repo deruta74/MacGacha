@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Dispatch
 import Foundation
+import Observation
+import Launch
 import Synchronization
 import Testing
 import LauncherCore
@@ -10,6 +13,52 @@ import GameLibrary
 @testable import MacGacha
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct LanguageRestartTests {
+    @Test func relaunchWaitsForLaunchSettingsWrite() async throws {
+        let preferences = LanguageSettingsPreferences(holdWrite: true)
+        let f = try LanguageFixture(preferences: preferences); defer { preferences.release(); f.clean() }
+        await f.model.start()
+        f.model.sessionLogsEnabled = false
+        var writes = preferences.entered.stream.makeAsyncIterator(); _ = await writes.next()
+        let reserved = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        withObservationTracking { _ = f.model.languageRestart } onChange: { reserved.continuation.yield(()) }
+        let restart = Task { await f.model.restartForLanguage() }
+        var reservations = reserved.stream.makeAsyncIterator(); _ = await reservations.next()
+        #expect(f.model.languageRestart != nil)
+        #expect(f.launch.arguments.isEmpty && f.launch.terminations == 0)
+        preferences.release(); await restart.value
+        await f.model.settingsWriteTask?.value
+        #expect(try preferences.loadGlobal().sessionLogsEnabled == false)
+        #expect(f.launch.arguments.count == 1 && f.launch.terminations == 1)
+    }
+    @Test func settingsCannotChangeDuringRelaunchHandoff() async throws {
+        let preferences = LanguageSettingsPreferences()
+        let f = try LanguageFixture(preferences: preferences); defer { f.clean() }
+        await f.model.start()
+        f.launch.onOpen = {
+            #expect(f.model.languageRestart != nil)
+            #expect(throws: LauncherError.self) {
+                try f.model.saveLaunchSettings(f.model.launchSettings(for: "genshin"), for: "genshin")
+            }
+            f.model.sessionLogsEnabled = false
+            #expect(f.model.sessionLogsEnabled)
+            #expect(preferences.writeCount == 0)
+        }
+        await f.model.restartForLanguage()
+        await f.model.settingsWriteTask?.value
+        #expect(preferences.writeCount == 0 && f.launch.terminations == 1)
+    }
+    @Test func settingsFlushFailureAbortsLanguageRestart() async throws {
+        let preferences = LanguageSettingsPreferences(failWrite: true)
+        let f = try LanguageFixture(preferences: preferences); defer { f.clean() }
+        await f.model.start()
+        f.model.sessionLogsEnabled = false
+        await f.model.settingsWriteTask?.value
+        await f.model.restartForLanguage()
+        #expect(f.launch.arguments.isEmpty && f.launch.terminations == 0)
+        #expect(f.model.languageRestart == nil)
+        #expect(f.defaults.data(forKey: LanguageRestartContinuation.defaultsKey) == nil)
+        #expect(f.model.lastError == LauncherError.languageRestartFailed.userMessage)
+    }
     @Test func relaunchWaitsForPipelineDrain() async throws {
         let f = try LanguageFixture(); defer { f.clean() }
         await f.model.start()
@@ -162,24 +211,26 @@ import GameLibrary
     let game: LanguageGameServices
     let launch: LanguageRelaunch
     let model: AppModel
-    init(pending: Bool = true, arguments: [String] = []) throws {
+    init(pending: Bool = true, arguments: [String] = [], preferences: (any LaunchPreferencesPersistence)? = nil) throws {
         domain = "language-restart-\(UUID())"
         defaults = try #require(UserDefaults(suiteName: domain))
         game = LanguageGameServices(record: try languageRecord(pending: pending)); launch = LanguageRelaunch()
         let launch = launch
         model = AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/language")),
             manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(), defaults: defaults,
-            gameServices: game, relaunch: { try await launch.open($0) }, terminateAfterLanguageRestart: { launch.terminations += 1 }, launchArguments: arguments)
+            gameServices: game, launchPreferences: preferences, relaunch: { try await launch.open($0) }, terminateAfterLanguageRestart: { launch.terminations += 1 }, launchArguments: arguments)
     }
     func saveContinuation(id: UUID = UUID()) throws {
         let value = LanguageRestartContinuation(restartID: id, gameID: "genshin", action: .resume, planID: "language-plan")
         defaults.set(try JSONEncoder().encode(value), forKey: "languageRestartContinuation")
     }
-    func clean() { game.finish(); defaults.removePersistentDomain(forName: domain) }
+    func clean() { launch.onOpen = nil; game.finish(); defaults.removePersistentDomain(forName: domain) }
 }
 @MainActor private final class LanguageRelaunch {
     var arguments: [[String]] = [], terminations = 0, failure = false
+    var onOpen: (() -> Void)?
     func open(_ args: [String]) async throws {
+        onOpen?()
         arguments.append(args)
         if failure { throw LauncherError.io("private relaunch failure") }
     }
@@ -229,4 +280,34 @@ private func languageRecord(pending: Bool) throws -> GameRecord {
     return GameRecord(installPath: URL(fileURLWithPath: "/inert/game"), ownership: .created, executable: try SafeRelativePath("Game.exe"), installed: build,
         pending: pending ? PendingOperation(kind: .repair, planID: try SafeIdentifier("language-plan"), planDigest: try Digest(algorithm: .sha256, hex: String(repeating: "0", count: 64)), target: build) : nil,
         installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: 1))
+}
+
+private final class LanguageSettingsPreferences: LaunchPreferencesPersistence, Sendable {
+    private struct State {
+        var global = GlobalLaunchSettings()
+        var games: [String: LaunchSettings] = [:]
+        var writes = 0
+    }
+    private let state = Mutex(State())
+    private let holdWrite: Bool, failWrite: Bool
+    private let released = DispatchSemaphore(value: 0)
+    let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    init(holdWrite: Bool = false, failWrite: Bool = false) { self.holdWrite = holdWrite; self.failWrite = failWrite }
+    var writeCount: Int { state.withLock { $0.writes } }
+    func release() { released.signal() }
+    func loadGames() throws -> [String: LaunchSettings] { state.withLock { $0.games } }
+    func loadGlobal() throws -> GlobalLaunchSettings { state.withLock { $0.global } }
+    func save(_ settings: LaunchSettings, game: String) throws {
+        state.withLock { $0.writes += 1; $0.games[game] = settings }
+    }
+    func saveGlobal(_ settings: GlobalLaunchSettings) throws {
+        state.withLock { $0.writes += 1 }
+        if holdWrite {
+            // Called on BlockingIO, never on a cooperative worker. Time is only a failure bound.
+            entered.continuation.yield(())
+            guard released.wait(timeout: .now() + 60) == .success else { throw LauncherError.io("Settings write release deadline") }
+        }
+        if failWrite { throw LauncherError.io("Injected settings write failure") }
+        state.withLock { $0.global = settings }
+    }
 }

@@ -66,6 +66,7 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
                 // Join them too, but do not resume an operation the user had already paused.
                 try await gameServices.waitUntilIdle(previous.id)
             }
+            try await flushLaunchSettings()
             try Task.checkCancellation()
             if let continuation {
                 guard let defaults else { throw LauncherError.languageRestartFailed }
