@@ -107,6 +107,7 @@ private struct GameSnapshot: Sendable {
             let events = center.notifications(named: NSApplication.didBecomeActiveNotification).map { _ in true }
             for await _ in events {
                 guard !Task.isCancelled else { return }
+                self?.revalidateGameEvents()
                 await self?.refreshRosetta()
                 if self?.gameStartupTask != nil { await self?.refreshGames() }
             }

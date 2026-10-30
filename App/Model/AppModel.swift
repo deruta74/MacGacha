@@ -46,6 +46,7 @@ final class AppModel {
             guard region != oldValue else { return }
             defaults?.set(region.rawValue, forKey: "region")
             updateArtReveal()
+            revalidateGameEvents()
             if started && regionLoadingEnabled { loadRegion(region) }
         }
     }
@@ -63,6 +64,17 @@ final class AppModel {
     @ObservationIgnored var artStartupBegan = false
     @ObservationIgnored var artRefreshFinished: Set<Region> = []
     private(set) var gameArt: [String: GameArt]
+    /// Activity posts for the visible region, keyed by the edition's game ID.
+    private(set) var gameEvents: [String: [GameEvent]] = [:]
+    @ObservationIgnored let eventsServices: [Region: any GameEventsProviding]
+    @ObservationIgnored let eventsNow: @Sendable () -> Date
+    @ObservationIgnored let eventsSleep: @Sendable (Duration) async throws -> Void
+    @ObservationIgnored var eventsSnapshots: [Region: [String: GameEventsSnapshot]] = [:]
+    @ObservationIgnored var eventsHydrationTask: Task<Void, Never>?
+    @ObservationIgnored var eventsTasks: [Region: Task<Void, Never>] = [:]
+    @ObservationIgnored var eventsExpiryTask: Task<Void, Never>?
+    @ObservationIgnored var eventsExpiryGeneration = UUID()
+    @ObservationIgnored var eventsWindowTask: Task<Void, Never>?
     var connectedDisplays: [ConnectedDisplay] = []
     @ObservationIgnored let displayProbe: any DisplayProbe
     @ObservationIgnored let displayNames: @MainActor @Sendable () -> [String: String]
@@ -176,6 +188,7 @@ final class AppModel {
         services: (any RuntimeServices)? = nil, defaults: UserDefaults? = .standard,
         artService: any GameArtProviding = EmptyGameArtProvider(),
         artServices: [Region: any GameArtProviding] = [:],
+        eventsServices: [Region: any GameEventsProviding] = [:],
         gameServices: any GameServices = PreviewGameServices(),
         rosettaProbe: any RosettaProbing = UnknownRosettaProbe(),
         displayProbe: any DisplayProbe = FixedDisplayProbe(),
@@ -192,9 +205,14 @@ final class AppModel {
         launchSleep: @escaping @Sendable () async throws -> Void = { try await ContinuousClock().sleep(for: .milliseconds(500)) },
         recoverySleep: @escaping @Sendable (Duration) async throws -> Void = { try await ContinuousClock().sleep(for: $0) },
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
+        eventsNow: @escaping @Sendable () -> Date = Date.init,
+        eventsSleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         updater: any AppUpdating = InertAppUpdater(), artClock: any Clock<Duration> = ContinuousClock()) {
         self.artClock = artClock
         self.updater = updater
+        self.eventsServices = eventsServices
+        self.eventsNow = eventsNow; self.eventsSleep = eventsSleep
+        self.eventsSnapshots = eventsServices.mapValues { $0.cached() }
         self.displayProbe = displayProbe; self.displayNames = displayNames
         self.launchPreferences = launchPreferences ?? LiveLaunchPreferencesPersistence(paths: paths)
         self.rosettaProbe = rosettaProbe; self.rosettaClock = rosettaClock
@@ -218,7 +236,9 @@ final class AppModel {
         self.installRoot = stored.flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Games/MacGacha", isDirectory: true)
         rebuildRows()
+        revalidateGameEvents()
         observeGameActivation()
+        observeEventsWindowActivation()
         refreshConnectedDisplays()
         screenChangeObservation = ScreenChangeObservation(center: activationCenter, model: self)
     }
@@ -249,6 +269,27 @@ final class AppModel {
     func revealLauncher() {
         launcherRevealed = true
         artRevealTask?.cancel()
+        revalidateGameEvents()
+    }
+
+    /// Call when revealing launcher content. Activation and the nearest expiry
+    /// also revalidate automatically; this never makes a network request.
+    func revalidateGameEvents() {
+        eventsExpiryTask?.cancel(); eventsExpiryTask = nil
+        let generation = UUID(); eventsExpiryGeneration = generation
+        let date = eventsNow()
+        let visible = (eventsSnapshots[region] ?? [:]).filter {
+            GameDefinition.find($0.key)?.region == region && $0.value.region == region && $0.value.isFresh(at: date)
+        }
+        gameEvents = visible.mapValues(\.posts)
+        guard let next = visible.values.filter({ !$0.posts.isEmpty }).map(\.expiresAt).min() else { return }
+        let sleep = eventsSleep, delay = Duration.seconds(next.timeIntervalSince(date))
+        eventsExpiryTask = Task { [weak self] in
+            do { try await sleep(delay); try Task.checkCancellation() } catch { return }
+            guard let self, self.eventsExpiryGeneration == generation else { return }
+            self.eventsExpiryTask = nil
+            self.revalidateGameEvents()
+        }
     }
 
     func applyArt(_ art: [String: GameArt], in region: Region) {
@@ -269,8 +310,14 @@ final class AppModel {
                 bundleIdentifier: Bundle.main.bundleIdentifier), region: $0,
                 language: HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations), log: log))
         })
+        let events: [Region: any GameEventsProviding] = Dictionary(uniqueKeysWithValues: Region.allCases.map {
+            ($0, GameEventsService(cacheDirectory: gameArtCacheDirectory(in: caches,
+                bundleIdentifier: Bundle.main.bundleIdentifier).deletingLastPathComponent()
+                .appendingPathComponent("GameEvents", isDirectory: true), region: $0,
+                language: HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations)))
+        })
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
-            artServices: art, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
+            artServices: art, eventsServices: events, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
             rosettaProbe: SystemRosettaProbe(), displayProbe: SystemDisplayProbe(),
             displayNames: { ScreenDisplayNames.current() }, launchServices: launch, updater: SparkleUpdaterService())
     }
@@ -314,6 +361,8 @@ final class AppModel {
         for task in artTasks.values { task.cancel() }
         for task in artHydrationTasks.values { task.cancel() }
         artStartupTask?.cancel(); artRevealTask?.cancel()
+        for task in eventsTasks.values { task.cancel() }
+        eventsHydrationTask?.cancel(); eventsExpiryTask?.cancel(); eventsWindowTask?.cancel()
         gameTask?.cancel(); gameStartupTask?.cancel(); gameActivationTask?.cancel()
     }
 
@@ -321,6 +370,7 @@ final class AppModel {
         guard !started else { return }
         started = true; isStarting = true
         startArtStartup()
+        let eventsHydration = hydrateGameEvents()
         defer { isStarting = false }
         refreshConnectedDisplays()
         await reattachOnStart()
@@ -336,6 +386,7 @@ final class AppModel {
             await refreshLogs()
         } catch { show(error) }
         await refreshGames()
+        await eventsHydration.value
         updater.start { [weak self] in self?.isBusyForUpdates ?? true }
     }
 
