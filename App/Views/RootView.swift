@@ -31,7 +31,6 @@ struct RootView: View {
     /// The slide on screen: it follows the selection only once its image has loaded,
     /// so the background and its highlights button always change together.
     @State private var shownSlide: GameBackground?
-    @State private var hovered = false
 
     /// The rail shows one region; a selection from the other region falls back to its first game.
     private var game: LauncherGame {
@@ -78,11 +77,7 @@ struct RootView: View {
             if let slides = selection.slides, !slides.dotIDs.isEmpty, let shown = shownSlide {
                 BackgroundDots(ids: slides.dotIDs, current: shown.id,
                     onEnter: { selection.pointerEnteredDots() }, onSelect: { selection.clickDot($0) })
-                    .padding(.top, 14)
                     .frame(maxHeight: .infinity, alignment: .top)
-                    // Hidden until the pointer is over the window, as in HoYoPlay, but always reachable by VoiceOver.
-                    .opacity(hovered ? 1 : 0)
-                    .animation(.easeOut(duration: 0.2), value: hovered)
             }
             HStack(alignment: .bottom, spacing: 0) {
                 GameRail(selectedID: Binding(get: { game.id }, set: { selectedID = $0 }), panel: $panel)
@@ -98,7 +93,6 @@ struct RootView: View {
             }
         }
         .animation(.smooth(duration: 0.35), value: selectedID)
-        .onHover { hovered = $0 }
         .onChange(of: selectionInputs, initial: true) { old, new in
             if old.gameID != new.gameID || old.region != new.region { shownSlide = nil }
             images.preload(new.backgrounds.flatMap { [$0.image, $0.theme, $0.highlights?.image, $0.highlights?.hoverImage].compactMap { $0 } })
