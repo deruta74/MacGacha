@@ -27,6 +27,11 @@ struct SettingsView: View {
                     get: { model.automaticallyChecksForUpdates },
                     set: { model.automaticallyChecksForUpdates = $0 }
                 ))
+                HStack {
+                    Spacer()
+                    Button("Check Now") { model.checkForUpdates() }
+                        .disabled(!model.canCheckForUpdates)
+                }
             } footer: {
                 Text("MacGacha asks before it downloads an update and waits until no game or download is running to install it.")
                     .font(.caption)
