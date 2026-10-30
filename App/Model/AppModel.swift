@@ -308,13 +308,13 @@ final class AppModel {
         let art: [Region: any GameArtProviding] = Dictionary(uniqueKeysWithValues: Region.allCases.map {
             ($0, GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
                 bundleIdentifier: Bundle.main.bundleIdentifier), region: $0,
-                language: HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations), log: log))
+                language: HoYoPlayLanguage.content(forInterface: InterfaceLanguageSettings.runningLocalization), log: log))
         })
         let events: [Region: any GameEventsProviding] = Dictionary(uniqueKeysWithValues: Region.allCases.map {
             ($0, GameEventsService(cacheDirectory: gameArtCacheDirectory(in: caches,
                 bundleIdentifier: Bundle.main.bundleIdentifier).deletingLastPathComponent()
                 .appendingPathComponent("GameEvents", isDirectory: true), region: $0,
-                language: HoYoPlayLanguage.preferred(Bundle.main.preferredLocalizations)))
+                language: HoYoPlayLanguage.content(forInterface: InterfaceLanguageSettings.runningLocalization)))
         })
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artServices: art, eventsServices: events, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
