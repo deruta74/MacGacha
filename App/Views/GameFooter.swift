@@ -69,7 +69,7 @@ struct GameFooter: View {
                         .frame(maxWidth: 480, alignment: .trailing)
                 }
                 HStack(spacing: 10) {
-                    if art?.videoPage != nil {
+                    if art?.video != nil {
                         backgroundToggle
                     }
                     if showsMenu {
