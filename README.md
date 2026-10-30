@@ -46,7 +46,7 @@ This only changes MacGacha itself, not any system setting. The first launch can 
 - **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space".
 - **Runtimes.** Wine, DXMT and D3DMetal are downloaded and kept side by side, so an update never breaks a working version. D3DMetal is installed only after you accept Apple's terms, or imported from an existing Game Porting Toolkit. The default DXMT build now uses CrossOver's Wine, which needs about 2.5× less CPU than the previous one.
 - **Compatibility components.** jadeite and a Steam launcher shim are installed and removed from the Runtimes window. We build the shim ourselves, reproducibly, from Valve's Proton source ([release](https://github.com/deruta74/MacGacha/releases/tag/steam-shim-proton-10.0-4)).
-- **Launcher.** One window for all three games with the official banners and background art, plus a diagnostics bundle for bug reports. Backgrounds rotate like in HoYoPlay: an animated background plays when the game has one, otherwise the stills change every 7 seconds, and the dots at the top let you pick one. Each background's Version Highlights button opens in the browser. Animated backgrounds play with MacGacha's own video player, which uses about a third less memory than the previous web view.
+- **Launcher.** One window for all three games with the official banners and background art, plus a diagnostics bundle for bug reports. Backgrounds rotate like in HoYoPlay: an animated background plays when the game has one, otherwise the stills change every 7 seconds, and the dots at the top let you pick one. Each background's Version Highlights button and the current events from HoYoPlay, listed below it, open in the browser. Animated backgrounds play with MacGacha's own video player, which uses about a third less memory than the previous web view.
 - **One-click Play.** Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game and minimizes itself to the Dock. When the game closes, it comes back and puts back any game files it hid. Accepted in all three games on D3DMetal and DXMT.
 - **One-click setup.** When a game needs runtimes, "Set Up…" lists exactly what it needs for its settings (the Wine bundle and its compatibility component) and installs it all in one go, asking for Apple's terms only when D3DMetal is part of it. The Runtimes panel stays available for picking versions by hand.
 - **Per-game settings:** graphics backend, frame limit, Retina mode, DirectX 12 for Zenless Zone Zero, and a switch for the compatibility workaround.
@@ -75,8 +75,7 @@ DXMT works for every game and stays available as the open-source alternative. Th
 1. **Wine 11.21 runtime**, which has the crypt32 fix built in. Our separate fix then goes away.
 2. **FPS unlocker (opt-in)** for games capped at 60 fps, off by default, with a ban-risk warning before you enable it.
 3. **Pre-download.** Downloading the next version before release.
-4. **Events** from HoYoPlay in the launcher window.
-5. **Audio.** Surround output, including Spatial Audio on AirPods.
+4. **Audio.** Surround output, including Spatial Audio on AirPods.
 
 ## Feedback
 
