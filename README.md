@@ -52,7 +52,7 @@ This only changes MacGacha itself, not any system setting. The first launch can 
 - **Per-game settings:** graphics backend, frame limit, Retina mode, DirectX 12 for Zenless Zone Zero, and a switch for the compatibility workaround.
 - **Recovery.** If the launcher crashes or is quit while a game runs, it finds the game again on restart and restores everything once the game exits. Quitting during a game asks first.
 - **Privacy.** Games run in their own Wine prefix with no links to your Desktop, Documents or other home folders. Session logs stay on your Mac and can be turned off in Settings.
-- **Languages.** English and Simplified Chinese interface. Game news and art follow the interface language.
+- **Languages.** The interface comes in English, Simplified and Traditional Chinese, Japanese, Korean, Russian, Ukrainian, German, French, Spanish, Portuguese, Indonesian, Thai and Vietnamese. It follows your Mac's language order, or you pick one in Settings. Game news and art follow the interface language (English for Ukrainian, which HoYoPlay doesn't offer). Changing the language restarts MacGacha, and a running download pauses and picks up again by itself.
 
 **Verified by hand (macOS 27.0.1)**
 
@@ -69,7 +69,6 @@ DXMT works for every game and stays available as the open-source alternative. Th
 **In progress**
 - **Mainland China editions (beta).** A region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and runs past the login screen with our [Wine crypt32 fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 and 崩坏：星穹铁道 still need in-game testing, and login hasn't been tested on any mainland edition. Testers with mainland accounts are welcome.
 - **Star Rail's in-game hotfix restart**, which hasn't been tested yet.
-- **Interface in every HoYoPlay language.** Besides English and Simplified Chinese: Traditional Chinese, Japanese, Korean, Russian, German, French, Spanish, Portuguese, Indonesian, Thai and Vietnamese. Game news and art already follow the interface language.
 
 **Next**
 1. **Wine 11.21 runtime**, which has the crypt32 fix built in. Our separate fix then goes away.
