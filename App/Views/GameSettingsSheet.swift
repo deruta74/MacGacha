@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Launch
+import LauncherCore
 import RuntimeManager
 import SwiftUI
 
@@ -58,6 +59,22 @@ struct GameSettingsSheet: View {
         display.isEmpty ? String(localized: "Unnamed Display") : display
     }
 
+    /// Star Rail stores its frame rate in its own settings, which accept 30, 60 or 120.
+    private var offersStarRailUnlock: Bool { GameDefinition.find(game.id)?.family == .starrail }
+
+    /// Turning the unlock on lifts a lower frame limit, so the unlock isn't silently capped.
+    private var unlockFPS: Binding<Bool> {
+        Binding(
+            get: { settings.wrappedValue.unlockFPS },
+            set: { isOn in
+                var value = settings.wrappedValue
+                value.unlockFPS = isOn
+                if isOn, let limit = value.frameLimit, limit < value.unlockTarget { value.frameLimit = value.unlockTarget }
+                settings.wrappedValue = value
+            }
+        )
+    }
+
     /// Only Zenless Zone Zero has a DirectX 12 renderer, and only D3DMetal runs it.
     private var offersDirectX12: Bool { Recipes.recipe(for: game.id)?.supportsDirectX12 == true }
 
@@ -72,7 +89,7 @@ struct GameSettingsSheet: View {
                     .pickerStyle(.segmented)
                     Picker("Frame limit", selection: settings.frameLimit) {
                         Text("Off").tag(Int?.none)
-                        ForEach([30, 60, 120], id: \.self) { fps in
+                        ForEach([30, 60, 90, 120], id: \.self) { fps in
                             Text(fps.formatted()).tag(Int?.some(fps))
                         }
                     }
@@ -85,6 +102,15 @@ struct GameSettingsSheet: View {
                     Text(graphicsFooter)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                if offersStarRailUnlock {
+                    Section {
+                        Toggle("Unlock 120 FPS", isOn: unlockFPS)
+                    } footer: {
+                        Text(unlockFooter)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if offersDisplayChoice {
                     Section {
@@ -138,6 +164,15 @@ struct GameSettingsSheet: View {
             text = String(localized: "DirectX 12 needs D3DMetal. \(text)", comment: "The argument is the general note about graphics settings")
         }
         return text
+    }
+
+    private var unlockFooter: String {
+        let value = settings.wrappedValue
+        if value.unlockFPS, let limit = value.frameLimit, limit < value.unlockTarget {
+            return String(localized: "The frame limit is \(limit) FPS, so the game won't go above it. Set the limit to 120 or Off to play at 120 FPS.",
+                comment: "The argument is the current frame limit")
+        }
+        return String(localized: "Sets 120 FPS in the game's own graphics settings before each launch. While it's on, the game hides its FPS option. Turning it off sets the game back to 60 FPS.")
     }
 
     private var patchesFooter: String {
