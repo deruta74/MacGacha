@@ -18,8 +18,16 @@ import Sparkle
         set { controller.updater.automaticallyChecksForUpdates = newValue; automaticChecks = newValue }
     }
 
-    static func permitsStartup(environment: [String: String], testBundleLoaded: Bool) -> Bool {
-        !testBundleLoaded && environment["XCTestConfigurationFilePath"] == nil && environment["XCTestBundlePath"] == nil
+    static var isDebugBuild: Bool {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
+    }
+    static func permitsStartup(environment: [String: String], testBundleLoaded: Bool,
+        debugBuild: Bool = SparkleUpdaterService.isDebugBuild) -> Bool {
+        !debugBuild && !testBundleLoaded && environment["XCTestConfigurationFilePath"] == nil && environment["XCTestBundlePath"] == nil
     }
 
     func start(isBusy: @escaping @MainActor () -> Bool) {
