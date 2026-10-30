@@ -262,7 +262,13 @@ public actor LaunchManager {
             stage = .prepare; events.yield(.stage(stage)); note(context, "stage prepare")
             let initialized = try await prefixes.createPrefix(game: game.id, bundle: bundle)
             guard initialized.standardizedFileURL == prefix.standardizedFileURL else { throw LauncherError.io("Prefix changed during preparation") }
-            try await preparation.ensure(prefix: prefix, wineBinary: bundle.wineBinary, request: preview.preparation)
+            let prepared = try await preparation.ensure(prefix: prefix, wineBinary: bundle.wineBinary, request: preview.preparation)
+            if let frameRate = prepared.starRailFrameRate, frameRate == .missing || frameRate == .unreadable {
+                events.yield(.note(.starRailSettingsMissing))
+                let reason = frameRate == .missing ? "missing" : "unreadable"
+                note(context, "Star Rail frame-rate setting " + reason)
+                event("Star Rail frame-rate setting is unavailable", game: game.id, metadata: ["reason": reason])
+            }
             let original = context.session, log = context.log, hideHooks = hideHooks, beforeJournalRead = beforeJournalRead
             let (hiddenSnapshot, hideResult) = try await BlockingIO.run {
                 var snapshot = original

@@ -61,7 +61,7 @@ private func resolve(_ game: String, settings: LaunchSettings? = nil, components
     #expect(try !resolve("zzz", settings: settings).arguments.contains("-use-d3d12"))
 }
 
-@Test(arguments: ["genshin", "starrail", "zzz"], [Int?.none, 30, 60, 120]) func dxmtFrameLimit(game: String, limit: Int?) throws {
+@Test(arguments: ["genshin", "starrail", "zzz"], [Int?.none, 30, 60, 90, 120]) func dxmtFrameLimit(game: String, limit: Int?) throws {
     var settings = LaunchSettings.defaults(for: game); settings.backend = .dxmt; settings.frameLimit = limit; settings.retina = true
     let value = try resolve(game, settings: settings)
     let config = value.environment["DXMT_CONFIG"] ?? ""
@@ -115,7 +115,7 @@ private func resolve(_ game: String, settings: LaunchSettings? = nil, components
 
 @Test(arguments: [0, -1, 59, 144]) func invalidFrameLimitThrows(limit: Int) throws {
     var settings = LaunchSettings.defaults(for: "genshin"); settings.frameLimit = limit
-    #expect(throws: LauncherError.io("Frame limit must be Off, 30, 60 or 120")) { try resolve("genshin", settings: settings) }
+    #expect(throws: LauncherError.io("Frame limit must be Off, 30, 60, 90 or 120")) { try resolve("genshin", settings: settings) }
 }
 
 @Test func unknownGameThrows() throws {
@@ -138,4 +138,29 @@ private func resolve(_ game: String, settings: LaunchSettings? = nil, components
 @Test func d3dmetalFrameLimitOffOmitsVariable() throws {
     var settings = LaunchSettings.defaults(for: "genshin"); settings.frameLimit = nil
     #expect(try resolve("genshin", settings: settings).environment["D3DM_MAX_FPS"] == nil)
+}
+
+@Test(arguments: ["starrail", "starrail-cn"], [false, true])
+func starRailUnlockRequestsOneTwenty(game: String, patches: Bool) throws {
+    var settings = LaunchSettings.defaults(for: game); settings.unlockFPS = true; settings.compatibilityPatches = patches
+    let value = try resolve(game, settings: settings)
+    #expect(value.preparation.starRailFrameRate == .unlock120)
+    #expect(value.preparation.starRailRegion == GameDefinition.find(game)?.region)
+}
+@Test(arguments: ["starrail", "starrail-cn"])
+func starRailOffRequestsRestore(game: String) throws {
+    #expect(try resolve(game).preparation.starRailFrameRate == .restore)
+    var settings = LaunchSettings.defaults(for: game); settings.unlockFPS = true; settings.unlockTarget = 90
+    #expect(throws: LauncherError.self) { try resolve(game, settings: settings) }
+}
+@Test(arguments: ["genshin", "genshin-cn", "zzz", "zzz-cn"], [false, true])
+func genshinAndZZZNeverTouchStarRailValue(game: String, unlock: Bool) throws {
+    var settings = LaunchSettings.defaults(for: game); settings.unlockFPS = unlock
+    #expect(try resolve(game, settings: settings).preparation.starRailFrameRate == nil)
+}
+@Test(arguments: [RuntimeBackend.d3dmetal, .dxmt]) func ninetyFrameLimitReachesBackend(backend: RuntimeBackend) throws {
+    var settings = LaunchSettings.defaults(for: "starrail"); settings.backend = backend; settings.frameLimit = 90
+    let value = try resolve("starrail", settings: settings)
+    if backend == .d3dmetal { #expect(value.environment["D3DM_MAX_FPS"] == "90") }
+    else { #expect(value.environment["DXMT_CONFIG"]?.contains("d3d11.preferredMaxFrameRate=90") == true) }
 }

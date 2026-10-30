@@ -46,7 +46,7 @@ public enum LaunchResolver {
         wineBinary: URL, proxyPort: UInt16, componentRoots: [ComponentKind: URL], baseEnvironment: [String: String],
         runtimeBundleID: String? = nil, displays: [String] = []) throws -> ResolvedLaunch {
         guard Recipes.recipe(for: recipe.game) != nil else { throw LauncherError.io("Unknown launch game: \(recipe.game)") }
-        try settings.validate()
+        try settings.validate(for: recipe.game)
         for url in [installRoot, prefix, wineBinary] { try validateLocalURL(url) }
 
         let gamePath = WinePath.windowsPath(for: recipe.executable.resolved(against: installRoot))
@@ -120,7 +120,9 @@ public enum LaunchResolver {
             blockedHosts: settings.compatibilityPatches ? recipe.blockedHosts : [],
             preparation: PreparationRequest(retina: settings.retina, steamShim: steamShim,
                 dxmtExtras: dxmt ? (["winemetal.dll"] + (starRail ? ["nvngx.dll"] : [])) : [], nvidiaKeys: dxmt && starRail,
-                crypt32Native: requiredComponents.contains(.crypt32Fix)),
+                crypt32Native: requiredComponents.contains(.crypt32Fix),
+                starRailFrameRate: starRail ? (settings.unlockFPS ? .unlock120 : .restore) : nil,
+                starRailRegion: starRail ? (GameDefinition.find(recipe.game)?.region ?? .global) : .global),
             requiredComponents: requiredComponents, componentCopies: componentCopies, displayFallback: displayFallback)
     }
 

@@ -24,7 +24,7 @@ public struct LaunchSettingsStore: Sendable {
 
     public func save(_ settings: LaunchSettings, for game: String) throws {
         let path = try relativePath(for: game)
-        try settings.validate()
+        try settings.validate(for: game)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(settings)
         let fs = try ContainedFileSystem(root: paths.root, fileOps: fileOps)
