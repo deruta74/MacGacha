@@ -107,13 +107,13 @@ public struct RuntimeBundleManager: Sendable {
             let destination = try bundlePath(bundle)
             var uncertain = false
             do {
-                let source = try RuntimeTree(fs: fs, root: winePath)
+                let source = try RuntimeTree(fs: fs, root: winePath, allowingExternalHardLinks: true)
                 var overlays: [(RuntimeTree, SafeRelativePath)] = []
                 var runtimeDigest = digest
                 for c in components {
                     let root = try RuntimeJSONFile.relativePath(store.installURL(for: c), root: store.paths.root)
                     for overlay in c.overlay {
-                        overlays.append((try RuntimeTree(fs: fs, root: SafeRelativePath("\(root)/\(overlay.source)")), overlay.destination))
+                        overlays.append((try RuntimeTree(fs: fs, root: SafeRelativePath("\(root)/\(overlay.source)"), allowingExternalHardLinks: true), overlay.destination))
                     }
                 }
                 if let candidate {
@@ -149,6 +149,7 @@ public struct RuntimeBundleManager: Sendable {
                 try fs.writeAtomically(JSONEncoder().encode(marker), to: markerPath)
                 try fs.fullSync(at: markerPath)
                 progress(.phase(.committing))
+                try GameModeHelper.remove(bundleID: bundle.id, paths: store.paths, fs: fs)
                 try RuntimePublication.publish(fs: fs, incoming: incoming, destination: destination,
                     uncertain: &uncertain, failurePoint: failurePoint)
                 try fs.removeItem(at: incoming)
@@ -179,6 +180,7 @@ public struct RuntimeBundleManager: Sendable {
             let pins = try RuntimeRemovalLease(paths: store.paths, componentIDs: components.map { $0.id.rawValue })
             defer { withExtendedLifetime((lease, pins)) {} }
             let fs = try ContainedFileSystem(root: store.paths.root)
+            try GameModeHelper.remove(bundleID: bundle.id, paths: store.paths, fs: fs)
             let path = try bundlePath(bundle)
             if try fs.itemType(at: path) != nil {
                 let hidden = try SafeRelativePath("\(bundleParent())/.removing-\(UUID().uuidString)")
@@ -265,9 +267,9 @@ private struct RuntimeTree {
     let root: SafeRelativePath
     let entries: [ContainedFileSystem.TreeEntry]
     let bytes: Int64
-    init(fs: ContainedFileSystem, root: SafeRelativePath) throws {
+    init(fs: ContainedFileSystem, root: SafeRelativePath, allowingExternalHardLinks: Bool = false) throws {
         self.fs = fs; self.root = root
-        entries = try fs.inspectTree(at: root)
+        entries = try fs.inspectTree(at: root, allowingExternalHardLinks: allowingExternalHardLinks)
         try ArchivePolicy.validate(entries.map { ArchiveEntry(path: $0.path.description,
             kind: $0.linkTarget.map { .symlink($0) } ?? ($0.type == .directory ? .directory : .file)) })
         var size: Int64 = 0
