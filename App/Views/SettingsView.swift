@@ -67,6 +67,16 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Game Mode for games", isOn: Binding(
+                    get: { model.gameModeEnabled },
+                    set: { model.gameModeEnabled = $0 }
+                ))
+            } footer: {
+                Text("macOS gives a full-screen game priority on the CPU and GPU and lowers latency for AirPods and controllers. Takes effect the next time you play.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Save session logs", isOn: Binding(
                     get: { model.sessionLogsEnabled },
                     set: { model.sessionLogsEnabled = $0 }

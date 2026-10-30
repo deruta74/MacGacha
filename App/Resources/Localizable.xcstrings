@@ -7425,6 +7425,88 @@
         }
       }
     },
+    "Game Mode for games" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为游戏启用游戏模式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為遊戲啟用遊戲模式"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲームでゲームモードを使用"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임에 게임 모드 사용"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Игровой режим для игр"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ігровий режим для ігор"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spielmodus für Spiele"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mode Jeu pour les jeux"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modo de juego para los juegos"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modo de Jogo para os jogos"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mode Game untuk game"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "โหมดเกมสำหรับเกม"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chế độ trò chơi cho game"
+          }
+        }
+      }
+    },
     "Game Settings…" : {
       "localizations" : {
         "de" : {
@@ -21578,6 +21660,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "macOS 會詢問是否安裝 Rosetta。請在該視窗中按一下「安裝」並同意 Apple 的授權條款，MacGacha 會自動繼續。"
+          }
+        }
+      }
+    },
+    "macOS gives a full-screen game priority on the CPU and GPU and lowers latency for AirPods and controllers. Takes effect the next time you play." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 会让全屏游戏优先使用 CPU 和 GPU，并降低 AirPods 和手柄的延迟。下次开始游戏时生效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 會讓全螢幕遊戲優先使用 CPU 和 GPU，並降低 AirPods 和控制器的延遲。下次開始遊戲時生效。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS がフルスクリーンのゲームに CPU と GPU を優先的に割り当て、AirPods とコントローラの遅延を減らします。次にゲームを開始したときに反映されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS가 전체 화면 게임에 CPU와 GPU를 우선 할당하고 AirPods 및 컨트롤러의 지연 시간을 줄입니다. 다음에 게임을 시작할 때 적용됩니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS отдаёт полноэкранной игре приоритет на CPU и GPU и снижает задержку AirPods и контроллеров. Вступит в силу при следующем запуске игры."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS надає повноекранній грі пріоритет на CPU і GPU та зменшує затримку AirPods і контролерів. Набуде чинності під час наступного запуску гри."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS gibt einem Spiel im Vollbild Vorrang bei CPU und GPU und senkt die Latenz von AirPods und Controllern. Wirkt beim nächsten Spielstart."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS donne la priorité CPU et GPU au jeu en plein écran et réduit la latence des AirPods et des manettes. Prend effet au prochain lancement du jeu."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS da prioridad de CPU y GPU al juego a pantalla completa y reduce la latencia de los AirPods y los mandos. Se aplica la próxima vez que juegues."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O macOS dá prioridade de CPU e GPU ao jogo em tela cheia e reduz a latência dos AirPods e controles. Entra em vigor na próxima vez que você jogar."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS memberi game layar penuh prioritas CPU dan GPU serta menurunkan latensi AirPods dan kontroler. Berlaku saat berikutnya Anda bermain."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS จะให้เกมแบบเต็มหน้าจอใช้ CPU และ GPU ก่อน และลดความหน่วงของ AirPods และคอนโทรลเลอร์ มีผลเมื่อคุณเล่นครั้งถัดไป"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS ưu tiên CPU và GPU cho game toàn màn hình và giảm độ trễ của AirPods và tay cầm. Có hiệu lực từ lần chơi tiếp theo."
           }
         }
       }
