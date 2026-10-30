@@ -103,5 +103,7 @@ private struct LauncherWindowContent: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.4), value: model.launcherRevealed)
         .frame(minWidth: 960, minHeight: 540)
+        // Installed here, not in RootView: startup can reattach a running game while the loading screen shows.
+        .task { model.quitConfirmation = QuitConfirmation.present }
     }
 }

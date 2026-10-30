@@ -146,7 +146,6 @@ struct RootView: View {
         }
         // A sheet belongs to one game; once its region is hidden it must not act on it.
         .onChange(of: model.region) { gameSheet = nil }
-        .task { model.quitConfirmation = QuitConfirmation.present }
         #if DEBUG
         .onAppear(perform: applyDebugLaunchArguments)
         #endif

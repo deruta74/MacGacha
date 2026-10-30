@@ -81,6 +81,7 @@ struct BackgroundSelection<C: Clock> where C.Duration == Duration {
     /// user's stop decision, including while video fallback is active.
     mutating func update(region: Region, gameID: String, backgrounds: [GameBackground], animated: Bool, reduceMotion: Bool,
         playbackStates: [BackgroundVideoSource: BackgroundPlaybackState]? = nil) {
+        let previousSource = videoCandidate?.1
         let changedGame = self.region != region || self.gameID != gameID
         if changedGame {
             currentID = nil; userAllowsAuto = !reduceMotion; playback = [:]
@@ -94,7 +95,9 @@ struct BackgroundSelection<C: Clock> where C.Duration == Duration {
             background.video.map { BackgroundVideoSource(region: region, gameID: gameID, backgroundID: background.id, assetURL: $0) }
         })
         playback = (playbackStates ?? playback).filter { sources.contains($0.key) }
-        generation = UUID()
+        // The view keeps the same player while the source is unchanged, and that player won't report
+        // its state again, so a refresh must not orphan callbacks already in flight.
+        if videoCandidate?.1 == nil || videoCandidate?.1 != previousSource { generation = UUID() }
         reconcileCurrent()
         invalidateContentAndRestart()
     }

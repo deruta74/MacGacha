@@ -76,11 +76,16 @@ import HoYoPlayAPI
         model.setPlaybackState(.failed, for: token)
         #expect(model.video != nil)
         let old = try #require(model.video?.token)
+        // An identical refresh keeps the player, so its in-flight callback still counts.
         model.update(region: .mainlandChina, gameID: "starrail-cn", backgrounds: [video], animated: true, reduceMotion: false)
-        model.setPlaybackState(.failed, for: old)
-        #expect(model.video != nil)
+        model.setPlaybackState(.playing, for: old)
+        #expect(model.video?.state == .playing)
         model.update(region: .mainlandChina, gameID: "starrail-cn", backgrounds: [video], animated: false, reduceMotion: false)
         #expect(model.video == nil && model.slides?.dotIDs == [] && model.rotation == nil)
+        // Turning animation back on mounts a new player, so the old one's callbacks are ignored.
+        model.update(region: .mainlandChina, gameID: "starrail-cn", backgrounds: [video], animated: true, reduceMotion: false)
+        model.setPlaybackState(.failed, for: old)
+        #expect(model.video != nil && model.video?.token != old)
     }
 
     @Test func missingStillsAndStaleImageTokens() throws {
