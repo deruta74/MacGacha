@@ -11,6 +11,7 @@ typealias GameEventStream = AsyncThrowingStream<OperationEvent, any Error>
 
 protocol GameServices: Sendable {
     func start() async
+    func waitUntilIdle(_ id: String) async throws
     func status(_ id: String) async -> GameStatus
     func record(_ id: String) async throws -> GameRecord?
     func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate
@@ -52,6 +53,10 @@ final class LiveGameServices: GameServices, Sendable {
     private func library(for game: GameDefinition) -> GameLibrary { libraries[game.region]! }
 
     func start() async { await libraries[.global]!.start() }
+    func waitUntilIdle(_ id: String) async throws {
+        let game = try Self.requireGame(id)
+        try await library(for: game).waitUntilIdle(id)
+    }
     func status(_ id: String) async -> GameStatus {
         guard let game = Self.game(id) else { return .unknown }
         return await library(for: game).status(game)
@@ -162,6 +167,7 @@ final class PreviewGameServices: GameServices, Sendable {
     private let state: Mutex<State>
     init(states: [String: GameState] = [:]) { state = Mutex(State(statuses: states.mapValues(\.status))) }
     func start() async {}
+    func waitUntilIdle(_ id: String) async throws {}
     func status(_ id: String) async -> GameStatus { state.withLock { $0.statuses[id] ?? .notInstalled } }
     func record(_ id: String) async throws -> GameRecord? {
         let value = state.withLock { ($0.statuses[id] ?? .notInstalled, $0.voices[id] ?? ["en-us"]) }

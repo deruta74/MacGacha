@@ -59,6 +59,36 @@ import TestSupport
         #expect(try await store.load("genshin")?.pending?.planDigest == plan.planDigest)
     }
 
+    @Test func waitUntilIdleWaitsForHeldWorker() async throws {
+        let root = try TempDir(), records = try TempDir(), cdn = MockCDN(), ops = BridgeBlockedAssembly()
+        let plan = try bridgePlan(); bridgeServe(cdn, plan)
+        let rootURL = root.url, store = GameRecordStore(directory: records.url)
+        let runner = OperationRunner(store: store, fetcher: bridgeFetcher(cdn), disk: FixedDiskSpace(bytes: Int64.max), log: nil, fileOps: ops)
+        let library = GameLibrary(paths: AppPaths(root: records.url), api: DeliveryAPI(http: cdn), runner: runner,
+            store: store, disk: FixedDiskSpace(bytes: Int64.max), log: nil)
+        let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1)), returned = Mutex(false)
+        defer { ops.release() }
+        try await OperationWork.$observer.withValue({
+            if $0 == .ownershipDrainWait { waiting.continuation.yield(()) }
+        }) {
+            let consumer = Task {
+                for try await event in await runner.start("genshin", record: try bridgeRecord(rootURL), plan: plan,
+                    kind: .update, target: bridgeBuild("new"), approved: true, managedPaths: Set(plan.files.map(\.path))) {
+                    if event == .fileVerified(plan.files[0].path) { await ops.waitUntilBlocked(); return }
+                }
+            }
+            try await consumer.value
+            let idle = Task { try await library.waitUntilIdle("genshin"); returned.withLock { $0 = true } }
+            defer { idle.cancel() }
+            var iterator = waiting.stream.makeAsyncIterator(); _ = await iterator.next()
+            #expect(!returned.withLock { $0 })
+            ops.release(); try await idle.value
+            #expect(returned.withLock { $0 })
+        }
+        let lease = try await store.acquireOperationLease()
+        withExtendedLifetime(lease) {}
+    }
+
     @Test func blockedCompletionCleanupDoesNotStarveCancellation() async throws {
         let root = try TempDir(), records = try TempDir(), cdn = MockCDN()
         let plan = try bridgePlan(), store = GameRecordStore(directory: records.url)

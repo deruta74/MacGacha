@@ -317,6 +317,56 @@
         }
       }
     },
+    "Available after MacGacha finishes starting." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 启动完成后可用。"
+          }
+        }
+      }
+    },
+    "Available after the app update finishes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用更新完成后可用。"
+          }
+        }
+      }
+    },
+    "Available after the current game operation finishes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前游戏操作完成后可用。"
+          }
+        }
+      }
+    },
+    "Available after the current runtime setup finishes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前运行环境设置完成后可用。"
+          }
+        }
+      }
+    },
+    "Available after the game closes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏关闭后可用。"
+          }
+        }
+      }
+    },
     "Background %lld of %lld" : {
       "comment" : "Accessibility label of a background picker dot; the arguments are its position and the count",
       "localizations" : {
@@ -1385,6 +1435,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "MacGacha 无法识别此文件夹的地区版本。请选择包含启动器配置的官方安装文件夹。"
+          }
+        }
+      }
+    },
+    "MacGacha could not restart. Open MacGacha again to use the new language." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 无法重新启动。请再次打开 MacGacha 以使用新语言。"
           }
         }
       }

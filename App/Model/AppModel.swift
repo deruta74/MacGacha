@@ -97,13 +97,19 @@ final class AppModel {
     @ObservationIgnored var artTasks: [Region: Task<Void, Never>] = [:]
     @ObservationIgnored var regionLoadTasks: [Region: Task<Void, Never>] = [:]
     @ObservationIgnored var regionLoadingEnabled = true
-    @ObservationIgnored private let defaults: UserDefaults?
+    @ObservationIgnored let defaults: UserDefaults?
     @ObservationIgnored let purgeableSpace: any PurgeableSpaceProbe
     @ObservationIgnored let gameServices: any GameServices
     @ObservationIgnored var gameTask: Task<Void, Never>?
     @ObservationIgnored var gameStartupTask: Task<Void, Never>?
     @ObservationIgnored var gameActivationTask: Task<Void, Never>?
     var gameOperation: GameOperationToken?
+    private(set) var languageRestart: UUID?
+    func setLanguageRestart(_ value: UUID?) { languageRestart = value }
+    @ObservationIgnored var lastGameConsumerOutcome: (token: GameOperationToken, outcome: GameConsumerOutcome)?
+    @ObservationIgnored let relaunch: @MainActor ([String]) async throws -> Void
+    @ObservationIgnored let terminateAfterLanguageRestart: @MainActor () -> Void
+    @ObservationIgnored let launchArguments: [String]
     @ObservationIgnored var gameProgress = GameProgress()
     @ObservationIgnored var gameLastRefresh: [Region: ContinuousClock.Instant] = [:]
     @ObservationIgnored var gameRefreshInFlight: Set<Region> = []
@@ -207,7 +213,12 @@ final class AppModel {
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
         eventsNow: @escaping @Sendable () -> Date = Date.init,
         eventsSleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-        updater: any AppUpdating = InertAppUpdater(), artClock: any Clock<Duration> = ContinuousClock()) {
+        updater: any AppUpdating = InertAppUpdater(), artClock: any Clock<Duration> = ContinuousClock(),
+        relaunch: @escaping @MainActor ([String]) async throws -> Void = { _ in },
+        terminateAfterLanguageRestart: @escaping @MainActor () -> Void = {},
+        launchArguments: [String] = ProcessInfo.processInfo.arguments) {
+        self.relaunch = relaunch; self.terminateAfterLanguageRestart = terminateAfterLanguageRestart
+        self.launchArguments = launchArguments
         self.artClock = artClock
         self.updater = updater
         self.eventsServices = eventsServices
@@ -319,7 +330,11 @@ final class AppModel {
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artServices: art, eventsServices: events, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
             rosettaProbe: SystemRosettaProbe(), displayProbe: SystemDisplayProbe(),
-            displayNames: { ScreenDisplayNames.current() }, launchServices: launch, updater: SparkleUpdaterService())
+            displayNames: { ScreenDisplayNames.current() }, launchServices: launch, updater: SparkleUpdaterService(), relaunch: { arguments in
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.createsNewApplicationInstance = true; configuration.arguments = arguments
+                _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
+            }, terminateAfterLanguageRestart: { NSApp.terminate(nil) })
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -369,11 +384,13 @@ final class AppModel {
     func start() async {
         guard !started else { return }
         started = true; isStarting = true
+        if defaults?.data(forKey: LanguageRestartContinuation.defaultsKey) != nil { setLanguageRestart(UUID()) }
         startArtStartup()
         let eventsHydration = hydrateGameEvents()
         defer { isStarting = false }
         refreshConnectedDisplays()
-        await reattachOnStart()
+        await ensureGameStartup().value
+        await continueLanguageRestart(arguments: launchArguments)
         await refreshRosetta()
         do {
             if manifest == nil { manifest = try await BundledRuntimeManifest.load() }
