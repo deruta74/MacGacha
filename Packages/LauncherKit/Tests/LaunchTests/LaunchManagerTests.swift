@@ -12,6 +12,38 @@ import TestSupport
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchManagerTests {
+    @Test func resolvesDisplayOrderAgainBeforeSpawn() async throws {
+        let f = try await ManagerFixture.make()
+        let main = ConnectedDisplay(id: "00000000-0000-0000-0000-000000000001", name: "Main", isMain: true)
+        let second = ConnectedDisplay(id: "00000000-0000-0000-0000-000000000002", name: "Private screen name", isMain: false)
+        let probe = ManagerDisplayProbe([[main, second], [
+            ConnectedDisplay(id: second.id, name: second.name, isMain: true),
+            ConnectedDisplay(id: main.id, name: main.name, isMain: false)]])
+        try await BlockingIO.run {
+            var settings = LaunchSettings.defaults(for: "starrail")
+            settings.display = DisplayChoice(id: second.id, name: second.name)
+            try LaunchSettingsStore(paths: f.paths).save(settings, for: "starrail")
+        }
+        let manager = f.manager(displayProbe: probe), events = ManagerEvents()
+        let consumer = await f.consume(manager, events: events)
+        await events.waitForRunning()
+        #expect(probe.calls == 2)
+        #expect(f.spawner.calls.first?.arguments == [WinePath.windowsPath(for: f.paths.runtimes.appendingPathComponent("jadeite/jadeite.exe")),
+            WinePath.windowsPath(for: f.installRoot.appendingPathComponent("StarRail.exe")), "--", "-monitor", "1"])
+        try await f.end(manager); await consumer.value
+    }
+
+    @Test func reattachmentNeverQueriesDisplayOrder() async throws {
+        let f = try await ManagerFixture.make(), probe = ManagerDisplayProbe([])
+        _ = try await f.saveSnapshot(state: .running, processes: [f.gameProcess.identity])
+        let manager = f.manager(displayProbe: probe)
+        _ = await manager.reattachAll()
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        #expect(probe.calls == 0)
+        try await f.end(manager); await f.waitForRestore(manager)
+        #expect(probe.calls == 0)
+    }
+
     @Test func happyPathStagesInOrder() async throws {
         let f = try await ManagerFixture.make()
         let manager = f.manager()

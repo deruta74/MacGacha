@@ -21,13 +21,14 @@ public struct ResolvedLaunch: Equatable, Sendable {
     public let preparation: PreparationRequest
     public let requiredComponents: [ComponentKind]
     public let componentCopies: [LaunchComponentCopy]
+    public let displayFallback: Bool
 
     public static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.executable == rhs.executable && lhs.arguments == rhs.arguments && lhs.environment == rhs.environment
             && lhs.currentDirectory == rhs.currentDirectory && lhs.hidden == rhs.hidden
             && lhs.copyIfPresent.elementsEqual(rhs.copyIfPresent, by: { $0.source == $1.source && $0.toSystem32 == $1.toSystem32 })
             && lhs.blockedHosts == rhs.blockedHosts && lhs.preparation == rhs.preparation && lhs.requiredComponents == rhs.requiredComponents
-            && lhs.componentCopies == rhs.componentCopies
+            && lhs.componentCopies == rhs.componentCopies && lhs.displayFallback == rhs.displayFallback
     }
 }
 
@@ -43,7 +44,7 @@ public enum LaunchResolver {
     }
     public static func resolve(recipe: LaunchRecipe, settings: LaunchSettings, installRoot: URL, prefix: URL,
         wineBinary: URL, proxyPort: UInt16, componentRoots: [ComponentKind: URL], baseEnvironment: [String: String],
-        runtimeBundleID: String? = nil) throws -> ResolvedLaunch {
+        runtimeBundleID: String? = nil, displays: [String] = []) throws -> ResolvedLaunch {
         guard Recipes.recipe(for: recipe.game) != nil else { throw LauncherError.io("Unknown launch game: \(recipe.game)") }
         try settings.validate()
         for url in [installRoot, prefix, wineBinary] { try validateLocalURL(url) }
@@ -65,8 +66,21 @@ public enum LaunchResolver {
                 arguments.insert(#"C:\windows\system32\steam.exe"#, at: 0)
             }
         }
+        var displayFallback = false
+        if !displays.isEmpty {
+            let selected = settings.display.flatMap { choice in
+                displays.firstIndex { $0.caseInsensitiveCompare(choice.id) == .orderedSame }
+            }
+            displayFallback = settings.display != nil && selected == nil
+            arguments.append(contentsOf: ["-monitor", String((selected ?? 0) + 1)])
+        }
         if recipe.supportsDirectX12 && settings.directX12 && settings.backend == .d3dmetal {
             arguments.append("-use-d3d12")
+        }
+        if settings.compatibilityPatches, case .jadeite = recipe.wrapper, arguments.count > 2 {
+            // Jadeite reserves argv[2] for a launcher. "--" selects explorer.exe
+            // and forwards the remaining arguments to the game's command line.
+            arguments.insert("--", at: 2)
         }
 
         let basics: Set<String> = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG"]
@@ -107,7 +121,7 @@ public enum LaunchResolver {
             preparation: PreparationRequest(retina: settings.retina, steamShim: steamShim,
                 dxmtExtras: dxmt ? (["winemetal.dll"] + (starRail ? ["nvngx.dll"] : [])) : [], nvidiaKeys: dxmt && starRail,
                 crypt32Native: requiredComponents.contains(.crypt32Fix)),
-            requiredComponents: requiredComponents, componentCopies: componentCopies)
+            requiredComponents: requiredComponents, componentCopies: componentCopies, displayFallback: displayFallback)
     }
 
     private static func requiredRoot(_ kind: ComponentKind, in roots: [ComponentKind: URL]) throws -> URL {
