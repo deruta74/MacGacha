@@ -27,6 +27,8 @@ struct GameFooter: View {
     @Environment(AppModel.self) private var model
     let game: LauncherGame
     let art: GameArt?
+    let highlights: GameHighlights?
+    let images: ArtImageCache
     @Binding var panel: Panel?
     @Binding var gameSheet: GameSheet?
     @Binding var animated: Bool
@@ -43,7 +45,12 @@ struct GameFooter: View {
 
     var body: some View {
         HStack(alignment: .bottom) {
-            title
+            VStack(alignment: .leading, spacing: 16) {
+                title
+                if let highlights {
+                    HighlightsButton(highlights: highlights, images: images)
+                }
+            }
             Spacer(minLength: 24)
             VStack(alignment: .trailing, spacing: 10) {
                 if let note = otherRegionNote {

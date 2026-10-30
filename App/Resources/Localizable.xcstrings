@@ -317,6 +317,23 @@
         }
       }
     },
+    "Background %lld of %lld" : {
+      "comment" : "Accessibility label of a background picker dot; the arguments are its position and the count",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Background %1$lld of %2$lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld 张背景，共 %2$lld 张"
+          }
+        }
+      }
+    },
     "Cancel" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1262,6 +1279,16 @@
         }
       }
     },
+    "Loading" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在加载"
+          }
+        }
+      }
+    },
     "Local runtime" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1489,6 +1516,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开 Apple 的 Game Porting Toolkit 磁盘映像后重新扫描，或选择包含它的文件夹。"
+          }
+        }
+      }
+    },
+    "Opens in your browser" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在浏览器中打开"
           }
         }
       }
@@ -2379,6 +2416,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "版本 %1$@ · 可更新到版本 %2$@"
+          }
+        }
+      }
+    },
+    "Version highlights" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本资讯"
           }
         }
       }
