@@ -45,7 +45,7 @@ let package = Package(
             resources: [.copy("Resources/zstd")]),
         .testTarget(name: "RuntimeManagerTests", dependencies: ["RuntimeManager", "TestSupport", "Launch", "CrashHarness"]),
         .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "LauncherCore", "TestSupport"]),
-        .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"], resources: [.copy("Fixtures/CN")]),
+        .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"], resources: [.copy("Fixtures/CN"), .copy("Fixtures/Events")]),
         .testTarget(name: "SophonTests", dependencies: ["Sophon", "TestSupport"], resources: [.copy("Fixtures/CN")]),
         .testTarget(name: "GameLibraryTests", dependencies: ["GameLibrary", "TestSupport", "CrashHarness"],
             resources: [.copy("Fixtures/Adopt")]),
