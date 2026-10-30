@@ -40,7 +40,7 @@ This only changes MacGacha itself, not any system setting. The first launch can 
 
 **Done**
 
-- **Launcher category.** MacGacha is a utility rather than a game. Game Mode for launched games is not available yet.
+- **Game Mode groundwork.** MacGacha is a utility. Games launch through a dedicated game app so macOS can recognize them for Game Mode, with a normal-launch fallback. Full-screen behavior still needs live verification.
 - **Display choice.** Each game can open on a chosen monitor, with the main display as the default and fallback.
 - **Progress timing.** An estimated time remaining for downloads and full verification, elapsed time for phases without a percentage, and a signal when progress is taking longer than usual.
 - **Automatic updates** (Sparkle). **Check for Updates…** in the MacGacha menu and a switch in Settings. MacGacha asks before it downloads an update and installs it only when no game, recovery or installation is running.
