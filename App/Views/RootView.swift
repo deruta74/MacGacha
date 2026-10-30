@@ -72,7 +72,7 @@ struct RootView: View {
         ZStack {
             // An entry's video joins only once its own still is on screen, so the still, theme
             // and highlights never lag behind the motion.
-            GameBackdrop(game: game, video: selection.video.flatMap { $0.background.id == shownSlide?.id ? $0 : nil }, slide: shownSlide,
+            GameBackdrop(game: game, video: selection.video.flatMap { $0.background == shownSlide ? $0 : nil }, slide: shownSlide,
                 images: images, crossfade: selection.allowsCrossfade) { selection.setPlaybackState($0, for: $1) }
                 .id(game.id)
                 .transition(.opacity)
@@ -88,7 +88,7 @@ struct RootView: View {
                     .padding(.top, 40) // below the window's traffic lights
                     .padding(.bottom, 12)
                     .frame(maxHeight: .infinity)
-                GameFooter(game: game, art: model.gameArt[game.id], highlights: shownSlide?.highlights ?? selection.video?.background.highlights,
+                GameFooter(game: game, art: model.gameArt[game.id], highlights: shownSlide?.highlights,
                     images: images, panel: $panel, gameSheet: $gameSheet, animated: animated)
                     // A fresh footer per game, so a confirmation opened for one game can't act on another.
                     .id(game.id)
