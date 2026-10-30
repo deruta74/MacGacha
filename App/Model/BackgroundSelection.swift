@@ -33,6 +33,13 @@ struct BackgroundVideo: Sendable, Equatable {
 
 /// Server-order selection has no periodic work. Window state affects only video.
 @MainActor struct BackgroundSelection<C: Clock> where C.Duration == Duration {
+    struct Hover: Hashable, Sendable {
+        let generation: UUID
+        let backgroundID: String
+        let deadline: C.Instant
+    }
+    static var dotHoverDelay: Duration { .milliseconds(100) }
+    private(set) var dotHover: Hover?
     private let clock: C
     private let session: BackgroundSelectionSession
     private var region: Region?
@@ -69,6 +76,7 @@ struct BackgroundVideo: Sendable, Equatable {
 
     mutating func update(region: Region, gameID: String, backgrounds: [GameBackground], animated: Bool, reduceMotion: Bool) {
         let previousSource = videoCandidate?.1
+        dotHover = nil
         if self.region != region || self.gameID != gameID { playback = [:] }
         self.region = region; self.gameID = gameID
         var ids: Set<String> = []
@@ -87,8 +95,23 @@ struct BackgroundVideo: Sendable, Equatable {
         guard token.generation == generation, videoCandidate?.1 == token.source, playback[token.source] != .failed else { return }
         playback[token.source] = state
     }
+    mutating func hoverDot(_ id: String) {
+        guard let slides, slides.dotIDs.contains(id), slides.current.id != id else { dotHover = nil; return }
+        guard dotHover?.backgroundID != id else { return }
+        dotHover = Hover(generation: UUID(), backgroundID: id, deadline: clock.now.advanced(by: Self.dotHoverDelay))
+    }
+    mutating func leaveDot(_ id: String) {
+        if dotHover?.backgroundID == id { dotHover = nil }
+    }
+    /// The view sleeps on the injected clock and returns the exact hover token.
+    /// A cancelled or superseded hover can never select another game's slide.
+    mutating func selectHoveredDot(if token: Hover) {
+        guard token == dotHover, clock.now >= token.deadline else { return }
+        clickDot(token.backgroundID)
+    }
     mutating func clickDot(_ id: String) {
         guard let gameID, let slides, slides.dotIDs.contains(id) else { return }
+        dotHover = nil
         let previousSource = videoCandidate?.1
         session.select(id, for: gameID); currentID = id
         reconcileVideo(previousSource)
@@ -96,6 +119,7 @@ struct BackgroundVideo: Sendable, Equatable {
     mutating func setStillImageFailed(_ url: URL) {
         guard let gameID, backgrounds.contains(where: { $0.image == url }) else { return }
         let previousSource = videoCandidate?.1
+        dotHover = nil
         failedStills.insert(url)
         currentID = session.selection(for: gameID, availableIDs: available.map(\.id))
         reconcileVideo(previousSource)
