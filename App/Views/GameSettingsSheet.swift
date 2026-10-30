@@ -19,6 +19,45 @@ struct GameSettingsSheet: View {
         )
     }
 
+    /// With one display there is nothing to choose, unless a choice was saved while another was connected.
+    private var offersDisplayChoice: Bool {
+        model.connectedDisplays.count > 1 || settings.wrappedValue.display != nil
+    }
+
+    private var missingDisplay: DisplayChoice? {
+        guard let chosen = settings.wrappedValue.display,
+            !model.connectedDisplays.contains(where: { $0.id == chosen.id }) else { return nil }
+        return chosen
+    }
+
+    /// Selects by ID so a display that reports a new name still matches the saved choice.
+    private var displayID: Binding<String?> {
+        Binding(
+            get: { settings.wrappedValue.display?.id },
+            set: { id in
+                var value = settings.wrappedValue
+                if let id {
+                    let name = model.connectedDisplays.first { $0.id == id }?.name ?? value.display?.name ?? ""
+                    value.display = DisplayChoice(id: id, name: name)
+                } else {
+                    value.display = nil
+                }
+                settings.wrappedValue = value
+            }
+        )
+    }
+
+    private var displayFooter: String {
+        if missingDisplay != nil {
+            return String(localized: "That display isn't connected, so the game opens on the main display. Changes apply the next time you press Play.")
+        }
+        return String(localized: "The main display is the one with the menu bar. Changes apply the next time you press Play.")
+    }
+
+    private static func name(of display: String) -> String {
+        display.isEmpty ? String(localized: "Unnamed Display") : display
+    }
+
     /// Only Zenless Zone Zero has a DirectX 12 renderer, and only D3DMetal runs it.
     private var offersDirectX12: Bool { Recipes.recipe(for: game.id)?.supportsDirectX12 == true }
 
@@ -46,6 +85,25 @@ struct GameSettingsSheet: View {
                     Text(graphicsFooter)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                if offersDisplayChoice {
+                    Section {
+                        Picker("Display", selection: displayID) {
+                            Text("Main Display").tag(String?.none)
+                            ForEach(model.connectedDisplays, id: \.id) { display in
+                                Text(Self.name(of: display.name)).tag(String?.some(display.id))
+                            }
+                            if let missing = missingDisplay {
+                                Text("\(Self.name(of: missing.name)) (Not Connected)",
+                                    comment: "A chosen display that is unplugged; the argument is its name")
+                                    .tag(String?.some(missing.id))
+                            }
+                        }
+                    } footer: {
+                        Text(displayFooter)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section {
                     Toggle("Retina resolution", isOn: settings.retina)

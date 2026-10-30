@@ -10,10 +10,11 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
     public var frameLimit: Int?
     public var directX12: Bool
     public var compatibilityPatches: Bool
+    public var display: DisplayChoice?
 
-    public init(backend: RuntimeBackend, retina: Bool, frameLimit: Int?, directX12: Bool, compatibilityPatches: Bool) {
+    public init(backend: RuntimeBackend, retina: Bool, frameLimit: Int?, directX12: Bool, compatibilityPatches: Bool, display: DisplayChoice? = nil) {
         self.backend = backend; self.retina = retina; self.frameLimit = frameLimit
-        self.directX12 = directX12; self.compatibilityPatches = compatibilityPatches
+        self.directX12 = directX12; self.compatibilityPatches = compatibilityPatches; self.display = display
     }
 
     public static func defaults(for game: String) -> Self {
@@ -21,7 +22,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
             directX12: GameDefinition.find(game)?.family == .zzz, compatibilityPatches: true)
     }
 
-    private enum CodingKeys: CodingKey { case backend, retina, frameLimit, directX12, compatibilityPatches }
+    private enum CodingKeys: CodingKey { case backend, retina, frameLimit, directX12, compatibilityPatches, display }
     // The store supplies the game so absent fields get that game's defaults.
     // A standalone decoder uses the shared defaults (60 FPS, DirectX 12 off).
     static let gameKey = CodingUserInfoKey(rawValue: "MacGacha.launchSettings.game")!
@@ -33,6 +34,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         frameLimit = c.contains(.frameLimit) ? try c.decodeIfPresent(Int.self, forKey: .frameLimit) : defaults.frameLimit
         directX12 = try c.decodeIfPresent(Bool.self, forKey: .directX12) ?? defaults.directX12
         compatibilityPatches = try c.decodeIfPresent(Bool.self, forKey: .compatibilityPatches) ?? defaults.compatibilityPatches
+        display = try c.decodeIfPresent(DisplayChoice.self, forKey: .display)
         try validate()
     }
 
@@ -42,9 +44,11 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         // Explicit null means Off; an absent key means use the game's default.
         try c.encode(frameLimit, forKey: .frameLimit)
         try c.encode(directX12, forKey: .directX12); try c.encode(compatibilityPatches, forKey: .compatibilityPatches)
+        try c.encodeIfPresent(display, forKey: .display)
     }
 
-    func validate() throws {
+    public func validate() throws {
+        try display?.validate()
         if let frameLimit, ![30, 60, 120].contains(frameLimit) {
             throw LauncherError.io("Frame limit must be Off, 30, 60 or 120")
         }

@@ -16,10 +16,8 @@ import RuntimeManager
     /// join the queue, and a write failure is surfaced rather than launching with
     /// an unpersisted setting.
     func saveLaunchSettings(_ settings: LaunchSettings, for id: String) throws {
-        guard GameDefinition.all.contains(where: { $0.id == id }),
-            settings.frameLimit.map({ [30, 60, 120].contains($0) }) ?? true else {
-            throw LauncherError.io("Invalid launch settings")
-        }
+        guard GameDefinition.all.contains(where: { $0.id == id }) else { throw LauncherError.io("Invalid launch settings") }
+        try settings.validate()
         let revision = UUID(), preferences = launchPreferences
         launchSettingsRevision = revision; launchSettingsRevisions[id] = revision; launchSettingsCache[id] = settings
         enqueueSettingsWrite(key: id) {

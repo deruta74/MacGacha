@@ -29,6 +29,7 @@ public actor LaunchManager {
     private let inspector: any ProcessInspector
     private let runner: any ProcessRunner
     private let clock: any Clock<Duration>
+    private let displayProbe: any DisplayProbe
     private let proxyFactory: ProxyFactory
     private let baseEnvironment: [String: String]
     private let journalFileOps: any FileOps
@@ -76,11 +77,11 @@ public actor LaunchManager {
 
     public init(paths: AppPaths, runtimes: any LaunchRuntimeProviding, prefixes: any LaunchPrefixProviding,
         preparation: any LaunchPreparing, spawner: any ProcessSpawner, inspector: any ProcessInspector,
-        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil) {
+        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, displayProbe: any DisplayProbe = SystemDisplayProbe()) {
         self.eventLog = log ?? EventLog(directory: paths.logs)
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: {})
         self.paths = paths; self.runtimes = runtimes; self.prefixes = prefixes; self.preparation = preparation
-        self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock
+        self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock; self.displayProbe = displayProbe
         self.baseEnvironment = ProcessInfo.processInfo.environment; self.journalFileOps = SystemFileOps()
         self.recipeOverrides = [:]
         self.hideHooks = .none; self.beforeJournalRead = {}; self.beforeRecoveryRead = {}
@@ -90,7 +91,8 @@ public actor LaunchManager {
 
     package init(paths: AppPaths, runtimes: any LaunchRuntimeProviding, prefixes: any LaunchPrefixProviding,
         preparation: any LaunchPreparing, spawner: any ProcessSpawner, inspector: any ProcessInspector,
-        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, proxyFactory: @escaping ProxyFactory,
+        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, displayProbe: any DisplayProbe = FixedDisplayProbe(),
+        proxyFactory: @escaping ProxyFactory,
         baseEnvironment: [String: String] = [:], journalFileOps: any FileOps = SystemFileOps(),
         hideHooks: LaunchFileHooks = .none, beforeJournalRead: @escaping @Sendable () throws -> Void = {},
         beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {},
@@ -100,7 +102,7 @@ public actor LaunchManager {
         self.eventLog = log ?? EventLog(directory: paths.logs)
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: beforeSessionLogWrite)
         self.paths = paths; self.runtimes = runtimes; self.prefixes = prefixes; self.preparation = preparation
-        self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock
+        self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock; self.displayProbe = displayProbe
         self.proxyFactory = proxyFactory; self.baseEnvironment = baseEnvironment; self.journalFileOps = journalFileOps
         self.recipeOverrides = recipeOverrides
         self.hideHooks = hideHooks; self.beforeJournalRead = beforeJournalRead; self.beforeRecoveryRead = beforeRecoveryRead
@@ -210,7 +212,7 @@ public actor LaunchManager {
             let bundle = selection.bundle
             let prefix = try await prefixes.prefixURL(game: game.id, bundle: bundle)
             let preview = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue)
+                wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displayProbe.connectedDisplays().map(\.id))
             guard !selection.componentIDs.isEmpty else { throw LauncherError.io("The runtime bundle has no pinnable components") }
             let compatibilityIDs = try preview.requiredComponents.map { kind in
                 guard let id = selection.compatibilityComponentIDs[kind] else { throw LauncherError.io("Required compatibility component has no pin identity") }
@@ -286,8 +288,14 @@ public actor LaunchManager {
             }
             context.proxy = try await proxyFactory(preview.blockedHosts, logger)
             context.session.proxyPort = context.proxy?.port
+            let displays = displayProbe.connectedDisplays().map(\.id)
             let resolved = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue)
+                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displays)
+            if !displays.isEmpty {
+                let selection = resolved.displayFallback ? "fallback" : (settings.display == nil ? "main" : "chosen")
+                note(context, "display=\(selection)")
+                event("Display selected", game: game.id, metadata: ["display": selection])
+            }
             stage = .spawn; events.yield(.stage(stage)); note(context, "stage spawn")
             context.session.state = .spawning; try await persist(context.session)
             let spawner = spawner, output = context.log?.processOutput ?? .discard

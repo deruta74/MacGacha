@@ -54,6 +54,10 @@ final class AppModel {
     private(set) var isRuntimeOperationRunning = false
     @ObservationIgnored let updater: any AppUpdating
     private(set) var gameArt: [String: GameArt]
+    var connectedDisplays: [ConnectedDisplay] = []
+    @ObservationIgnored let displayProbe: any DisplayProbe
+    @ObservationIgnored let displayNames: @MainActor @Sendable () -> [String: String]
+    @ObservationIgnored private var screenChangeObservation: ScreenChangeObservation?
     private(set) var rows: [RuntimeRow] = []
     private(set) var consentRequest: ConsentRequest?
     private(set) var importState: ImportState?
@@ -165,6 +169,8 @@ final class AppModel {
         artServices: [Region: any GameArtProviding] = [:],
         gameServices: any GameServices = PreviewGameServices(),
         rosettaProbe: any RosettaProbing = UnknownRosettaProbe(),
+        displayProbe: any DisplayProbe = FixedDisplayProbe(),
+        displayNames: @escaping @MainActor @Sendable () -> [String: String] = { [:] },
         activationCenter: NotificationCenter = .default,
         rosettaClock: any Clock<Duration> = ContinuousClock(),
         rosettaPollInterval: Duration = .seconds(2), rosettaPollTimeout: Duration = .seconds(300),
@@ -179,6 +185,7 @@ final class AppModel {
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
         updater: any AppUpdating = InertAppUpdater()) {
         self.updater = updater
+        self.displayProbe = displayProbe; self.displayNames = displayNames
         self.launchPreferences = launchPreferences ?? LiveLaunchPreferencesPersistence(paths: paths)
         self.rosettaProbe = rosettaProbe; self.rosettaClock = rosettaClock
         self.activationCenter = activationCenter
@@ -202,6 +209,8 @@ final class AppModel {
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Games/MacGacha", isDirectory: true)
         rebuildRows()
         observeGameActivation()
+        refreshConnectedDisplays()
+        screenChangeObservation = ScreenChangeObservation(center: activationCenter, model: self)
     }
 
     func setGameState(_ id: String, _ state: GameState) {
@@ -242,7 +251,8 @@ final class AppModel {
         })
         return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
             artServices: art, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
-            rosettaProbe: SystemRosettaProbe(), launchServices: launch, updater: SparkleUpdaterService())
+            rosettaProbe: SystemRosettaProbe(), displayProbe: SystemDisplayProbe(),
+            displayNames: { ScreenDisplayNames.current() }, launchServices: launch, updater: SparkleUpdaterService())
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -290,6 +300,7 @@ final class AppModel {
         guard !started else { return }
         started = true; isStarting = true
         defer { isStarting = false }
+        refreshConnectedDisplays()
         await reattachOnStart()
         await refreshRosetta()
         do {

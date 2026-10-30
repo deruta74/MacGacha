@@ -1,6 +1,17 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ (Not Connected)" : {
+      "comment" : "A chosen display that is unplugged; the argument is its name",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@（未连接）"
+          }
+        }
+      }
+    },
     "%@ Settings" : {
       "comment" : "Sheet title; the argument is the game's name",
       "localizations" : {
@@ -684,6 +695,16 @@
         }
       }
     },
+    "Display" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示器"
+          }
+        }
+      }
+    },
     "Done" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1352,6 +1373,16 @@
         }
       }
     },
+    "Main Display" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主显示器"
+          }
+        }
+      }
+    },
     "Mainland China (Beta)" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1933,6 +1964,16 @@
         }
       }
     },
+    "That display isn't connected, so the game opens on the main display. Changes apply the next time you press Play." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该显示器未连接，游戏将在主显示器上打开。更改将在下次点击“开始游戏”时生效。"
+          }
+        }
+      }
+    },
     "The download could not finish. Check your connection and try again." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2000,6 +2041,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "游戏在启动过程中关闭。"
+          }
+        }
+      }
+    },
+    "The main display is the one with the menu bar. Changes apply the next time you press Play." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主显示器是显示菜单栏的那一台。更改将在下次点击“开始游戏”时生效。"
           }
         }
       }
@@ -2229,6 +2280,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未知运行环境"
+          }
+        }
+      }
+    },
+    "Unnamed Display" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未命名显示器"
           }
         }
       }

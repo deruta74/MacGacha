@@ -99,7 +99,7 @@ final class ManagerInspector: ProcessInspector, Sendable {
 }
 
 final class ManagerSpawner: ProcessSpawner, Sendable {
-    struct Call: Sendable { let outputDiscarded: Bool; let environment: [String: String] }
+    struct Call: Sendable { let outputDiscarded: Bool; let environment: [String: String]; let arguments: [String] }
     private struct State { var calls: [Call] = []; var failure: LauncherError?; var afterSpawn: (@Sendable () throws -> Void)? }
     private let state = Mutex(State())
     let identity = ProcessIdentity(pid: 12345, startTime: 100)
@@ -108,7 +108,7 @@ final class ManagerSpawner: ProcessSpawner, Sendable {
     func afterSpawn(_ action: @escaping @Sendable () throws -> Void) { state.withLock { $0.afterSpawn = action } }
     func spawn(_ executable: URL, arguments: [String], environment: [String: String], currentDirectory: URL, output: ProcessOutput) throws -> ProcessIdentity {
         let action = try state.withLock { state in
-            state.calls.append(Call(outputDiscarded: { if case .discard = output { true } else { false } }(), environment: environment))
+            state.calls.append(Call(outputDiscarded: { if case .discard = output { true } else { false } }(), environment: environment, arguments: arguments))
             if let failure = state.failure { throw failure }
             return state.afterSpawn
         }
@@ -216,9 +216,9 @@ final class ManagerFixture: Sendable {
     }
     func manager(hideHooks: LaunchFileHooks = .none, beforeJournalRead: @escaping @Sendable () throws -> Void = {},
         beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {}, inspector overrideInspector: (any ProcessInspector)? = nil,
-        log: EventLog? = nil, beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) -> LaunchManager {
+        log: EventLog? = nil, displayProbe: any DisplayProbe = FixedDisplayProbe(), beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) -> LaunchManager {
         LaunchManager(paths: paths, runtimes: runtime, prefixes: prefixes, preparation: preparation,
-            spawner: spawner, inspector: overrideInspector ?? inspector, runner: runner, clock: clock, log: log,
+            spawner: spawner, inspector: overrideInspector ?? inspector, runner: runner, clock: clock, log: log, displayProbe: displayProbe,
             proxyFactory: { [proxy] _, log in proxy.start(log: log); return proxy }, baseEnvironment: [:], journalFileOps: journalOps, hideHooks: hideHooks, beforeJournalRead: beforeJournalRead, beforeRecoveryRead: beforeRecoveryRead,
             sessionProvenance: { (Self.bootSessionUUID, Self.sessionStartTime) }, beforeSessionLogWrite: beforeSessionLogWrite)
     }
@@ -368,5 +368,18 @@ final class ManagerRecoveryReadGate: Sendable {
     func read() async throws {
         let first = count.withLock { $0 += 1; return $0 == 1 }
         if first { entered.signal(); try await released.wait() }
+    }
+}
+
+final class ManagerDisplayProbe: DisplayProbe, Sendable {
+    private let state: Mutex<(lists: [[ConnectedDisplay]], calls: Int)>
+    init(_ lists: [[ConnectedDisplay]]) { state = Mutex((lists, 0)) }
+    var calls: Int { state.withLock { $0.calls } }
+    func connectedDisplays() -> [ConnectedDisplay] {
+        state.withLock { state in
+            let index = min(state.calls, state.lists.count - 1)
+            state.calls += 1
+            return index >= 0 ? state.lists[index] : []
+        }
     }
 }
