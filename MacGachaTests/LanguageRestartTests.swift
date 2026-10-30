@@ -62,8 +62,9 @@ import GameLibrary
         f.model.launchSlotOwner = "starrail"
         #expect(f.model.languageRestartBlocker == .game("starrail"))
         f.model.launchSlotOwner = nil
-        f.model.gameOperation = GameOperationToken(id: "zzz", generation: UUID())
-        #expect(f.model.languageRestartBlocker == .unresumableOperation("zzz"))
+        // Uninstall is never resumable, even when the folder already has a pending plan.
+        f.model.gameOperation = GameOperationToken(id: "genshin", generation: UUID(), isUninstall: true)
+        #expect(f.model.languageRestartBlocker == .unresumableOperation("genshin"))
         f.model.gameOperation = nil
         let fake = FakeRuntimeServices()
         fake.setInstalled(try InstalledComponent(kind: .wine, version: "11.0", installedAt: Date(), source: .download))
