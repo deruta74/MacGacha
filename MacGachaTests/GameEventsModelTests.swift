@@ -89,19 +89,23 @@ import HoYoPlayAPI
         #expect(model.gameEvents["genshin"]?.first?.title == "fresh")
     }
 
-    @Test func startHydratesBothCachesWithoutFetchingEitherRegion() async throws {
-        let date = Date(timeIntervalSince1970: 1_800_000_000)
-        let global = ModelEvents(region: .global, date: date, initiallyEmpty: true)
+    @Test(.timeLimit(.minutes(1))) func startHydratesBothCachesAndFetchesOnlyTheSelectedRegion() async throws {
+        let date = Date(timeIntervalSince1970: 1_800_000_000), entered = EventsSignal(), release = EventsSignal()
+        let global = ModelEvents(region: .global, date: date, entered: entered, release: release, initiallyEmpty: true)
         let cn = ModelEvents(region: .mainlandChina, date: date, initiallyEmpty: true)
         let model = try model(global: global, cn: cn, now: { date })
         #expect(model.gameEvents.isEmpty)
         await model.start()
+        // The startup art load also refreshes the selected region's Events; hold that response.
+        await entered.wait()
         #expect(model.gameEvents["genshin"]?.first?.title == "cached")
         #expect(global.hydrations == 1 && cn.hydrations == 1)
-        #expect(global.refreshes == 0 && cn.refreshes == 0)
+        #expect(global.refreshes == 1 && cn.refreshes == 0)
         model.regionLoadingEnabled = false
         model.region = .mainlandChina
-        #expect(model.gameEvents["genshin-cn"]?.first?.title == "cached")
+        #expect(model.gameEvents["genshin-cn"]?.first?.title == "cached" && cn.refreshes == 0)
+        let pending = model.eventsTasks[.global]
+        await release.signal(); await pending?.value
     }
 
     private func model(global: any GameEventsProviding, cn: any GameEventsProviding = EmptyGameEventsProvider(),
