@@ -16,6 +16,7 @@ import RuntimeManager
     /// join the queue, and a write failure is surfaced rather than launching with
     /// an unpersisted setting.
     func saveLaunchSettings(_ settings: LaunchSettings, for id: String) throws {
+        guard languageRestart == nil else { throw LauncherError.busy("Application language restart is in progress") }
         guard GameDefinition.all.contains(where: { $0.id == id }) else { throw LauncherError.io("Invalid launch settings") }
         try settings.validate()
         let revision = UUID(), preferences = launchPreferences
@@ -31,6 +32,8 @@ import RuntimeManager
     var sessionLogsEnabled: Bool {
         get { globalLaunchSettings.sessionLogsEnabled }
         set {
+            // No settings writes may enter behind the restart's final flush.
+            guard languageRestart == nil else { show(LauncherError.busy("Application language restart is in progress")); return }
             let preferences = launchPreferences
             globalLaunchSettings.sessionLogsEnabled = newValue
             let settings = globalLaunchSettings, revision = UUID()

@@ -18,6 +18,7 @@ extension LauncherError {
         case .fileTooLarge: String(localized: "A file exceeds the supported size limit. Choose another source.")
         case .consentRequired: String(localized: "Accept the license terms before installing this component.")
         case .processSpawnFailed, .processFailed: String(localized: "A required tool could not finish. Check Diagnostics for details.")
+        case .languageRestartFailed: String(localized: "MacGacha could not restart. Open MacGacha again to use the new language.")
         case .rosettaMissing: String(localized: "Rosetta 2 is required to run games. Install it using MacGacha, then try again.")
         case .rosettaInstallerUnavailable: String(localized: "MacGacha couldn't open Apple's Rosetta installer. Open Terminal and run softwareupdate --install-rosetta, then try again.")
         case .gameEditionMismatch: String(localized: "This folder belongs to a different game or edition. Choose the matching game and region.")

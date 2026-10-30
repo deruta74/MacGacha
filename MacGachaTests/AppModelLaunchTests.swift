@@ -424,7 +424,9 @@ private final class StartupGameServices: GameServices, Sendable {
     let backend = PreviewGameServices()
     private let observed = Mutex<[String]>([])
     var calls: [String] { observed.withLock { $0 } }
-    func start() async { observed.withLock { $0.append("start") } }
+    func start() async { observed.withLock { $0.append("start") }
+    }
+    func waitUntilIdle(_ id: String) async throws {}
     func status(_ id: String) async -> GameStatus { await backend.status(id) }
     func record(_ id: String) async throws -> GameRecord? { try await backend.record(id) }
     func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate {

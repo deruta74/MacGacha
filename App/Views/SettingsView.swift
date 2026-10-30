@@ -9,9 +9,28 @@ struct SettingsView: View {
     @State private var choosing = false
     @AppStorage("animatedBackgrounds") private var animatedBackgrounds = true
     @AppStorage("animatedBackgroundsChosen") private var animatedChosen = false
+    @State private var language = InterfaceLanguageSettings()
 
     var body: some View {
         Form {
+            Section {
+                Picker("Language", selection: Binding(get: { language.selection }, set: { language.select($0) })) {
+                    Text(InterfaceLanguageSettings.systemName).tag(InterfaceLanguage?.none)
+                    Divider()
+                    ForEach(InterfaceLanguage.allCases) { option in
+                        Text(verbatim: option.endonym).tag(Optional(option))
+                    }
+                }
+                if language.needsRestart {
+                    LanguageRestartRow()
+                }
+            } footer: {
+                Text("System follows the language order in macOS. HoYoPlay's art and events follow the interface language where HoYoPlay offers it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .onAppear { language.reload() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in language.reload() }
             Section {
                 Picker("Region", selection: Binding(get: { model.region }, set: { model.region = $0 })) {
                     Text("Global").tag(Region.global)
@@ -87,6 +106,36 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.setInstallRoot(url) }
+        }
+    }
+}
+
+/// Offers the restart that applies a new interface language, or says what it waits for.
+private struct LanguageRestartRow: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Restart MacGacha to use the new language.")
+                if model.languageRestart != nil {
+                    Text("Getting ready to restart…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let blocker = model.languageRestartBlocker {
+                    Text(blocker.reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if model.languageRestart != nil {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Restart Now") { Task { await model.restartForLanguage() } }
+                    .disabled(model.languageRestartBlocker != nil)
+            }
         }
     }
 }

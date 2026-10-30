@@ -9,6 +9,8 @@ import GameLibrary
 struct GameOperationToken: Sendable, Equatable {
     let id: String; let generation: UUID
     var kind: OtherRegionActivity = .downloading
+    var isVerification = false
+    var isUninstall = false
 }
 private enum GameRequest: Sendable {
     case install(Set<String>, URL, Bool), adopt(URL, Set<String>), update, resume(Bool), verify, voices(Set<String>), uninstall
@@ -22,6 +24,10 @@ private enum GameRequest: Sendable {
         }
     }
 }
+enum GameStopOutcome: Sendable, Equatable {
+    case resume(planID: String), verify, finished, failed
+}
+enum GameConsumerOutcome: Sendable { case stopped, completed, failed }
 private struct GameSnapshot: Sendable {
     let status: GameStatus
     let record: GameRecord?
@@ -114,7 +120,7 @@ private struct GameSnapshot: Sendable {
         }
     }
 
-    private func ensureGameStartup() -> Task<Void, Never> {
+    func ensureGameStartup() -> Task<Void, Never> {
         if let task = gameStartupTask { return task }
         let services = gameServices
         let task = Task { [weak self] in
@@ -126,11 +132,11 @@ private struct GameSnapshot: Sendable {
         return task
     }
 
-    private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity) -> GameOperationToken? {
+    private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity, isVerification: Bool, isUninstall: Bool) -> GameOperationToken? {
         guard canBeginGameOrRuntimeOperation() else { return nil }
         guard GameDefinition.all.contains(where: { $0.id == id }) else { show(LauncherError.io("Unknown game")); return nil }
         guard gameOperation == nil else { show(LauncherError.busy("another game operation is running")); return nil }
-        let token = GameOperationToken(id: id, generation: UUID(), kind: kind)
+        let token = GameOperationToken(id: id, generation: UUID(), kind: kind, isVerification: isVerification, isUninstall: isUninstall)
         gameOperation = token; gameRevisions[id] = token.generation
         gameProgress = GameProgress()
         dismissError()
@@ -140,7 +146,7 @@ private struct GameSnapshot: Sendable {
 
     @discardableResult private func beginGame(_ id: String, _ request: GameRequest) -> Task<Void, Never>? {
         guard let token = reserveGame(id, activity: request.isUninstall ? .working(.deleting, fraction: nil, bytesPerSecond: nil) : .resolving,
-            kind: request.activity(record: gameRecords[id])) else { return nil }
+            kind: request.activity(record: gameRecords[id]), isVerification: { if case .verify = request { true } else { false } }(), isUninstall: request.isUninstall) else { return nil }
         let services = gameServices, startup = ensureGameStartup()
         let task = Task { [weak self] in
             var approval: (required: Int64, available: Int64)?
@@ -164,6 +170,9 @@ private struct GameSnapshot: Sendable {
                         // durable snapshot finish and we release the reservation.
                         approval = (required, available)
                     case .phase(let phase):
+                        if let record = try? await services.record(id), self?.gameOperation == token {
+                            self?.setGameRecord(id, record)
+                        }
                         self?.setGameState(id, GameState(status: self?.games[id]?.status ?? .unknown,
                             activity: .working(phase, fraction: nil, bytesPerSecond: nil)))
                     case .progress(let downloaded, let network, let staged, let totalStaged):
@@ -173,7 +182,7 @@ private struct GameSnapshot: Sendable {
                 }
                 // Nil without completed is a pause; OperationRunner owns the receipt proof.
             } catch {
-                let error = Task.isCancelled ? LauncherError.cancelled : launcherError(error)
+                let error = launcherError(error)
                 if approval != nil, case .insufficientSpace = error { /* Expected approval pair. */ }
                 else { failure = error }
             }
@@ -196,6 +205,8 @@ private struct GameSnapshot: Sendable {
                 state.spaceShortage = GameSpaceShortage(required: approval.required, available: approval.available)
                 self.setGameState(id, state)
             }
+            let failed = failure.map { $0 != .cancelled } ?? false
+            self.lastGameConsumerOutcome = (token, failed || snapshot.error != nil ? .failed : completed ? .completed : .stopped)
             self.releaseGame(token, activity: activity)
             // CacheDelete is advisory and potentially slow. Query only this pause,
             // after releasing the operation slot, never from the progress stream.
@@ -211,6 +222,24 @@ private struct GameSnapshot: Sendable {
         }
         gameTask = task
         return task
+    }
+
+    func stopGameOperation(_ token: GameOperationToken) async throws -> GameStopOutcome {
+        let task = gameOperation == token ? gameTask : nil
+        task?.cancel()
+        await task?.value
+        try await gameServices.waitUntilIdle(token.id)
+        let record = try await gameServices.record(token.id)
+        setGameRecord(token.id, record)
+        guard let final = lastGameConsumerOutcome, final.token == token else { return .failed }
+        switch final.outcome {
+        case .failed: return .failed
+        case .completed: return .finished
+        case .stopped:
+            if let pending = record?.pending { return .resume(planID: pending.planID.rawValue) }
+            if token.isVerification, record?.installed != nil, record?.uninstalling == false { return .verify }
+            return .finished
+        }
     }
 
     private func applyGame(_ snapshot: GameSnapshot, id: String, activity: GameActivity?, reportError: Bool = true) {

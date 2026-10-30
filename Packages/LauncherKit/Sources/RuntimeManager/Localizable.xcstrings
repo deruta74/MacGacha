@@ -4,10 +4,82 @@
     "Cannot inspect runtime entry" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufzeiteintrag kann nicht geprüft werden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se puede inspeccionar la entrada del entorno de ejecución"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible d'inspecter l'entrée de l'environnement d'exécution"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidak dapat memeriksa entri runtime"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイム項目を検査できません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 항목을 검사할 수 없음"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não é possível inspecionar a entrada do ambiente de execução"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удаётся проверить элемент среды выполнения"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไม่สามารถตรวจสอบรายการรันไทม์ได้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не вдається перевірити елемент середовища виконання"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể kiểm tra mục runtime"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法检查运行环境条目"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法檢查執行環境項目"
           }
         }
       }
@@ -15,10 +87,82 @@
     "Invalid runtime marker JSON" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ungültiges JSON der Laufzeitmarkierung"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JSON del marcador del entorno de ejecución no válido"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JSON du marqueur d'environnement d'exécution non valide"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JSON penanda runtime tidak valid"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムマーカーのJSONが無効です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 마커 JSON이 올바르지 않음"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JSON do marcador do ambiente de execução inválido"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недопустимый JSON маркера среды выполнения"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JSON ของไฟล์ระบุรันไทม์ไม่ถูกต้อง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недійсний JSON маркера середовища виконання"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JSON đánh dấu runtime không hợp lệ"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行环境标记 JSON 无效"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行環境標記 JSON 無效"
           }
         }
       }
@@ -26,10 +170,82 @@
     "Invalid runtime path component" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ungültiger Pfadbestandteil der Laufzeitumgebung"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Componente de ruta del entorno de ejecución no válido"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Composant de chemin d'environnement d'exécution non valide"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Komponen path runtime tidak valid"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムのパス要素が無効です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 경로 구성 요소가 올바르지 않음"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Componente de caminho do ambiente de execução inválido"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недопустимый компонент пути среды выполнения"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ส่วนประกอบพาธของรันไทม์ไม่ถูกต้อง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недійсний компонент шляху середовища виконання"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thành phần đường dẫn runtime không hợp lệ"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行环境路径组成部分无效"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行環境路徑組成部分無效"
           }
         }
       }
@@ -37,10 +253,82 @@
     "Invalid runtime version identifier" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ungültige Versionskennung der Laufzeitumgebung"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identificador de versión del entorno de ejecución no válido"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identifiant de version d'environnement d'exécution non valide"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pengenal versi runtime tidak valid"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムのバージョン識別子が無効です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 버전 식별자가 올바르지 않음"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identificador de versão do ambiente de execução inválido"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недопустимый идентификатор версии среды выполнения"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ตัวระบุเวอร์ชันรันไทม์ไม่ถูกต้อง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недійсний ідентифікатор версії середовища виконання"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mã định danh phiên bản runtime không hợp lệ"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行环境版本标识无效"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行環境版本識別碼無效"
           }
         }
       }
@@ -48,10 +336,82 @@
     "Runtime entry disappeared during inspection" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufzeiteintrag ist während der Prüfung verschwunden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La entrada del entorno de ejecución desapareció durante la inspección"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'entrée de l'environnement d'exécution a disparu pendant l'inspection"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entri runtime hilang saat pemeriksaan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "検査中にランタイム項目がなくなりました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검사 중 런타임 항목이 사라짐"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A entrada do ambiente de execução desapareceu durante a inspeção"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Элемент среды выполнения исчез во время проверки"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "รายการรันไทม์หายไประหว่างการตรวจสอบ"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Елемент середовища виконання зник під час перевірки"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mục runtime biến mất trong lúc kiểm tra"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "检查期间运行环境条目消失"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檢查期間執行環境項目消失"
           }
         }
       }
@@ -59,10 +419,82 @@
     "Runtime kind path is not a directory" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pfad der Laufzeitart ist kein Ordner"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La ruta del tipo de entorno de ejecución no es una carpeta"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le chemin du type d'environnement d'exécution n'est pas un dossier"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Path jenis runtime bukan direktori"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイム種別のパスがフォルダではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 종류 경로가 폴더가 아님"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O caminho do tipo de ambiente de execução não é uma pasta"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Путь типа среды выполнения не является папкой"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "พาธประเภทรันไทม์ไม่ใช่โฟลเดอร์"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Шлях типу середовища виконання не є папкою"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đường dẫn loại runtime không phải là thư mục"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行环境类型路径不是文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行環境類型路徑不是資料夾"
           }
         }
       }
@@ -70,10 +502,82 @@
     "Runtime marker does not match its directory" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufzeitmarkierung passt nicht zu ihrem Ordner"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El marcador del entorno de ejecución no coincide con su carpeta"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le marqueur d'environnement d'exécution ne correspond pas à son dossier"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Penanda runtime tidak cocok dengan direktorinya"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムマーカーがフォルダと一致しません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 마커가 해당 폴더와 일치하지 않음"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O marcador do ambiente de execução não corresponde à sua pasta"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Маркер среды выполнения не соответствует своей папке"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไฟล์ระบุรันไทม์ไม่ตรงกับโฟลเดอร์"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Маркер середовища виконання не відповідає своїй папці"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tệp đánh dấu runtime không khớp với thư mục"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行环境标记与其文件夹不符"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行環境標記與其資料夾不符"
           }
         }
       }
@@ -81,10 +585,82 @@
     "Runtime marker exceeds size limit" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufzeitmarkierung überschreitet die Größengrenze"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El marcador del entorno de ejecución supera el tamaño máximo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le marqueur d'environnement d'exécution dépasse la taille maximale"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Penanda runtime melebihi batas ukuran"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムマーカーがサイズ上限を超えています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 마커가 크기 제한을 초과함"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O marcador do ambiente de execução excede o limite de tamanho"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Маркер среды выполнения превышает допустимый размер"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไฟล์ระบุรันไทม์มีขนาดเกินขีดจำกัด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Маркер середовища виконання перевищує допустимий розмір"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tệp đánh dấu runtime vượt quá giới hạn kích thước"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行环境标记超出大小上限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行環境標記超出大小上限"
           }
         }
       }
@@ -92,10 +668,82 @@
     "Runtime marker is missing" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufzeitmarkierung fehlt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falta el marcador del entorno de ejecución"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Marqueur d'environnement d'exécution manquant"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Penanda runtime tidak ada"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムマーカーがありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 마커가 없음"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O marcador do ambiente de execução está ausente"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отсутствует маркер среды выполнения"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไม่พบไฟล์ระบุรันไทม์"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Відсутній маркер середовища виконання"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thiếu tệp đánh dấu runtime"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "缺少运行环境标记"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缺少執行環境標記"
           }
         }
       }
@@ -103,10 +751,82 @@
     "Runtime path is not a directory" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufzeitpfad ist kein Ordner"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La ruta del entorno de ejecución no es una carpeta"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le chemin de l'environnement d'exécution n'est pas un dossier"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Path runtime bukan direktori"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムのパスがフォルダではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 경로가 폴더가 아님"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O caminho do ambiente de execução não é uma pasta"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Путь среды выполнения не является папкой"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "พาธรันไทม์ไม่ใช่โฟลเดอร์"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Шлях середовища виконання не є папкою"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đường dẫn runtime không phải là thư mục"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行环境路径不是文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行環境路徑不是資料夾"
           }
         }
       }
@@ -114,10 +834,82 @@
     "Too many runtime directory entries" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zu viele Einträge im Laufzeitordner"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demasiadas entradas en la carpeta del entorno de ejecución"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trop d'entrées dans le dossier de l'environnement d'exécution"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terlalu banyak entri di direktori runtime"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムフォルダ内の項目が多すぎます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "런타임 폴더 항목이 너무 많음"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entradas demais na pasta do ambiente de execução"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Слишком много элементов в папке среды выполнения"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "โฟลเดอร์รันไทม์มีรายการมากเกินไป"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Забагато елементів у папці середовища виконання"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thư mục runtime có quá nhiều mục"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行环境文件夹中的条目过多"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行環境資料夾中的項目過多"
           }
         }
       }
@@ -125,10 +917,82 @@
     "Unknown runtime kind" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unbekannte Laufzeitart"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tipo de entorno de ejecución desconocido"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Type d'environnement d'exécution inconnu"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jenis runtime tidak dikenal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不明なランタイム種別"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알 수 없는 런타임 종류"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tipo de ambiente de execução desconhecido"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Неизвестный тип среды выполнения"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไม่รู้จักประเภทรันไทม์"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Невідомий тип середовища виконання"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loại runtime không xác định"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "未知的运行环境类型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知的執行環境類型"
           }
         }
       }
@@ -136,10 +1000,82 @@
     "Unsafe path or symbolic link" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unsicherer Pfad oder symbolischer Link"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ruta o enlace simbólico no seguro"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chemin ou lien symbolique non sûr"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Path atau tautan simbolis tidak aman"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全でないパスまたはシンボリックリンク"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "안전하지 않은 경로 또는 심볼릭 링크"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Caminho ou link simbólico inseguro"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Небезопасный путь или символическая ссылка"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "พาธหรือลิงก์สัญลักษณ์ไม่ปลอดภัย"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Небезпечний шлях або символьне посилання"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đường dẫn hoặc liên kết tượng trưng không an toàn"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "不安全的路径或符号链接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不安全的路徑或符號連結"
           }
         }
       }
@@ -147,10 +1083,82 @@
     "Unsafe runtime marker path" : {
       "comment" : "Why an installed runtime folder is damaged, shown after “Damaged:” in Runtimes.",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unsicherer Pfad der Laufzeitmarkierung"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ruta del marcador del entorno de ejecución no segura"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chemin du marqueur d'environnement d'exécution non sûr"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Path penanda runtime tidak aman"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全でないランタイムマーカーのパス"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "안전하지 않은 런타임 마커 경로"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Caminho do marcador do ambiente de execução inseguro"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Небезопасный путь маркера среды выполнения"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "พาธไฟล์ระบุรันไทม์ไม่ปลอดภัย"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Небезпечний шлях маркера середовища виконання"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đường dẫn tệp đánh dấu runtime không an toàn"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "不安全的运行环境标记路径"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不安全的執行環境標記路徑"
           }
         }
       }

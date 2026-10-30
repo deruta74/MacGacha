@@ -9,14 +9,17 @@ xcodebuild does not. This script does the same merge into a temporary copy and f
 the committed catalog differs: a new string is missing, or an old one is now stale.
 `--write` updates the committed catalog instead.
 
-Every string must also be translated into each language in TRANSLATIONS, with the same
-format arguments, so a new string can't ship in English only.
+Every string must also be translated into each language in TRANSLATIONS, with matching
+format argument positions and types in every variation, so a new string can't ship in English only.
 
 It also flags the few code shapes that bypass localization: a String literal returned,
 concatenated or wrapped in Text(verbatim:). SwiftUI shows a String as-is, so such text
 must go through String(localized:) or LocalizedStringResource.
 """
+from __future__ import annotations
+
 import argparse
+from collections import Counter
 import json
 import re
 import shutil
@@ -31,8 +34,17 @@ SOURCES = ROOT / "App"
 # Package catalogs aren't synced from code here (SwiftPM builds them), but their
 # translations are checked like the app's.
 PACKAGE_CATALOGS = sorted((ROOT / "Packages/LauncherKit/Sources").glob("*/Localizable.xcstrings"))
-TRANSLATIONS = ["zh-Hans"]
-FORMAT_ARGUMENT = re.compile(r"%(?:\d+\$)?[@dlfs]|%%")
+TRANSLATIONS = ["zh-Hans", "zh-Hant", "ja", "ko", "ru", "uk", "de", "fr", "es", "pt", "id", "th", "vi"]
+# Preserve length modifiers: %@, %d, %ld and %lld are different argument types.
+FORMAT_ARGUMENT = re.compile(
+    r"%%|%(?:(?P<position>[1-9]\d*)\$)?[-+ #0']*"
+    r"(?P<width>\d+|\*(?:[1-9]\d*\$)?)?"
+    r"(?:\.(?P<precision>\d+|\*(?:[1-9]\d*\$)?))?"
+    r"(?P<length>hh|ll|h|l|j|z|t|q|L)?(?P<type>[@diuoxXfFeEgGaAcCsSpn])"
+)
+# Apple's content-addressed legal text remains verbatim, rather than being translated.
+APPLE_LICENSE_TITLE = "Apple Game Porting Toolkit License"
+APPLE_LICENSE_PREFIX = "ENGLISH\n\u00a0\nAPPLE INC. \nSOFTWARE LICENSE AGREEMENT FOR GAME PORTING TOOLKIT"
 
 # A user-facing sentence starts with a capital letter and has a space; identifiers,
 # symbol names and log categories don't.
@@ -83,15 +95,55 @@ def translation_problems(catalog: Path) -> list[str]:
     problems = []
     name = catalog.relative_to(ROOT)
     for key, entry in sorted(json.loads(catalog.read_text(encoding="utf-8"))["strings"].items()):
-        if entry.get("shouldTranslate") is False:
-            continue
         for language in TRANSLATIONS:
-            unit = entry.get("localizations", {}).get(language, {}).get("stringUnit", {})
-            if unit.get("state") != "translated" or not unit.get("value"):
-                problems.append(f"{name}: no {language} translation for {key!r}")
-            # Positional forms (%1$@) may reorder arguments, so only the count must match.
-            elif len(FORMAT_ARGUMENT.findall(key)) != len(FORMAT_ARGUMENT.findall(unit["value"])):
-                problems.append(f"{name}: {language} translation of {key!r} has different format arguments")
+            problems += entry_translation_problems(key, entry, language, str(name))
+    return problems
+
+
+def string_units(node: dict, path: str = "") -> list[tuple[str, dict]]:
+    if not node:
+        return [(path, {})]
+    units = []
+    for key, value in node.items():
+        branch = f"{path}.{key}" if path else key
+        if key == "stringUnit":
+            units.append((branch, value if isinstance(value, dict) else {}))
+        elif isinstance(value, dict):
+            units += string_units(value, branch)
+    return units
+
+
+def missing_variation_defaults(node: dict, path: str = "") -> list[str]:
+    missing = []
+    variations = node.get("variations", {})
+    if isinstance(variations, dict):
+        for dimension, branches in variations.items():
+            if dimension in ("plural", "device") and (
+                not isinstance(branches, dict) or not isinstance(branches.get("other"), dict)
+            ):
+                prefix = f"{path}." if path else ""
+                missing.append(f"{prefix}variations.{dimension}.other")
+    for key, value in node.items():
+        if isinstance(value, dict):
+            missing += missing_variation_defaults(value, f"{path}.{key}" if path else key)
+    return missing
+
+
+def entry_translation_problems(key: str, entry: dict, language: str, name: str) -> list[str]:
+    if entry.get("shouldTranslate") is False or key == APPLE_LICENSE_TITLE or key.startswith(APPLE_LICENSE_PREFIX):
+        return []
+    localization = entry.get("localizations", {}).get(language, {})
+    problems = [f"{name}: {language} translation of {key!r} is missing mandatory variation {branch}"
+                for branch in missing_variation_defaults(localization)]
+    units = string_units(localization)
+    if not units:
+        return problems + [f"{name}: no {language} translation for {key!r}"]
+    for branch, unit in units:
+        value = unit.get("value")
+        if unit.get("state") != "translated" or not isinstance(value, str) or not value:
+            problems.append(f"{name}: no {language} translation for {key!r} ({branch})")
+        elif not format_arguments_match(key, value):
+            problems.append(f"{name}: {language} translation of {key!r} has different format arguments ({branch})")
     return problems
 
 
@@ -113,11 +165,104 @@ def literal_problems() -> list[str]:
     return problems
 
 
+def format_arguments(text: str) -> Counter:
+    result = Counter()
+    implicit = 1
+    modes = set()
+    offset = 0
+
+    def argument(position: str | None, kind: str) -> None:
+        nonlocal implicit
+        modes.add("explicit" if position else "implicit")
+        index = int(position) if position else implicit
+        if not position:
+            implicit += 1
+        result[(index, kind)] += 1
+
+    while (offset := text.find("%", offset)) != -1:
+        match = FORMAT_ARGUMENT.match(text, offset)
+        if match is None:
+            raise ValueError("invalid format specifier")
+        offset = match.end()
+        if match.group() == "%%":
+            continue
+        for field in [match.group("width"), match.group("precision")]:
+            if field and field.startswith("*"):
+                argument(field[1:-1] if field.endswith("$") else None, "d")
+        argument(match.group("position"), (match.group("length") or "") + match.group("type"))
+    if len(modes) > 1:
+        raise ValueError("mixed positional and sequential arguments")
+    return result
+
+
+def format_arguments_match(source: str, translated: str) -> bool:
+    try:
+        return format_arguments(source) == format_arguments(translated)
+    except ValueError:
+        return False
+
+
+def self_check() -> None:
+    rejected = [("Value %@", "值 %lld"), ("%1$@ %2$@", "%1$@ %1$@"), ("%@", "%%"),
+                ("%ld", "%lld"), ("%u", "%d"), ("%1$@ %2$lld", "%2$ld %1$@"),
+                ("%@", "%"), ("%*.*f", "%f"), ("%@ %@", "%1$@ %@")]
+    accepted = [("%1$@ %2$lld", "%2$lld %1$@"), ("%% %@", "%% %@"),
+                ("%@ %@", "%2$@ %1$@"), ("%lld", "%1$lld"), ("plain", "普通"),
+                ("%*.*f", "%3$*1$.*2$f"), ("%1$@ %1$@", "%1$@ %1$@")]
+    for source, translated in rejected:
+        assert not format_arguments_match(source, translated), (source, translated)
+    for source, translated in accepted:
+        assert format_arguments_match(source, translated), (source, translated)
+
+    def unit(text: str) -> dict:
+        return {"stringUnit": {"state": "translated", "value": text}}
+
+    entry = {"localizations": {"zh-Hans": {"variations": {"plural": {
+        "one": unit("%lld 个"), "other": unit("%lld 个")}}}}}
+    assert not entry_translation_problems("%lld items", entry, "zh-Hans", "fixture")
+    entry["localizations"]["zh-Hans"]["variations"]["plural"]["other"] = unit("%ld 个")
+    errors = entry_translation_problems("%lld items", entry, "zh-Hans", "fixture")
+    assert len(errors) == 1 and "other" in errors[0], errors
+    entry["localizations"]["zh-Hans"]["variations"]["plural"]["other"] = unit("%%")
+    assert entry_translation_problems("%lld items", entry, "zh-Hans", "fixture")
+    entry["localizations"]["zh-Hans"]["variations"]["plural"]["other"] = {}
+    errors = entry_translation_problems("%lld items", entry, "zh-Hans", "fixture")
+    assert len(errors) == 1 and "other" in errors[0], errors
+    for dimension, category in [("plural", "one"), ("device", "mac")]:
+        missing_other = {"localizations": {"ru": {"variations": {dimension: {
+            category: unit("%lld")}}}}}
+        errors = entry_translation_problems("%lld", missing_other, "ru", "fixture")
+        assert len(errors) == 1 and f"{dimension}.other" in errors[0], errors
+        missing_other["localizations"]["ru"]["variations"][dimension]["other"] = unit("%lld")
+        assert not entry_translation_problems("%lld", missing_other, "ru", "fixture")
+        missing_other["localizations"]["ru"]["variations"][dimension]["other"] = None
+        assert entry_translation_problems("%lld", missing_other, "ru", "fixture")
+    nested = {"localizations": {"ru": {"variations": {"device": {
+        "mac": {"variations": {"plural": {"one": unit("%lld")}}}, "other": unit("%lld")}}}}}
+    errors = entry_translation_problems("%lld", nested, "ru", "fixture")
+    assert len(errors) == 1 and "device.mac.variations.plural.other" in errors[0], errors
+    nested["localizations"]["ru"]["variations"]["device"]["mac"]["variations"]["plural"]["other"] = unit("%lld")
+    assert not entry_translation_problems("%lld", nested, "ru", "fixture")
+    assert entry_translation_problems("Value %@", {}, "zh-Hans", "fixture")
+    assert not entry_translation_problems("Value %@", {"shouldTranslate": False}, "zh-Hans", "fixture")
+    for legal in [APPLE_LICENSE_TITLE, APPLE_LICENSE_PREFIX + "\nTerms"]:
+        assert not entry_translation_problems(legal, {}, "ja", "fixture")
+    assert entry_translation_problems("Read Apple's license terms", {}, "ja", "fixture")
+    assert len(TRANSLATIONS) == 13 and len(set(TRANSLATIONS)) == 13 and "en" not in TRANSLATIONS
+    print("String format self-check passed")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("derived_data", type=Path, help="the -derivedDataPath of a Debug build of MacGacha")
+    parser.add_argument("derived_data", nargs="?", type=Path, help="the -derivedDataPath of a Debug build of MacGacha")
     parser.add_argument("--write", action="store_true", help="update the committed catalog instead of checking it")
+    parser.add_argument("--self-check", action="store_true", help="check format validation without a build")
     args = parser.parse_args()
+    if args.self_check:
+        self_check()
+        return 0
+    if args.derived_data is None:
+        parser.error("derived_data is required unless --self-check is used")
     if args.write:
         sync(CATALOG, stringsdata(args.derived_data))
         return 0

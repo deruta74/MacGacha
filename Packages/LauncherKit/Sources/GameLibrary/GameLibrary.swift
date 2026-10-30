@@ -47,6 +47,15 @@ public actor GameLibrary {
     private var started = false
     private static let cleanupName = "uninstall-cleaned.json"
 
+    /// Join a cancelled pipeline before reading its final record or relaunching.
+    /// Taking the lease also refuses an unrelated active operation.
+    public func waitUntilIdle(_ id: String) async throws {
+        _ = try SafeIdentifier(id)
+        try await store.waitForPipelineDrain()
+        let lease = try await store.acquireOperationLease()
+        withExtendedLifetime(lease) {}
+    }
+
     public init(paths: AppPaths, api: DeliveryAPI, runner: OperationRunner, store: GameRecordStore,
         disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(), guard operationGuard: (any GameOperationGuard)? = nil) {
         self.paths = paths; self.api = api; self.runner = runner; self.store = store
