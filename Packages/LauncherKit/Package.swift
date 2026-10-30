@@ -16,9 +16,13 @@ let package = Package(
         .library(name: "Sophon", targets: ["Sophon"]),
         .library(name: "GameLibrary", targets: ["GameLibrary"]),
         .library(name: "Launch", targets: ["Launch"]),
+        .library(name: "BackdropVideo", targets: ["BackdropVideo"]),
     ],
     targets: [
         .target(name: "LauncherCore"),
+        .target(name: "BackdropVideo", dependencies: ["LauncherCore"], linkerSettings: [
+            .linkedFramework("VideoToolbox"), .linkedFramework("CoreMedia"), .linkedFramework("AVFoundation"),
+        ]),
         // Decompression only; CZstd.h is the public umbrella over unchanged upstream headers.
         .target(name: "CZstd", exclude: ["LICENSE", "VENDOR.txt"], publicHeadersPath: "include", cSettings: [
             .define("ZSTD_DISABLE_ASM", to: "1"), .define("ZSTD_LEGACY_SUPPORT", to: "0"),
@@ -46,6 +50,7 @@ let package = Package(
         .testTarget(name: "GameLibraryTests", dependencies: ["GameLibrary", "TestSupport", "CrashHarness"],
             resources: [.copy("Fixtures/Adopt")]),
         .testTarget(name: "LaunchTests", dependencies: ["Launch", "TestSupport", "CrashHarness"]),
+        .testTarget(name: "BackdropVideoTests", dependencies: ["BackdropVideo", "TestSupport"], resources: [.copy("Fixtures")]),
     ],
     swiftLanguageModes: [.v6]
 )

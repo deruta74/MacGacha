@@ -44,6 +44,8 @@ targets:
       - package: LauncherKit
         product: HoYoPlayAPI
       - package: LauncherKit
+        product: BackdropVideo
+      - package: LauncherKit
         product: Sophon
       - package: LauncherKit
         product: GameLibrary

@@ -39,7 +39,4 @@ enum ArtMedia {
         return (value, width)
     }
 
-    static func page(_ filename: String) -> String {
-        "<!doctype html><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; media-src file:; style-src 'unsafe-inline'\"><style>html,body{margin:0;height:100%;overflow:hidden;background:transparent}video{width:100%;height:100%;object-fit:cover;display:block}</style><video src=\"\(filename)\" autoplay muted loop playsinline disablepictureinpicture></video>"
-    }
 }

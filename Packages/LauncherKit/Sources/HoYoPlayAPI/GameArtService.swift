@@ -164,7 +164,6 @@ public actor GameArtService {
                 let prefix = try handle.read(upToCount: ArtMedia.headerLimit) ?? Data()
                 if record.file.hasSuffix(".webm") {
                     guard ArtMedia.isWebM(prefix) else { return false }
-                    try Self.ensurePage(record.file, fs: fs, root: root)
                 } else if ArtMedia.imageExtension(prefix) != URL(fileURLWithPath: record.file).pathExtension { return false }
                 return true
             } catch { return false }
@@ -180,14 +179,12 @@ public actor GameArtService {
         return index.games.mapValues { remote in
             let video = local(remote.video, video: true)
             return GameArt(background: local(remote.background), video: video,
-                videoPage: video?.deletingPathExtension().appendingPathExtension("html"),
                 theme: video == nil ? nil : local(remote.theme), icon: local(remote.icon), logo: local(remote.logo))
         }
     }
 
     private func prune(_ fs: ContainedFileSystem, root: SafeRelativePath, index: ArtIndex) throws {
         var keep = Set(index.assets.values.map(\.file)); keep.insert("art-index.json")
-        for file in index.assets.values where file.file.hasSuffix(".webm") { keep.insert(String(file.file.dropLast(5)) + ".html") }
         for path in try fs.contentsOfDirectory(at: root) where !keep.contains(path.components.last ?? "") {
             if try fs.itemType(at: path, allowingLeafSymlink: true) == .regularFile { try fs.removeFile(at: path) }
         }
@@ -243,7 +240,6 @@ public actor GameArtService {
             let file = hash(url) + "." + ext
             try fs.fullSync(at: part)
             try fs.rename(from: part, to: SafeRelativePath("\(root)/\(file)"))
-            if video { try ensurePage(file, fs: fs, root: root) }
             return AssetRecord(file: file, fetchedAt: date)
         } catch {
             await Task.detached { try? fs.removeFile(at: part) }.value
@@ -251,11 +247,6 @@ public actor GameArtService {
         }
     }
 
-    private static func ensurePage(_ video: String, fs: ContainedFileSystem, root: SafeRelativePath) throws {
-        let page = try SafeRelativePath("\(root)/\(String(video.dropLast(5))).html")
-        let bytes = Data(ArtMedia.page(video).utf8)
-        if (try? fs.readFile(at: page, maxBytes: 1024)) != bytes { try fs.writeAtomically(bytes, to: page) }
-    }
 
     /// The two HoYoPlay endpoints art comes from, in `language`.
     public static func apiURLs(region: Region = .global, language: HoYoPlayLanguage) -> (games: URL, basic: URL) {

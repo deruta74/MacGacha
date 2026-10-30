@@ -9,7 +9,7 @@ import HoYoPlayAPI
 import TestSupport
 
 @Test
-func mappingPrefersBasicBackgroundAndWritesVideoPage() async throws {
+func mappingPrefersBasicBackgroundAndExposesNativeVideo() async throws {
     let temp = try TempDir(); let cdn = MockCDN()
     try artFixtures(cdn, video: true)
     let service = GameArtService(cacheDirectory: temp.url.appendingPathComponent("GameArt"), http: cdn)
@@ -19,12 +19,44 @@ func mappingPrefersBasicBackgroundAndWritesVideoPage() async throws {
     #expect(try Data(contentsOf: #require(genshin.background)) == png)
     #expect(genshin.background?.lastPathComponent == hashURL("https://fastcdn.hoyoverse.com/preferred") + ".png")
     #expect(genshin.icon?.pathExtension == "jpg" && genshin.logo?.pathExtension == "webp")
-    let video = try #require(genshin.video); let page = try #require(genshin.videoPage)
+    let video = try #require(genshin.video)
     #expect(video.pathExtension == "webm" && genshin.theme != nil)
-    #expect(try String(contentsOf: page, encoding: .utf8) == pageTemplate(video.lastPathComponent))
-    #expect(page.deletingPathExtension().lastPathComponent == video.deletingPathExtension().lastPathComponent)
+    let root = temp.url
+    let paths = try await BlockingIO.run { try ContainedFileSystem(root: root).contentsOfDirectory(at: SafeRelativePath("GameArt")) }
+    #expect(!paths.contains { $0.description.hasSuffix(".html") })
     #expect(service.cached() == art)
     #expect(art["starrail"]?.background?.lastPathComponent == hashURL("https://fastcdn.hoyoverse.com/fallback") + ".png")
+}
+
+@Test
+func legacyCacheIndexLoadsOfflineWithoutRegeneratingHTML() async throws {
+    let temp = try TempDir(), cdn = MockCDN()
+    try artFixtures(cdn, video: true)
+    let directory = temp.url.appendingPathComponent("GameArt")
+    let first = await GameArtService(cacheDirectory: directory, http: cdn).refresh()
+    let video = try #require(first["genshin"]?.video)
+    let oldPage = try SafeRelativePath(video.deletingPathExtension().appendingPathExtension("html").lastPathComponent)
+    let before = try await BlockingIO.run {
+        let fs = try ContainedFileSystem(root: directory)
+        try fs.removeFile(at: oldPage)
+        return try fs.readFile(at: SafeRelativePath("art-index.json"), maxBytes: 1 << 20)
+    }
+    let requests = cdn.requestLog.count
+    let restored = await GameArtService(cacheDirectory: directory, http: cdn).loadCached()
+    #expect(restored["genshin"]?.video == video && restored["genshin"]?.background == first["genshin"]?.background)
+    #expect(cdn.requestLog.count == requests)
+    try await BlockingIO.run {
+        let fs = try ContainedFileSystem(root: directory)
+        #expect(try fs.itemType(at: oldPage) == nil)
+        #expect(try fs.readFile(at: SafeRelativePath("art-index.json"), maxBytes: 1 << 20) == before)
+    }
+}
+
+@Test
+func legacyVideoPageKeyDoesNotPreventGameArtDecoding() throws {
+    let data = Data(#"{"background":"file:///cache/still.png","video":"file:///cache/video.webm","videoPage":"file:///cache/video.html"}"#.utf8)
+    let art = try JSONDecoder().decode(GameArt.self, from: data)
+    #expect(art.video?.lastPathComponent == "video.webm" && art.background?.lastPathComponent == "still.png")
 }
 
 @Test
@@ -54,7 +86,7 @@ func emptyOptionalURLsInOtherLayersDoNotDiscardGameArt() async throws {
     #expect(art["genshin"]?.video == nil)
     for id in ["starrail", "zzz"] {
         let game = try #require(art[id])
-        for file in [game.video, game.videoPage, game.theme] {
+        for file in [game.video, game.theme] {
             #expect(FileManager.default.fileExists(atPath: try #require(file).path))
         }
     }
@@ -77,7 +109,7 @@ func nonImagesAndMalformedWebMDoNotBlockStaticSet() async throws {
     cdn.serve("video", data: Data([0x1a, 0x45, 0xdf, 0xa3]) + Data("not actually webm".utf8))
     let art = await GameArtService(cacheDirectory: temp.url.appendingPathComponent("GameArt"), http: cdn).refresh()
     #expect(art["genshin"]?.background != nil)
-    #expect(art["genshin"]?.icon == nil && art["genshin"]?.video == nil && art["genshin"]?.videoPage == nil)
+    #expect(art["genshin"]?.icon == nil && art["genshin"]?.video == nil)
 }
 
 @Test
@@ -124,7 +156,10 @@ func pruningKeepsPagesExactlyWithTheirVideos() async throws {
     let service = GameArtService(cacheDirectory: directory, http: cdn, now: { time.withLock { $0 } })
     let first = await service.refresh()
     let old = try #require(first["genshin"]?.background); let video = try #require(first["genshin"]?.video)
-    let page = try #require(first["genshin"]?.videoPage)
+    let page = video.deletingPathExtension().appendingPathExtension("html")
+    try await BlockingIO.run {
+        try ContainedFileSystem(root: directory).writeAtomically(Data("legacy page".utf8), to: SafeRelativePath(page.lastPathComponent))
+    }
     let stray = directory.appendingPathComponent("stray.png"); try png.write(to: stray)
     time.withLock { $0 = $0.addingTimeInterval(6 * 3600 + 1) }
     try artFixtures(cdn, background: "https://other.hoyoverse.com/new")
@@ -169,10 +204,6 @@ private func artFixtures(_ cdn: MockCDN, background: String = "https://fastcdn.h
 }
 
 private func hashURL(_ string: String) -> String { var h = StreamingHasher(.sha256); h.update(Data(string.utf8)); return h.finalize().hex }
-private func pageTemplate(_ filename: String) -> String {
-    "<!doctype html><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; media-src file:; style-src 'unsafe-inline'\"><style>html,body{margin:0;height:100%;overflow:hidden;background:transparent}video{width:100%;height:100%;object-fit:cover;display:block}</style><video src=\"\(filename)\" autoplay muted loop playsinline disablepictureinpicture></video>"
-}
-
 private struct NoLengthHTTP: HTTPClient {
     let cdn: MockCDN
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
