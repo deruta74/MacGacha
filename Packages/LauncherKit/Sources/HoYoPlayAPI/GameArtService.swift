@@ -81,8 +81,10 @@ public actor GameArtService {
             try fs.createDirectory(at: root)
             hydrate(fs, root: root)
             let age = now().timeIntervalSince(index.fetchedAt)
-            // Art fetched in another language is stale however fresh it is.
-            if age >= 0 && age < Self.ttl && (index.language ?? .enUS) == language { return cached() }
+            // Art fetched in another language is stale however fresh it is, and so is an index from
+            // before background lists, so an app update shows every background without waiting.
+            if age >= 0 && age < Self.ttl && (index.language ?? .enUS) == language,
+                index.games.values.allSatisfy({ $0.backgrounds != nil }) { return cached() }
             let http = http; let log = log; let timeout = requestTimeout
             let urls = Self.apiURLs(region: region, language: language)
             let gamesData = try await Self.deadline(timeout) { try await Self.json(urls.games, http: http, log: log) }

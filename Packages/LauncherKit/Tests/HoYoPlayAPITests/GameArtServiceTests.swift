@@ -349,6 +349,16 @@ func orderedBackgroundsRestoreLargeIndexAndMigrateLegacyOffline() async throws {
     try FileManager.default.removeItem(at: #require(migrated.image))
     let missing = await GameArtService(cacheDirectory: directory, http: cdn).loadCached()
     #expect(missing["genshin"]?.backgrounds.first?.image == nil)
+
+    // A fresh legacy index is refetched at once instead of waiting for the TTL.
+    index = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: indexURL)) as? [String: Any])
+    games = try #require(index["games"] as? [String: [String: Any]])
+    games["genshin"]?.removeValue(forKey: "backgrounds"); index["games"] = games
+    try JSONSerialization.data(withJSONObject: index).write(to: indexURL)
+    let before = cdn.requestLog.count
+    let upgraded = await GameArtService(cacheDirectory: directory, http: cdn).refresh()
+    #expect(cdn.requestLog.count > before)
+    #expect(upgraded["genshin"]?.backgrounds.count == 8)
 }
 
 @Test
