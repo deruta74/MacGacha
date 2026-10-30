@@ -67,7 +67,7 @@ targets:
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 deruta74. GPL-3.0."
         MARKETING_VERSION: 0.1.3
         CURRENT_PROJECT_VERSION: 1
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.games
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES

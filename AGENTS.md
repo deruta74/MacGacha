@@ -92,6 +92,8 @@ swift test --package-path Packages/LauncherKit --filter <Suite>   # one package 
 
 Code must keep these guarantees. A PR that weakens one won't be merged.
 
+- **Game Mode:** the launcher is categorized as a utility. Per-runtime game helpers are not implemented: the installed D3DMetal `bin/wine` wrapper resolves libraries, policy and `wine.real` relative to its own path, so relocating only its loaders is unsafe. Preserve that policy before adding helper routing; full-screen Game Mode acceptance remains an owner's live check.
+
 - **Game files are the user's data.**
   - Hide them only with non-replacing renames (`RENAME_EXCL`), recorded in the launch journal: "planned" before the rename, "done" after.
   - Never delete or overwrite a game file.
@@ -125,6 +127,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
 ## Current state
 
 - **Done:**
+  - launcher category changed to Utilities; Game Mode helper routing remains blocked on preserving the D3DMetal wrapper's runtime-relative policy;
   - download engine;
   - game install, update, verify and repair, voice packs, uninstall;
   - runtime manager with Wine, DXMT and D3DMetal bundles plus jadeite and Steam shim components;
