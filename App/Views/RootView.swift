@@ -76,7 +76,7 @@ struct RootView: View {
                 .transition(.opacity)
             if let slides = selection.slides, !slides.dotIDs.isEmpty, let shown = shownSlide {
                 BackgroundDots(ids: slides.dotIDs, current: shown.id,
-                    onEnter: { selection.pointerEnteredDots() }, onSelect: { selection.clickDot($0) })
+                    onEnter: {}, onSelect: { selection.clickDot($0) })
                     .frame(maxHeight: .infinity, alignment: .top)
             }
             HStack(alignment: .bottom, spacing: 0) {
@@ -104,11 +104,6 @@ struct RootView: View {
         }
         .onChange(of: activeState, initial: true) { updateWindowState() }
         .onChange(of: scenePhase) { updateWindowState() }
-        .task(id: selection.rotation) {
-            guard let rotation = selection.rotation else { return }
-            do { try await ContinuousClock().sleep(until: rotation.deadline) } catch { return }
-            selection.advance(if: rotation)
-        }
         .ignoresSafeArea()
         .frame(minWidth: 960, minHeight: 540)
         .sheet(item: $panel) { panel in
