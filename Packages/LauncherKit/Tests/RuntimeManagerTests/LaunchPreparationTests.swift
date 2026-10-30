@@ -70,6 +70,33 @@ import TestSupport
             #expect(runner.invocations.last?.arguments == ["-w"])
         }
     }
+    @Test(arguments: ["6e6f74206a736f6e00", "7b7d00", "GG", "writeFailure"], [false, true])
+    func mixedFrameRateFailureTakesPrecedence(failure: String, failedValueFirst: Bool) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let key = "HKCU\\Software\\Cognosphere\\Star Rail"
+            let good = "    GraphicsSettings_Model_h1    REG_BINARY    \(frameRateHex(60))\n"
+            let bad = "    GraphicsSettings_Model_h2    REG_BINARY    \(failure == "writeFailure" ? frameRateHex(60) : failure)\n"
+            let runner = FakeProcessRunner { call in
+                if call.arguments.prefix(2) == ["reg", "query"] {
+                    return ProcessResult(exitCode: 0, stdout: Data((failedValueFirst ? bad + good : good + bad).utf8), stderr: Data())
+                }
+                if failure == "writeFailure", call.arguments.contains("GraphicsSettings_Model_h2") {
+                    return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: Access is denied".utf8))
+                }
+                return preparationSuccess()
+            }
+            let result = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, starRailFrameRate: .unlock120))
+            #expect(result.starRailFrameRate == .unreadable)
+            let writes = runner.invocations.filter { $0.arguments.prefix(3) == ["reg", "add", key] }
+            let goodWrite = try #require(writes.first { $0.arguments.contains("GraphicsSettings_Model_h1") })
+            #expect(frameRateFPS(goodWrite.arguments) == 120)
+            #expect(writes.count == (failure == "writeFailure" ? 2 : 1))
+            #expect(runner.invocations.last?.arguments == ["-w"])
+            #expect(try fixture.revision() == 2)
+        }
+    }
     @Test func frameRateRewriteRunsPerLaunchAndIsIdempotent() async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url), stored = Mutex(60)

@@ -170,7 +170,7 @@ public struct LaunchPreparation: Sendable {
                 try Task.checkCancellation()
                 if result.exitCode == 0 { applied = true } else { unreadable = true }
             }
-            return applied ? .applied : unreadable ? .unreadable : .unchanged
+            return unreadable ? .unreadable : applied ? .applied : .unchanged
         } catch {
             if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled { throw LauncherError.cancelled }
             return .unreadable
