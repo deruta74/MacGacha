@@ -18,7 +18,7 @@ import RuntimeManager
     func saveLaunchSettings(_ settings: LaunchSettings, for id: String) throws {
         guard languageRestart == nil else { throw LauncherError.busy("Application language restart is in progress") }
         guard GameDefinition.all.contains(where: { $0.id == id }) else { throw LauncherError.io("Invalid launch settings") }
-        try settings.validate()
+        try settings.validate(for: id)
         let revision = UUID(), preferences = launchPreferences
         launchSettingsRevision = revision; launchSettingsRevisions[id] = revision; launchSettingsCache[id] = settings
         enqueueSettingsWrite(key: id) {
@@ -109,7 +109,7 @@ import RuntimeManager
         // Reserve before any await, and assume potentially live before spawning.
         // A post-spawn journal write may suspend before the .watch event arrives.
         launchSlotOwner = id; liveLaunchGames.insert(id)
-        launchLogURLs[id] = nil; launchFailures[id] = nil
+        launchLogURLs[id] = nil; launchFailures[id] = nil; launchNotes[id] = nil
         knownEndedLaunchGames.remove(id); launchRecoveryConflicts.remove(id)
         launchObservationGenerations[id] = UUID()
         launchStates[id] = .starting(.preflight)
@@ -152,6 +152,7 @@ import RuntimeManager
             if case .recoveryNeeded = launchStates[id] { return }
             launchStates[id] = .starting(stage)
             await captureLog(id)
+        case .note(let note): launchNotes[id] = note
         case .running:
             launchSlotOwner = id; liveLaunchGames.insert(id)
             if launchStates[id] != .ready { launchStates[id] = .running }

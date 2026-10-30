@@ -9,6 +9,147 @@ import TestSupport
 @testable import RuntimeManager
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchPreparationTests {
+    @Test(arguments: [Region.global, .mainlandChina]) func allMatchingValuesAreRewritten(region: Region) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let key = region == .global ? "HKCU\\Software\\Cognosphere\\Star Rail" : "HKCU\\Software\\miHoYo\\崩坏：星穹铁道"
+            let hex = frameRateHex(60)
+            let runner = FakeProcessRunner { call in
+                if call.arguments.prefix(2) == ["reg", "query"] {
+                    #expect(call.arguments == ["reg", "query", key])
+                    return ProcessResult(exitCode: 0, stdout: Data("    GraphicsSettings_Model_h1    REG_BINARY    \(hex)\n    GraphicsSettings_Model_h2    REG_BINARY    \(hex)\n".utf8), stderr: Data())
+                }
+                return preparationSuccess()
+            }
+            let result = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false,
+                    starRailFrameRate: .unlock120, starRailRegion: region))
+            #expect(result.starRailFrameRate == .applied)
+            let writes = runner.invocations.filter { $0.arguments.prefix(3) == ["reg", "add", key] }
+            #expect(writes.count == 2)
+            #expect(writes.compactMap { frameRateFPS($0.arguments) } == [120, 120])
+            #expect(runner.invocations.last?.arguments == ["-w"])
+            #expect(try fixture.revision() == 2)
+        }
+    }
+    @Test func missingValueWritesNothing() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url), runner = FakeProcessRunner()
+            let result = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, starRailFrameRate: .unlock120))
+            #expect(result.starRailFrameRate == .missing)
+            #expect(!runner.invocations.contains { $0.arguments.contains("GraphicsSettings_Model_h1") })
+        }
+    }
+    @Test(arguments: [30, 60, 120]) func switchOffRestoresSixtyOnlyFromOneTwenty(stored: Int) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let runner = FakeProcessRunner { call in
+                call.arguments.prefix(2) == ["reg", "query"] ? ProcessResult(exitCode: 0,
+                    stdout: Data("    GraphicsSettings_Model_h1    REG_BINARY    \(frameRateHex(stored))\n".utf8), stderr: Data()) : preparationSuccess()
+            }
+            let result = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, starRailFrameRate: .restore))
+            #expect(result.starRailFrameRate == (stored == 120 ? .applied : .unchanged))
+            let writes = runner.invocations.filter { $0.arguments.prefix(2) == ["reg", "add"] && $0.arguments.contains("GraphicsSettings_Model_h1") }
+            #expect(writes.count == (stored == 120 ? 1 : 0))
+            if let write = writes.first { #expect(frameRateFPS(write.arguments) == 60) }
+        }
+    }
+    @Test(arguments: ["6e6f74206a736f6e00", "7b7d00", "GG"]) func malformedValueIsReportedAndUntouched(hex: String) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let runner = FakeProcessRunner { call in
+                call.arguments.prefix(2) == ["reg", "query"] ? ProcessResult(exitCode: 0,
+                    stdout: Data("    GraphicsSettings_Model_h1    REG_BINARY    \(hex)\n".utf8), stderr: Data()) : preparationSuccess()
+            }
+            let result = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, starRailFrameRate: .unlock120))
+            #expect(result.starRailFrameRate == .unreadable)
+            #expect(!runner.invocations.contains { $0.arguments.prefix(2) == ["reg", "add"] && $0.arguments.contains("GraphicsSettings_Model_h1") })
+            #expect(runner.invocations.last?.arguments == ["-w"])
+        }
+    }
+    @Test(arguments: ["6e6f74206a736f6e00", "7b7d00", "GG", "writeFailure"], [false, true])
+    func mixedFrameRateFailureTakesPrecedence(failure: String, failedValueFirst: Bool) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let key = "HKCU\\Software\\Cognosphere\\Star Rail"
+            let good = "    GraphicsSettings_Model_h1    REG_BINARY    \(frameRateHex(60))\n"
+            let bad = "    GraphicsSettings_Model_h2    REG_BINARY    \(failure == "writeFailure" ? frameRateHex(60) : failure)\n"
+            let runner = FakeProcessRunner { call in
+                if call.arguments.prefix(2) == ["reg", "query"] {
+                    return ProcessResult(exitCode: 0, stdout: Data((failedValueFirst ? bad + good : good + bad).utf8), stderr: Data())
+                }
+                if failure == "writeFailure", call.arguments.contains("GraphicsSettings_Model_h2") {
+                    return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: Access is denied".utf8))
+                }
+                return preparationSuccess()
+            }
+            let result = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, starRailFrameRate: .unlock120))
+            #expect(result.starRailFrameRate == .unreadable)
+            let writes = runner.invocations.filter { $0.arguments.prefix(3) == ["reg", "add", key] }
+            let goodWrite = try #require(writes.first { $0.arguments.contains("GraphicsSettings_Model_h1") })
+            #expect(frameRateFPS(goodWrite.arguments) == 120)
+            #expect(writes.count == (failure == "writeFailure" ? 2 : 1))
+            #expect(runner.invocations.last?.arguments == ["-w"])
+            #expect(try fixture.revision() == 2)
+        }
+    }
+    @Test func frameRateRewriteRunsPerLaunchAndIsIdempotent() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url), stored = Mutex(60)
+            let runner = FakeProcessRunner { call in
+                if call.arguments.prefix(2) == ["reg", "query"] {
+                    return ProcessResult(exitCode: 0, stdout: Data("    GraphicsSettings_Model_h1    REG_BINARY    \(frameRateHex(stored.withLock { $0 }))\n".utf8), stderr: Data())
+                }
+                if let fps = frameRateFPS(call.arguments) { stored.withLock { $0 = fps } }
+                return preparationSuccess()
+            }
+            let request = PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, starRailFrameRate: .unlock120)
+            #expect(try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: request).starRailFrameRate == .applied)
+            #expect(try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: request).starRailFrameRate == .unchanged)
+            #expect(runner.invocations.filter { $0.arguments.prefix(2) == ["reg", "query"] }.count == 2)
+            #expect(runner.invocations.filter { $0.arguments.contains("GraphicsSettings_Model_h1") }.count == 1)
+        }
+    }
+    @Test(arguments: ["missing", "denied", "queryFailure", "writeFailure"])
+    func frameRateFailureNeverBlocksPreparation(scenario: String) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let runner = FakeProcessRunner { call in
+                if call.arguments.prefix(2) == ["reg", "query"] {
+                    if scenario == "queryFailure" { throw LauncherError.io("injected query failure") }
+                    if scenario == "missing" { return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: The system was unable to find the specified registry key or value".utf8)) }
+                    if scenario == "denied" { return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: Access is denied".utf8)) }
+                    return ProcessResult(exitCode: 0, stdout: Data("    GraphicsSettings_Model_h1    REG_BINARY    \(frameRateHex(60))\n".utf8), stderr: Data())
+                }
+                if scenario == "writeFailure", call.arguments.contains("GraphicsSettings_Model_h1") {
+                    return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: Access is denied".utf8))
+                }
+                return preparationSuccess()
+            }
+            let outcome = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, starRailFrameRate: .unlock120))
+            #expect(outcome.starRailFrameRate == (scenario == "missing" ? .missing : .unreadable))
+            #expect(runner.invocations.last?.arguments == ["-w"])
+        }
+    }
+    @Test func cancelledFrameRateQueryStillCancelsPreparation() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let runner = FakeProcessRunner { call in
+                if call.arguments.prefix(2) == ["reg", "query"] { throw LauncherError.cancelled }
+                return preparationSuccess()
+            }
+            await #expect(throws: LauncherError.cancelled) {
+                try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                    request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, starRailFrameRate: .unlock120))
+            }
+            #expect(runner.invocations.last?.arguments.prefix(2) == ["reg", "query"])
+        }
+    }
     @Test(arguments: [false, true]) func crypt32RegistryPolicyIsScopedAndUsesPersistenceBarrier(enabled: Bool) async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
@@ -600,3 +741,19 @@ extension LaunchPreparationTests {
 }
 
 private final class WineServerHarnessToken { }
+
+private func frameRateHex(_ fps: Int) -> String {
+    (Data("{\"FPS\":\(fps),\"EnableVSync\":false}".utf8) + Data([0])).map { String(format: "%02x", $0) }.joined()
+}
+private func frameRateFPS(_ arguments: [String]) -> Int? {
+    guard let index = arguments.firstIndex(of: "/d"), arguments.indices.contains(index + 1) else { return nil }
+    let bytes = Array(arguments[index + 1].utf8)
+    guard bytes.count.isMultiple(of: 2) else { return nil }
+    var data = Data()
+    for i in stride(from: 0, to: bytes.count, by: 2) {
+        guard let value = UInt8(String(decoding: bytes[i...i+1], as: UTF8.self), radix: 16) else { return nil }
+        data.append(value)
+    }
+    if data.last == 0 { data.removeLast() }
+    return (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["FPS"] as? Int
+}

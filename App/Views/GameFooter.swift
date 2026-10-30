@@ -189,6 +189,15 @@ struct GameFooter: View {
         }
     }
 
+    /// Something the last launch couldn't apply. It stays until Play is pressed again.
+    private var note: String? {
+        switch model.launchNotes[game.id] {
+        case .starRailSettingsMissing:
+            String(localized: "Open the game's graphics settings once, then play again to use 120 FPS")
+        case nil: nil
+        }
+    }
+
     /// What the launch is doing, or why it stopped. Nil when the game isn't launching or running.
     private var launchLine: String? {
         switch launch {
@@ -201,6 +210,7 @@ struct GameFooter: View {
             case .restore, .report: return String(localized: "Restoring game files…")
             }
         case .running, .ready:
+            if let note { return note }
             return String(localized: "Keep MacGacha open while you play — it restores the game's files when you quit")
         case .failed(let failure):
             let line = failureLine(failure)
@@ -209,6 +219,7 @@ struct GameFooter: View {
                 : line
         case .recoveryNeeded(let reason): return reason
         case nil:
+            if let note { return note }
             guard let other = playingElsewhere else { return nil }
             if case .recoveryNeeded = model.launchState(for: other.id) {
                 return String(localized: "Waiting for \(other.name) to put its files back", comment: "The argument is another game's name")

@@ -158,6 +158,7 @@ final class AppModel {
     #endif
     var launchSettingsRevisions: [String: UUID] = [:]
     var launchStates: [String: LaunchUIState] = [:]
+    var launchNotes: [String: LaunchNote] = [:]
     @ObservationIgnored var launchFailures: [String: LaunchFailureInfo] = [:]
     var recoveryNotices: [RecoveryNotice] = []
     var durableLaunchSettings: [String: LaunchSettings] = [:]
