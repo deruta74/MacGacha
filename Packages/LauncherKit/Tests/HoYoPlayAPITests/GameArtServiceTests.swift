@@ -57,6 +57,7 @@ func legacyVideoPageKeyDoesNotPreventGameArtDecoding() throws {
     let data = Data(#"{"background":"file:///cache/still.png","video":"file:///cache/video.webm","videoPage":"file:///cache/video.html"}"#.utf8)
     let art = try JSONDecoder().decode(GameArt.self, from: data)
     #expect(art.video?.lastPathComponent == "video.webm" && art.background?.lastPathComponent == "still.png")
+    #expect(art.backgrounds.isEmpty)
 }
 
 @Test
