@@ -33,6 +33,9 @@ public struct ResolvedLaunch: Equatable, Sendable {
 }
 
 public enum LaunchResolver {
+    /// The Mainland China registry key is unverified; only Global supports this setting.
+    public static func offersStarRailUnlock(_ game: String) -> Bool { game == "starrail" }
+
     /// Shared with setup availability; checking requirements never needs component files.
     public static func requiredComponents(recipe: LaunchRecipe, settings: LaunchSettings, runtimeBundleID: String?) -> [ComponentKind] {
         var required: [ComponentKind] = []
@@ -121,7 +124,7 @@ public enum LaunchResolver {
             preparation: PreparationRequest(retina: settings.retina, steamShim: steamShim,
                 dxmtExtras: dxmt ? (["winemetal.dll"] + (starRail ? ["nvngx.dll"] : [])) : [], nvidiaKeys: dxmt && starRail,
                 crypt32Native: requiredComponents.contains(.crypt32Fix),
-                starRailFrameRate: starRail ? (settings.unlockFPS ? .unlock120 : .restore) : nil,
+                starRailFrameRate: offersStarRailUnlock(recipe.game) ? (settings.unlockFPS ? .unlock120 : .restore) : nil,
                 starRailRegion: starRail ? (GameDefinition.find(recipe.game)?.region ?? .global) : .global),
             requiredComponents: requiredComponents, componentCopies: componentCopies, displayFallback: displayFallback)
     }

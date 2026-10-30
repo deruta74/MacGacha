@@ -140,18 +140,29 @@ private func resolve(_ game: String, settings: LaunchSettings? = nil, components
     #expect(try resolve("genshin", settings: settings).environment["D3DM_MAX_FPS"] == nil)
 }
 
-@Test(arguments: ["starrail", "starrail-cn"], [false, true])
-func starRailUnlockRequestsOneTwenty(game: String, patches: Bool) throws {
+@Test(arguments: [false, true])
+func starRailUnlockRequestsOneTwenty(patches: Bool) throws {
+    let game = "starrail"
     var settings = LaunchSettings.defaults(for: game); settings.unlockFPS = true; settings.compatibilityPatches = patches
     let value = try resolve(game, settings: settings)
     #expect(value.preparation.starRailFrameRate == .unlock120)
     #expect(value.preparation.starRailRegion == GameDefinition.find(game)?.region)
 }
-@Test(arguments: ["starrail", "starrail-cn"])
-func starRailOffRequestsRestore(game: String) throws {
+@Test func starRailOffRequestsRestore() throws {
+    let game = "starrail"
     #expect(try resolve(game).preparation.starRailFrameRate == .restore)
     var settings = LaunchSettings.defaults(for: game); settings.unlockFPS = true; settings.unlockTarget = 90
     #expect(throws: LauncherError.self) { try resolve(game, settings: settings) }
+}
+@Test(arguments: [false, true], [RuntimeBackend.d3dmetal, .dxmt])
+func unverifiedChinaStarRailNeverPreparesFrameRate(unlock: Bool, backend: RuntimeBackend) throws {
+    var settings = LaunchSettings.defaults(for: "starrail-cn"); settings.unlockFPS = unlock; settings.backend = backend
+    #expect(try resolve("starrail-cn", settings: settings).preparation.starRailFrameRate == nil)
+}
+@Test(arguments: [("starrail", true), ("starrail-cn", false), ("genshin", false), ("genshin-cn", false),
+    ("zzz", false), ("zzz-cn", false), ("unknown", false)])
+func starRailUnlockEligibilityIsGlobalOnly(game: String, offered: Bool) {
+    #expect(LaunchResolver.offersStarRailUnlock(game) == offered)
 }
 @Test(arguments: ["genshin", "genshin-cn", "zzz", "zzz-cn"], [false, true])
 func genshinAndZZZNeverTouchStarRailValue(game: String, unlock: Bool) throws {

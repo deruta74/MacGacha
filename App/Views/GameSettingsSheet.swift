@@ -60,7 +60,7 @@ struct GameSettingsSheet: View {
     }
 
     /// Star Rail stores its frame rate in its own settings, which accept 30, 60 or 120.
-    private var offersStarRailUnlock: Bool { GameDefinition.find(game.id)?.family == .starrail }
+    private var offersStarRailUnlock: Bool { LaunchResolver.offersStarRailUnlock(game.id) }
 
     /// Turning the unlock on lifts a lower frame limit, so the unlock isn't silently capped.
     private var unlockFPS: Binding<Bool> {
