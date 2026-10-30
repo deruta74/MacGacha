@@ -113,13 +113,31 @@ def string_units(node: dict, path: str = "") -> list[tuple[str, dict]]:
     return units
 
 
+def missing_variation_defaults(node: dict, path: str = "") -> list[str]:
+    missing = []
+    variations = node.get("variations", {})
+    if isinstance(variations, dict):
+        for dimension, branches in variations.items():
+            if dimension in ("plural", "device") and (
+                not isinstance(branches, dict) or not isinstance(branches.get("other"), dict)
+            ):
+                prefix = f"{path}." if path else ""
+                missing.append(f"{prefix}variations.{dimension}.other")
+    for key, value in node.items():
+        if isinstance(value, dict):
+            missing += missing_variation_defaults(value, f"{path}.{key}" if path else key)
+    return missing
+
+
 def entry_translation_problems(key: str, entry: dict, language: str, name: str) -> list[str]:
     if entry.get("shouldTranslate") is False or key == APPLE_LICENSE_TITLE or key.startswith(APPLE_LICENSE_PREFIX):
         return []
-    units = string_units(entry.get("localizations", {}).get(language, {}))
+    localization = entry.get("localizations", {}).get(language, {})
+    problems = [f"{name}: {language} translation of {key!r} is missing mandatory variation {branch}"
+                for branch in missing_variation_defaults(localization)]
+    units = string_units(localization)
     if not units:
-        return [f"{name}: no {language} translation for {key!r}"]
-    problems = []
+        return problems + [f"{name}: no {language} translation for {key!r}"]
     for branch, unit in units:
         value = unit.get("value")
         if unit.get("state") != "translated" or not isinstance(value, str) or not value:
@@ -210,6 +228,21 @@ def self_check() -> None:
     entry["localizations"]["zh-Hans"]["variations"]["plural"]["other"] = {}
     errors = entry_translation_problems("%lld items", entry, "zh-Hans", "fixture")
     assert len(errors) == 1 and "other" in errors[0], errors
+    for dimension, category in [("plural", "one"), ("device", "mac")]:
+        missing_other = {"localizations": {"ru": {"variations": {dimension: {
+            category: unit("%lld")}}}}}
+        errors = entry_translation_problems("%lld", missing_other, "ru", "fixture")
+        assert len(errors) == 1 and f"{dimension}.other" in errors[0], errors
+        missing_other["localizations"]["ru"]["variations"][dimension]["other"] = unit("%lld")
+        assert not entry_translation_problems("%lld", missing_other, "ru", "fixture")
+        missing_other["localizations"]["ru"]["variations"][dimension]["other"] = None
+        assert entry_translation_problems("%lld", missing_other, "ru", "fixture")
+    nested = {"localizations": {"ru": {"variations": {"device": {
+        "mac": {"variations": {"plural": {"one": unit("%lld")}}}, "other": unit("%lld")}}}}}
+    errors = entry_translation_problems("%lld", nested, "ru", "fixture")
+    assert len(errors) == 1 and "device.mac.variations.plural.other" in errors[0], errors
+    nested["localizations"]["ru"]["variations"]["device"]["mac"]["variations"]["plural"]["other"] = unit("%lld")
+    assert not entry_translation_problems("%lld", nested, "ru", "fixture")
     assert entry_translation_problems("Value %@", {}, "zh-Hans", "fixture")
     assert not entry_translation_problems("Value %@", {"shouldTranslate": False}, "zh-Hans", "fixture")
     for legal in [APPLE_LICENSE_TITLE, APPLE_LICENSE_PREFIX + "\nTerms"]:
