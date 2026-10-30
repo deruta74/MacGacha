@@ -50,6 +50,7 @@ struct GameFooter: View {
                 if let highlights {
                     HighlightsButton(highlights: highlights, images: images)
                 }
+                EventsPanel(events: model.gameEvents[game.id] ?? [])
             }
             Spacer(minLength: 24)
             VStack(alignment: .trailing, spacing: 10) {
