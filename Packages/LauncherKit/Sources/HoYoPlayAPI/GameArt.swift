@@ -3,6 +3,7 @@
 import Foundation
 
 public struct GameArt: Sendable, Equatable, Codable {
+    public let backgrounds: [GameBackground]
     public let background: URL?
     public let video: URL?
     public let theme: URL?
@@ -10,7 +11,8 @@ public struct GameArt: Sendable, Equatable, Codable {
     public let logo: URL?
 
     public init(background: URL? = nil, video: URL? = nil,
-        theme: URL? = nil, icon: URL? = nil, logo: URL? = nil) {
+        theme: URL? = nil, icon: URL? = nil, logo: URL? = nil, backgrounds: [GameBackground] = []) {
+        self.backgrounds = backgrounds
         self.background = background; self.video = video
         self.theme = theme; self.icon = icon; self.logo = logo
     }

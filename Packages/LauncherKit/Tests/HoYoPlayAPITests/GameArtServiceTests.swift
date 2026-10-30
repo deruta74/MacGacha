@@ -312,3 +312,104 @@ private final class QueryRecordingHTTP: HTTPClient, Sendable {
         }
     }
 }
+
+@Test
+func orderedBackgroundsRestoreLargeIndexAndMigrateLegacyOffline() async throws {
+    let temp = try TempDir(), cdn = MockCDN(); try artFixtures(cdn)
+    let layers: [[String: Any]] = (0..<8).map { n in
+        let base = "https://fastcdn.hoyoverse.com/layer-\(n)"
+        for suffix in ["", "-icon", "-hover"] { cdn.serve("layer-\(n)" + suffix, data: png) }
+        return ["id": "slide-\(n)", "background": ["url": base],
+            "icon": ["url": base + "-icon", "hover_url": base + "-hover", "link": n == 0 ? "https://hoyo.link/test" : "http://unsafe.test"]]
+    }
+    cdn.serve(apiBasic, data: try JSONSerialization.data(withJSONObject: ["data": ["game_info_list": [["game": ["biz": "hk4e_global"], "backgrounds": layers]]]]))
+    let directory = temp.url.appendingPathComponent("GameArt")
+    let art = await GameArtService(cacheDirectory: directory, http: cdn).refresh()
+    let backgrounds = try #require(art["genshin"]?.backgrounds)
+    #expect(backgrounds.map(\.id) == (0..<8).map { "slide-\($0)" })
+    #expect(backgrounds.allSatisfy { $0.image != nil && $0.highlights?.image != nil && $0.highlights?.hoverImage != nil })
+    #expect(backgrounds[0].highlights?.link == URL(string: "https://hoyo.link/test"))
+    #expect(backgrounds[1].highlights?.link == nil)
+    #expect(!cdn.requestLog.contains { $0.path == "test" })
+    let count = cdn.requestLog.count
+    let restored = await GameArtService(cacheDirectory: directory, http: cdn).loadCached()
+    #expect(restored == art)
+    #expect(cdn.requestLog.count == count)
+
+    let indexURL = directory.appendingPathComponent("art-index.json")
+    var index = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: indexURL)) as? [String: Any])
+    var games = try #require(index["games"] as? [String: [String: Any]])
+    games["genshin"]?.removeValue(forKey: "backgrounds"); index["games"] = games
+    try JSONSerialization.data(withJSONObject: index).write(to: indexURL)
+    let legacy = await GameArtService(cacheDirectory: directory, http: cdn).loadCached()
+    let migrated = try #require(legacy["genshin"]?.backgrounds.first)
+    #expect(migrated.image == art["genshin"]?.background)
+    let again = await GameArtService(cacheDirectory: directory, http: cdn).loadCached()
+    #expect(again["genshin"]?.backgrounds.first?.id == migrated.id)
+    try FileManager.default.removeItem(at: #require(migrated.image))
+    let missing = await GameArtService(cacheDirectory: directory, http: cdn).loadCached()
+    #expect(missing["genshin"]?.backgrounds.first?.image == nil)
+}
+
+@Test
+func highlightsFallbackStaysWithinSlideAndAbsentIconRemovesIt() async throws {
+    let temp = try TempDir(), cdn = MockCDN(); try artFixtures(cdn, video: true)
+    let time = Mutex(Date(timeIntervalSince1970: 1_800_000_000))
+    func serve(_ suffix: String, includeIcon: Bool) throws {
+        let layers: [[String: Any]] = ["a", "b"].map { id in
+            var layer: [String: Any] = ["id": id, "background": ["url": "https://fastcdn.hoyoverse.com/preferred"]]
+            if includeIcon { layer["icon"] = ["url": "https://fastcdn.hoyoverse.com/\(id)\(suffix)", "hover_url": "", "link": "javascript:alert(1)"] }
+            return layer
+        }
+        cdn.serve(apiBasic, data: try JSONSerialization.data(withJSONObject: ["data": ["game_info_list": [["game": ["biz": "hk4e_global"], "backgrounds": layers]]]]))
+    }
+    cdn.serve("a", data: png); cdn.serve("b", data: jpeg)
+    try serve("", includeIcon: true)
+    let service = GameArtService(cacheDirectory: temp.url.appendingPathComponent("GameArt"), http: cdn, now: { time.withLock { $0 } })
+    let first = await service.refresh()
+    time.withLock { $0 += 7 * 3600 }; try serve("-broken", includeIcon: true)
+    let failed = await service.refresh()
+    #expect(failed["genshin"]?.backgrounds.map(\.highlights) == first["genshin"]?.backgrounds.map(\.highlights))
+    #expect(failed["genshin"]?.backgrounds.allSatisfy { $0.highlights?.link == nil } == true)
+    time.withLock { $0 += 7 * 3600 }; try serve("", includeIcon: false)
+    let removed = await service.refresh()
+    #expect(removed["genshin"]?.backgrounds.allSatisfy { $0.highlights == nil } == true)
+}
+
+@Test
+func boundsFitThreeGamesWithEveryBackgroundAsset() async throws {
+    let temp = try TempDir(), cdn = MockCDN(); try artFixtures(cdn)
+    let games: [[String: Any]] = ["hk4e_global", "hkrpg_global", "nap_global"].map { biz in
+        let layers: [[String: Any]] = (0..<(GameArtService.maximumBackgroundsPerGame + 1)).map { n in
+            let base = "\(biz)-\(n)"
+            func asset(_ suffix: String, video: Bool = false) -> String {
+                let name = base + suffix; cdn.serve(name, data: video ? webm : png)
+                return "https://fastcdn.hoyoverse.com/" + name
+            }
+            return ["id": String(n), "type": "BACKGROUND_TYPE_VIDEO", "background": ["url": asset("-still")],
+                "video": ["url": asset("-video", video: true)], "theme": ["url": asset("-theme")],
+                "icon": ["url": asset("-normal"), "hover_url": asset("-hover"), "link": "https://hoyo.link/\(base)"]]
+        }
+        return ["game": ["biz": biz], "backgrounds": layers]
+    }
+    cdn.serve(apiBasic, data: try JSONSerialization.data(withJSONObject: ["data": ["game_info_list": games]]))
+    let directory = temp.url.appendingPathComponent("GameArt")
+    let art = await GameArtService(cacheDirectory: directory, http: cdn).refresh()
+    #expect(art.count == 3)
+    for game in art.values {
+        #expect(game.backgrounds.count == GameArtService.maximumBackgroundsPerGame)
+        #expect(game.backgrounds.allSatisfy { $0.image != nil && $0.video != nil && $0.theme != nil && $0.highlights?.hoverImage != nil })
+    }
+    let index = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("art-index.json"))) as? [String: Any])
+    let assets = try #require(index["assets"] as? [String: Any])
+    #expect(assets.count > 18 && assets.count <= GameArtService.maximumAssets)
+    let count = cdn.requestLog.count
+    let restored = await GameArtService(cacheDirectory: directory, http: cdn).loadCached()
+    #expect(restored == art && cdn.requestLog.count == count)
+}
+
+@Test(arguments: ["http://hoyo.link/x", "javascript:alert(1)", "file:///tmp/x", "https:///", "https://user:pass@hoyo.link/x"])
+func highlightsBrowserLinksAreValidatedAlsoWhenDecoded(value: String) throws {
+    let bytes = try JSONSerialization.data(withJSONObject: ["image": "file:///tmp/icon.png", "link": value])
+    #expect(try JSONDecoder().decode(GameHighlights.self, from: bytes).link == nil)
+}
