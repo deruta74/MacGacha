@@ -1,6 +1,6 @@
 # MacGacha — universal launcher for HoYoverse games on Apple Silicon
 
-> 🧪 **Beta.** [MacGacha 0.1.2 beta](https://github.com/deruta74/MacGacha/releases/tag/v0.1.2-beta) is out: install, update and play all three games with one click. Expect rough edges, and please [report what you find](#feedback).
+> 🧪 **Beta.** [MacGacha 0.1.3 beta](https://github.com/deruta74/MacGacha/releases/tag/v0.1.3-beta) is out: install, update and play all three games with one click. Expect rough edges, and please [report what you find](#feedback).
 
 A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenless Zone Zero** on Apple Silicon. It aims to provide reliable resumable downloads, file verification, and managed Wine / DXMT / D3DMetal runtimes.
 
