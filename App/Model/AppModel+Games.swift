@@ -121,7 +121,9 @@ private struct GameSnapshot: Sendable {
             return result
         }
         guard !Task.isCancelled else { return }
-        for (id, snapshot) in results where gameRevisions[id] == revisions[id] {
+        // A manual check in flight owns this game's status until it finishes,
+        // so a cached automatic read cannot discard its fresh result.
+        for (id, snapshot) in results where gameRevisions[id] == revisions[id] && gameUpdateCheckTasks[id] == nil {
             applyGame(snapshot, id: id, activity: games[id]?.activity)
         }
         // Records are local; only the selected region performs remote status reads.

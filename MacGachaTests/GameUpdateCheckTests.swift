@@ -46,6 +46,20 @@ import Launch
         #expect(model.gameUpdateCheckTasks.isEmpty)
     }
 
+    @Test func automaticRefreshDuringCheckKeepsManualResult() async {
+        let gate = UpdateCheckGate(), fake = UpdateCheckServices(gate: gate), model = fixture(fake)
+        fake.result = .success(.updateAvailable(from: "1.0", to: "2.0"))
+        model.checkForGameUpdate("genshin")
+        let task = model.gameUpdateCheckTasks["genshin"]
+        await gate.waitForEntry()
+        await model.refreshGames()
+        #expect(fake.normalReads.contains("genshin"))
+        #expect(model.gameUpdateCheck["genshin"] == .checking)
+        await gate.release(); await task?.value
+        #expect(model.games["genshin"]?.status == .updateAvailable(from: "1.0", to: "2.0"))
+        #expect(model.gameUpdateCheck["genshin"] == .updateAvailable)
+    }
+
     @Test(arguments: ["operation", "approval", "launch", "session", "recovery", "pending", "restart"])
     func busyGameDoesNotCheck(kind: String) async throws {
         let fake = UpdateCheckServices(), model = fixture(fake)
@@ -103,17 +117,6 @@ import Launch
         await gate.release(); await task?.value
         #expect(model.games["genshin"]?.status == .installed(tag: "3.0"))
         #expect(model.gameUpdateCheck["genshin"] == nil)
-    }
-
-    @Test func normalStatusApplicationWinsOverLateCheck() async {
-        let gate = UpdateCheckGate(), fake = UpdateCheckServices(gate: gate), model = fixture(fake)
-        model.checkForGameUpdate("genshin")
-        let task = model.gameUpdateCheckTasks["genshin"]
-        await gate.waitForEntry()
-        await model.refreshGames()
-        await gate.release(); await task?.value
-        #expect(model.gameUpdateCheck["genshin"] == nil)
-        #expect(model.games["genshin"]?.status == .installed(tag: "1.0"))
     }
 
     @Test func sessionStartingDuringCheckDiscardsResponse() async {
