@@ -32,13 +32,16 @@ extension LaunchServices {
 /// Construction performs no I/O; callers join startup before any game operation.
 actor LiveLaunchServices: LaunchServices, GameOperationGuard {
     private let paths: AppPaths
+    private let icons: any GameModeIconProviding
     private let log: EventLog?
     private var construction: Task<LaunchManager, any Error>?
     private var startup: Task<LaunchStartupResult, Never>?
-    init(paths: AppPaths, log: EventLog? = nil) { self.paths = paths; self.log = log }
+    init(paths: AppPaths, log: EventLog? = nil, icons: any GameModeIconProviding = BundleGameModeIcons()) {
+        self.paths = paths; self.log = log; self.icons = icons
+    }
     private func manager() async throws -> LaunchManager {
         if let construction { return try await construction.value }
-        let paths = paths, log = log
+        let paths = paths, log = log, icons = icons
         let task = Task {
             let manifest = try await BundledRuntimeManifest.load()
             let runner = SystemProcessRunner(), store = RuntimeStore(paths: paths)
@@ -47,7 +50,7 @@ actor LiveLaunchServices: LaunchServices, GameOperationGuard {
                 installer: ComponentInstaller(store: store, consent: consent))
             return LaunchManager(paths: paths, runtimes: LiveLaunchRuntimes(manifest: manifest, manager: bundles, store: store),
                 prefixes: PrefixManager(paths: paths, runner: runner), preparation: LaunchPreparation(paths: paths, runner: runner),
-                spawner: SystemProcessSpawner(), inspector: SystemProcessInspector(), runner: runner, clock: ContinuousClock(), log: log)
+                spawner: SystemProcessSpawner(), inspector: SystemProcessInspector(), runner: runner, clock: ContinuousClock(), log: log, gameMode: GameModeHelper(paths: paths, icons: icons))
         }
         construction = task
         return try await task.value

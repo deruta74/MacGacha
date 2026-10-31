@@ -63,6 +63,20 @@ public actor GameArtService {
         snapshot.withLock { $0 = buildArt(index) }
     }
 
+    /// A local-only read for helper icons. Revalidate the disk index and image
+    /// header rather than trusting an earlier in-memory URL after cache changes.
+    public nonisolated func cachedIcon(for gameID: String) async -> Data? {
+        guard GameDefinition.find(gameID)?.region == region else { return nil }
+        return try? await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: self.directory.deletingLastPathComponent())
+            let root = try SafeRelativePath(self.directory.lastPathComponent)
+            let saved = try self.readIndex(fs, root: root)
+            guard let url = saved.games[gameID]?.icon, let asset = saved.assets[url.absoluteString],
+                !asset.file.hasSuffix(".webm") else { return nil }
+            return try fs.readFile(at: SafeRelativePath("\(root)/\(asset.file)"), maxBytes: 16 << 20)
+        }
+    }
+
     public func refresh() async -> [String: GameArt] {
         if Task.isCancelled { return cached() }
         let current: (id: UUID, task: Task<[String: GameArt], Never>)
@@ -179,7 +193,7 @@ public actor GameArtService {
         return video == (file.hasSuffix(".webm"))
     }
 
-    private func readIndex(_ fs: ContainedFileSystem, root: SafeRelativePath) throws -> ArtIndex {
+    private nonisolated func readIndex(_ fs: ContainedFileSystem, root: SafeRelativePath) throws -> ArtIndex {
         let data = try fs.readFile(at: SafeRelativePath("\(root)/art-index.json"), maxBytes: Self.indexLimit)
         var saved = try JSONDecoder().decode(ArtIndex.self, from: data)
         guard (saved.region ?? .global) == region, saved.assets.count <= Self.maximumAssets, saved.games.count <= 3, saved.games.values.allSatisfy({ $0.layers.count <= Self.maximumBackgroundsPerGame }), saved.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
