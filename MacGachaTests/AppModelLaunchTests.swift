@@ -67,6 +67,29 @@ struct AppModelLaunchTests {
         #expect(other == original)
     }
 
+    @Test func surroundFallbackNoteIsExposedForTheFooter() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        await fixture.model.handleLaunch(.note(.surroundUnavailable), id: "genshin")
+        #expect(fixture.model.launchNotes["genshin"] == .surroundUnavailable)
+        #expect(fixture.model.launchNotes["zzz"] == nil)
+    }
+
+    @Test func surroundPreferencePersistsOnlyForItsEdition() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        let model = fixture.model
+        #expect(!model.surroundSound(for: "genshin"))
+        try model.setSurroundSound(true, for: "genshin")
+        try await model.flushLaunchSettings()
+        #expect(model.surroundSound(for: "genshin"))
+        #expect(!model.surroundSound(for: "genshin-cn"))
+        let persisted = try await BlockingIO.run { try LaunchSettingsStore(paths: fixture.paths).load("genshin") }
+        #expect(persisted.surroundSound)
+        #expect(persisted.backend == .d3dmetal)
+        try model.setSurroundSound(false, for: "genshin")
+        try await model.flushLaunchSettings()
+        #expect(!model.surroundSound(for: "genshin"))
+    }
+
     @Test func gameModeDefaultOnPersistsWithoutChangingOtherLaunchSettings() async throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
         await fixture.model.reattachOnStart()

@@ -36,6 +36,10 @@ public enum LaunchResolver {
     /// The Mainland China registry key is unverified; only Global supports this setting.
     public static func offersStarRailUnlock(_ game: String) -> Bool { game == "starrail" }
 
+    public static func offersSurroundSound(_ game: String, backend: RuntimeBackend, runtimeBundleID: String?) -> Bool {
+        SurroundAudio.applies(game: game, backend: backend, bundleID: runtimeBundleID)
+    }
+
     /// Shared with setup availability; checking requirements never needs component files.
     public static func requiredComponents(recipe: LaunchRecipe, settings: LaunchSettings, runtimeBundleID: String?) -> [ComponentKind] {
         var required: [ComponentKind] = []
@@ -43,6 +47,9 @@ public enum LaunchResolver {
             switch recipe.wrapper { case .none: break; case .jadeite: required.append(.jadeite); case .steamShim: required.append(.steamShim) }
         }
         if Crypt32Fix.applies(game: recipe.game, backend: settings.backend, bundleID: runtimeBundleID) { required.append(.crypt32Fix) }
+        if settings.surroundSound && offersSurroundSound(recipe.game, backend: settings.backend, runtimeBundleID: runtimeBundleID) {
+            required.append(.surroundAudio)
+        }
         return required
     }
     public static func resolve(recipe: LaunchRecipe, settings: LaunchSettings, installRoot: URL, prefix: URL,
@@ -53,7 +60,10 @@ public enum LaunchResolver {
         try settings.validate(for: recipe.game)
         for url in [installRoot, prefix, wineBinary] { try validateLocalURL(url) }
 
-        let helper = gameModeEnabled ? gameModeRuntime : nil
+        let surroundRequested = settings.surroundSound && offersSurroundSound(recipe.game, backend: settings.backend, runtimeBundleID: runtimeBundleID)
+        let module = componentRoots[.surroundAudio].map { SurroundAudio.modulePath.resolved(against: $0) }
+        let surroundActive = surroundRequested && module != nil && gameModeRuntime?.gameID == recipe.game && gameModeRuntime?.surroundModule == module
+        let helper = (gameModeEnabled || surroundActive) ? gameModeRuntime : nil
         if let helper {
             try validateLocalURL(helper.wineBinary)
             try validateLocalURL(helper.wineserver)
@@ -108,6 +118,7 @@ public enum LaunchResolver {
             componentCopies.append(LaunchComponentCopy(root: try requiredRoot(.crypt32Fix, in: componentRoots),
                 source: try SafeRelativePath("x86_64-windows/crypt32.dll"), toSystem32: "crypt32.dll"))
         }
+        if surroundActive { environment["MACGACHA_SURROUND"] = "1" }
         environment["WINEDEBUG"] = "fixme-all"
         let proxy = "http://127.0.0.1:\(proxyPort)"
         for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] { environment[key] = proxy }

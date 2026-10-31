@@ -4,11 +4,11 @@ import Foundation
 import LauncherCore
 
 public enum ComponentKind: String, Codable, Sendable, CaseIterable {
-    case wine, dxmt, d3dmetal, jadeite, steamShim, crypt32Fix
+    case wine, dxmt, d3dmetal, jadeite, steamShim, crypt32Fix, surroundAudio
 
     /// Component IDs use release-facing names; store directories use the Codable kind.
     public var idPrefix: String {
-        switch self { case .steamShim: "steam-shim"; case .crypt32Fix: "crypt32-fix"; default: rawValue }
+        switch self { case .steamShim: "steam-shim"; case .crypt32Fix: "crypt32-fix"; case .surroundAudio: "surround-audio"; default: rawValue }
     }
 }
 
