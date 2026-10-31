@@ -112,6 +112,15 @@ struct GameSettingsSheet: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                if model.offersSurround(for: game.id) {
+                    Section {
+                        Toggle("Surround sound", isOn: settings.surroundSound)
+                    } footer: {
+                        Text("The game mixes 7.1 audio. On headphones and AirPods it plays as Spatial Audio, and a 5.1 or 7.1 output gets the channels directly. Also pick surround output in the game's audio settings.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 if offersDisplayChoice {
                     Section {
                         Picker("Display", selection: displayID) {

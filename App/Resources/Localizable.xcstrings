@@ -16880,6 +16880,170 @@
         }
       }
     },
+    "Surround sound" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "环绕声"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "環繞聲"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サラウンド"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서라운드 사운드"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Объёмный звук"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Об'ємний звук"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surround-Sound"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Son surround"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sonido envolvente"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Som surround"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suara surround"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เสียงเซอร์ราวด์"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Âm thanh vòm"
+          }
+        }
+      }
+    },
+    "Surround sound wasn't available for this launch, so the game used stereo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本次启动无法使用环绕声，游戏使用了立体声"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本次啟動無法使用環繞聲，遊戲使用了立體聲"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今回の起動ではサラウンドを使えなかったため、ゲームはステレオで再生されました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이번 실행에서는 서라운드를 사용할 수 없어 게임이 스테레오로 재생되었습니다"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Объёмный звук был недоступен при этом запуске, поэтому игра использовала стерео"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Об'ємний звук був недоступний під час цього запуску, тому гра використала стерео"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surround-Sound war bei diesem Start nicht verfügbar, daher lief das Spiel in Stereo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le son surround n'était pas disponible pour ce lancement, le jeu a donc utilisé la stéréo"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El sonido envolvente no estaba disponible en este inicio, así que el juego usó estéreo"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O som surround não estava disponível nesta abertura, então o jogo usou estéreo"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suara surround tidak tersedia untuk peluncuran ini, jadi game menggunakan stereo"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เสียงเซอร์ราวด์ใช้ไม่ได้ในการเปิดครั้งนี้ เกมจึงใช้เสียงสเตอริโอ"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Âm thanh vòm không khả dụng trong lần khởi chạy này, nên trò chơi dùng âm thanh stereo"
+          }
+        }
+      }
+    },
     "Switch to Global" : {
       "localizations" : {
         "de" : {
@@ -18027,6 +18191,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "遊戲在啟動過程中關閉。"
+          }
+        }
+      }
+    },
+    "The game mixes 7.1 audio. On headphones and AirPods it plays as Spatial Audio, and a 5.1 or 7.1 output gets the channels directly. Also pick surround output in the game's audio settings." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏将混合 7.1 声道音频。在耳机和 AirPods 上以空间音频播放，5.1 或 7.1 输出设备则直接获得各声道。还需在游戏的音频设置中选择环绕声输出。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遊戲將混合 7.1 聲道音訊。在耳機和 AirPods 上以空間音訊播放，5.1 或 7.1 輸出裝置則直接取得各聲道。也需在遊戲的音訊設定中選擇環繞聲輸出。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲームが 7.1 チャンネルでミックスします。ヘッドフォンや AirPods では空間オーディオで再生され、5.1 または 7.1 の出力機器には各チャンネルがそのまま送られます。ゲームのオーディオ設定でもサラウンド出力を選んでください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임이 7.1 채널로 오디오를 믹스합니다. 헤드폰과 AirPods에서는 공간 음향으로 재생되고, 5.1 또는 7.1 출력 장치에는 각 채널이 그대로 전달됩니다. 게임의 오디오 설정에서도 서라운드 출력을 선택하세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Игра сводит звук в 7.1. В наушниках и AirPods он звучит как пространственное аудио, а выход 5.1 или 7.1 получает каналы напрямую. Также выберите объёмный звук в настройках звука игры."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Гра зводить звук у 7.1. У навушниках і AirPods він звучить як просторове аудіо, а вихід 5.1 або 7.1 отримує канали напряму. Також виберіть об'ємний звук у налаштуваннях звуку гри."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Spiel mischt 7.1-Audio. Auf Kopfhörern und AirPods klingt es als 3D-Audio, und ein 5.1- oder 7.1-Ausgang erhält die Kanäle direkt. Wähle auch in den Audioeinstellungen des Spiels die Surround-Ausgabe."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le jeu mixe l'audio en 7.1. Sur un casque et des AirPods, il est lu en audio spatial, et une sortie 5.1 ou 7.1 reçoit directement les canaux. Choisissez aussi la sortie surround dans les réglages audio du jeu."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El juego mezcla audio 7.1. En auriculares y AirPods se reproduce como audio espacial, y una salida 5.1 o 7.1 recibe los canales directamente. Elige también la salida envolvente en los ajustes de audio del juego."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O jogo mixa áudio 7.1. Em fones e AirPods, ele toca como Áudio Espacial, e uma saída 5.1 ou 7.1 recebe os canais diretamente. Escolha também a saída surround nos ajustes de áudio do jogo."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Game mencampur audio 7.1. Di headphone dan AirPods diputar sebagai Audio Spasial, dan output 5.1 atau 7.1 menerima kanal secara langsung. Pilih juga output surround di pengaturan audio game."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เกมจะมิกซ์เสียงแบบ 7.1 บนหูฟังและ AirPods จะเล่นเป็นเสียงรอบทิศทาง ส่วนเอาต์พุต 5.1 หรือ 7.1 จะได้รับแต่ละช่องโดยตรง เลือกเอาต์พุตเซอร์ราวด์ในการตั้งค่าเสียงของเกมด้วย"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trò chơi trộn âm thanh 7.1. Trên tai nghe và AirPods, âm thanh phát dưới dạng Âm thanh không gian, còn đầu ra 5.1 hoặc 7.1 nhận trực tiếp từng kênh. Hãy chọn cả đầu ra vòm trong cài đặt âm thanh của trò chơi."
           }
         }
       }
@@ -21497,89 +21743,6 @@
         }
       }
     },
-    "Wine surround audio" : {
-      "comment" : "Runtime component name",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine-Surround-Audio"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sonido envolvente de Wine"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Audio surround de Wine"
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Audio surround Wine"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine サラウンドオーディオ"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine 서라운드 오디오"
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Áudio surround do Wine"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Объёмный звук Wine"
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "เสียงรอบทิศทาง Wine"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Об’ємний звук Wine"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Âm thanh vòm Wine"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine 环绕声"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine 環繞音效"
-          }
-        }
-      }
-    },
     "Wine crypt32 fix" : {
       "comment" : "Runtime component name",
       "localizations" : {
@@ -21659,6 +21822,89 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wine crypt32 修正"
+          }
+        }
+      }
+    },
+    "Wine surround audio" : {
+      "comment" : "Runtime component name",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine-Surround-Audio"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sonido envolvente de Wine"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio surround de Wine"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio surround Wine"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine サラウンドオーディオ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 서라운드 오디오"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Áudio surround do Wine"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Объёмный звук Wine"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เสียงรอบทิศทาง Wine"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Об’ємний звук Wine"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Âm thanh vòm Wine"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 环绕声"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 環繞音效"
           }
         }
       }
