@@ -67,6 +67,20 @@ private struct LayoutRegistration: GameModeRegistering { func register(_ app: UR
         try await changed.validate(first, bundle: bundle)
     }
 
+    @Test func editionsKeepIndependentHelpersAndBundleRemovalClearsBoth() async throws {
+        let f = try BundleFixture(), bundle = try await gameModeTestBundle(f)
+        let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: LayoutRegistration())
+        let ids = f.bundle.components.map(\.rawValue)
+        let first = try await manager.prepare(bundle: bundle, game: GameDefinition.find("genshin")!, componentIDs: ids)
+        let second = try await manager.prepare(bundle: bundle, game: GameDefinition.find("genshin-cn")!, componentIDs: ids)
+        #expect(first.root != second.root)
+        try await manager.validate(first, bundle: bundle)
+        try await manager.validate(second, bundle: bundle)
+        try await f.manager.remove(f.bundle)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        #expect(try fs.itemType(at: SafeRelativePath("Runtimes/GameMode/\(f.bundle.id)")) == nil)
+    }
+
     @Test func nativeWineUsesTheUnixLoaderAndUnknownWrappersAreRefused() async throws {
         let f = try BundleFixture(), bundle = try await gameModeTestBundle(f), game = GameDefinition.all[0]
         let fs = try ContainedFileSystem(root: f.store.paths.root), path = try RuntimeJSONFile.relativePath(bundle.wineBinary, root: f.store.paths.root)
