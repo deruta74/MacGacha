@@ -4,6 +4,7 @@
 #include <CoreAudio/CoreAudio.h>
 #include <AudioUnit/AudioUnit.h>
 #include <assert.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -25,7 +26,6 @@ typedef struct { WAVEFORMATEX Format; struct { unsigned short wValidBitsPerSampl
 #pragma pack(pop)
 enum { eRender, eCapture, WAVE_FORMAT_EXTENSIBLE = 0xfffe,
     KSAUDIO_SPEAKER_7POINT1_SURROUND = 0x63f, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT = 3 };
-#include "macgacha-surround.h"
 #define FALSE 0
 #define TRUE 1
 #define FAILED(x) ((x) < 0)
@@ -51,6 +51,7 @@ static unsigned format_bits = 32;
 static int optional_calls[256];
 static int record_optional = 1;
 static AudioDeviceID default_device = 42;
+static UInt32 device_channels = 2;
 static OSStatus step(void) { return ++calls == fail_at ? -777 : noErr; }
 static int ca_get_audiodesc(AudioStreamBasicDescription *d, const WAVEFORMATEX *f) {
     memset(d, 0, sizeof(*d));
@@ -135,11 +136,26 @@ static OSStatus fake_uninit(AudioUnit u) { (void)u; return 0; }
 static Boolean fake_has(AudioObjectID o, const AudioObjectPropertyAddress *a) {
     (void)o; return a->mSelector != kAudioDevicePropertyDataSource || source_kind != 0;
 }
+static OSStatus fake_object_size(AudioObjectID o, const AudioObjectPropertyAddress *a,
+        UInt32 qs, const void *q, UInt32 *n) {
+    assert(o == 42 && a->mSelector == kAudioDevicePropertyStreamConfiguration &&
+        a->mScope == kAudioDevicePropertyScopeOutput);
+    OSStatus status = step();
+    *n = offsetof(AudioBufferList, mBuffers) + 2 * sizeof(AudioBuffer);
+    return status;
+}
 static OSStatus fake_object(AudioObjectID o, const AudioObjectPropertyAddress *a,
         UInt32 qs, const void *q, UInt32 *n, void *d) {
     (void)o; (void)qs; (void)q; (void)n;
     OSStatus s = step(); if (s) return s;
-    if (a->mSelector == kAudioDevicePropertyDataSourceKindForID)
+    if (a->mSelector == kAudioDevicePropertyStreamConfiguration) {
+        AudioBufferList *buffers = d;
+        assert(o == 42 && a->mScope == kAudioDevicePropertyScopeOutput);
+        buffers->mNumberBuffers = 2;
+        buffers->mBuffers[0].mNumberChannels = device_channels / 2;
+        buffers->mBuffers[1].mNumberChannels = device_channels - device_channels / 2;
+    }
+    else if (a->mSelector == kAudioDevicePropertyDataSourceKindForID)
         *(UInt32 *)((AudioValueTranslation *)d)->mOutputData = source_kind;
     else *(UInt32 *)d = a->mSelector == kAudioHardwarePropertyDefaultOutputDevice ? default_device :
         a->mSelector == kAudioDevicePropertyTransportType ? transport : source_kind;
@@ -161,21 +177,24 @@ static void fake_free(void *p) { if (p) --allocations; free(p); }
 #define AudioOutputUnitStart fake_start
 #define AudioOutputUnitStop fake_stop
 #define AudioObjectHasProperty fake_has
+#define AudioObjectGetPropertyDataSize fake_object_size
 #define AudioObjectGetPropertyData fake_object
 #define malloc fake_malloc
 #define free fake_free
+#include "macgacha-surround.h"
 static unsigned log_lines;
 static int test_fprintf(FILE *file, const char *format, ...)
 {
     char text[512], output[64], spatial[128];
-    unsigned channels, rate; int end = 0, result;
+    unsigned channels, rate, device_count; int end = 0, result;
     va_list args;
     va_start(args, format); result = vsnprintf(text, sizeof(text), format, args); va_end(args);
     assert(file == stderr && result > 0 && result < (int)sizeof(text));
-    assert(sscanf(text, "macgacha-surround: stream output=%63s channels=%u rate=%u spatial=%127s%n",
-        output, &channels, &rate, spatial, &end) == 4);
+    assert(sscanf(text, "macgacha-surround: stream output=%63s device-channels=%u channels=%u rate=%u spatial=%127s%n",
+        output, &device_count, &channels, &rate, spatial, &end) == 5);
     assert(!strcmp(text + end, "\n") && !strchr(output, '/') && !strchr(spatial, '/'));
-    assert(!strcmp(spatial, "on") || !strncmp(spatial, "fallback:", 9));
+    assert(!strcmp(spatial, "on") || !strncmp(spatial, "fallback:", 9) || !strncmp(spatial, "off:", 4));
+    if (device_count) assert(device_count == device_channels);
     ++log_lines;
     return result;
 }
@@ -195,7 +214,7 @@ static BOOL checked_start(struct coreaudio_stream *stream)
 
 int main(void) {
     WAVEFORMATEXTENSIBLE fmt = {.Format = {.nSamplesPerSec = 48000}};
-    macgacha_surround_mix_format(&fmt);
+    macgacha_surround_mix_format(&fmt, 2);
     assert(fmt.Format.nChannels == 8 && fmt.Format.nSamplesPerSec == 48000 &&
         fmt.Format.wBitsPerSample == 32 && fmt.Format.nBlockAlign == 32 &&
         fmt.Format.nAvgBytesPerSec == 1536000 && fmt.Samples.wValidBitsPerSample == 32 &&
@@ -205,15 +224,45 @@ int main(void) {
     for (unsigned i = 0; i < sizeof(values)/sizeof(*values); ++i) {
         if (values[i]) setenv("MACGACHA_SURROUND", values[i], 1); else unsetenv("MACGACHA_SURROUND");
         calls = 0; assert(!macgacha_spatial_start(&s)); assert(!calls && !live);
-        assert(!macgacha_surround_endpoint_prefix(eRender));
+        assert(!macgacha_surround_endpoint_prefix(eRender, device_channels));
         assert(!strcmp(macgacha_surround_device(MACGACHA_SURROUND_ENDPOINT "device"), MACGACHA_SURROUND_ENDPOINT "device"));
     }
     setenv("MACGACHA_SURROUND", "1", 1);
-    assert(macgacha_surround_endpoint_prefix(eRender) == sizeof(MACGACHA_SURROUND_ENDPOINT) - 1);
-    assert(!macgacha_surround_endpoint_prefix(eCapture));
+    /* Literal decisions catch either endpoint or stream eligibility being ignored. */
+    const unsigned counts[] = {1, 2, 6, 8};
+    const int expected[4][4] = {{0, 0, 1, 1}, {0, 0, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}};
+    record_optional = 0;
+    for (unsigned d = 0; d < 4; ++d) {
+        WAVEFORMATEXTENSIBLE native = {.Format = {.nChannels = counts[d], .nSamplesPerSec = 48000},
+            .dwChannelMask = d == 2 ? 0x3f : d == 3 ? 0x63f : d == 1 ? 3 : 4};
+        WAVEFORMATEXTENSIBLE reported = native;
+        device_channels = counts[d];
+        macgacha_surround_mix_format(&reported, device_channels);
+        if (d < 2) assert(reported.Format.nChannels == 8 && reported.dwChannelMask == 0x63f);
+        else assert(!memcmp(&native, &reported, sizeof(native)));
+        assert(!!macgacha_surround_endpoint_prefix(eRender, device_channels) == (d < 2));
+        for (unsigned c = 0; c < 4; ++c) {
+            assert(macgacha_surround_spatial_candidate(1, counts[d], counts[c]) == expected[d][c]);
+            assert(!macgacha_surround_spatial_candidate(0, counts[d], counts[c]));
+            fmt.Format.nChannels = counts[c]; fmt.Format.nBlockAlign = counts[c] * sizeof(float);
+            calls = 0;
+            BOOL started = macgacha_spatial_start(&s);
+            /* The bridge still supports only 8ch float 0x63f; 6ch falls back. */
+            assert(started == (d < 2 && c == 3));
+            if (started) macgacha_spatial_dispose(&s);
+            else assert(calls == 3); /* Only channel discovery, no AudioUnit setup. */
+            assert(!live && !running && !allocations);
+        }
+    }
+    assert(!macgacha_surround_spatial_candidate(1, 0, 8));
+    assert(!macgacha_surround_spatial_candidate(1, 4, 8));
+    device_channels = 2; fmt.Format.nChannels = 8; fmt.Format.nBlockAlign = 32;
+    calls = 0; record_optional = 1; memset(optional_calls, 0, sizeof(optional_calls));
+    assert(macgacha_surround_endpoint_prefix(eRender, device_channels) == sizeof(MACGACHA_SURROUND_ENDPOINT) - 1);
+    assert(!macgacha_surround_endpoint_prefix(eCapture, device_channels));
     assert(!strcmp(macgacha_surround_device(MACGACHA_SURROUND_ENDPOINT "device"), "device"));
     assert(!strcmp(macgacha_surround_device("device"), "device"));
-    head_info_error = -10851;
+    head_info_error = -10851; head_value = 0;
     assert(macgacha_spatial_start(&s)); assert(!head_value);
     macgacha_spatial_dispose(&s); head_info_error = 0; calls = 0;
     s.flow = eCapture; assert(!macgacha_spatial_start(&s)); assert(!calls);
@@ -286,16 +335,16 @@ int main(void) {
     default_device = 99; assert(!macgacha_spatial_start(&s)); assert(!live && !allocations);
     default_device = 42;
     fmt.dwChannelMask = 0xff;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(!calls && !live);
+    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
     fmt.dwChannelMask = 0x63f;
     fmt.Format.nChannels = 2;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(!calls && !live);
+    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
     fmt.Format.nChannels = 8; format_bits = 16;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(!calls && !live);
+    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
     format_bits = 32; fmt.Format.cbSize = 0;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(!calls && !live);
+    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
     fmt.Format.cbSize = 22; fmt.Format.nBlockAlign = 16;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(!calls && !live);
-    printf("PASS: opt-in, layouts, planar pull bounds, output routing, optional tracking; %d setup fault points covered\n", total_calls);
+    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
+    printf("PASS: 16 device/stream decisions, native layouts, opt-in, planar pull bounds, output routing, optional tracking; %d setup fault points covered\n", total_calls);
     return 0;
 }

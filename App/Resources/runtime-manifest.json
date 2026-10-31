@@ -170,11 +170,11 @@
       "version": "wine-11.20-1",
       "sourceMode": "download",
       "url": "https://github.com/deruta74/MacGacha/releases/download/surround-audio-wine-11.20-1/surround-audio-wine-11.20-1.zip",
-      "size": 88972,
-      "installedSize": 242000,
+      "size": 91325,
+      "installedSize": 254000,
       "sha256": {
         "algorithm": "sha256",
-        "hex": "396fa5f27e9374454beea2a0925b0f18e6229b5b0ce06f929f0070a6fd9dff79"
+        "hex": "bbcedafd33e57949daabd861f67aeaabe3c1df1d166be299b161cc8cf28f5cf5"
       },
       "archive": "zip",
       "license": {

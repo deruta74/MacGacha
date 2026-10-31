@@ -32,14 +32,33 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
      AudioConverterRef converter;
      AudioStreamBasicDescription dev_desc; /* audio unit format, not necessarily the same as fmt */
      AudioDeviceID dev_id;
-@@ -310,8 +314,12 @@
+@@ -295,10 +299,18 @@
+     for(i = 0; i < params->num; i++){
+         const SIZE_T name_len = CFStringGetLength(info[i].name) + 1;
+         CFIndex device_len;
++        UInt32 channels = 0;
++        unsigned int prefix = 0;
++
++        if (macgacha_surround_enabled() && params->flow == eRender)
++        {
++            macgacha_surround_device_channels(info[i].id, &channels);
++            prefix = macgacha_surround_endpoint_prefix(params->flow, channels);
++        }
+
+         CFStringGetBytes(info[i].uid, CFRangeMake(0, CFStringGetLength(info[i].uid)), kCFStringEncodingUTF8,
+                          0, false, NULL, 0, &device_len);
+-        device_len++;   /* for null terminator */
++        device_len += prefix + 1;   /* namespace and null terminator */
+
+         needed += name_len * sizeof(WCHAR) + ((device_len + 1) & ~1);
+
+@@ -310,8 +322,11 @@
              offset += name_len * sizeof(WCHAR);
  
              endpoint->device = offset;
 -            CFStringGetBytes(info[i].uid, CFRangeMake(0, CFStringGetLength(info[i].uid)), kCFStringEncodingUTF8,
 -                             0, false, (UInt8 *)params->endpoints + offset, params->size - offset, NULL);
 +            {
-+                unsigned int prefix = macgacha_surround_endpoint_prefix(params->flow);
 +                if (prefix) memcpy((char *)params->endpoints + offset, MACGACHA_SURROUND_ENDPOINT, prefix);
 +                CFStringGetBytes(info[i].uid, CFRangeMake(0, CFStringGetLength(info[i].uid)), kCFStringEncodingUTF8,
 +                                 0, false, (UInt8 *)params->endpoints + offset + prefix, params->size - offset - prefix, NULL);
@@ -47,7 +66,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
              ((char *)params->endpoints)[offset + device_len - 1] = '\0';
              offset += (device_len + 1) & ~1;
  
-@@ -680,6 +688,7 @@
+@@ -680,6 +695,7 @@
          .mSelector = kAudioHardwarePropertyTranslateUIDToDevice,
      };
  
@@ -55,7 +74,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
      uid = CFStringCreateWithCStringNoCopy(NULL, device, kCFStringEncodingUTF8, kCFAllocatorNull);
  
      size = sizeof(id);
-@@ -786,6 +795,8 @@
+@@ -786,6 +802,8 @@
      return S_OK;
  }
  
@@ -64,7 +83,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
  static NTSTATUS unix_create_stream(void *args)
  {
      struct create_stream_params *params = args;
-@@ -834,44 +845,48 @@
+@@ -834,44 +852,48 @@
      if(params->share == AUDCLNT_SHAREMODE_EXCLUSIVE)
          stream->bufsize_frames -= stream->bufsize_frames % stream->period_frames;
  
@@ -151,7 +170,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
      }
  
      size = stream->bufsize_frames * stream->fmt->nBlockAlign;
-@@ -890,6 +905,7 @@
+@@ -890,6 +912,7 @@
  
  end:
      if(FAILED(params->result)){
@@ -159,7 +178,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
          if(stream->converter) AudioConverterDispose(stream->converter);
          if(stream->unit) AudioComponentInstanceDispose(stream->unit);
          free(stream->fmt);
-@@ -913,6 +929,8 @@
+@@ -913,6 +936,8 @@
          NtWaitForSingleObject(stream->timer_thread, FALSE, NULL);
          NtClose(stream->timer_thread);
      }
@@ -168,18 +187,20 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
  
      if(stream->unit){
          AudioOutputUnitStop(stream->unit);
-@@ -1174,6 +1192,10 @@
+@@ -1174,6 +1199,12 @@
  
      params->fmt->Samples.wValidBitsPerSample = params->fmt->Format.wBitsPerSample;
      params->fmt->Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
 +    if (macgacha_surround_enabled() && params->flow == eRender)
 +    {
-+        macgacha_surround_mix_format(params->fmt);
++        UInt32 channels;
++        if (!macgacha_surround_device_channels(dev_id, &channels))
++            macgacha_surround_mix_format(params->fmt, channels);
 +    }
      params->result = S_OK;
      return STATUS_SUCCESS;
  }
-@@ -1853,6 +1875,15 @@
+@@ -1853,6 +1884,20 @@
  {
      struct get_prop_value_params *params = args;
      const PROPERTYKEY *prop = params->prop;
@@ -187,17 +208,22 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    if (macgacha_surround_enabled() && params->flow == eRender &&
 +        IsEqualPropertyKey(*prop, PKEY_AudioEndpoint_PhysicalSpeakers))
 +    {
-+        params->value->vt = VT_UI4;
-+        params->value->ulVal = KSAUDIO_SPEAKER_7POINT1_SURROUND;
-+        params->result = S_OK;
-+        return STATUS_SUCCESS;
++        UInt32 channels;
++        if (!macgacha_surround_device_channels(dev_id_from_device(params->device), &channels) &&
++            macgacha_surround_spatial_candidate(1, channels, 8))
++        {
++            params->value->vt = VT_UI4;
++            params->value->ulVal = KSAUDIO_SPEAKER_7POINT1_SURROUND;
++            params->result = S_OK;
++            return STATUS_SUCCESS;
++        }
 +    }
  
      if(IsEqualPropertyKey(*prop, DEVPKEY_Device_InstanceId)){
          DWORD vid = 0, pid = 0;
 --- /dev/null
 +++ b/dlls/winecoreaudio.drv/macgacha-surround.h
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,91 @@
 +/* SPDX-License-Identifier: LGPL-2.1-or-later */
 +/* MacGacha surround audio — https://github.com/deruta74/MacGacha */
 +/* Unix-only opt-in format and endpoint namespace. */
@@ -206,6 +232,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +
 +#define MACGACHA_SURROUND_ENDPOINT "macgacha-surround:1:"
 +
++#include <stddef.h>
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <string.h>
@@ -216,9 +243,53 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    return value && !strcmp(value, "1");
 +}
 +
-+static inline unsigned int macgacha_surround_endpoint_prefix(EDataFlow flow)
++/* Unknown and intermediate channel counts retain Wine's stock path. */
++static inline int macgacha_surround_spatial_candidate(int enabled, unsigned int device_channels,
++                                                     unsigned int stream_channels)
 +{
-+    return macgacha_surround_enabled() && flow == eRender ? sizeof(MACGACHA_SURROUND_ENDPOINT) - 1 : 0;
++    return enabled && device_channels >= 1 && device_channels <= 2 && stream_channels > 2;
++}
++
++/* Read the selected endpoint now; never cache this across stream initialization. */
++static OSStatus macgacha_surround_device_channels(AudioDeviceID device, UInt32 *channels)
++{
++    AudioObjectPropertyAddress addr = {kAudioDevicePropertyStreamConfiguration,
++        kAudioDevicePropertyScopeOutput, kAudioObjectPropertyElementMain};
++    AudioBufferList *buffers;
++    UInt32 size, capacity, i;
++    OSStatus status;
++
++    *channels = 0;
++    status = AudioObjectGetPropertyDataSize(device, &addr, 0, NULL, &size);
++    if (status) return status;
++    if (size < offsetof(AudioBufferList, mBuffers) || size > 65536)
++        return kAudioHardwareBadPropertySizeError;
++    capacity = size;
++    if (!(buffers = malloc(size))) return kAudioUnitErr_FailedInitialization;
++    status = AudioObjectGetPropertyData(device, &addr, 0, NULL, &size, buffers);
++    if (!status && (size > capacity || size < offsetof(AudioBufferList, mBuffers) ||
++        buffers->mNumberBuffers > (size - offsetof(AudioBufferList, mBuffers)) / sizeof(AudioBuffer)))
++        status = kAudioHardwareBadPropertySizeError;
++    if (!status)
++    {
++        for (i = 0; i < buffers->mNumberBuffers; ++i)
++        {
++            if (buffers->mBuffers[i].mNumberChannels > 65536 - *channels)
++            {
++                status = kAudioHardwareBadPropertySizeError;
++                break;
++            }
++            *channels += buffers->mBuffers[i].mNumberChannels;
++        }
++    }
++    free(buffers);
++    if (status) *channels = 0;
++    return status;
++}
++
++static inline unsigned int macgacha_surround_endpoint_prefix(EDataFlow flow, unsigned int device_channels)
++{
++    return macgacha_surround_spatial_candidate(macgacha_surround_enabled(), device_channels, 8) && flow == eRender ? sizeof(MACGACHA_SURROUND_ENDPOINT) - 1 : 0;
 +}
 +
 +static inline const char *macgacha_surround_device(const char *device)
@@ -228,8 +299,9 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    return device;
 +}
 +
-+static inline void macgacha_surround_mix_format(WAVEFORMATEXTENSIBLE *fmt)
++static inline void macgacha_surround_mix_format(WAVEFORMATEXTENSIBLE *fmt, unsigned int device_channels)
 +{
++    if (!macgacha_surround_spatial_candidate(1, device_channels, 8)) return;
 +    /* Keep the device nominal rate; expose the Ambience Bed input layout. */
 +    fmt->Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
 +    fmt->Format.nChannels = 8;
@@ -245,7 +317,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +#endif
 --- /dev/null
 +++ b/dlls/winecoreaudio.drv/macgacha-spatial.h
-@@ -0,0 +1,288 @@
+@@ -0,0 +1,299 @@
 +/* SPDX-License-Identifier: LGPL-2.1-or-later */
 +/* MacGacha surround audio — https://github.com/deruta74/MacGacha */
 +/* Unix-only. Included after Wine's stream, format and render helpers. */
@@ -414,7 +486,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    AudioChannelLayout layout = {0};
 +    AudioUnitConnection connection;
 +    AURenderCallbackStruct callback = {macgacha_spatial_pull, stream};
-+    UInt32 type = 0, value, size;
++    UInt32 type = 0, device_channels = 0, value, size;
 +    HRESULT format_result;
 +    OSStatus status = noErr;
 +    const char *stage = "eligibility";
@@ -424,6 +496,17 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    {
 +        stage = "capture"; status = kAudioUnitErr_FormatNotSupported; goto failed;
 +    }
++    stage = "device-channels";
++    status = macgacha_surround_device_channels(stream->dev_id, &device_channels);
++    if (status) goto failed;
++    if (!macgacha_surround_spatial_candidate(1, device_channels, stream->fmt->nChannels))
++    {
++        fprintf(stderr, "macgacha-surround: stream output=stock device-channels=%u channels=%u rate=%u spatial=off:%s\n",
++            (unsigned)device_channels, (unsigned)stream->fmt->nChannels,
++            (unsigned)stream->fmt->nSamplesPerSec, stream->fmt->nChannels <= 2 ? "mono-stereo" : "device-channels");
++        return FALSE;
++    }
++    stage = "eligibility";
 +    format_result = ca_get_audiodesc(&input, stream->fmt);
 +    /* Keep cutscene PCM/stereo and unknown masks on Wine's original path. */
 +    if (stream->fmt->wFormatTag != WAVE_FORMAT_EXTENSIBLE || stream->fmt->cbSize < 22 || stream->fmt->nChannels != 8 ||
@@ -521,15 +604,15 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    macgacha_spatial_tracking(stream->spatial_mixer, type);
 +    MACGACHA_AU_STEP("start-output", AudioOutputUnitStart(stream->unit));
 +#undef MACGACHA_AU_STEP
-+    fprintf(stderr, "macgacha-surround: stream output=%s channels=%u rate=%u spatial=on\n",
-+        macgacha_spatial_type_name(type), (unsigned)stream->fmt->nChannels,
++    fprintf(stderr, "macgacha-surround: stream output=%s device-channels=%u channels=%u rate=%u spatial=on\n",
++        macgacha_spatial_type_name(type), (unsigned)device_channels, (unsigned)stream->fmt->nChannels,
 +        (unsigned)stream->fmt->nSamplesPerSec);
 +    return TRUE;
 +
 +failed:
 +    macgacha_spatial_dispose(stream);
-+    fprintf(stderr, "macgacha-surround: stream output=%s channels=%u rate=%u spatial=fallback:%s:%d\n",
-+        macgacha_spatial_type_name(type), (unsigned)stream->fmt->nChannels,
++    fprintf(stderr, "macgacha-surround: stream output=%s device-channels=%u channels=%u rate=%u spatial=fallback:%s:%d\n",
++        macgacha_spatial_type_name(type), (unsigned)device_channels, (unsigned)stream->fmt->nChannels,
 +        (unsigned)stream->fmt->nSamplesPerSec, stage, (int)status);
 +    return FALSE;
 +}
