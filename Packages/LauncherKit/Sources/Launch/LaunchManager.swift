@@ -224,7 +224,7 @@ public actor LaunchManager {
             let ids = Array(Set(selection.componentIDs + compatibilityIDs)).sorted()
             var helper: GameModeRuntime?
             if globalSettings.gameModeEnabled, let gameMode {
-                do { helper = try await gameMode.prepare(bundle: bundle, componentIDs: ids) }
+                do { helper = try await gameMode.prepare(bundle: bundle, game: game, componentIDs: ids) }
                 catch {
                     event("Game Mode unavailable; using normal Wine", game: game.id, metadata: ["reason": "helperPreparationFailed"])
                 }

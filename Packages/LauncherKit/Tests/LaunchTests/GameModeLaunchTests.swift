@@ -12,14 +12,14 @@ private final class FakeGameMode: GameModeProviding, Sendable {
     let helper: GameModeRuntime
     let prepareFails: Bool
     let validationFails: Bool
-    let calls = Mutex((prepare: 0, validate: 0))
+    let calls = Mutex((prepare: 0, validate: 0, game: Optional<String>.none))
     init(paths: AppPaths, prepareFails: Bool = false, validationFails: Bool = false) {
-        let root = paths.runtimes.appendingPathComponent("GameMode/bundle-a/MacGacha Game.app/Contents")
-        helper = GameModeRuntime(root: root, wineBinary: root.appendingPathComponent("MacOS/wine"))
+        let root = paths.runtimes.appendingPathComponent("GameMode/bundle-a/starrail/starrail.app/Contents")
+        helper = GameModeRuntime(game: GameDefinition.find("starrail")!, root: root, wineBinary: root.appendingPathComponent("MacOS/wine-wrapper"), wineserver: root.appendingPathComponent("bin/wineserver"))
         self.prepareFails = prepareFails; self.validationFails = validationFails
     }
-    func prepare(bundle: InstalledRuntimeBundle, componentIDs: [String]) async throws -> GameModeRuntime {
-        calls.withLock { $0.prepare += 1 }
+    func prepare(bundle: InstalledRuntimeBundle, game: GameDefinition, componentIDs: [String]) async throws -> GameModeRuntime {
+        calls.withLock { $0.prepare += 1; $0.game = game.id }
         if prepareFails { throw LauncherError.io("Synthetic private path must not reach logs") }
         return helper
     }
@@ -45,12 +45,16 @@ private final class FakeGameMode: GameModeProviding, Sendable {
         await events.waitForRunning()
         let enabled = mode == "enabled", call = try #require(f.spawner.calls.first)
         #expect(call.executable == (enabled ? provider.helper.wineBinary : f.bundle.wineBinary))
-        #expect(call.environment["WINELOADER"] == (enabled ? provider.helper.wineBinary.path : nil))
+        #expect(call.environment["WINELOADER"] == (enabled ? provider.helper.loader.path : nil))
         #expect(call.environment["WINESERVER"] == (enabled ? provider.helper.wineserver.path : nil))
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+            #expect(call.environment[key]?.hasPrefix("http://127.0.0.1:") == true)
+        }
         let snapshot = try #require(try await f.journal())
         #expect(snapshot.wineBinary == call.executable)
         #expect(snapshot.wineserver == (enabled ? provider.helper.wineserver : f.bundle.wineBinary.deletingLastPathComponent().appendingPathComponent("wineserver")))
         #expect(provider.calls.withLock { $0.prepare } == (mode == "disabled" ? 0 : 1))
+        #expect(provider.calls.withLock { $0.game } == (mode == "disabled" ? nil : f.game.id))
         #expect(provider.calls.withLock { $0.validate } == (["enabled", "validationFailure"].contains(mode) ? 1 : 0))
         #expect(f.inspector.values.scopes.allSatisfy { $0.executableRoots.contains(f.paths.runtimes) })
         try await f.end(manager); await consumer.value
@@ -66,14 +70,18 @@ private final class FakeGameMode: GameModeProviding, Sendable {
         else { #expect(text.contains("Game Mode helper selected")) }
     }
 
-    @Test func reattachmentUsesPersistedMirrorWithoutPreparingAgain() async throws {
+    @Test(arguments: ["legacy", "titleNamed", "ascii"]) func reattachmentUsesPersistedMirrorWithoutPreparingAgain(layout: String) async throws {
         let f = try await ManagerFixture.make(), provider = FakeGameMode(paths: f.paths)
+        let oldPath = layout == "legacy" ? "GameMode/bundle-a/MacGacha Game.app/Contents/MacOS" : "GameMode/bundle-a/starrail/Honkai: Star Rail.app/Contents/MacOS"
+        let oldRoot = f.paths.runtimes.appendingPathComponent(oldPath)
+        let recordedWine = layout == "ascii" ? provider.helper.wineBinary : oldRoot.appendingPathComponent("wine")
+        let recordedServer = layout == "ascii" ? provider.helper.wineserver : oldRoot.appendingPathComponent("wineserver")
         _ = try await f.saveSnapshot(state: .running, processes: [f.gameProcess.identity])
         try await BlockingIO.run {
             let journal = LaunchJournal(paths: f.paths), original = try #require(try journal.read(game: "starrail"))
             let mirrored = LaunchSession(sessionID: original.sessionID, game: original.game, installRoot: original.installRoot,
                 installIdentity: original.installIdentity, prefix: original.prefix, bundleID: original.bundleID,
-                runtimeDigest: original.runtimeDigest, wineBinary: provider.helper.wineBinary, wineserver: provider.helper.wineserver,
+                runtimeDigest: original.runtimeDigest, wineBinary: recordedWine, wineserver: recordedServer,
                 componentIDs: original.componentIDs, recipeVersion: original.recipeVersion, settings: original.settings,
                 state: original.state, processes: original.processes, hides: original.hides, gameExecutable: original.gameExecutable)
             try journal.write(mirrored)

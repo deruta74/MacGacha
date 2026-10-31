@@ -454,3 +454,20 @@ func highlightsBrowserLinksAreValidatedAlsoWhenDecoded(value: String) throws {
     let bytes = try JSONSerialization.data(withJSONObject: ["image": "file:///tmp/icon.png", "link": value])
     #expect(try JSONDecoder().decode(GameHighlights.self, from: bytes).link == nil)
 }
+
+@Test func cachedGameModeIconsAreValidatedWithoutRemoteRequests() async throws {
+    let temp = try TempDir(), http = MockCDN(); try artFixtures(http)
+    let directory = temp.url.appendingPathComponent("GameArt")
+    let populated = await GameArtService(cacheDirectory: directory, http: http).refresh()
+    let icon = try #require(populated["genshin"]?.icon)
+    let service = GameArtService(cacheDirectory: directory, http: http)
+    let count = http.requestLog.count
+    #expect(await service.cachedIcon(for: "genshin") != nil)
+    #expect(await service.cachedIcon(for: "genshin-cn") == nil)
+    try await BlockingIO.run {
+        let fs = try ContainedFileSystem(root: directory)
+        try fs.writeAtomically(Data("not an image".utf8), to: SafeRelativePath(icon.lastPathComponent))
+    }
+    #expect(await service.cachedIcon(for: "genshin") == nil)
+    #expect(http.requestLog.count == count)
+}

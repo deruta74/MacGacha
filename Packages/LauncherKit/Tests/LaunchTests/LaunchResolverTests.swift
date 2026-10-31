@@ -142,14 +142,14 @@ private func resolve(_ game: String, settings: LaunchSettings? = nil, components
 
 @Test func gameModeUsesMirroredWrapperLoaderAndServerOnlyWhenEnabled() throws {
     let root = URL(fileURLWithPath: "/Runtimes/GameMode/bundle/MacGacha Game.app/Contents")
-    let helper = GameModeRuntime(root: root, wineBinary: root.appendingPathComponent("MacOS/wine"))
+    let helper = GameModeRuntime(game: GameDefinition.find("starrail")!, root: root, wineBinary: root.appendingPathComponent("MacOS/wine-wrapper"), wineserver: root.appendingPathComponent("bin/wineserver"))
     let recipe = try #require(Recipes.recipe(for: "starrail"))
     for enabled in [true, false] {
         let result = try LaunchResolver.resolve(recipe: recipe, settings: .defaults(for: "starrail"), installRoot: installRoot,
             prefix: prefix, wineBinary: wine, proxyPort: 1, componentRoots: roots, baseEnvironment: ["WINELOADER": "/inherited/bad"],
             gameModeRuntime: helper, gameModeEnabled: enabled)
         #expect(result.executable == (enabled ? helper.wineBinary : wine))
-        #expect(result.environment["WINELOADER"] == (enabled ? helper.wineBinary.path : nil))
+        #expect(result.environment["WINELOADER"] == (enabled ? helper.loader.path : nil))
         #expect(result.environment["WINESERVER"] == (enabled ? helper.wineserver.path : nil))
         #expect(result.arguments == [WinePath.windowsPath(for: roots[.jadeite]!.appendingPathComponent("jadeite.exe")),
             WinePath.windowsPath(for: installRoot.appendingPathComponent("StarRail.exe"))])

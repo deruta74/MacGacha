@@ -16,88 +16,101 @@ public struct SystemGameModeRegistration: GameModeRegistering {
 }
 
 public struct GameModeRuntime: Sendable, Equatable {
-    /// The mirrored runtime root is Contents, with bin renamed to MacOS.
+    public let gameID: String
     public let root: URL
     public let wineBinary: URL
-    public var wineserver: URL { wineBinary.deletingLastPathComponent().appendingPathComponent("wineserver") }
-    public init(root: URL, wineBinary: URL) {
+    public let wineserver: URL
+    public var loader: URL { root.appendingPathComponent("MacOS/wine", isDirectory: false) }
+    public init(game: GameDefinition, root: URL, wineBinary: URL, wineserver: URL) {
+        gameID = game.id
         self.root = URL(fileURLWithPath: root.path, isDirectory: true)
         self.wineBinary = URL(fileURLWithPath: wineBinary.path, isDirectory: false)
+        self.wineserver = URL(fileURLWithPath: wineserver.path, isDirectory: false)
     }
 }
 
 public protocol GameModeProviding: Sendable {
-    func prepare(bundle: InstalledRuntimeBundle, componentIDs: [String]) async throws -> GameModeRuntime
+    func prepare(bundle: InstalledRuntimeBundle, game: GameDefinition, componentIDs: [String]) async throws -> GameModeRuntime
     func validate(_ helper: GameModeRuntime, bundle: InstalledRuntimeBundle) async throws
 }
 
-/// Mirrors owned runtime files without copying or modifying their signed bytes.
-/// A launch treats any failure as an optional-feature failure and uses normal Wine.
+/// Keep the runtime tree intact, but load ntdll and every long-running Unix
+/// loader from MacOS so macOS attributes the game and its children to this app.
 public struct GameModeHelper: GameModeProviding {
     private let paths: AppPaths
+    private let icons: any GameModeIconProviding
     private let registration: any GameModeRegistering
     private let beforeLink: @Sendable () throws -> Void
-    public init(paths: AppPaths, registration: any GameModeRegistering = SystemGameModeRegistration()) {
-        self.paths = paths; self.registration = registration; self.beforeLink = {}
+    public init(paths: AppPaths, icons: any GameModeIconProviding = BundleGameModeIcons(), registration: any GameModeRegistering = SystemGameModeRegistration()) {
+        self.paths = paths; self.icons = icons; self.registration = registration; self.beforeLink = {}
     }
-    package init(paths: AppPaths, registration: any GameModeRegistering, beforeLink: @escaping @Sendable () throws -> Void) {
-        self.paths = paths; self.registration = registration; self.beforeLink = beforeLink
+    package init(paths: AppPaths, icons: any GameModeIconProviding = BundleGameModeIcons(), registration: any GameModeRegistering,
+        beforeLink: @escaping @Sendable () throws -> Void) {
+        self.paths = paths; self.icons = icons; self.registration = registration; self.beforeLink = beforeLink
     }
 
     private struct Marker: Codable, Equatable {
+        let layout: Int
+        let gameID: String
         let bundleID: SafeIdentifier
         let bundleDigest: Digest
         let wineDigest: Digest
-        let sourceRoot: SafeRelativePath?
+        let iconDigest: Digest
+        let sourceRoot: SafeRelativePath
+    }
+    private struct Entry {
+        let path: SafeRelativePath
+        var source: SafeRelativePath? = nil
+        var link: String? = nil
+        var data: Data? = nil
+        var directory: Bool = false
+    }
+    private struct Plan {
+        let marker: Marker
+        let entries: [Entry]
+        let command: String
     }
 
-    public func prepare(bundle: InstalledRuntimeBundle, componentIDs: [String]) async throws -> GameModeRuntime {
-        try await BlockingIO.run {
+    public func prepare(bundle: InstalledRuntimeBundle, game: GameDefinition, componentIDs: [String]) async throws -> GameModeRuntime {
+        let icon = try await icons.icon(for: game)
+        return try await BlockingIO.run {
             let lease = try RuntimeStoreLease(store: RuntimeStore(paths: paths))
             defer { withExtendedLifetime(lease) {} }
             let fs = try ContainedFileSystem(root: paths.root).pinRoot()
-            let source = try sourcePath(bundle)
-            let marker = try self.marker(bundle, fs: fs)
-            let destination = try Self.appPath(bundle.id, paths: paths)
-            let helper = GameModeRuntime(root: try SafeRelativePath("\(destination)/Contents").resolved(against: paths.root),
-                wineBinary: try SafeRelativePath("\(destination)/Contents/MacOS/\(bundle.wineBinary.lastPathComponent)").resolved(against: paths.root))
-            if (try? verify(helper, bundle: bundle, fs: fs, marker: marker)) != nil {
+            let plan = try self.plan(bundle: bundle, game: game, icon: icon, fs: fs)
+            let destination = try appPath(bundle.id, game: game)
+            let helper = try result(destination: destination, game: game, command: plan.command)
+            if (try? verify(helper, destination: destination, plan: plan, fs: fs)) != nil {
                 try registration.register(destination.resolved(against: paths.root))
                 return helper
             }
-            // Valid reuse is read-only, but construction/replacement needs the same
-            // component exclusion and journal barrier as runtime publication/removal.
             let pins = try RuntimeRemovalLease(paths: paths, componentIDs: componentIDs)
             defer { withExtendedLifetime(pins) {} }
             guard !pins.componentIDs.isEmpty else { throw LauncherError.io("Missing Game Mode component exclusion") }
-            let entries = try snapshot(fs: fs, root: source)
+            // Old sessions keep these links until their pins and journal drain.
+            let legacy = try SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/GameMode/\(bundle.id)/MacGacha Game.app")
+            try fs.removeItem(at: legacy)
+            let titleNamed = try SafeRelativePath("\(destination.components.dropLast().joined(separator: "/"))/\(game.gameApplicationName).app")
+            if titleNamed != destination { try fs.removeItem(at: titleNamed) }
             let incoming = try SafeRelativePath("\(destination.components.dropLast().joined(separator: "/"))/.incoming-\(UUID().uuidString)")
             do {
-                try fs.createDirectory(at: SafeRelativePath("\(incoming)/Contents"))
-                for entry in entries {
+                try fs.createDirectory(at: incoming)
+                for entry in plan.entries {
                     try Task.checkCancellation()
-                    let output = try SafeRelativePath("\(incoming)/Contents/\(mapped(entry.path))")
-                    if entry.type == .directory { try fs.createDirectory(at: output) }
-                    else if let target = entry.linkTarget { try fs.createSymbolicLink(at: output, target: target) }
-                    else {
-                        try beforeLink()
-                        try fs.createHardLink(at: output, to: SafeRelativePath("\(source)/\(entry.path)"))
-                    }
+                    let output = try SafeRelativePath("\(incoming)/\(entry.path)")
+                    if entry.directory { try fs.createDirectory(at: output) }
+                    else if let link = entry.link { try fs.createSymbolicLink(at: output, target: link) }
+                    else if let source = entry.source { try beforeLink(); try fs.createHardLink(at: output, to: source) }
+                    else if let data = entry.data { try fs.writeAtomically(data, to: output) }
                 }
-                let contents = try SafeRelativePath("\(incoming)/Contents")
-                let plist = try PropertyListSerialization.data(fromPropertyList: Self.plist(executable: bundle.wineBinary.lastPathComponent), format: .xml, options: 0)
-                try fs.writeAtomically(plist, to: SafeRelativePath("\(contents)/Info.plist"))
-                try fs.writeAtomically(JSONEncoder().encode(marker), to: SafeRelativePath("\(incoming)/.macgacha-game-mode.json"))
-                // Never sync/quarantine/sign the linked tree: those operations would
-                // mutate or repeatedly flush the original runtime's shared inodes.
+                try fs.writeAtomically(JSONEncoder().encode(plan.marker), to: SafeRelativePath("\(incoming)/.macgacha-game-mode.json"))
+                // Shared executable inodes must never be re-signed or modified.
                 try fs.publishDirectory(at: incoming, to: destination)
-                try verify(helper, bundle: bundle, fs: fs, marker: marker)
+                try verify(helper, destination: destination, plan: plan, fs: fs)
                 try registration.register(destination.resolved(against: paths.root))
                 try fs.removeItem(at: incoming)
                 return helper
             } catch {
-                // The construction lease and component pins stay alive until
-                // cleanup joins, even when cancellation caused this failure.
                 try? await BlockingIO.finish { try fs.removeItem(at: incoming) }
                 throw error
             }
@@ -105,81 +118,133 @@ public struct GameModeHelper: GameModeProviding {
     }
 
     public func validate(_ helper: GameModeRuntime, bundle: InstalledRuntimeBundle) async throws {
+        guard let game = GameDefinition.find(helper.gameID) else { throw LauncherError.io("Unknown Game Mode edition") }
+        let icon = try await icons.icon(for: game)
         try await BlockingIO.run {
             let fs = try ContainedFileSystem(root: paths.root).pinRoot()
-            try verify(helper, bundle: bundle, fs: fs, marker: marker(bundle, fs: fs))
+            try verify(helper, destination: appPath(bundle.id, game: game), plan: plan(bundle: bundle, game: game, icon: icon, fs: fs), fs: fs)
         }
     }
 
-    private func verify(_ helper: GameModeRuntime, bundle: InstalledRuntimeBundle, fs: ContainedFileSystem, marker: Marker) throws {
-        let app = try Self.appPath(bundle.id, paths: paths)
-        let root = try SafeRelativePath("\(app)/Contents")
-        guard helper.root.path == root.resolved(against: paths.root).path,
-            helper.wineBinary.path == (try SafeRelativePath("\(root)/MacOS/\(bundle.wineBinary.lastPathComponent)").resolved(against: paths.root)).path else {
-            throw LauncherError.io("Game Mode helper location changed")
+    private func plan(bundle: InstalledRuntimeBundle, game: GameDefinition, icon: GameModeIcon, fs: ContainedFileSystem) throws -> Plan {
+        guard GameDefinition.find(game.id) != nil else { throw LauncherError.io("Unknown Game Mode edition") }
+        let source = try RuntimeJSONFile.relativePath(bundle.root, root: paths.root)
+        let runtimes = try RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root)
+        guard source.components.starts(with: runtimes.components), !source.components.contains("GameMode"),
+            bundle.wineBinary.deletingLastPathComponent().path == bundle.root.appendingPathComponent("bin").path else { throw LauncherError.io("Invalid Game Mode runtime layout") }
+        let unix = "lib/wine/x86_64-unix"
+        let wrapper = try fs.readFile(at: RuntimeJSONFile.relativePath(bundle.wineBinary, root: paths.root), maxBytes: 32 << 20)
+        let script = String(data: wrapper, encoding: .utf8)
+        let wrapped = script?.hasPrefix("#!/bin/sh") == true && script?.contains("$wrapper_dir/wine.real") == true
+        let magic = Data([0xcf, 0xfa, 0xed, 0xfe])
+        guard wrapped || wrapper.starts(with: magic) else { throw LauncherError.io("Unsupported Game Mode Wine wrapper") }
+        var hash = StreamingHasher(.sha256); hash.update(wrapper)
+        for name in ["wine", "ntdll.so"] {
+            let data = try fs.readFile(at: SafeRelativePath("\(source)/\(unix)/\(name)"), maxBytes: 32 << 20)
+            guard data.starts(with: magic) else { throw LauncherError.io("Unsupported Game Mode Unix loader") }
+            hash.update(data)
         }
-        guard try JSONDecoder().decode(Marker.self, from: fs.readFile(at: SafeRelativePath("\(app)/.macgacha-game-mode.json"), maxBytes: 4096)) == marker else {
-            throw LauncherError.io("Game Mode identity changed")
+        let marker = Marker(layout: 3, gameID: game.id, bundleID: bundle.id, bundleDigest: bundle.digest,
+            wineDigest: hash.finalize(), iconDigest: icon.digest, sourceRoot: source)
+        let original = try fs.inspectTree(at: source, allowingExternalHardLinks: true)
+        guard !original.contains(where: { ["MacOS", "Info.plist", "Resources"].contains($0.path.components[0]) }) else { throw LauncherError.io("Unsupported Game Mode runtime layout") }
+        try ArchivePolicy.validate(original.map { ArchiveEntry(path: $0.path.description, kind: $0.linkTarget.map { .symlink($0) } ?? ($0.type == .directory ? .directory : .file)) })
+        var entries = [Entry(path: try SafeRelativePath("Contents"), directory: true)]
+        for entry in original {
+            entries.append(Entry(path: try SafeRelativePath("Contents/\(entry.path)"), source: entry.type == .regularFile ? try SafeRelativePath("\(source)/\(entry.path)") : nil,
+                link: entry.linkTarget, directory: entry.type == .directory))
         }
-        let source = try sourcePath(bundle), entries = try snapshot(fs: fs, root: source)
-        let actual = try fs.inspectTree(at: root, allowingExternalHardLinks: true)
+        entries.append(Entry(path: try SafeRelativePath("Contents/MacOS"), directory: true))
+        for entry in original where entry.path.components.dropLast().joined(separator: "/") == unix {
+            let name = entry.path.components.last!
+            guard !["wine-wrapper", "wine.real", "x86_64-unix", "x86_64-windows"].contains(name), entry.type != .directory else { throw LauncherError.io("Unsupported Game Mode Unix directory") }
+            entries.append(Entry(path: try SafeRelativePath("Contents/MacOS/\(name)"),
+                source: entry.type == .regularFile ? try SafeRelativePath("\(source)/\(entry.path)") : nil,
+                link: entry.linkTarget.map { "../\(unix)/\($0)" }))
+        }
+        entries.append(Entry(path: try SafeRelativePath("Contents/MacOS/wine-wrapper"), source: try RuntimeJSONFile.relativePath(bundle.wineBinary, root: paths.root)))
+        entries.append(Entry(path: try SafeRelativePath("Contents/MacOS/wine.real"), source: try SafeRelativePath("\(source)/\(unix)/wine")))
+        entries.append(Entry(path: try SafeRelativePath("Contents/MacOS/x86_64-windows"), link: "../lib/wine/x86_64-windows"))
+        entries.append(Entry(path: try SafeRelativePath("Contents/MacOS/x86_64-unix"), link: "."))
+        for name in ["bin", "lib", "share"] where original.contains(where: { $0.path.description == name && $0.type == .directory }) {
+            entries.append(Entry(path: try SafeRelativePath(name), link: "Contents/\(name)"))
+        }
+        // Relocated Unix modules retain @loader_path/../.. rpaths. From
+        // MacOS that is the app root, so expose every lib entry there too.
+        for entry in original where entry.path.components.count == 2 && entry.path.components.first == "lib" {
+            let name = entry.path.components.last!
+            if entries.contains(where: { $0.path.description == name }) { continue }
+            entries.append(Entry(path: try SafeRelativePath(name), link: "Contents/lib/\(name)"))
+        }
+        entries.append(Entry(path: try SafeRelativePath("Contents/Resources"), directory: true))
+        entries.append(Entry(path: try SafeRelativePath("Contents/Resources/AppIcon.icns"), data: icon.icns))
+        if let assets = icon.assets { entries.append(Entry(path: try SafeRelativePath("Contents/Resources/Assets.car"), data: assets)) }
+        for (language, text) in GameModePrivacy.descriptions.sorted(by: { $0.key < $1.key }) {
+            let directory = "Contents/Resources/\(language).lproj"
+            entries.append(Entry(path: try SafeRelativePath(directory), directory: true))
+            entries.append(Entry(path: try SafeRelativePath("\(directory)/InfoPlist.strings"),
+                data: try PropertyListSerialization.data(fromPropertyList: [GameModePrivacy.key: text], format: .xml, options: 0)))
+        }
+        entries.append(Entry(path: try SafeRelativePath("Contents/Info.plist"), data: try PropertyListSerialization.data(fromPropertyList: plist(game), format: .xml, options: 0)))
+        try validateDependencies(entries: entries, original: original, source: source, fs: fs)
+        return Plan(marker: marker, entries: entries, command: wrapped ? "wine-wrapper" : "wine")
+    }
+
+    private func validateDependencies(entries: [Entry], original: [ContainedFileSystem.TreeEntry], source: SafeRelativePath, fs: ContainedFileSystem) throws {
+        let runtime = GameModeDependencyTree(paths: Set(original.map { $0.path.description }),
+            directories: Set(original.filter { $0.type == .directory }.map { $0.path.description }),
+            links: Dictionary(uniqueKeysWithValues: original.compactMap { entry in entry.linkTarget.map { (entry.path.description, $0) } }),
+            files: Dictionary(uniqueKeysWithValues: try original.filter { $0.type == .regularFile }.map {
+                ($0.path.description, try SafeRelativePath("\(source)/\($0.path)"))
+            }))
+        let mirror = GameModeDependencyTree(paths: Set(entries.map { $0.path.description }),
+            directories: Set(entries.filter { $0.directory }.map { $0.path.description }),
+            links: Dictionary(uniqueKeysWithValues: entries.compactMap { entry in entry.link.map { (entry.path.description, $0) } }),
+            files: Dictionary(uniqueKeysWithValues: entries.compactMap { entry in entry.source.map { (entry.path.description, $0) } }))
+        let validator = GameModeDependencies(runtime: runtime, mirror: mirror, sourceRoot: source.resolved(against: paths.root).path, fs: fs)
+        for entry in entries where entry.path.components.dropLast() == ["Contents", "MacOS"][...] {
+            guard let file = entry.source else { continue }
+            let data = try fs.readFile(at: file, maxBytes: MachOLoadCommands.maximumFileBytes)
+            for image in try MachOLoadCommands.images(in: data) {
+                try validator.validate(image, originalParent: Array(file.components.dropFirst(source.components.count).dropLast()),
+                    helperParent: Array(entry.path.components.dropLast()))
+            }
+        }
+    }
+
+    private func verify(_ helper: GameModeRuntime, destination: SafeRelativePath, plan: Plan, fs: ContainedFileSystem) throws {
+        guard let game = GameDefinition.find(plan.marker.gameID), helper == (try result(destination: destination, game: game, command: plan.command)),
+            try JSONDecoder().decode(Marker.self, from: fs.readFile(at: SafeRelativePath("\(destination)/.macgacha-game-mode.json"), maxBytes: 4096)) == plan.marker else { throw LauncherError.io("Game Mode identity changed") }
+        let actual = try fs.inspectTree(at: destination, allowingExternalHardLinks: true)
+        guard actual.count == plan.entries.count + 1 else { throw LauncherError.io("Game Mode mirror contents changed") }
         let byPath = Dictionary(uniqueKeysWithValues: actual.map { ($0.path.description, $0) })
-        guard actual.count == entries.count + 1 else { throw LauncherError.io("Game Mode mirror contents changed") }
-        for entry in entries {
-            let mapped = try mapped(entry.path)
-            guard let mirror = byPath[mapped.description], mirror.type == entry.type, mirror.linkTarget == entry.linkTarget else {
-                throw LauncherError.io("Game Mode mirror entry changed")
+        for entry in plan.entries {
+            guard let found = byPath[entry.path.description], found.linkTarget == entry.link,
+                found.type == (entry.directory ? .directory : entry.link == nil ? .regularFile : .other) else { throw LauncherError.io("Game Mode mirror entry changed") }
+            let target = try SafeRelativePath("\(destination)/\(entry.path)")
+            if let source = entry.source {
+                guard try fs.regularFileIdentity(at: source) == fs.regularFileIdentity(at: target) else { throw LauncherError.io("Game Mode mirror inode changed") }
             }
-            if entry.type == .regularFile {
-                guard try fs.regularFileIdentity(at: SafeRelativePath("\(source)/\(entry.path)")) == fs.regularFileIdentity(at: SafeRelativePath("\(root)/\(mapped)")) else {
-                    throw LauncherError.io("Game Mode mirror inode changed")
-                }
+            if let data = entry.data {
+                guard try fs.readFile(at: target, maxBytes: max(16384, data.count)) == data else { throw LauncherError.io("Game Mode resources changed") }
             }
-        }
-        let plist = try PropertyListSerialization.propertyList(from: fs.readFile(at: SafeRelativePath("\(root)/Info.plist"), maxBytes: 16384), format: nil)
-        guard let dictionary = plist as? NSDictionary, dictionary == Self.plist(executable: bundle.wineBinary.lastPathComponent) as NSDictionary else {
-            throw LauncherError.io("Game Mode application metadata changed")
         }
     }
 
-    private func marker(_ bundle: InstalledRuntimeBundle, fs: ContainedFileSystem) throws -> Marker {
-        var hash = StreamingHasher(.sha256)
-        hash.update(try fs.readFile(at: RuntimeJSONFile.relativePath(bundle.wineBinary, root: paths.root), maxBytes: 32 << 20))
-        return Marker(bundleID: bundle.id, bundleDigest: bundle.digest, wineDigest: hash.finalize(), sourceRoot: try sourcePath(bundle))
+    private func plist(_ game: GameDefinition) -> [String: Any] {
+        ["CFBundleIdentifier": "com.lo7ted.macgacha.game.\(game.id)", "CFBundleName": game.gameApplicationName,
+         "CFBundleDisplayName": game.gameApplicationName, "CFBundleExecutable": "wine", "CFBundlePackageType": "APPL",
+         "CFBundleInfoDictionaryVersion": "6.0", "CFBundleShortVersionString": "1.0", "CFBundleVersion": "2",
+         "CFBundleIconName": "AppIcon", "CFBundleIconFile": "AppIcon", "LSApplicationCategoryType": "public.app-category.games",
+         "LSSupportsGameMode": true, "LSUIElement": true, "CFBundleDevelopmentRegion": "en",
+         "CFBundleLocalizations": GameModePrivacy.descriptions.keys.sorted(), GameModePrivacy.key: GameModePrivacy.english]
     }
-    private func sourcePath(_ bundle: InstalledRuntimeBundle) throws -> SafeRelativePath {
-        let root = try RuntimeJSONFile.relativePath(bundle.root, root: paths.root)
-        let runtime = try RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root)
-        guard root.components.starts(with: runtime.components), !root.components.contains("GameMode"),
-            bundle.wineBinary.deletingLastPathComponent().path == bundle.root.appendingPathComponent("bin").path else {
-            throw LauncherError.io("Invalid Game Mode runtime layout")
-        }
-        return root
+    private func appPath(_ id: SafeIdentifier, game: GameDefinition) throws -> SafeRelativePath {
+        try SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/GameMode/\(id)/\(SafeIdentifier(game.id))/\(SafeIdentifier(game.id)).app")
     }
-    private func snapshot(fs: ContainedFileSystem, root: SafeRelativePath) throws -> [ContainedFileSystem.TreeEntry] {
-        let entries = try fs.inspectTree(at: root, allowingExternalHardLinks: true)
-        guard entries.contains(where: { $0.path.description == "bin" && $0.type == .directory }),
-            !entries.contains(where: { ["Info.plist", "MacOS"].contains($0.path.components[0]) }) else {
-            throw LauncherError.io("Unsupported Game Mode runtime layout")
-        }
-        // Validate containment both before and after the bin -> MacOS mapping.
-        for transform in [false, true] {
-            try ArchivePolicy.validate(entries.map { entry in
-                ArchiveEntry(path: try transform ? mapped(entry.path).description : entry.path.description,
-                    kind: entry.linkTarget.map { .symlink($0) } ?? (entry.type == .directory ? .directory : .file))
-            })
-        }
-        return entries
-    }
-    private func mapped(_ path: SafeRelativePath) throws -> SafeRelativePath {
-        try SafeRelativePath(([path.components[0] == "bin" ? "MacOS" : path.components[0]] + path.components.dropFirst()).joined(separator: "/"))
-    }
-    private static func plist(executable: String) -> [String: Any] {
-        ["CFBundleIdentifier": "com.lo7ted.macgacha.game", "CFBundleName": "MacGacha Game", "CFBundleExecutable": executable,
-         "CFBundlePackageType": "APPL", "LSApplicationCategoryType": "public.app-category.games", "LSSupportsGameMode": true, "LSUIElement": true]
-    }
-    private static func appPath(_ id: SafeIdentifier, paths: AppPaths) throws -> SafeRelativePath {
-        try SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/GameMode/\(id)/MacGacha Game.app")
+    private func result(destination: SafeRelativePath, game: GameDefinition, command: String) throws -> GameModeRuntime {
+        let root = try SafeRelativePath("\(destination)/Contents").resolved(against: paths.root)
+        return GameModeRuntime(game: game, root: root, wineBinary: root.appendingPathComponent("MacOS/\(command)"), wineserver: root.appendingPathComponent("bin/wineserver"))
     }
     static func remove(bundleID: SafeIdentifier, paths: AppPaths, fs: ContainedFileSystem) throws {
         try fs.removeItem(at: SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/GameMode/\(bundleID)"))

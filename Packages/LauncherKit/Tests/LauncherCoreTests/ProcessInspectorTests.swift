@@ -234,9 +234,11 @@ import Testing
         }
     }
 
-    @Test func unreadableGameModeMirrorRemainsWithinRuntimeInspectionScope() {
+    @Test(arguments: ["/runtime/GameMode/bundle/MacGacha Game.app/Contents/MacOS/wine.real",
+        "/runtime/GameMode/bundle/genshin/Genshin Impact.app/Contents/MacOS/wine"])
+    func unreadableGameModeMirrorRemainsWithinRuntimeInspectionScope(path: String) {
         let inspector = SystemProcessInspector(kernel: InspectionFixture(failure: .unreadable,
-            path: "/runtime/GameMode/bundle/MacGacha Game.app/Contents/MacOS/wine.real"))
+            path: path))
         #expect(throws: ProcessInspectionError.incompleteScan) {
             try inspector.processes(environmentContains: "WINEPREFIX", value: "/prefix", scope: runtimeScope)
         }

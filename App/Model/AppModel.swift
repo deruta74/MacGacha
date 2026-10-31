@@ -316,7 +316,8 @@ final class AppModel {
         let log = EventLog(directory: paths.logs)
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
-        let launch = LiveLaunchServices(paths: paths, log: log)
+        let launch = LiveLaunchServices(paths: paths, log: log, icons: CachedGameModeIcons(
+            cacheDirectory: gameArtCacheDirectory(in: caches, bundleIdentifier: Bundle.main.bundleIdentifier)))
         let art: [Region: any GameArtProviding] = Dictionary(uniqueKeysWithValues: Region.allCases.map {
             ($0, GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
                 bundleIdentifier: Bundle.main.bundleIdentifier), region: $0,
