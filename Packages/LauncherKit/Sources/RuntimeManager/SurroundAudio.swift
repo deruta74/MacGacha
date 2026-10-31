@@ -11,5 +11,6 @@ public enum SurroundAudio {
         guard backend == .d3dmetal, bundleID == Self.bundleID, let family = GameDefinition.find(game)?.family else { return false }
         return family == .genshin || family == .zzz
     }
+    public static let version = String(componentID.dropFirst(ComponentKind.surroundAudio.idPrefix.count + 1))
     public static let modulePath = try! SafeRelativePath("x86_64-unix/winecoreaudio.so")
 }

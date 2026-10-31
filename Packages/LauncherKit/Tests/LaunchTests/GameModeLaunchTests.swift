@@ -18,7 +18,7 @@ private final class FakeGameMode: GameModeProviding, Sendable {
         helper = GameModeRuntime(game: GameDefinition.find("starrail")!, root: root, wineBinary: root.appendingPathComponent("MacOS/wine-wrapper"), wineserver: root.appendingPathComponent("bin/wineserver"))
         self.prepareFails = prepareFails; self.validationFails = validationFails
     }
-    func prepare(bundle: InstalledRuntimeBundle, game: GameDefinition, componentIDs: [String]) async throws -> GameModeRuntime {
+    func prepare(bundle: InstalledRuntimeBundle, game: GameDefinition, componentIDs: [String], options: GameModeOptions) async throws -> GameModeRuntime {
         calls.withLock { $0.prepare += 1; $0.game = game.id }
         if prepareFails { throw LauncherError.io("Synthetic private path must not reach logs") }
         return helper

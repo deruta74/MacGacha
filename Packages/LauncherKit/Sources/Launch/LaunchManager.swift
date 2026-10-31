@@ -222,9 +222,13 @@ public actor LaunchManager {
                 return id
             }
             let ids = Array(Set(selection.componentIDs + compatibilityIDs)).sorted()
+            let surroundRequested = requiredComponents.contains(.surroundAudio)
+            let surroundModule = surroundRequested ? selection.componentRoots[.surroundAudio].map { SurroundAudio.modulePath.resolved(against: $0) } : nil
+            guard !surroundRequested || surroundModule != nil else { throw LauncherError.io("Missing surround component root") }
             var helper: GameModeRuntime?
-            if globalSettings.gameModeEnabled, let gameMode {
-                do { helper = try await gameMode.prepare(bundle: bundle, game: game, componentIDs: ids) }
+            if globalSettings.gameModeEnabled || surroundRequested, let gameMode {
+                do { helper = try await gameMode.prepare(bundle: bundle, game: game, componentIDs: ids,
+                    options: GameModeOptions(gameModeEnabled: globalSettings.gameModeEnabled, surroundModule: surroundModule)) }
                 catch {
                     event("Game Mode unavailable; using normal Wine", game: game.id, metadata: ["reason": "helperPreparationFailed"])
                 }
@@ -234,7 +238,7 @@ public actor LaunchManager {
             }
             var previewChoice = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
                 wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment,
-                runtimeBundleID: bundle.id.rawValue, displays: displayProbe.connectedDisplays().map(\.id), gameModeRuntime: helper)
+                runtimeBundleID: bundle.id.rawValue, displays: displayProbe.connectedDisplays().map(\.id), gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled)
             stage = .lock; events.yield(.stage(stage))
             let (lock, pin) = try await BlockingIO.run {
                 let lock = try SessionLock.acquire(paths: paths, game: game.id)
@@ -251,7 +255,7 @@ public actor LaunchManager {
             if let candidate = helper, let gameMode {
                 do {
                     try await gameMode.validate(candidate, bundle: bundle)
-                    event("Game Mode helper selected", game: game.id)
+                    event(globalSettings.gameModeEnabled ? "Game Mode helper selected" : "Surround audio helper selected", game: game.id)
                 } catch {
                     helper = nil
                     previewChoice = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
@@ -260,6 +264,12 @@ public actor LaunchManager {
                     event("Game Mode unavailable; using normal Wine", game: game.id, metadata: ["reason": "helperValidationFailed"])
                 }
             }
+            let surroundActive = surroundRequested && helper?.surroundModule == surroundModule && helper?.gameID == game.id
+            if surroundRequested && !surroundActive {
+                events.yield(.note(.surroundUnavailable))
+                event("Surround audio skipped; using normal Wine audio", game: game.id, metadata: ["reason": "helperUnavailable"])
+            }
+            if !globalSettings.gameModeEnabled && !surroundActive { helper = nil }
             let preview = previewChoice
             guard try await read(game: game.id) == nil else { throw LauncherError.busy("Launch recovery is required") }
             let provenance = sessionProvenance
@@ -325,7 +335,7 @@ public actor LaunchManager {
             context.session.proxyPort = context.proxy?.port
             let displays = displayProbe.connectedDisplays().map(\.id)
             let resolved = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displays, gameModeRuntime: helper)
+                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displays, gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled)
             if !displays.isEmpty {
                 let selection = resolved.displayFallback ? "fallback" : (settings.display == nil ? "main" : "chosen")
                 note(context, "display=\(selection)")

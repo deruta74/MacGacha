@@ -60,7 +60,10 @@ public enum LaunchResolver {
         try settings.validate(for: recipe.game)
         for url in [installRoot, prefix, wineBinary] { try validateLocalURL(url) }
 
-        let helper = gameModeEnabled ? gameModeRuntime : nil
+        let surroundRequested = settings.surroundSound && offersSurroundSound(recipe.game, backend: settings.backend, runtimeBundleID: runtimeBundleID)
+        let module = componentRoots[.surroundAudio].map { SurroundAudio.modulePath.resolved(against: $0) }
+        let surroundActive = surroundRequested && module != nil && gameModeRuntime?.gameID == recipe.game && gameModeRuntime?.surroundModule == module
+        let helper = (gameModeEnabled || surroundActive) ? gameModeRuntime : nil
         if let helper {
             try validateLocalURL(helper.wineBinary)
             try validateLocalURL(helper.wineserver)
@@ -115,6 +118,7 @@ public enum LaunchResolver {
             componentCopies.append(LaunchComponentCopy(root: try requiredRoot(.crypt32Fix, in: componentRoots),
                 source: try SafeRelativePath("x86_64-windows/crypt32.dll"), toSystem32: "crypt32.dll"))
         }
+        if surroundActive { environment["MACGACHA_SURROUND"] = "1" }
         environment["WINEDEBUG"] = "fixme-all"
         let proxy = "http://127.0.0.1:\(proxyPort)"
         for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] { environment[key] = proxy }

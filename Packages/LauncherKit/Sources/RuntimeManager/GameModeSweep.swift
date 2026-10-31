@@ -6,7 +6,7 @@ import LauncherCore
 /// Runs within the store lease. Pins are kept on disk, so even an old partial
 /// mirror whose marker was never written can be reclaimed under exclusion.
 enum GameModeSweep {
-    private struct Source: Decodable { let sourceRoot: SafeRelativePath? }
+    private struct Source: Decodable { let sourceRoot: SafeRelativePath?; let surroundSource: SafeRelativePath? }
 
     static func run(paths: AppPaths, fs: ContainedFileSystem, holding held: RuntimeRemovalLease?,
         deleting: (ContainedFileSystem, SafeRelativePath) throws -> Void) throws {
@@ -59,25 +59,34 @@ enum GameModeSweep {
 
     private static func reclaim(app: SafeRelativePath, container: SafeRelativePath, bundleID: SafeIdentifier,
         runtimes: SafeRelativePath, fs: ContainedFileSystem, deleting: (ContainedFileSystem, SafeRelativePath) throws -> Void) throws {
-        let source = try sourceRoot(app: app, id: bundleID, runtimes: runtimes, fs: fs)
+        let metadata = try sourceRoot(app: app, id: bundleID, runtimes: runtimes, fs: fs)
+        guard let source = metadata.sourceRoot else { throw LauncherError.io("Missing Game Mode source location") }
         guard source.components.count > runtimes.components.count, source.components.starts(with: runtimes.components),
             !source.components.contains("GameMode") else { throw LauncherError.io("Invalid Game Mode source location") }
-        if try fs.itemType(at: source) != .directory { try deleting(fs, container) }
+        var audioMissing = false
+        if let audio = metadata.surroundSource {
+            let expected = try SafeRelativePath("\(runtimes)/surroundAudio/\(SurroundAudio.version)/\(SurroundAudio.modulePath)")
+            guard audio == expected else { throw LauncherError.io("Invalid helper audio source") }
+            audioMissing = try fs.itemType(at: audio) != .regularFile
+        }
+        if try fs.itemType(at: source) != .directory || audioMissing { try deleting(fs, container) }
     }
 
     private static func sourceRoot(app: SafeRelativePath, id: SafeIdentifier, runtimes: SafeRelativePath,
-        fs: ContainedFileSystem) throws -> SafeRelativePath {
+        fs: ContainedFileSystem) throws -> Source {
         let marker = try SafeRelativePath("\(app)/.macgacha-game-mode.json")
-        if let data = try RuntimeJSONFile.read(marker, in: fs, limit: 4096),
-            let path = try JSONDecoder().decode(Source.self, from: data).sourceRoot { return path }
+        if let data = try RuntimeJSONFile.read(marker, in: fs, limit: 4096) {
+            let value = try JSONDecoder().decode(Source.self, from: data)
+            if value.sourceRoot != nil { return value }
+        }
         // Before sourceRoot was recorded, downloaded D3DMetal mirrored its
         // component marker; assembled and imported bundles used bundles/<id>.
         let component = try SafeRelativePath("\(app)/Contents/.macgacha-component.json")
         if let data = try RuntimeJSONFile.read(component, in: fs, limit: 16384) {
             let record = try JSONDecoder().decode(InstalledComponent.self, from: data)
-            return try SafeRelativePath("\(runtimes)/\(record.kind.rawValue)/\(record.version)")
+            return Source(sourceRoot: try SafeRelativePath("\(runtimes)/\(record.kind.rawValue)/\(record.version)"), surroundSource: nil)
         }
-        return try SafeRelativePath("\(runtimes)/bundles/\(id)")
+        return Source(sourceRoot: try SafeRelativePath("\(runtimes)/bundles/\(id)"), surroundSource: nil)
     }
 
     private static func children(_ path: SafeRelativePath, fs: ContainedFileSystem) throws -> [SafeRelativePath] {

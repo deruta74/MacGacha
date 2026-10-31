@@ -67,6 +67,13 @@ struct AppModelLaunchTests {
         #expect(other == original)
     }
 
+    @Test func surroundFallbackNoteIsExposedForTheFooter() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        await fixture.model.handleLaunch(.note(.surroundUnavailable), id: "genshin")
+        #expect(fixture.model.launchNotes["genshin"] == .surroundUnavailable)
+        #expect(fixture.model.launchNotes["zzz"] == nil)
+    }
+
     @Test func surroundPreferencePersistsOnlyForItsEdition() async throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
         let model = fixture.model

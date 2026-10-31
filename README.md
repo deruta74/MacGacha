@@ -39,6 +39,7 @@ This only changes MacGacha itself, not any system setting. The first launch can 
 ## Roadmap
 
 **Done**
+- **Surround sound.** Optional spatial mixing for Genshin Impact and Zenless Zone Zero on D3DMetal Wine 11.20. Multichannel outputs retain their native layout. Head tracking is planned.
 
 - **Game Mode preparation.** MacGacha stays a utility. Each game edition launches through its own named app, using its cached game icon when available. Wine’s game processes stay inside that app so macOS can identify them. Normal launch remains the fallback. Game Mode is confirmed on D3DMetal Genshin. DXMT still needs live verification.
 - **Display choice.** Each game can open on a chosen monitor, with the main display as the default and fallback.
@@ -76,7 +77,7 @@ DXMT works for every game and stays available as the open-source alternative. Th
 1. **Wine 11.21 runtime**, which has the crypt32 fix built in. Our separate fix then goes away.
 2. **FPS unlocker (opt-in)** for games capped at 60 fps, off by default, with a ban-risk warning before you enable it.
 3. **Pre-download.** Downloading the next version before release.
-4. **Audio.** Surround output, including Spatial Audio on AirPods.
+4. **Spatial Audio head tracking.** Follow headphone motion during spatial playback.
 
 ## Feedback
 
