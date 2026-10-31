@@ -8,12 +8,12 @@ import LauncherCore
 private struct DependencyRegistration: GameModeRegistering { func register(_ app: URL) throws {} }
 
 // Real load-command structure, without executable code or platform tools.
-func gameModeMachO(rpaths: [String] = [], dylibs: [String] = []) -> Data {
+func gameModeMachO(rpaths: [String] = [], dylibs: [String] = [], weakDylibs: [String] = []) -> Data {
     func word(_ n: UInt32) -> Data { withUnsafeBytes(of: n.littleEndian) { Data($0) } }
     var commands = Data()
-    for (kind, paths) in [(UInt32(0x8000001c), rpaths), (UInt32(0xc), dylibs)] {
+    for (kind, paths) in [(UInt32(0x8000001c), rpaths), (UInt32(0xc), dylibs), (UInt32(0x80000018), weakDylibs)] {
         for path in paths {
-            let offset = kind == 0xc ? 24 : 12
+            let offset = kind == 0x8000001c ? 12 : 24
             let size = (offset + path.utf8.count + 1 + 7) & ~7
             var command = word(kind) + word(UInt32(size)) + word(UInt32(offset))
             command.append(Data(repeating: 0, count: offset - command.count))
@@ -21,7 +21,7 @@ func gameModeMachO(rpaths: [String] = [], dylibs: [String] = []) -> Data {
             commands.append(command)
         }
     }
-    return word(0xfeedfacf) + word(0x01000007) + word(3) + word(6) + word(UInt32(rpaths.count + dylibs.count)) + word(UInt32(commands.count)) + word(0) + word(0) + commands
+    return word(0xfeedfacf) + word(0x01000007) + word(3) + word(6) + word(UInt32(rpaths.count + dylibs.count + weakDylibs.count)) + word(UInt32(commands.count)) + word(0) + word(0) + commands
 }
 
 @Suite(.timeLimit(.minutes(1))) struct GameModeDependencyTests {

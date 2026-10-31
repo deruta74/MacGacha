@@ -18,6 +18,41 @@ private func fatMachO(_ images: [Data]) -> Data {
 }
 
 @Suite(.timeLimit(.minutes(1))) struct GameModeResolutionTests {
+    @Test(arguments: [false, true], [false, true])
+    func absentDependencyMustStayAbsent(weak: Bool, helperPresent: Bool) async throws {
+        let f = try BundleFixture(), bundle = try await gameModeTestBundle(f)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        let source = try RuntimeJSONFile.relativePath(bundle.root, root: f.store.paths.root)
+        if helperPresent {
+            try fs.writeAtomically(Data("optional library".utf8), to: SafeRelativePath("\(source)/bin/liboptional.dylib"))
+        }
+        let path = "@loader_path/../../bin/liboptional.dylib"
+        try fs.writeAtomically(gameModeMachO(dylibs: weak ? [] : [path], weakDylibs: weak ? [path] : []),
+            to: SafeRelativePath("\(source)/lib/wine/x86_64-unix/winebus.so"))
+        #expect(try fs.itemType(at: SafeRelativePath("\(source)/lib/bin/liboptional.dylib")) == nil)
+        let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: ResolutionRegistration())
+        if helperPresent {
+            await #expect(throws: (any Error).self) {
+                try await manager.prepare(bundle: bundle, game: GameDefinition.all[0], componentIDs: f.bundle.components.map(\.rawValue))
+            }
+        } else {
+            let helper = try await manager.prepare(bundle: bundle, game: GameDefinition.all[0], componentIDs: f.bundle.components.map(\.rawValue))
+            try await manager.validate(helper, bundle: bundle)
+        }
+    }
+
+    @Test func generatedResourceCannotCreateANewDependency() throws {
+        let f = try BundleFixture(), fs = try ContainedFileSystem(root: f.store.paths.root)
+        let runtime = GameModeDependencyTree(paths: [], directories: [], links: [:], files: [:])
+        let mirror = GameModeDependencyTree(paths: ["Contents", "Contents/MacOS", "Contents/Resources", "Contents/Resources/Assets.car"],
+            directories: ["Contents", "Contents/MacOS", "Contents/Resources"], links: [:], files: [:])
+        let validator = GameModeDependencies(runtime: runtime, mirror: mirror, sourceRoot: f.store.paths.root.path, fs: fs)
+        #expect(throws: (any Error).self) {
+            try validator.validate(MachOLoadCommands.Image(dylibs: ["@loader_path/../Resources/Assets.car"]),
+                originalParent: ["lib", "wine", "x86_64-unix"], helperParent: ["Contents", "MacOS"])
+        }
+    }
+
     @Test func dependencySearchWorkHasAFixedBound() throws {
         let f = try BundleFixture(), fs = try ContainedFileSystem(root: f.store.paths.root)
         let tree = GameModeDependencyTree(paths: [], directories: [], links: [:], files: [:])

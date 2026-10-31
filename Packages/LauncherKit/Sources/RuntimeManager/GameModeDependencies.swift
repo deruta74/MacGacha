@@ -48,10 +48,14 @@ struct GameModeDependencies {
         guard searches <= Self.maximumSearchCandidates else { throw LauncherError.io("Too many Game Mode dependency candidates") }
         for dylib in image.dylibs {
             let originalCandidates = candidates(dylib, rpaths: image.rpaths, parent: originalParent, helper: false)
-            guard let original = try firstFile(originalCandidates, in: runtime) else { continue }
+            let original = try firstFile(originalCandidates, in: runtime)
             let helperCandidates = candidates(dylib, rpaths: image.rpaths, parent: helperParent, helper: true)
-            guard let target = try firstFile(helperCandidates, in: mirror),
-                try fs.regularFileIdentity(at: original) == fs.regularFileIdentity(at: target) else {
+            let target = try firstFile(helperCandidates, in: mirror)
+            // Missing weak loads must stay missing, just as present loads must
+            // retain their inode. Always resolve both layouts before comparing.
+            let originalIdentity = try original.map { try fs.regularFileIdentity(at: $0) }
+            let targetIdentity = try target.map { try fs.regularFileIdentity(at: $0) }
+            guard originalIdentity == targetIdentity else {
                 throw LauncherError.io("Game Mode dependency target changed")
             }
         }
@@ -68,7 +72,15 @@ struct GameModeDependencies {
             catch GameModeDependencyTree.Failure.missing { continue }
             catch GameModeDependencyTree.Failure.outside { external = true; continue }
             catch { throw LauncherError.io("Invalid Game Mode dependency link") }
-            guard let file = tree.files[resolved.joined(separator: "/")] else { continue }
+            let key = resolved.joined(separator: "/")
+            guard let file = tree.files[key] else {
+                guard resolved.isEmpty || tree.directories.contains(key) else {
+                    // A generated resource exists here but has no runtime
+                    // source inode. It cannot preserve a runtime dependency.
+                    throw LauncherError.io("Unverifiable Game Mode dependency target")
+                }
+                continue
+            }
             guard !external else { throw LauncherError.io("Unverifiable Game Mode dependency search") }
             return file
         }
