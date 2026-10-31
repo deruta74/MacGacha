@@ -61,6 +61,7 @@ import TestSupport
             let affected = ["genshin-cn", "zzz-cn"].contains(game) && backend == .d3dmetal && bundle == Crypt32Fix.bundleID
             #expect(value.environment["WINEDLLPATH"] == nil)
             #expect(value.environment["WINEDLLOVERRIDES"] == (affected ? "crypt32=n,b" : ""))
+            #expect(!value.requiredComponents.contains(.surroundAudio))
             #expect(value.requiredComponents.contains(.crypt32Fix) == affected)
             #expect(value.componentCopies.count == (affected ? 1 : 0))
             #expect(value.preparation.crypt32Native == affected)
