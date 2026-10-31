@@ -338,3 +338,15 @@ private func writeRuntimeMarker(_ record: InstalledComponent, paths: AppPaths) t
     try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
     try JSONEncoder().encode(record).write(to: destination.appendingPathComponent(".macgacha-component.json"), options: .atomic)
 }
+
+@Test func runtimeDiscoveryReservesGameModeMirrors() throws {
+    let temp = try TempDir(), paths = AppPaths(root: temp.url)
+    let fs = try ContainedFileSystem(root: temp.url), store = RuntimeStore(paths: paths)
+    let installed = try InstalledComponent(kind: .wine, version: "1", installedAt: Date(timeIntervalSince1970: 1), source: .download)
+    try writeRuntimeMarker(installed, paths: paths)
+    try fs.createDirectory(at: SafeRelativePath("Runtimes/GameMode/bundle/MacGacha Game.app/Contents/MacOS"))
+    try fs.createDirectory(at: SafeRelativePath("Runtimes/unknown"))
+    let scan = try store.scan()
+    #expect(scan.components == [installed])
+    #expect(scan.invalid.map(\.rawName) == ["unknown"])
+}

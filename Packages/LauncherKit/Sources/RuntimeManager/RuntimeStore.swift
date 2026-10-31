@@ -92,7 +92,7 @@ public struct RuntimeStore: Sendable {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let rawName = kindPath.components.last!
             guard rawName.utf8.first != 0x2e else { continue }
-            if rawName == "bundles" { continue }
+            if ["bundles", "GameMode"].contains(rawName) { continue }
             guard let kind = ComponentKind(rawValue: rawName) else {
                 invalid.append(InvalidRuntimeEntry(kind: nil, rawName: rawName, reason: String(localized: "Unknown runtime kind", bundle: .module)))
                 continue
