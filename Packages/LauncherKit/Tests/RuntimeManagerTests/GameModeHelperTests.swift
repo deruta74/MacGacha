@@ -25,7 +25,7 @@ func gameModeTestBundle(_ fixture: BundleFixture) async throws -> InstalledRunti
     try await BlockingIO.run {
         let fs = try ContainedFileSystem(root: paths.root)
         let root = try RuntimeJSONFile.relativePath(bundle.root, root: paths.root)
-        let native = Data([0xcf, 0xfa, 0xed, 0xfe]) + Data("native fixture".utf8)
+        let native = gameModeMachO()
         try fs.writeAtomically(Data("#!/bin/sh\nreal_wine=\"$wrapper_dir/wine.real\"\n".utf8), to: SafeRelativePath("\(root)/bin/wine"))
         try fs.writeAtomically(Data("old stub".utf8), to: SafeRelativePath("\(root)/bin/wine.real"))
         for file in ["wine", "ntdll.so", "driver.so"] {
@@ -111,8 +111,8 @@ func gameModeTestBundle(_ fixture: BundleFixture) async throws -> InstalledRunti
             wineBinary: root.appendingPathComponent("bin/wine"), digest: hash.finalize(), source: .download)
         try await BlockingIO.run {
             let fs = try ContainedFileSystem(root: paths.root)
-            try fs.writeAtomically(Data([0xcf, 0xfa, 0xed, 0xfe]), to: SafeRelativePath("Runtimes/d3dmetal/1/bin/wine"))
-            for file in ["wine", "ntdll.so"] { try fs.writeAtomically(Data([0xcf, 0xfa, 0xed, 0xfe]), to: SafeRelativePath("Runtimes/d3dmetal/1/lib/wine/x86_64-unix/\(file)")) }
+            try fs.writeAtomically(gameModeMachO(), to: SafeRelativePath("Runtimes/d3dmetal/1/bin/wine"))
+            for file in ["wine", "ntdll.so"] { try fs.writeAtomically(gameModeMachO(), to: SafeRelativePath("Runtimes/d3dmetal/1/lib/wine/x86_64-unix/\(file)")) }
             try fs.createDirectory(at: SafeRelativePath("Runtimes/d3dmetal/1/lib/wine/x86_64-windows"))
             try fs.writeAtomically(JSONEncoder().encode(record), to: SafeRelativePath("Runtimes/d3dmetal/1/.macgacha-component.json"))
         }

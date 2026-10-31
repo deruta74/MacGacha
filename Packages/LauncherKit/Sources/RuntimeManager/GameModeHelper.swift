@@ -142,7 +142,7 @@ public struct GameModeHelper: GameModeProviding {
             guard data.starts(with: magic) else { throw LauncherError.io("Unsupported Game Mode Unix loader") }
             hash.update(data)
         }
-        let marker = Marker(layout: 2, gameID: game.id, bundleID: bundle.id, bundleDigest: bundle.digest,
+        let marker = Marker(layout: 3, gameID: game.id, bundleID: bundle.id, bundleDigest: bundle.digest,
             wineDigest: hash.finalize(), iconDigest: icon.digest, sourceRoot: source)
         let original = try fs.inspectTree(at: source, allowingExternalHardLinks: true)
         guard !original.contains(where: { ["MacOS", "Info.plist", "Resources"].contains($0.path.components[0]) }) else { throw LauncherError.io("Unsupported Game Mode runtime layout") }
@@ -167,11 +167,56 @@ public struct GameModeHelper: GameModeProviding {
         for name in ["bin", "lib", "share"] where original.contains(where: { $0.path.description == name && $0.type == .directory }) {
             entries.append(Entry(path: try SafeRelativePath(name), link: "Contents/\(name)"))
         }
+        // Relocated Unix modules retain @loader_path/../.. rpaths. From
+        // MacOS that is the app root, so expose every lib entry there too.
+        for entry in original where entry.path.components.count == 2 && entry.path.components.first == "lib" {
+            let name = entry.path.components.last!
+            if entries.contains(where: { $0.path.description == name }) { continue }
+            entries.append(Entry(path: try SafeRelativePath(name), link: "Contents/lib/\(name)"))
+        }
         entries.append(Entry(path: try SafeRelativePath("Contents/Resources"), directory: true))
         entries.append(Entry(path: try SafeRelativePath("Contents/Resources/AppIcon.icns"), data: icon.icns))
         if let assets = icon.assets { entries.append(Entry(path: try SafeRelativePath("Contents/Resources/Assets.car"), data: assets)) }
         entries.append(Entry(path: try SafeRelativePath("Contents/Info.plist"), data: try PropertyListSerialization.data(fromPropertyList: plist(game), format: .xml, options: 0)))
+        try validateDependencies(entries: entries, original: original, source: source, fs: fs)
         return Plan(marker: marker, entries: entries, command: wrapped ? "wine-wrapper" : "wine")
+    }
+
+    private func validateDependencies(entries: [Entry], original: [ContainedFileSystem.TreeEntry], source: SafeRelativePath, fs: ContainedFileSystem) throws {
+        let runtime = GameModeDependencyTree(paths: Set(original.map { $0.path.description }),
+            links: Dictionary(uniqueKeysWithValues: original.compactMap { entry in entry.linkTarget.map { (entry.path.description, $0) } }))
+        let mirror = GameModeDependencyTree(paths: Set(entries.map { $0.path.description }),
+            links: Dictionary(uniqueKeysWithValues: entries.compactMap { entry in entry.link.map { (entry.path.description, $0) } }))
+        for entry in entries where entry.path.components.dropLast() == ["Contents", "MacOS"][...] {
+            guard let file = entry.source else { continue }
+            let data = try fs.readFile(at: file, maxBytes: MachOLoadCommands.maximumFileBytes)
+            for path in try MachOLoadCommands.loaderPaths(in: data) {
+                let parent: [String], targetParent: [String], trailing: [String]
+                if path == "@loader_path" || path.hasPrefix("@loader_path/") {
+                    parent = Array(file.components.dropFirst(source.components.count).dropLast())
+                    targetParent = Array(entry.path.components.dropLast())
+                    trailing = path.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
+                } else if path == "@executable_path" || path.hasPrefix("@executable_path/") {
+                    // The long-running process and its children use the Unix loader.
+                    parent = ["lib", "wine", "x86_64-unix"]; targetParent = ["Contents", "MacOS"]
+                    trailing = path.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
+                } else {
+                    let root = source.resolved(against: paths.root).path
+                    guard path == root || path.hasPrefix(root + "/") else { continue }
+                    parent = []; targetParent = ["Contents"]
+                    trailing = path.dropFirst(root.count).split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+                }
+                // System paths outside the original runtime are not relocated.
+                var depth = parent.count, inside = true
+                for part in trailing {
+                    if part == ".." { depth -= 1 } else if part != "." && !part.isEmpty { depth += 1 }
+                    if depth < 0 { inside = false; break }
+                }
+                guard inside else { continue }
+                _ = try runtime.resolve(parent + trailing)
+                _ = try mirror.resolve(targetParent + trailing)
+            }
+        }
     }
 
     private func verify(_ helper: GameModeRuntime, destination: SafeRelativePath, plan: Plan, fs: ContainedFileSystem) throws {

@@ -84,7 +84,7 @@ private struct LayoutRegistration: GameModeRegistering { func register(_ app: UR
     @Test func nativeWineUsesTheUnixLoaderAndUnknownWrappersAreRefused() async throws {
         let f = try BundleFixture(), bundle = try await gameModeTestBundle(f), game = GameDefinition.all[0]
         let fs = try ContainedFileSystem(root: f.store.paths.root), path = try RuntimeJSONFile.relativePath(bundle.wineBinary, root: f.store.paths.root)
-        try fs.writeAtomically(Data([0xcf, 0xfa, 0xed, 0xfe]), to: path)
+        try fs.writeAtomically(gameModeMachO(), to: path)
         let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: LayoutRegistration())
         let helper = try await manager.prepare(bundle: bundle, game: game, componentIDs: f.bundle.components.map(\.rawValue))
         #expect(helper.wineBinary == helper.loader)
