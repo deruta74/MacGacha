@@ -75,10 +75,12 @@ enum RuntimeSetupItemState {
         let required = LaunchResolver.requiredComponents(recipe: recipe, settings: launchSettings(for: gameID),
             runtimeBundleID: bundle.id.rawValue)
         // Keep the ABI-specific Wine correction beside its bundle, before optional wrappers.
-        let kinds = required.filter { $0 == .crypt32Fix } + required.filter { $0 != .crypt32Fix }
+        let scoped: Set<ComponentKind> = [.crypt32Fix, .surroundAudio]
+        let kinds = required.filter { scoped.contains($0) } + required.filter { !scoped.contains($0) }
         for kind in kinds {
             guard let component = manifest.components.first(where: {
                 $0.kind == kind && (kind != .crypt32Fix || $0.id.rawValue == Crypt32Fix.componentID)
+                    && (kind != .surroundAudio || $0.id.rawValue == SurroundAudio.componentID)
             }) else { return nil }
             if !installed.contains(where: { $0.kind == kind && $0.version == component.version.rawValue }) {
                 result.append(RuntimeSetupRequirement(item: .init(id: component.id.rawValue, name: Self.kindName(kind),

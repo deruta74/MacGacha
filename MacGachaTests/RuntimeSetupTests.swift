@@ -71,6 +71,32 @@ import Launch
         #expect(!model.missingComponents(for: game))
     }
 
+    @Test(arguments: GameDefinition.all.map(\.id), [RuntimeBackend.dxmt, .d3dmetal])
+    func surroundSetupOnlyWhenEnabledAndEligible(game: String, backend: RuntimeBackend) async throws {
+        let (model, fake, manifest) = try fixture(game, backend: backend, patches: false)
+        var settings = model.launchSettings(for: game); settings.surroundSound = true
+        model.launchSettingsCache[game] = settings
+        let bundle = try #require(manifest.defaultBundle(for: backend))
+        let eligible = LaunchResolver.offersSurroundSound(game, backend: backend, runtimeBundleID: bundle.id.rawValue)
+        #expect(model.offersSurround(for: game) == eligible)
+        let ids = try #require(model.runtimeSetupPlan(for: game)).items.map(\.id)
+        #expect(ids.contains(SurroundAudio.componentID) == eligible)
+        for id in ids where id != SurroundAudio.componentID { try publish(id, fake: fake, manifest: manifest) }
+        await model.refreshRuntimes()
+        #expect(model.missingComponents(for: game) == eligible)
+        if eligible {
+            #expect(model.runtimeSetupPlan(for: game)?.items.map(\.id) == [SurroundAudio.componentID])
+            var events = fake.installEvents.stream.makeAsyncIterator()
+            model.installRecommended(for: game)
+            #expect(await events.next() == SurroundAudio.componentID)
+            try complete(SurroundAudio.componentID, fake: fake, manifest: manifest)
+            try await setupWait { model.runtimeSetupProgress.isEmpty }
+            #expect(!model.missingComponents(for: game))
+        }
+        settings.surroundSound = false; model.launchSettingsCache[game] = settings
+        #expect(!model.runtimeSetupRequirements(for: game)!.contains { $0.item.id == SurroundAudio.componentID })
+    }
+
     @Test func totalsRequireEveryKnownSizeAndDoNotOverflow() {
         func plan(_ sizes: [Int64?]) -> RuntimeSetupPlan {
             RuntimeSetupPlan(gameID: "genshin", items: sizes.enumerated().map { .init(id: "\($0.offset)", name: "fixture", size: $0.element) }, needsAppleTerms: false)

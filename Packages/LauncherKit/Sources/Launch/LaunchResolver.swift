@@ -36,6 +36,10 @@ public enum LaunchResolver {
     /// The Mainland China registry key is unverified; only Global supports this setting.
     public static func offersStarRailUnlock(_ game: String) -> Bool { game == "starrail" }
 
+    public static func offersSurroundSound(_ game: String, backend: RuntimeBackend, runtimeBundleID: String?) -> Bool {
+        SurroundAudio.applies(game: game, backend: backend, bundleID: runtimeBundleID)
+    }
+
     /// Shared with setup availability; checking requirements never needs component files.
     public static func requiredComponents(recipe: LaunchRecipe, settings: LaunchSettings, runtimeBundleID: String?) -> [ComponentKind] {
         var required: [ComponentKind] = []
@@ -43,6 +47,9 @@ public enum LaunchResolver {
             switch recipe.wrapper { case .none: break; case .jadeite: required.append(.jadeite); case .steamShim: required.append(.steamShim) }
         }
         if Crypt32Fix.applies(game: recipe.game, backend: settings.backend, bundleID: runtimeBundleID) { required.append(.crypt32Fix) }
+        if settings.surroundSound && offersSurroundSound(recipe.game, backend: settings.backend, runtimeBundleID: runtimeBundleID) {
+            required.append(.surroundAudio)
+        }
         return required
     }
     public static func resolve(recipe: LaunchRecipe, settings: LaunchSettings, installRoot: URL, prefix: URL,
