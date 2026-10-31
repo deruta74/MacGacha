@@ -9,6 +9,36 @@ import HoYoPlayAPI
 import TestSupport
 
 @Test
+func entryThemesAreKeptForStillsAndVideosInServerOrder() async throws {
+    let temp = try TempDir(), cdn = MockCDN(); try artFixtures(cdn)
+    let layers: [[String: Any]] = [
+        ["id": "first", "type": "BACKGROUND_TYPE_UNSPECIFIED", "background": ["url": "https://fastcdn.hoyoverse.com/first"],
+         "theme": ["url": "https://fastcdn.hoyoverse.com/first-theme"]],
+        ["id": "middle", "type": "BACKGROUND_TYPE_VIDEO", "background": ["url": "https://fastcdn.hoyoverse.com/middle"],
+         "video": ["url": "https://fastcdn.hoyoverse.com/middle-video"], "theme": ["url": "https://fastcdn.hoyoverse.com/middle-theme"]],
+        ["id": "last", "background": ["url": "https://fastcdn.hoyoverse.com/last"]]
+    ]
+    for name in ["first", "first-theme", "middle", "middle-theme", "last"] { cdn.serve(name, data: png) }
+    cdn.serve("middle-video", data: webm)
+    cdn.serve(apiBasic, data: try JSONSerialization.data(withJSONObject: ["data": ["game_info_list": [["game": ["biz": "hk4e_global"], "backgrounds": layers]]]]))
+    let directory = temp.url.appendingPathComponent("GameArt")
+    let first = await GameArtService(cacheDirectory: directory, http: cdn).refresh()
+    let backgrounds = try #require(first["genshin"]?.backgrounds)
+    #expect(backgrounds.map(\.id) == ["first", "middle", "last"])
+    #expect(backgrounds[0].theme != nil && backgrounds[0].video == nil)
+    #expect(backgrounds[1].theme != nil && backgrounds[1].video != nil)
+    #expect(backgrounds[2].theme == nil)
+    #expect(backgrounds[0].theme != backgrounds[1].theme)
+    let restored = await GameArtService(cacheDirectory: directory, http: cdn).loadCached()
+    #expect(restored == first)
+    cdn.serve("middle-video", data: Data("unavailable clip".utf8))
+    let failedVideo = await GameArtService(cacheDirectory: temp.url.appendingPathComponent("FailedVideo"), http: cdn).refresh()
+    let fallback = try #require(failedVideo["genshin"]?.backgrounds)
+    #expect(fallback.map(\.id) == ["first", "middle", "last"])
+    #expect(fallback[1].video == nil && fallback[1].image != nil && fallback[1].theme != nil)
+}
+
+@Test
 func mappingPrefersBasicBackgroundAndExposesNativeVideo() async throws {
     let temp = try TempDir(); let cdn = MockCDN()
     try artFixtures(cdn, video: true)

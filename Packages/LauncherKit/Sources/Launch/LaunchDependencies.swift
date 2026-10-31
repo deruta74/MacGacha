@@ -24,7 +24,7 @@ public protocol LaunchPrefixProviding: Sendable {
     func createPrefix(game: String, bundle: InstalledRuntimeBundle) async throws -> URL
 }
 public protocol LaunchPreparing: Sendable {
-    func ensure(prefix: URL, wineBinary: URL, request: PreparationRequest) async throws
+    @discardableResult func ensure(prefix: URL, wineBinary: URL, request: PreparationRequest) async throws -> PreparationOutcome
 }
 
 extension PrefixManager: LaunchPrefixProviding {

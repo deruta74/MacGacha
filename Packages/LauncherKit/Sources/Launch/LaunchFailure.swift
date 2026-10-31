@@ -16,6 +16,10 @@ public struct LaunchFailure: Error, Sendable {
     }
 }
 
+public enum LaunchNote: Sendable, Equatable {
+    case starRailSettingsMissing
+}
+
 public enum LaunchEvent: Sendable {
-    case stage(LaunchStage), running, ready, ended(normal: Bool), restored(RestoreOutcome), failed(LaunchFailure)
+    case stage(LaunchStage), note(LaunchNote), running, ready, ended(normal: Bool), restored(RestoreOutcome), failed(LaunchFailure)
 }

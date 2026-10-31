@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import AppKit
+import Launch
 import Foundation
 import Synchronization
 import Testing
@@ -13,6 +14,26 @@ import RuntimeManager
 
 @Suite(.serialized) @MainActor
 struct AppModelLaunchTests {
+    @Test(arguments: ["starrail", "starrail-cn"]) func starRailUnlockTargetIsValidatedBeforeSaving(game: String) throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        let original = fixture.model.launchSettings(for: game)
+        var settings = original; settings.unlockFPS = true; settings.unlockTarget = 90
+        #expect(throws: LauncherError.self) { try fixture.model.saveLaunchSettings(settings, for: game) }
+        #expect(fixture.model.launchSettings(for: game) == original)
+    }
+
+    @Test func frameRateNoteDoesNotFailLaunchAndClearsOnNextPlay() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        fixture.model.launchStates["starrail"] = .running
+        await fixture.model.handleLaunch(.note(.starRailSettingsMissing), id: "starrail")
+        #expect(fixture.model.launchNotes["starrail"] == .starRailSettingsMissing)
+        #expect(fixture.model.launchState(for: "starrail") == .running && fixture.model.lastError == nil)
+        #expect(fixture.makeModel().launchNotes.isEmpty)
+        fixture.model.play("starrail")
+        #expect(fixture.model.launchNotes["starrail"] == nil)
+        await fixture.model.launchTasks["starrail"]?.value
+    }
+
     @Test func unresolvedStartupRetainsReservationQuitProtectionAndRetries() async throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
         await fixture.services.setUnresolved(true)

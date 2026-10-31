@@ -12852,6 +12852,88 @@
         }
       }
     },
+    "Open the game's graphics settings once, then play again to use 120 FPS" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öffne einmal die Grafikeinstellungen und starte das Spiel erneut für 120 FPS"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abre los ajustes gráficos del juego una vez y vuelve a pulsar Comenzar juego para jugar a 120 FPS"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvrez une fois les paramètres graphiques du jeu, puis cliquez à nouveau sur Démarrer pour jouer à 120 FPS"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buka pengaturan grafis game sekali, lalu tekan Mulai Main lagi untuk bermain di 120 FPS"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲーム内のグラフィックス設定を一度開き、再び「ゲーム開始」を押すと120 FPSを利用できます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임 내 그래픽 설정을 한 번 연 뒤 다시 '게임 시작'을 누르면 120 FPS를 사용할 수 있습니다"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abra as configurações gráficas do jogo uma vez e clique em Começar Jogo novamente para jogar a 120 FPS"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Откройте настройки графики в игре, затем снова нажмите «Начать игру» для 120 FPS"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เปิดการตั้งค่ากราฟิกในเกมหนึ่งครั้ง แล้วกดเริ่มเกมอีกครั้งเพื่อใช้ 120 FPS"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Відкрийте налаштування графіки в грі, потім знову натисніть «Почати гру» для 120 FPS"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mở cài đặt đồ họa trong game một lần, rồi nhấn Bắt Đầu Game lần nữa để chơi ở 120 FPS"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开一次游戏内的图形设置，再点击“开始游戏”即可使用 120 FPS"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟一次遊戲內的圖形設定，再按「開始遊戲」即可使用 120 FPS"
+          }
+        }
+      }
+    },
     "Opens in your browser" : {
       "localizations" : {
         "de" : {
@@ -15565,6 +15647,88 @@
         }
       }
     },
+    "Sets 120 FPS in the game's own graphics settings before each launch. While it's on, the game hides its FPS option. Turning it off sets the game back to 60 FPS." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Legt vor jedem Start 120 FPS in den Grafikeinstellungen des Spiels fest. Solange diese Option aktiviert ist, blendet das Spiel seine FPS-Option aus. Beim Ausschalten wird das Spiel wieder auf 60 FPS gesetzt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Establece 120 FPS en los ajustes gráficos del juego antes de cada inicio. Mientras esta opción esté activada, el juego oculta su ajuste de FPS. Al desactivarla, el juego vuelve a 60 FPS."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Règle la fréquence sur 120 FPS dans les paramètres graphiques du jeu avant chaque lancement. Tant que cette option est activée, le jeu masque son réglage de fréquence d'images. La désactiver rétablit la fréquence à 60 FPS."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mengatur 120 FPS di pengaturan grafis game sebelum setiap peluncuran. Saat fitur ini aktif, game menyembunyikan opsi FPS-nya. Menonaktifkannya akan mengembalikan game ke 60 FPS."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "起動するたびに、ゲーム内のグラフィックス設定を120 FPSに変更します。有効な間は、ゲーム内のフレームレート設定が非表示になります。無効にすると、ゲームは60 FPSに戻ります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실행할 때마다 게임 내 그래픽 설정을 120 FPS로 변경합니다. 이 기능이 켜져 있는 동안 게임에서 프레임 설정 옵션이 숨겨집니다. 끄면 게임이 다시 60 FPS로 설정됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Define 120 FPS nas configurações gráficas do próprio jogo antes de cada inicialização. Enquanto esta opção estiver ativada, o jogo oculta a configuração de FPS. Ao desativá-la, o jogo volta a 60 FPS."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перед каждым запуском устанавливает 120 FPS в настройках графики самой игры. Пока эта функция включена, игра скрывает настройку частоты кадров. При отключении игра возвращается к 60 FPS."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ตั้งค่าเป็น 120 FPS ในการตั้งค่ากราฟิกของเกมก่อนเปิดเกมแต่ละครั้ง ขณะเปิดใช้ฟีเจอร์นี้ เกมจะซ่อนตัวเลือก FPS เมื่อปิดฟีเจอร์นี้ เกมจะกลับไปใช้ 60 FPS"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перед кожним запуском встановлює 120 FPS у налаштуваннях графіки самої гри. Поки цю функцію ввімкнено, гра приховує налаштування частоти кадрів. Після вимкнення гра повертається до 60 FPS."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đặt 120 FPS trong cài đặt đồ họa của game trước mỗi lần khởi chạy. Khi tính năng này bật, game sẽ ẩn tùy chọn FPS. Tắt tính năng này sẽ đưa game về 60 FPS."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次启动前，在游戏自身的图形设置中设为 120 FPS。启用后，游戏会隐藏帧率选项。关闭后，游戏将恢复为 60 FPS。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次啟動前，在遊戲本身的圖形設定中設為 120 FPS。啟用後，遊戲會隱藏幀率選項。關閉後，遊戲將恢復為 60 FPS。"
+          }
+        }
+      }
+    },
     "Settings" : {
       "localizations" : {
         "de" : {
@@ -17616,6 +17780,89 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "資料夾 %@ 及其中的所有內容將被刪除。"
+          }
+        }
+      }
+    },
+    "The frame limit is %lld FPS, so the game won't go above it. Set the limit to 120 or Off to play at 120 FPS." : {
+      "comment" : "The argument is the current frame limit",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Bildratenlimit liegt bei %lld FPS, daher wird das Spiel diesen Wert nicht überschreiten. Stelle das Limit auf 120 oder „Aus“, um mit 120 FPS zu spielen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El límite de fotogramas es de %lld FPS, por lo que el juego no lo superará. Establece el límite en 120 o Desactivado para jugar a 120 FPS."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La limite de fréquence d'images est de %lld FPS, le jeu ne la dépassera donc pas. Réglez la limite sur 120 ou « Désactivé » pour jouer à 120 FPS."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Batas frame rate adalah %lld FPS, jadi game tidak akan melebihi nilai tersebut. Atur batas ke 120 atau Nonaktif untuk bermain di 120 FPS."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フレームレート上限が%lld FPSのため、ゲームはこの値を超えません。120 FPSでプレイするには、上限を120または「オフ」に設定してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프레임 제한이 %lld FPS로 설정되어 있어 게임에서 이 값을 초과할 수 없습니다. 120 FPS로 플레이하려면 제한을 120 또는 '끔'으로 설정하세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O limite de quadros é de %lld FPS, então o jogo não ultrapassará esse valor. Defina o limite como 120 ou Desativado para jogar a 120 FPS."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ограничение частоты кадров установлено на %lld FPS, и игра не превысит его. Чтобы играть при 120 FPS, выберите ограничение 120 или «Выкл.»."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "จำกัดเฟรมเรตไว้ที่ %lld FPS เกมจึงจะไม่เกินค่านี้ หากต้องการเล่นที่ 120 FPS ให้ตั้งค่าจำกัดเฟรมเรตเป็น 120 หรือ ปิด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обмеження частоти кадрів установлено на %lld FPS, і гра не перевищить його. Щоб грати зі 120 FPS, виберіть обмеження 120 або «Вимк.»."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giới hạn khung hình là %lld FPS nên game sẽ không vượt quá mức này. Đặt giới hạn thành 120 hoặc Tắt để chơi ở 120 FPS."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帧率上限为 %lld FPS，游戏不会超过此值。要以 120 FPS 游玩，请将上限设为 120 或“关”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "幀率上限為 %lld FPS，遊戲不會超過此值。若要以 120 FPS 遊玩，請將上限設為 120 或「關閉」。"
           }
         }
       }
@@ -19675,6 +19922,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未知執行環境"
+          }
+        }
+      }
+    },
+    "Unlock 120 FPS" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "120 FPS freischalten"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desbloquear 120 FPS"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Débloquer 120 FPS"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buka 120 FPS"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "120 FPSを有効にする"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "120 FPS 잠금 해제"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desbloquear 120 FPS"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разблокировать 120 FPS"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ปลดล็อก 120 FPS"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Розблокувати 120 FPS"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mở khóa 120 FPS"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解锁 120 FPS"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解鎖 120 FPS"
           }
         }
       }

@@ -12,6 +12,22 @@ import TestSupport
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchManagerTests {
+    @Test(arguments: [StarRailFrameRateOutcome.missing, .unreadable, .applied, .unchanged])
+    func missingStarRailValueLaunchesAndPostsNote(outcome: StarRailFrameRateOutcome) async throws {
+        let f = try await ManagerFixture.make()
+        f.preparation.report(PreparationOutcome(starRailFrameRate: outcome))
+        try await BlockingIO.run {
+            var settings = LaunchSettings.defaults(for: "starrail"); settings.unlockFPS = true
+            try LaunchSettingsStore(paths: f.paths).save(settings, for: "starrail")
+        }
+        let manager = f.manager(), events = ManagerEvents(), consumer = await f.consume(manager, events: events)
+        await events.waitForRunning()
+        #expect(f.spawner.calls.count == 1)
+        let notes: [LaunchNote] = await events.values.compactMap { if case .note(let note) = $0 { note } else { nil } }
+        #expect(notes == (outcome == .missing || outcome == .unreadable ? [.starRailSettingsMissing] : []))
+        #expect(try await f.journal() != nil)
+        try await f.end(manager); await consumer.value
+    }
     @Test func resolvesDisplayOrderAgainBeforeSpawn() async throws {
         let f = try await ManagerFixture.make()
         let main = ConnectedDisplay(id: "00000000-0000-0000-0000-000000000001", name: "Main", isMain: true)

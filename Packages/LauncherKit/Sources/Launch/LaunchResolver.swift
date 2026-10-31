@@ -33,6 +33,9 @@ public struct ResolvedLaunch: Equatable, Sendable {
 }
 
 public enum LaunchResolver {
+    /// The Mainland China registry key is unverified; only Global supports this setting.
+    public static func offersStarRailUnlock(_ game: String) -> Bool { game == "starrail" }
+
     /// Shared with setup availability; checking requirements never needs component files.
     public static func requiredComponents(recipe: LaunchRecipe, settings: LaunchSettings, runtimeBundleID: String?) -> [ComponentKind] {
         var required: [ComponentKind] = []
@@ -47,7 +50,7 @@ public enum LaunchResolver {
         runtimeBundleID: String? = nil, displays: [String] = [],
         gameModeRuntime: GameModeRuntime? = nil, gameModeEnabled: Bool = true) throws -> ResolvedLaunch {
         guard Recipes.recipe(for: recipe.game) != nil else { throw LauncherError.io("Unknown launch game: \(recipe.game)") }
-        try settings.validate()
+        try settings.validate(for: recipe.game)
         for url in [installRoot, prefix, wineBinary] { try validateLocalURL(url) }
 
         let helper = gameModeEnabled ? gameModeRuntime : nil
@@ -132,7 +135,9 @@ public enum LaunchResolver {
             blockedHosts: settings.compatibilityPatches ? recipe.blockedHosts : [],
             preparation: PreparationRequest(retina: settings.retina, steamShim: steamShim,
                 dxmtExtras: dxmt ? (["winemetal.dll"] + (starRail ? ["nvngx.dll"] : [])) : [], nvidiaKeys: dxmt && starRail,
-                crypt32Native: requiredComponents.contains(.crypt32Fix)),
+                crypt32Native: requiredComponents.contains(.crypt32Fix),
+                starRailFrameRate: offersStarRailUnlock(recipe.game) ? (settings.unlockFPS ? .unlock120 : .restore) : nil,
+                starRailRegion: starRail ? (GameDefinition.find(recipe.game)?.region ?? .global) : .global),
             requiredComponents: requiredComponents, componentCopies: componentCopies, displayFallback: displayFallback)
     }
 
