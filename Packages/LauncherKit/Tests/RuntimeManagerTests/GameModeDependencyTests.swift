@@ -26,9 +26,10 @@ func gameModeMachO(rpaths: [String] = [], dylibs: [String] = []) -> Data {
 
 @Suite(.timeLimit(.minutes(1))) struct GameModeDependencyTests {
     @Test func readsThinAndEveryFatSliceAndRejectsBrokenCommands() throws {
+        func allPaths(_ data: Data) throws -> [String] { try MachOLoadCommands.images(in: data).flatMap { $0.rpaths + $0.dylibs } }
         let paths = ["@loader_path/../..", "@loader_path/../../GStreamer.framework"]
         let thin = gameModeMachO(rpaths: paths, dylibs: ["@loader_path/library.dylib"])
-        #expect(try MachOLoadCommands.loaderPaths(in: thin) == paths + ["@loader_path/library.dylib"])
+        #expect(try allPaths(thin) == paths + ["@loader_path/library.dylib"])
         func big(_ n: UInt32) -> Data { withUnsafeBytes(of: n.bigEndian) { Data($0) } }
         let second = gameModeMachO(rpaths: ["@loader_path/second"])
         var fat = big(0xcafebabe) + big(2)
@@ -36,25 +37,53 @@ func gameModeMachO(rpaths: [String] = [], dylibs: [String] = []) -> Data {
             fat += big(0x01000007) + big(3) + big(UInt32(offset)) + big(UInt32(size)) + big(0)
         }
         fat += thin + second
-        #expect(try MachOLoadCommands.loaderPaths(in: fat) == paths + ["@loader_path/library.dylib", "@loader_path/second"])
+        #expect(try allPaths(fat) == paths + ["@loader_path/library.dylib", "@loader_path/second"])
         func little(_ n: UInt32) -> Data { withUnsafeBytes(of: n.littleEndian) { Data($0) } }
         func little64(_ n: UInt64) -> Data { withUnsafeBytes(of: n.littleEndian) { Data($0) } }
         let fat64 = little(0xcafebabf) + little(1) + little(0x01000007) + little(3)
             + little64(40) + little64(UInt64(thin.count)) + little(0) + little(0) + thin
-        #expect(try MachOLoadCommands.loaderPaths(in: fat64) == paths + ["@loader_path/library.dylib"])
+        #expect(try allPaths(fat64) == paths + ["@loader_path/library.dylib"])
         // Byte-swapped 32-bit thin header, with no commands.
         let swapped = big(0xfeedface) + big(7) + big(3) + big(6) + big(0) + big(0) + big(0)
-        #expect(try MachOLoadCommands.loaderPaths(in: swapped).isEmpty)
+        #expect(try allPaths(swapped).isEmpty)
         var broken = thin; broken[36] = 0
-        #expect(throws: (any Error).self) { try MachOLoadCommands.loaderPaths(in: broken) }
+        #expect(throws: (any Error).self) { try allPaths(broken) }
         for length in [4, 20, thin.count - 1] {
-            #expect(throws: (any Error).self) { try MachOLoadCommands.loaderPaths(in: Data(thin.prefix(length))) }
+            #expect(throws: (any Error).self) { try allPaths(Data(thin.prefix(length))) }
         }
         var badOffset = thin; badOffset[40] = 255
-        #expect(throws: (any Error).self) { try MachOLoadCommands.loaderPaths(in: badOffset) }
+        #expect(throws: (any Error).self) { try allPaths(badOffset) }
         var badFat = fat; badFat[16] = 255
-        #expect(throws: (any Error).self) { try MachOLoadCommands.loaderPaths(in: badFat) }
-        #expect(try MachOLoadCommands.loaderPaths(in: Data("#!/bin/sh".utf8)).isEmpty)
+        #expect(throws: (any Error).self) { try allPaths(badFat) }
+        #expect(try allPaths(Data("#!/bin/sh".utf8)).isEmpty)
+    }
+
+    @Test func rpathDependencyThatNoLongerResolvesRefusesHelper() async throws {
+        let f = try BundleFixture(), bundle = try await gameModeTestBundle(f)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        let source = try RuntimeJSONFile.relativePath(bundle.root, root: f.store.paths.root)
+        try fs.writeAtomically(gameModeMachO(rpaths: ["@loader_path/.."], dylibs: ["@rpath/x86_64-unix/driver.so"]),
+            to: SafeRelativePath("\(source)/lib/wine/x86_64-unix/winebus.so"))
+        let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: DependencyRegistration())
+        await #expect(throws: (any Error).self) {
+            try await manager.prepare(bundle: bundle, game: GameDefinition.all[0], componentIDs: f.bundle.components.map(\.rawValue))
+        }
+    }
+
+    @Test func existingButDifferentDependencyTargetRefusesHelper() async throws {
+        let f = try BundleFixture(), bundle = try await gameModeTestBundle(f)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        let source = try RuntimeJSONFile.relativePath(bundle.root, root: f.store.paths.root)
+        // Identical bytes are insufficient: dyld must reach the same inode.
+        for parent in ["lib/bin", "bin"] {
+            try fs.writeAtomically(Data("same contents".utf8), to: SafeRelativePath("\(source)/\(parent)/libfoo.dylib"))
+        }
+        try fs.writeAtomically(gameModeMachO(dylibs: ["@loader_path/../../bin/libfoo.dylib"]),
+            to: SafeRelativePath("\(source)/lib/wine/x86_64-unix/winebus.so"))
+        let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: DependencyRegistration())
+        await #expect(throws: (any Error).self) {
+            try await manager.prepare(bundle: bundle, game: GameDefinition.all[0], componentIDs: f.bundle.components.map(\.rawValue))
+        }
     }
 
     @Test func unixModuleRpathsKeepLibraryAndFrameworkTargets() async throws {
@@ -83,8 +112,8 @@ func gameModeMachO(rpaths: [String] = [], dylibs: [String] = []) -> Data {
         let fs = try ContainedFileSystem(root: f.store.paths.root)
         let source = try RuntimeJSONFile.relativePath(bundle.root, root: f.store.paths.root)
         // A source-root dependency has no corresponding relocated parent in the app.
-        try fs.createDirectory(at: SafeRelativePath("\(source)/policy-dir"))
-        try fs.writeAtomically(gameModeMachO(rpaths: ["\(token)/../../../policy-dir"]), to: SafeRelativePath("\(source)/lib/wine/x86_64-unix/winebus.so"))
+        try fs.writeAtomically(Data("library".utf8), to: SafeRelativePath("\(source)/policy-dir/library.dylib"))
+        try fs.writeAtomically(gameModeMachO(dylibs: ["\(token)/../../../policy-dir/library.dylib"]), to: SafeRelativePath("\(source)/lib/wine/x86_64-unix/winebus.so"))
         let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: DependencyRegistration())
         await #expect(throws: (any Error).self) { try await manager.prepare(bundle: bundle, game: GameDefinition.all[0], componentIDs: f.bundle.components.map(\.rawValue)) }
     }
