@@ -179,6 +179,12 @@ public struct GameModeHelper: GameModeProviding {
         entries.append(Entry(path: try SafeRelativePath("Contents/Resources"), directory: true))
         entries.append(Entry(path: try SafeRelativePath("Contents/Resources/AppIcon.icns"), data: icon.icns))
         if let assets = icon.assets { entries.append(Entry(path: try SafeRelativePath("Contents/Resources/Assets.car"), data: assets)) }
+        for (language, text) in GameModePrivacy.descriptions.sorted(by: { $0.key < $1.key }) {
+            let directory = "Contents/Resources/\(language).lproj"
+            entries.append(Entry(path: try SafeRelativePath(directory), directory: true))
+            entries.append(Entry(path: try SafeRelativePath("\(directory)/InfoPlist.strings"),
+                data: try PropertyListSerialization.data(fromPropertyList: [GameModePrivacy.key: text], format: .xml, options: 0)))
+        }
         entries.append(Entry(path: try SafeRelativePath("Contents/Info.plist"), data: try PropertyListSerialization.data(fromPropertyList: plist(game), format: .xml, options: 0)))
         try validateDependencies(entries: entries, original: original, source: source, fs: fs)
         return Plan(marker: marker, entries: entries, command: wrapped ? "wine-wrapper" : "wine")
@@ -245,7 +251,8 @@ public struct GameModeHelper: GameModeProviding {
          "CFBundleDisplayName": game.gameApplicationName, "CFBundleExecutable": "wine", "CFBundlePackageType": "APPL",
          "CFBundleInfoDictionaryVersion": "6.0", "CFBundleShortVersionString": "1.0", "CFBundleVersion": "2",
          "CFBundleIconName": "AppIcon", "CFBundleIconFile": "AppIcon", "LSApplicationCategoryType": "public.app-category.games",
-         "LSSupportsGameMode": true, "LSUIElement": true]
+         "LSSupportsGameMode": true, "LSUIElement": true, "CFBundleDevelopmentRegion": "en",
+         "CFBundleLocalizations": GameModePrivacy.descriptions.keys.sorted(), GameModePrivacy.key: GameModePrivacy.english]
     }
     private func appPath(_ id: SafeIdentifier, game: GameDefinition) throws -> SafeRelativePath {
         try SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/GameMode/\(id)/\(SafeIdentifier(game.id))/\(SafeIdentifier(game.id)).app")

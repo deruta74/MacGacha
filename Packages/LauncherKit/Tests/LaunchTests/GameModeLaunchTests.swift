@@ -47,6 +47,9 @@ private final class FakeGameMode: GameModeProviding, Sendable {
         #expect(call.executable == (enabled ? provider.helper.wineBinary : f.bundle.wineBinary))
         #expect(call.environment["WINELOADER"] == (enabled ? provider.helper.loader.path : nil))
         #expect(call.environment["WINESERVER"] == (enabled ? provider.helper.wineserver.path : nil))
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+            #expect(call.environment[key]?.hasPrefix("http://127.0.0.1:") == true)
+        }
         let snapshot = try #require(try await f.journal())
         #expect(snapshot.wineBinary == call.executable)
         #expect(snapshot.wineserver == (enabled ? provider.helper.wineserver : f.bundle.wineBinary.deletingLastPathComponent().appendingPathComponent("wineserver")))

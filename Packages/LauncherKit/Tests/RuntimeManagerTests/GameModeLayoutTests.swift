@@ -49,6 +49,38 @@ private struct LayoutRegistration: GameModeRegistering { func register(_ app: UR
         await #expect(throws: (any Error).self) { try await manager.validate(helper, bundle: bundle) }
     }
 
+    @Test func helperPrivacyDescriptionHasEveryInterfaceLocalization() async throws {
+        let f = try BundleFixture(), bundle = try await gameModeTestBundle(f)
+        let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: LayoutRegistration())
+        let helper = try await manager.prepare(bundle: bundle, game: GameDefinition.all[0], componentIDs: f.bundle.components.map(\.rawValue))
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        let root = try RuntimeJSONFile.relativePath(helper.root, root: f.store.paths.root)
+        let plist = try #require(try PropertyListSerialization.propertyList(from: fs.readFile(at: SafeRelativePath("\(root)/Info.plist"), maxBytes: 16384), format: nil) as? [String: Any])
+        let english = "The game connects to a helper on this Mac that MacGacha starts for the session."
+        #expect(plist["NSLocalNetworkUsageDescription"] as? String == english)
+        #expect(plist["CFBundleDevelopmentRegion"] as? String == "en")
+        let locales = ["en", "zh-Hans", "zh-Hant", "ja", "ko", "ru", "uk", "de", "fr", "es", "pt", "id", "th", "vi"]
+        #expect(Set(plist["CFBundleLocalizations"] as? [String] ?? []) == Set(locales))
+        let appBundle = try #require(CFBundleCreate(nil, helper.root.deletingLastPathComponent() as CFURL))
+        for locale in locales {
+            let path = try SafeRelativePath("\(root)/Resources/\(locale).lproj/InfoPlist.strings")
+            let strings = try #require(try PropertyListSerialization.propertyList(from: fs.readFile(at: path, maxBytes: 4096), format: nil) as? [String: String])
+            let description = try #require(strings["NSLocalNetworkUsageDescription"])
+            #expect(!description.isEmpty)
+            if locale == "en" { #expect(description == english) }
+            else { #expect(description != english) }
+            #expect(!description.contains("/"))
+            if #available(macOS 15.4, *) {
+                let actual = CFBundleCopyLocalizedStringForLocalizations(appBundle,
+                    "NSLocalNetworkUsageDescription" as CFString, english as CFString, "InfoPlist" as CFString, [locale] as CFArray)
+                #expect(actual as String? == description)
+            }
+        }
+        try await manager.validate(helper, bundle: bundle)
+        try fs.writeAtomically(Data("corrupted".utf8), to: SafeRelativePath("\(root)/Resources/zh-Hans.lproj/InfoPlist.strings"))
+        await #expect(throws: (any Error).self) { try await manager.validate(helper, bundle: bundle) }
+    }
+
     @Test func titleNamedHelpersMigrateOnlyAfterPinsDrain() async throws {
         let f = try BundleFixture(), bundle = try await gameModeTestBundle(f), game = GameDefinition.find("starrail")!
         let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: LayoutRegistration())

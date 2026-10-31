@@ -40,7 +40,7 @@ This only changes MacGacha itself, not any system setting. The first launch can 
 
 **Done**
 
-- **Game Mode preparation.** MacGacha stays a utility. Each game edition launches through its own named app, using its cached game icon when available. Wine’s game processes stay inside that app so macOS can identify them. Normal launch remains the fallback. The generated helpers still need full-screen verification on both backends.
+- **Game Mode preparation.** MacGacha stays a utility. Each game edition launches through its own named app, using its cached game icon when available. Wine’s game processes stay inside that app so macOS can identify them. Normal launch remains the fallback. Game Mode is confirmed on D3DMetal Genshin. DXMT still needs live verification.
 - **Display choice.** Each game can open on a chosen monitor, with the main display as the default and fallback.
 - **Progress timing.** An estimated time remaining for downloads and full verification, elapsed time for phases without a percentage, and a signal when progress is taking longer than usual.
 - **Automatic updates** (Sparkle). **Check for Updates…** in the MacGacha menu and a switch in Settings. MacGacha asks before it downloads an update and installs it only when no game, recovery or installation is running.
