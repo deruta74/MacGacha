@@ -134,7 +134,7 @@ fileprivate actor ComponentInstallSession {
                 if lease == nil { lock = try InstallLock(fs: fs, path: SafeRelativePath("\(runtimes)/.lock")) }
                 self.fs = fs
                 if pins == nil { pins = try RuntimeRemovalLease(paths: store.paths, componentIDs: [component.id.rawValue]) }
-                try store.sweepStaging()
+                try store.sweepStaging(holding: pins, deleting: { try $0.removeItem(at: $1) })
                 let kind = try SafeRelativePath("\(runtimes)/\(component.kind.rawValue)")
                 try fs.createDirectory(at: kind)
                 let destination = try RuntimeJSONFile.relativePath(store.installURL(for: component), root: store.paths.root)

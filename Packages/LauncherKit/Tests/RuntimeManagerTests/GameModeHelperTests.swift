@@ -19,6 +19,121 @@ private final class RecordingGameRegistration: GameModeRegistering, Sendable {
 }
 
 @Suite(.timeLimit(.minutes(1))) struct GameModeHelperTests {
+    @Test func cancellationDrainsPartialMirrorBeforeReleasingPins() async throws {
+        let f = try BundleFixture(), bundle = try await f.manager.install(f.bundle)
+        let gate = BlockingTestGate(), calls = Mutex(0)
+        defer { gate.release() }
+        let store = f.store, ids = f.bundle.components.map(\.rawValue), bundleID = f.bundle.id
+        let paths = store.paths
+        let manager = GameModeHelper(paths: paths, registration: RecordingGameRegistration(), beforeLink: {
+            let count = calls.withLock { $0 += 1; return $0 }
+            if count == 2 { gate.block() }
+        })
+        let build = Task { try await manager.prepare(bundle: bundle, componentIDs: ids) }
+        try await gate.entered.wait()
+        build.cancel(); gate.release()
+        await #expect(throws: (any Error).self) { try await build.value }
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: paths.root)
+            let entries = try fs.contentsOfDirectory(at: SafeRelativePath("Runtimes/GameMode/\(bundleID)"))
+            #expect(!entries.contains { $0.components.last!.hasPrefix(".incoming-") })
+            // No abandoned hard links may keep the source's retired files alive.
+            _ = try fs.inspectTree(at: RuntimeJSONFile.relativePath(bundle.root, root: paths.root))
+            _ = try RuntimeRemovalLease(paths: paths, componentIDs: ids)
+        }
+    }
+
+    @Test(arguments: [false, true]) func crashStagingIsReclaimedAndLiveMirrorsSurvive(underInstallLease: Bool) async throws {
+        let f = try BundleFixture(), bundle = try await f.manager.install(f.bundle)
+        let store = f.store, ids = f.bundle.components.map(\.rawValue), bundleID = f.bundle.id
+        let paths = store.paths
+        let manager = GameModeHelper(paths: paths, registration: RecordingGameRegistration())
+        let helper = try await manager.prepare(bundle: bundle, componentIDs: ids)
+        let stage = try SafeRelativePath("Runtimes/GameMode/\(bundleID)/.incoming-crashed")
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: paths.root)
+            try fs.createHardLink(at: SafeRelativePath("\(stage)/Contents/MacOS/wine"), to: RuntimeJSONFile.relativePath(bundle.wineBinary, root: paths.root))
+        }
+        if underInstallLease { _ = try await f.manager.install(f.bundle) }
+        else { try await BlockingIO.run { try store.sweepStaging() } }
+        let remaining = try await BlockingIO.run { try ContainedFileSystem(root: paths.root).itemType(at: stage) }
+        #expect(remaining == nil)
+        try await manager.validate(helper, bundle: bundle)
+    }
+
+    @Test(arguments: [false, true]) func retiredBundleMirrorsAreReclaimedIncludingLegacyMarkers(legacy: Bool) async throws {
+        let f = try BundleFixture(), bundle = try await f.manager.install(f.bundle)
+        let store = f.store, ids = f.bundle.components.map(\.rawValue), bundleID = f.bundle.id
+        let paths = store.paths
+        let manager = GameModeHelper(paths: paths, registration: RecordingGameRegistration())
+        _ = try await manager.prepare(bundle: bundle, componentIDs: ids)
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: paths.root)
+            let parent = try SafeRelativePath("Runtimes/GameMode/\(bundleID)")
+            if legacy {
+                let marker = try SafeRelativePath("\(parent)/MacGacha Game.app/.macgacha-game-mode.json")
+                var object = try #require(try JSONSerialization.jsonObject(with: fs.readFile(at: marker, maxBytes: 4096)) as? [String: Any])
+                object.removeValue(forKey: "sourceRoot")
+                try fs.writeAtomically(JSONSerialization.data(withJSONObject: object), to: marker)
+            }
+            try fs.removeItem(at: RuntimeJSONFile.relativePath(bundle.root, root: paths.root))
+            try store.sweepStaging()
+            #expect(try fs.itemType(at: parent) == nil)
+            #expect(try store.installed().count == 2)
+        }
+    }
+
+    @Test func legacyDownloadedComponentMirrorIsReclaimedAfterComponentRemoval() async throws {
+        let temp = try TempDir(), paths = AppPaths(root: temp.url)
+        let record = try InstalledComponent(kind: .d3dmetal, version: "1", installedAt: Date(timeIntervalSince1970: 1), source: .download)
+        let root = paths.runtimes.appendingPathComponent("d3dmetal/1")
+        var hash = StreamingHasher(.sha256); hash.update(Data("wrapper".utf8))
+        let bundle = InstalledRuntimeBundle(id: try SafeIdentifier("metal-bundle"), root: root,
+            wineBinary: root.appendingPathComponent("bin/wine"), digest: hash.finalize(), source: .download)
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: paths.root)
+            try fs.writeAtomically(Data("wrapper".utf8), to: SafeRelativePath("Runtimes/d3dmetal/1/bin/wine"))
+            try fs.writeAtomically(JSONEncoder().encode(record), to: SafeRelativePath("Runtimes/d3dmetal/1/.macgacha-component.json"))
+        }
+        _ = try await GameModeHelper(paths: paths, registration: RecordingGameRegistration()).prepare(bundle: bundle, componentIDs: ["d3dmetal-1"])
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: paths.root)
+            let parent = try SafeRelativePath("Runtimes/GameMode/metal-bundle")
+            let marker = try SafeRelativePath("\(parent)/MacGacha Game.app/.macgacha-game-mode.json")
+            var object = try #require(try JSONSerialization.jsonObject(with: fs.readFile(at: marker, maxBytes: 4096)) as? [String: Any])
+            object.removeValue(forKey: "sourceRoot")
+            try fs.writeAtomically(JSONSerialization.data(withJSONObject: object), to: marker)
+            try fs.removeItem(at: SafeRelativePath("Runtimes/d3dmetal/1"))
+            try RuntimeStore(paths: paths).sweepStaging()
+            #expect(try fs.itemType(at: parent) == nil)
+        }
+    }
+
+    @Test(arguments: ["pin", "journal"]) func mirrorSweepFailsClosedUntilOwnershipDrains(blocker: String) async throws {
+        let f = try BundleFixture(), bundle = try await f.manager.install(f.bundle)
+        let store = f.store, ids = f.bundle.components.map(\.rawValue), bundleID = f.bundle.id
+        let paths = store.paths
+        let manager = GameModeHelper(paths: paths, registration: RecordingGameRegistration())
+        _ = try await manager.prepare(bundle: bundle, componentIDs: ids)
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: paths.root)
+            let parent = try SafeRelativePath("Runtimes/GameMode/\(bundleID)")
+            let stage = try SafeRelativePath("\(parent)/.incoming-crashed")
+            try fs.createHardLink(at: SafeRelativePath("\(stage)/wine"), to: RuntimeJSONFile.relativePath(bundle.wineBinary, root: paths.root))
+            try fs.removeItem(at: RuntimeJSONFile.relativePath(bundle.root, root: paths.root))
+            var pin: RuntimePin?
+            let journal = try SafeRelativePath("Games/genshin/launch-session.json")
+            if blocker == "pin" { pin = try RuntimePin.pin(paths: paths, componentIDs: ids) }
+            else { try fs.writeAtomically(Data("unresolved".utf8), to: journal) }
+            #expect(throws: (any Error).self) { try store.sweepStaging() }
+            #expect(try fs.itemType(at: stage) == .directory)
+            withExtendedLifetime(pin) {}; pin = nil
+            if blocker == "journal" { try fs.removeFile(at: journal) }
+            try store.sweepStaging()
+            #expect(try fs.itemType(at: parent) == nil)
+        }
+    }
+
     @Test func mirrorsWholeRuntimeAndVerifiesEveryInodeAndSymlink() async throws {
         let f = try BundleFixture(), registration = RecordingGameRegistration()
         let bundle = try await f.manager.install(f.bundle)

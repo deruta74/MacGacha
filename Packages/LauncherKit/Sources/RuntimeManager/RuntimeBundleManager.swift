@@ -72,7 +72,7 @@ public struct RuntimeBundleManager: Sendable {
             let lease = try RuntimeStoreLease(store: store)
             let pins = try RuntimeRemovalLease(paths: store.paths, componentIDs: components.map { $0.id.rawValue })
             defer { withExtendedLifetime((lease, pins)) {} }
-            try store.sweepStaging()
+            try store.sweepStaging(holding: pins, deleting: { try $0.removeItem(at: $1) })
             for c in components {
                 if try componentRecord(c) == nil {
                     guard candidate == nil && c.sourceMode == .download else {

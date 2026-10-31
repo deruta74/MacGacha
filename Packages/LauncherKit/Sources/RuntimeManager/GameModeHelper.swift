@@ -48,6 +48,7 @@ public struct GameModeHelper: GameModeProviding {
         let bundleID: SafeIdentifier
         let bundleDigest: Digest
         let wineDigest: Digest
+        let sourceRoot: SafeRelativePath?
     }
 
     public func prepare(bundle: InstalledRuntimeBundle, componentIDs: [String]) async throws -> GameModeRuntime {
@@ -95,7 +96,9 @@ public struct GameModeHelper: GameModeProviding {
                 try fs.removeItem(at: incoming)
                 return helper
             } catch {
-                try? fs.removeItem(at: incoming)
+                // The construction lease and component pins stay alive until
+                // cleanup joins, even when cancellation caused this failure.
+                try? await BlockingIO.finish { try fs.removeItem(at: incoming) }
                 throw error
             }
         }
@@ -142,7 +145,7 @@ public struct GameModeHelper: GameModeProviding {
     private func marker(_ bundle: InstalledRuntimeBundle, fs: ContainedFileSystem) throws -> Marker {
         var hash = StreamingHasher(.sha256)
         hash.update(try fs.readFile(at: RuntimeJSONFile.relativePath(bundle.wineBinary, root: paths.root), maxBytes: 32 << 20))
-        return Marker(bundleID: bundle.id, bundleDigest: bundle.digest, wineDigest: hash.finalize())
+        return Marker(bundleID: bundle.id, bundleDigest: bundle.digest, wineDigest: hash.finalize(), sourceRoot: try sourcePath(bundle))
     }
     private func sourcePath(_ bundle: InstalledRuntimeBundle) throws -> SafeRelativePath {
         let root = try RuntimeJSONFile.relativePath(bundle.root, root: paths.root)
