@@ -508,6 +508,7 @@ private final class FakeGameServices: GameServices, Sendable {
     func start() async { state.withLock { $0.starts += 1 }
     }
     func waitUntilIdle(_ id: String) async throws {}
+    func checkForUpdate(_ id: String) async throws -> GameStatus { await status(id) }
     func status(_ id: String) async -> GameStatus { state.withLock { $0.statusReads += 1; return $0.statuses[id] ?? .notInstalled } }
     func record(_ id: String) async throws -> GameRecord? {
         await snapshotRead?.wait()

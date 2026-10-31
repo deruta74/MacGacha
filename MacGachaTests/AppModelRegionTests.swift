@@ -235,6 +235,7 @@ private actor RegionGameServices: GameServices {
     private(set) var cancellations = 0
     func start() async { }
     func waitUntilIdle(_ id: String) async throws {}
+    func checkForUpdate(_ id: String) async throws -> GameStatus { status(id) }
     func status(_ id: String) -> GameStatus { statusReads.append(id); return .installed(tag: "1.0") }
     func record(_ id: String) throws -> GameRecord? {
         recordReads.append(id)

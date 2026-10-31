@@ -52,6 +52,8 @@ final class AppModel {
     }
     private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
     private(set) var gameRecords: [String: GameRecord] = [:]
+    var gameUpdateCheck: [String: GameUpdateCheckResult] = [:]
+    @ObservationIgnored var gameUpdateCheckTasks: [String: Task<Void, Never>] = [:]
     var isGameOperationRunning: Bool { gameOperation != nil }
     private(set) var isRuntimeOperationRunning = false
     @ObservationIgnored let updater: any AppUpdating
@@ -256,6 +258,9 @@ final class AppModel {
     }
 
     func setGameState(_ id: String, _ state: GameState) {
+        // A status application or operation transition supersedes a manual
+        // check, including one still waiting for its remote response.
+        gameUpdateCheck[id] = nil
         var state = state
         if case .working(let phase, let fraction, _, _, _) = state.activity {
             if case .working(let previous, _, _, _, _) = games[id]?.activity, previous != phase { state.timing = nil }

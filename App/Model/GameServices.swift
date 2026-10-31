@@ -13,6 +13,7 @@ protocol GameServices: Sendable {
     func start() async
     func waitUntilIdle(_ id: String) async throws
     func status(_ id: String) async -> GameStatus
+    func checkForUpdate(_ id: String) async throws -> GameStatus
     func record(_ id: String) async throws -> GameRecord?
     func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate
     func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool) async -> GameEventStream
@@ -60,6 +61,28 @@ final class LiveGameServices: GameServices, Sendable {
     func status(_ id: String) async -> GameStatus {
         guard let game = Self.game(id) else { return .unknown }
         return await library(for: game).status(game)
+    }
+    func checkForUpdate(_ id: String) async throws -> GameStatus {
+        let game = try Self.requireGame(id)
+        log.post(.info, "game", "Game update check started", metadata: ["game": game.id])
+        do {
+            let status = try await library(for: game).checkForUpdate(game)
+            let result: String
+            switch status {
+            case .installed: result = "upToDate"
+            case .updateAvailable: result = "updateAvailable"
+            default: result = "unavailable"
+            }
+            log.post(.info, "game", "Game update check finished", metadata: ["game": game.id, "result": result])
+            return status
+        } catch {
+            let error = launcherError(error)
+            // Error payloads can contain paths; log only the stable case name.
+            var fields = RuntimeErrorLog(error).metadata
+            fields["game"] = game.id; fields["result"] = "failed"
+            log.post(.warning, "game", "Game update check finished", metadata: fields)
+            throw error
+        }
     }
     func record(_ id: String) async throws -> GameRecord? {
         do { _ = try Self.requireGame(id); return try await store.load(id) }
@@ -169,6 +192,7 @@ final class PreviewGameServices: GameServices, Sendable {
     func start() async {}
     func waitUntilIdle(_ id: String) async throws {}
     func status(_ id: String) async -> GameStatus { state.withLock { $0.statuses[id] ?? .notInstalled } }
+    func checkForUpdate(_ id: String) async throws -> GameStatus { await status(id) }
     func record(_ id: String) async throws -> GameRecord? {
         let value = state.withLock { ($0.statuses[id] ?? .notInstalled, $0.voices[id] ?? ["en-us"]) }
         if value.0 == .notInstalled || value.0 == .unknown { return nil }
