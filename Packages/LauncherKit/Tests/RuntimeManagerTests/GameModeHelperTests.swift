@@ -90,7 +90,7 @@ func gameModeTestBundle(_ fixture: BundleFixture) async throws -> InstalledRunti
             let fs = try ContainedFileSystem(root: paths.root)
             let parent = try SafeRelativePath("Runtimes/GameMode/\(bundleID)/genshin")
             if legacy {
-                let marker = try SafeRelativePath("\(parent)/Genshin Impact.app/.macgacha-game-mode.json")
+                let marker = try SafeRelativePath("\(parent)/genshin.app/.macgacha-game-mode.json")
                 var object = try #require(try JSONSerialization.jsonObject(with: fs.readFile(at: marker, maxBytes: 4096)) as? [String: Any])
                 object.removeValue(forKey: "sourceRoot")
                 try fs.writeAtomically(JSONSerialization.data(withJSONObject: object), to: marker)
@@ -120,7 +120,7 @@ func gameModeTestBundle(_ fixture: BundleFixture) async throws -> InstalledRunti
         try await BlockingIO.run {
             let fs = try ContainedFileSystem(root: paths.root)
             let parent = try SafeRelativePath("Runtimes/GameMode/metal-bundle/genshin")
-            let marker = try SafeRelativePath("\(parent)/Genshin Impact.app/.macgacha-game-mode.json")
+            let marker = try SafeRelativePath("\(parent)/genshin.app/.macgacha-game-mode.json")
             var object = try #require(try JSONSerialization.jsonObject(with: fs.readFile(at: marker, maxBytes: 4096)) as? [String: Any])
             object.removeValue(forKey: "sourceRoot")
             try fs.writeAtomically(JSONSerialization.data(withJSONObject: object), to: marker)
@@ -165,7 +165,7 @@ func gameModeTestBundle(_ fixture: BundleFixture) async throws -> InstalledRunti
         try fs.createSymbolicLink(at: SafeRelativePath("\(source)/lib/current"), target: "wine")
         let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: registration)
         let helper = try await manager.prepare(bundle: bundle, game: mirrorGame, componentIDs: f.bundle.components.map(\.rawValue))
-        #expect(helper.wineBinary.path.hasSuffix("Genshin Impact.app/Contents/MacOS/wine-wrapper"))
+        #expect(helper.wineBinary.path.hasSuffix("genshin.app/Contents/MacOS/wine-wrapper"))
         #expect(helper.wineserver.path.hasSuffix("Contents/bin/wineserver"))
         let mirror = try RuntimeJSONFile.relativePath(helper.root, root: f.temp.url)
         #expect(try fs.regularFileIdentity(at: SafeRelativePath("\(source)/bin/wine")) == fs.regularFileIdentity(at: SafeRelativePath("\(mirror)/MacOS/wine-wrapper")))
@@ -254,6 +254,6 @@ func gameModeTestBundle(_ fixture: BundleFixture) async throws -> InstalledRunti
         let fs = try ContainedFileSystem(root: f.temp.url)
         try fs.removeItem(at: SafeRelativePath("Runtimes/GameMode/\(f.bundle.id)"))
         await #expect(throws: (any Error).self) { try await manager.prepare(bundle: bundle, game: mirrorGame, componentIDs: ids) }
-        #expect(try fs.itemType(at: SafeRelativePath("Runtimes/GameMode/\(f.bundle.id)/Genshin Impact.app")) == nil)
+        #expect(try fs.itemType(at: SafeRelativePath("Runtimes/GameMode/\(f.bundle.id)/genshin.app")) == nil)
     }
 }

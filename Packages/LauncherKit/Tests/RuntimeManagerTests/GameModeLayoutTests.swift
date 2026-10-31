@@ -18,7 +18,8 @@ private struct LayoutRegistration: GameModeRegistering { func register(_ app: UR
         let names = ["genshin": "Genshin Impact", "starrail": "Honkai: Star Rail", "zzz": "Zenless Zone Zero",
             "genshin-cn": "原神", "starrail-cn": "崩坏：星穹铁道", "zzz-cn": "绝区零"]
         #expect(game.gameApplicationName == names[game.id])
-        #expect(helper.root.path.contains("/\(game.id)/\(game.gameApplicationName).app/Contents"))
+        #expect(helper.root.path.contains("/\(game.id)/\(game.id).app/Contents"))
+        #expect(!helper.root.path.contains(":"))
         #expect(helper.wineBinary.lastPathComponent == "wine-wrapper")
         #expect(helper.loader.lastPathComponent == "wine")
         #expect(helper.wineserver.path.hasSuffix("Contents/bin/wineserver"))
@@ -46,6 +47,43 @@ private struct LayoutRegistration: GameModeRegistering { func register(_ app: UR
         try await manager.validate(helper, bundle: bundle)
         try fs.writeAtomically(Data("changed".utf8), to: SafeRelativePath("\(root)/MacOS/ntdll.so"))
         await #expect(throws: (any Error).self) { try await manager.validate(helper, bundle: bundle) }
+    }
+
+    @Test func titleNamedHelpersMigrateOnlyAfterPinsDrain() async throws {
+        let f = try BundleFixture(), bundle = try await gameModeTestBundle(f), game = GameDefinition.find("starrail")!
+        let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: LayoutRegistration())
+        let ids = f.bundle.components.map(\.rawValue)
+        let first = try await manager.prepare(bundle: bundle, game: game, componentIDs: ids)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        let group = "Runtimes/GameMode/\(bundle.id)/\(game.id)"
+        let legacy = try SafeRelativePath("\(group)/\(game.gameApplicationName).app")
+        let current = try RuntimeJSONFile.relativePath(first.root.deletingLastPathComponent(), root: f.store.paths.root)
+        if current != legacy { try fs.moveItem(at: current, to: legacy) }
+        var pin: RuntimePin? = try RuntimePin.pin(paths: f.store.paths, componentIDs: ids)
+        await #expect(throws: (any Error).self) { try await manager.prepare(bundle: bundle, game: game, componentIDs: ids) }
+        #expect(try fs.itemType(at: legacy) == .directory)
+        withExtendedLifetime(pin) {}; pin = nil
+        let migrated = try await manager.prepare(bundle: bundle, game: game, componentIDs: ids)
+        #expect(migrated.root.path.hasSuffix("/starrail.app/Contents"))
+        #expect(try fs.itemType(at: legacy) == nil)
+        try await manager.validate(migrated, bundle: bundle)
+    }
+
+    @Test(arguments: [false, true]) func staleTitleAndAsciiAppsAreReclaimed(titleNamed: Bool) async throws {
+        let f = try BundleFixture(), bundle = try await gameModeTestBundle(f), game = GameDefinition.find("starrail-cn")!
+        let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: LayoutRegistration())
+        let helper = try await manager.prepare(bundle: bundle, game: game, componentIDs: f.bundle.components.map(\.rawValue))
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        let group = try SafeRelativePath("Runtimes/GameMode/\(bundle.id)/\(game.id)")
+        if titleNamed {
+            let old = try SafeRelativePath("\(group)/\(game.gameApplicationName).app")
+            let app = try RuntimeJSONFile.relativePath(helper.root.deletingLastPathComponent(), root: f.store.paths.root)
+            if app != old { try fs.moveItem(at: app, to: old) }
+        }
+        try fs.removeItem(at: RuntimeJSONFile.relativePath(bundle.root, root: f.store.paths.root))
+        let store = f.store
+        try await BlockingIO.run { try store.sweepStaging() }
+        #expect(try fs.itemType(at: group) == nil)
     }
 
     @Test func iconChangeRebuildsAndMigrationWaitsForOldSessionPins() async throws {

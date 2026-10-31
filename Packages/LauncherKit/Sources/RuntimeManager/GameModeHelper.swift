@@ -90,6 +90,8 @@ public struct GameModeHelper: GameModeProviding {
             // Old sessions keep these links until their pins and journal drain.
             let legacy = try SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/GameMode/\(bundle.id)/MacGacha Game.app")
             try fs.removeItem(at: legacy)
+            let titleNamed = try SafeRelativePath("\(destination.components.dropLast().joined(separator: "/"))/\(game.gameApplicationName).app")
+            if titleNamed != destination { try fs.removeItem(at: titleNamed) }
             let incoming = try SafeRelativePath("\(destination.components.dropLast().joined(separator: "/"))/.incoming-\(UUID().uuidString)")
             do {
                 try fs.createDirectory(at: incoming)
@@ -246,7 +248,7 @@ public struct GameModeHelper: GameModeProviding {
          "LSSupportsGameMode": true, "LSUIElement": true]
     }
     private func appPath(_ id: SafeIdentifier, game: GameDefinition) throws -> SafeRelativePath {
-        try SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/GameMode/\(id)/\(SafeIdentifier(game.id))/\(game.gameApplicationName).app")
+        try SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/GameMode/\(id)/\(SafeIdentifier(game.id))/\(SafeIdentifier(game.id)).app")
     }
     private func result(destination: SafeRelativePath, game: GameDefinition, command: String) throws -> GameModeRuntime {
         let root = try SafeRelativePath("\(destination)/Contents").resolved(against: paths.root)

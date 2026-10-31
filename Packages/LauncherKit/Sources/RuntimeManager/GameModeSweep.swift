@@ -43,10 +43,15 @@ enum GameModeSweep {
                     let name = stage.components.last!
                     if (name.hasPrefix(".incoming-") || name.hasPrefix(".removing-")), try isDirectory(stage, fs: fs) { try deleting(fs, stage) }
                 }
-                let app = try SafeRelativePath("\(group)/\(game.gameApplicationName).app")
-                if try isDirectory(app, fs: fs) {
-                    try reclaim(app: app, container: group, bundleID: id, runtimes: runtimes, fs: fs, deleting: deleting)
-                } else if try children(group, fs: fs).isEmpty { try deleting(fs, group) }
+                // Retain title-named helpers for old sessions, but reclaim both
+                // generations when their runtime source no longer exists.
+                for name in [game.id, game.gameApplicationName] {
+                    let app = try SafeRelativePath("\(group)/\(name).app")
+                    if try isDirectory(app, fs: fs) {
+                        try reclaim(app: app, container: group, bundleID: id, runtimes: runtimes, fs: fs, deleting: deleting)
+                    }
+                }
+                if try isDirectory(group, fs: fs), try children(group, fs: fs).isEmpty { try deleting(fs, group) }
             }
             if try children(bundle, fs: fs).isEmpty { try deleting(fs, bundle) }
         }

@@ -14,7 +14,7 @@ private final class FakeGameMode: GameModeProviding, Sendable {
     let validationFails: Bool
     let calls = Mutex((prepare: 0, validate: 0, game: Optional<String>.none))
     init(paths: AppPaths, prepareFails: Bool = false, validationFails: Bool = false) {
-        let root = paths.runtimes.appendingPathComponent("GameMode/bundle-a/starrail/Honkai: Star Rail.app/Contents")
+        let root = paths.runtimes.appendingPathComponent("GameMode/bundle-a/starrail/starrail.app/Contents")
         helper = GameModeRuntime(game: GameDefinition.find("starrail")!, root: root, wineBinary: root.appendingPathComponent("MacOS/wine-wrapper"), wineserver: root.appendingPathComponent("bin/wineserver"))
         self.prepareFails = prepareFails; self.validationFails = validationFails
     }
@@ -67,11 +67,12 @@ private final class FakeGameMode: GameModeProviding, Sendable {
         else { #expect(text.contains("Game Mode helper selected")) }
     }
 
-    @Test(arguments: [false, true]) func reattachmentUsesPersistedMirrorWithoutPreparingAgain(legacy: Bool) async throws {
+    @Test(arguments: ["legacy", "titleNamed", "ascii"]) func reattachmentUsesPersistedMirrorWithoutPreparingAgain(layout: String) async throws {
         let f = try await ManagerFixture.make(), provider = FakeGameMode(paths: f.paths)
-        let oldRoot = f.paths.runtimes.appendingPathComponent("GameMode/bundle-a/MacGacha Game.app/Contents/MacOS")
-        let recordedWine = legacy ? oldRoot.appendingPathComponent("wine") : provider.helper.wineBinary
-        let recordedServer = legacy ? oldRoot.appendingPathComponent("wineserver") : provider.helper.wineserver
+        let oldPath = layout == "legacy" ? "GameMode/bundle-a/MacGacha Game.app/Contents/MacOS" : "GameMode/bundle-a/starrail/Honkai: Star Rail.app/Contents/MacOS"
+        let oldRoot = f.paths.runtimes.appendingPathComponent(oldPath)
+        let recordedWine = layout == "ascii" ? provider.helper.wineBinary : oldRoot.appendingPathComponent("wine")
+        let recordedServer = layout == "ascii" ? provider.helper.wineserver : oldRoot.appendingPathComponent("wineserver")
         _ = try await f.saveSnapshot(state: .running, processes: [f.gameProcess.identity])
         try await BlockingIO.run {
             let journal = LaunchJournal(paths: f.paths), original = try #require(try journal.read(game: "starrail"))
