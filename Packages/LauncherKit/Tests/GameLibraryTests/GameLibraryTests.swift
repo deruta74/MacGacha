@@ -374,6 +374,27 @@ import TestSupport
         #expect(!requests.contains { $0.path.hasPrefix("chunks/") })
     }
 
+    @Test func manualUpdateCheckReadsNewBranchAfterCachedStatus() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        #expect(await f.library.status(game) == .installed(tag: "1.0"))
+        let before = f.cdn.requestLog.count
+        try f.advertise(2)
+        #expect(try await f.library.checkForUpdate(game) == .updateAvailable(from: "1.0", to: "2.0"))
+        let requests = f.cdn.requestLog.dropFirst(before)
+        #expect(requests.filter { $0.path == "hyp/hyp-connect/api/getGameBranches" }.count == 1)
+        #expect(!requests.contains { $0.path.contains("build") })
+    }
+
+    @Test func manualUpdateCheckRefusesOfflineBranchFallback() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        #expect(await f.library.status(game) == .installed(tag: "1.0"))
+        f.cdn.enqueueFault("hyp/hyp-connect/api/getGameBranches", .transportError)
+        await #expect(throws: LauncherError.transport("delivery request failed")) {
+            _ = try await f.library.checkForUpdate(game)
+        }
+        #expect(try await f.store.load(game.id)?.installed?.tag == "1.0")
+    }
+
     @Test func offlineStatusUsesCachedBranch() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame(); try f.advertise(2)
         #expect(await f.library.status(game) == .updateAvailable(from: "1.0", to: "2.0"))

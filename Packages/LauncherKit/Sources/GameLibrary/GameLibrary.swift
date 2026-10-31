@@ -81,17 +81,28 @@ public actor GameLibrary {
     }
 
     public func status(_ game: GameDefinition) async -> GameStatus {
-        do {
-            guard let record = try await store.load(game.id) else { return .notInstalled }
-            do { try requireGameLocationAvailable(record.installPath) }
-            catch { return .locationUnavailable(record.installPath) }
-            if record.uninstalling { return .uninstallPaused }
-            if let pending = record.pending { return .paused(pending.kind) }
-            guard let installed = record.installed else { return .unknown }
-            let branch = try? await branch(game, cachedFallback: true)
-            if let branch, branch.tag != installed.tag { return .updateAvailable(from: installed.tag, to: branch.tag) }
-            return .installed(tag: installed.tag)
-        } catch { return .unknown }
+        (try? await readStatus(game, fresh: false)) ?? .unknown
+    }
+
+    /// Manual checks must surface request failures instead of treating a saved
+    /// branch as a successful fresh read. DeliveryAPI reads the current branch
+    /// directly; its HTTP client ignores the local URL cache. No build is needed.
+    public func checkForUpdate(_ game: GameDefinition) async throws -> GameStatus {
+        try await readStatus(game, fresh: true)
+    }
+
+    private func readStatus(_ game: GameDefinition, fresh: Bool) async throws -> GameStatus {
+        guard let record = try await store.load(game.id) else { return .notInstalled }
+        do { try requireGameLocationAvailable(record.installPath) }
+        catch { return .locationUnavailable(record.installPath) }
+        if record.uninstalling { return .uninstallPaused }
+        if let pending = record.pending { return .paused(pending.kind) }
+        guard let installed = record.installed else { return .unknown }
+        let latest: GameBranch?
+        if fresh { latest = try await branch(game, cachedFallback: false) }
+        else { latest = try? await branch(game, cachedFallback: true) }
+        if let latest, latest.tag != installed.tag { return .updateAvailable(from: installed.tag, to: latest.tag) }
+        return .installed(tag: installed.tag)
     }
 
     public func estimate(_ game: GameDefinition, voices: Set<String>, at location: URL) async throws -> GameEstimate {
