@@ -629,8 +629,10 @@ public struct ContainedFileSystem: Sendable, Hashable {
     }
 
     /// Snapshot of an extracted tree, never following a symbolic link. Special files and
-    /// hard links with names outside this tree are refused. Bounded like other tree operations.
-    package func inspectTree(at path: SafeRelativePath) throws -> [TreeEntry] {
+    /// hard links with names outside this tree are refused by default. Owned runtime
+    /// mirrors may explicitly allow them; untrusted archive/import callers must not.
+    /// Bounded like other tree operations.
+    package func inspectTree(at path: SafeRelativePath, allowingExternalHardLinks: Bool = false) throws -> [TreeEntry] {
         guard let fd = try directory(path.components, create: false) else { throw LauncherError.io("Directory is missing") }
         defer { close(fd) }
         var budget = Self.entryLimit
@@ -657,7 +659,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
             result.append(TreeEntry(path: relative, type: type == S_IFDIR ? .directory : type == S_IFREG ? .regularFile : .other,
                 linkTarget: target, size: uniqueSize))
         }
-        guard hardlinks.values.allSatisfy({ $0.count == $0.expected }) else { throw LauncherError.unsafePath(path.description) }
+        guard allowingExternalHardLinks || hardlinks.values.allSatisfy({ $0.count == $0.expected }) else { throw LauncherError.unsafePath(path.description) }
         return result
     }
 
@@ -730,6 +732,17 @@ public struct ContainedFileSystem: Sendable, Hashable {
         guard try entry(name, parent: parent) == nil else { throw LauncherError.unsafePath(path.description) }
         guard symlinkat(target, parent, name) == 0 else { throw LauncherError.fileSystemFailure("Cannot create import link") }
         try synchronize(parent)
+    }
+
+    /// Identity of a no-follow regular-file descriptor, including its birth time.
+    package func regularFileIdentity(at path: SafeRelativePath) throws -> OwnedFileIdentity {
+        let file = try openForReading(at: path)
+        defer { try? file.close() }
+        var info = stat()
+        guard fstat(file.fileDescriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else {
+            throw LauncherError.io("Cannot inspect runtime inode")
+        }
+        return OwnedFileIdentity(info)
     }
 
     /// Creates a literal hardlink between checked parents. Only a regular file

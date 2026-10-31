@@ -234,6 +234,14 @@ import Testing
         }
     }
 
+    @Test func unreadableGameModeMirrorRemainsWithinRuntimeInspectionScope() {
+        let inspector = SystemProcessInspector(kernel: InspectionFixture(failure: .unreadable,
+            path: "/runtime/GameMode/bundle/MacGacha Game.app/Contents/MacOS/wine.real"))
+        #expect(throws: ProcessInspectionError.incompleteScan) {
+            try inspector.processes(environmentContains: "WINEPREFIX", value: "/prefix", scope: runtimeScope)
+        }
+    }
+
     @Test(arguments: [InspectionFixture.Failure.unreadable, .malformed, .identityFailed, .invalidIdentity])
     private func unreadableRuntimeProcessMakesInspectionIncomplete(failure: InspectionFixture.Failure) {
         let inspector = SystemProcessInspector(kernel: InspectionFixture(failure: failure))

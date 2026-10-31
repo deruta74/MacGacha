@@ -47,11 +47,17 @@ public enum LaunchResolver {
     }
     public static func resolve(recipe: LaunchRecipe, settings: LaunchSettings, installRoot: URL, prefix: URL,
         wineBinary: URL, proxyPort: UInt16, componentRoots: [ComponentKind: URL], baseEnvironment: [String: String],
-        runtimeBundleID: String? = nil, displays: [String] = []) throws -> ResolvedLaunch {
+        runtimeBundleID: String? = nil, displays: [String] = [],
+        gameModeRuntime: GameModeRuntime? = nil, gameModeEnabled: Bool = true) throws -> ResolvedLaunch {
         guard Recipes.recipe(for: recipe.game) != nil else { throw LauncherError.io("Unknown launch game: \(recipe.game)") }
         try settings.validate(for: recipe.game)
         for url in [installRoot, prefix, wineBinary] { try validateLocalURL(url) }
 
+        let helper = gameModeEnabled ? gameModeRuntime : nil
+        if let helper {
+            try validateLocalURL(helper.wineBinary)
+            try validateLocalURL(helper.wineserver)
+        }
         let gamePath = WinePath.windowsPath(for: recipe.executable.resolved(against: installRoot))
         var arguments = [gamePath]
         let requiredComponents = requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: runtimeBundleID)
@@ -90,6 +96,12 @@ public enum LaunchResolver {
         var environment = baseEnvironment.filter { basics.contains($0.key) || $0.key.hasPrefix("LC_") }
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         environment["WINEPREFIX"] = prefix.path
+        if let helper {
+            environment["WINELOADER"] = helper.wineBinary.path
+            // ntdll's default server search derives bin from lib, whereas this
+            // application uses MacOS. Keep child/server routes in the same mirror.
+            environment["WINESERVER"] = helper.wineserver.path
+        }
         environment["WINEDLLOVERRIDES"] = ""
         if requiredComponents.contains(.crypt32Fix) {
             environment["WINEDLLOVERRIDES"] = "crypt32=n,b"
@@ -117,7 +129,7 @@ public enum LaunchResolver {
             }
             if !config.isEmpty { environment["DXMT_CONFIG"] = config.joined(separator: ";") }
         }
-        return ResolvedLaunch(executable: wineBinary, arguments: arguments, environment: environment,
+        return ResolvedLaunch(executable: helper?.wineBinary ?? wineBinary, arguments: arguments, environment: environment,
             currentDirectory: installRoot, hidden: settings.compatibilityPatches ? recipe.hidden : [],
             copyIfPresent: settings.compatibilityPatches ? recipe.copyIfPresent : [],
             blockedHosts: settings.compatibilityPatches ? recipe.blockedHosts : [],

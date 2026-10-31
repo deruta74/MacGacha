@@ -92,7 +92,7 @@ public struct RuntimeStore: Sendable {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let rawName = kindPath.components.last!
             guard rawName.utf8.first != 0x2e else { continue }
-            if rawName == "bundles" { continue }
+            if ["bundles", "GameMode"].contains(rawName) { continue }
             guard let kind = ComponentKind(rawValue: rawName) else {
                 invalid.append(InvalidRuntimeEntry(kind: nil, rawName: rawName, reason: String(localized: "Unknown runtime kind", bundle: .module)))
                 continue
@@ -220,7 +220,7 @@ public struct RuntimeStore: Sendable {
         try sweepStaging(deleting: { try $0.removeItem(at: $1) })
     }
 
-    func sweepStaging(deleting: (ContainedFileSystem, SafeRelativePath) throws -> Void) throws {
+    func sweepStaging(holding pins: RuntimeRemovalLease? = nil, deleting: (ContainedFileSystem, SafeRelativePath) throws -> Void) throws {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         try LaunchMutationBarrier.requireNoJournals(paths: paths)
         let fs = try ContainedFileSystem(root: paths.root)
@@ -244,6 +244,7 @@ public struct RuntimeStore: Sendable {
             }
             try sweepDirectory(path, in: fs, incoming: true, deleting: deleting)
         }
+        try GameModeSweep.run(paths: paths, fs: fs, holding: pins, deleting: deleting)
     }
 
     private func sweepDirectory(_ path: SafeRelativePath, in fs: ContainedFileSystem, incoming: Bool,

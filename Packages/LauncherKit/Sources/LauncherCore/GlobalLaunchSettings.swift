@@ -5,11 +5,15 @@ import Foundation
 /// Global preferences, separate from each game's launch recipe settings.
 public struct GlobalLaunchSettings: Codable, Equatable, Sendable {
     public var sessionLogsEnabled: Bool
-    public init(sessionLogsEnabled: Bool = true) { self.sessionLogsEnabled = sessionLogsEnabled }
-    private enum CodingKeys: CodingKey { case sessionLogsEnabled }
+    public var gameModeEnabled: Bool
+    public init(sessionLogsEnabled: Bool = true, gameModeEnabled: Bool = true) {
+        self.sessionLogsEnabled = sessionLogsEnabled; self.gameModeEnabled = gameModeEnabled
+    }
+    private enum CodingKeys: CodingKey { case sessionLogsEnabled, gameModeEnabled }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         sessionLogsEnabled = try values.decodeIfPresent(Bool.self, forKey: .sessionLogsEnabled) ?? true
+        gameModeEnabled = try values.decodeIfPresent(Bool.self, forKey: .gameModeEnabled) ?? true
     }
 }
 

@@ -29,6 +29,7 @@ public actor LaunchManager {
     private let inspector: any ProcessInspector
     private let runner: any ProcessRunner
     private let clock: any Clock<Duration>
+    private let gameMode: (any GameModeProviding)?
     private let displayProbe: any DisplayProbe
     private let proxyFactory: ProxyFactory
     private let baseEnvironment: [String: String]
@@ -77,7 +78,8 @@ public actor LaunchManager {
 
     public init(paths: AppPaths, runtimes: any LaunchRuntimeProviding, prefixes: any LaunchPrefixProviding,
         preparation: any LaunchPreparing, spawner: any ProcessSpawner, inspector: any ProcessInspector,
-        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, displayProbe: any DisplayProbe = SystemDisplayProbe()) {
+        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, displayProbe: any DisplayProbe = SystemDisplayProbe(), gameMode: (any GameModeProviding)? = nil) {
+        self.gameMode = gameMode ?? GameModeHelper(paths: paths)
         self.eventLog = log ?? EventLog(directory: paths.logs)
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: {})
         self.paths = paths; self.runtimes = runtimes; self.prefixes = prefixes; self.preparation = preparation
@@ -91,7 +93,7 @@ public actor LaunchManager {
 
     package init(paths: AppPaths, runtimes: any LaunchRuntimeProviding, prefixes: any LaunchPrefixProviding,
         preparation: any LaunchPreparing, spawner: any ProcessSpawner, inspector: any ProcessInspector,
-        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, displayProbe: any DisplayProbe = FixedDisplayProbe(),
+        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, displayProbe: any DisplayProbe = FixedDisplayProbe(), gameMode: (any GameModeProviding)? = nil,
         proxyFactory: @escaping ProxyFactory,
         baseEnvironment: [String: String] = [:], journalFileOps: any FileOps = SystemFileOps(),
         hideHooks: LaunchFileHooks = .none, beforeJournalRead: @escaping @Sendable () throws -> Void = {},
@@ -99,6 +101,7 @@ public actor LaunchManager {
         recipeOverrides: [String: LaunchRecipe] = [:],
         sessionProvenance: @escaping @Sendable () throws -> (bootSessionUUID: String, sessionStartTime: UInt64) = LaunchManager.currentSessionProvenance,
         beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) {
+        self.gameMode = gameMode
         self.eventLog = log ?? EventLog(directory: paths.logs)
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: beforeSessionLogWrite)
         self.paths = paths; self.runtimes = runtimes; self.prefixes = prefixes; self.preparation = preparation
@@ -196,11 +199,12 @@ public actor LaunchManager {
             events.yield(.stage(stage))
             guard let recipe = (recipeOverrides[game.id] ?? Recipes.recipe(for: game.id)) else { throw LauncherError.io("Unknown launch game") }
             let paths = paths, journalFileOps = journalFileOps
-            let (settings, logsEnabled) = try await BlockingIO.run {
+            let (settings, globalSettings) = try await BlockingIO.run {
                 let settings = try LaunchSettingsStore(paths: paths).load(game.id)
-                let enabled = try GlobalLaunchSettingsStore(paths: paths).load().sessionLogsEnabled
-                return (settings, enabled)
+                let global = try GlobalLaunchSettingsStore(paths: paths).load()
+                return (settings, global)
             }
+            let logsEnabled = globalSettings.sessionLogsEnabled
             event("Launch started", game: game.id, metadata: ["backend": settings.backend.rawValue,
                 "buildVerification": unverified ? "unverified" : "verified"])
             let identity = try await BlockingIO.run {
@@ -211,14 +215,26 @@ public actor LaunchManager {
             let selection = try await runtimes.selection(for: settings)
             let bundle = selection.bundle
             let prefix = try await prefixes.prefixURL(game: game.id, bundle: bundle)
-            let preview = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displayProbe.connectedDisplays().map(\.id))
+            let requiredComponents = LaunchResolver.requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: bundle.id.rawValue)
             guard !selection.componentIDs.isEmpty else { throw LauncherError.io("The runtime bundle has no pinnable components") }
-            let compatibilityIDs = try preview.requiredComponents.map { kind in
+            let compatibilityIDs = try requiredComponents.map { kind in
                 guard let id = selection.compatibilityComponentIDs[kind] else { throw LauncherError.io("Required compatibility component has no pin identity") }
                 return id
             }
             let ids = Array(Set(selection.componentIDs + compatibilityIDs)).sorted()
+            var helper: GameModeRuntime?
+            if globalSettings.gameModeEnabled, let gameMode {
+                do { helper = try await gameMode.prepare(bundle: bundle, componentIDs: ids) }
+                catch {
+                    event("Game Mode unavailable; using normal Wine", game: game.id, metadata: ["reason": "helperPreparationFailed"])
+                }
+            } else {
+                event("Game Mode skipped; using normal Wine", game: game.id,
+                    metadata: ["reason": globalSettings.gameModeEnabled ? "helperUnavailable" : "disabled"])
+            }
+            var previewChoice = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
+                wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment,
+                runtimeBundleID: bundle.id.rawValue, displays: displayProbe.connectedDisplays().map(\.id), gameModeRuntime: helper)
             stage = .lock; events.yield(.stage(stage))
             let (lock, pin) = try await BlockingIO.run {
                 let lock = try SessionLock.acquire(paths: paths, game: game.id)
@@ -228,16 +244,29 @@ public actor LaunchManager {
             let validated = try await runtimes.selection(for: settings)
             guard validated.bundle == bundle,
                 Set(validated.componentIDs) == Set(selection.componentIDs),
-                preview.requiredComponents.allSatisfy({ validated.componentRoots[$0] == selection.componentRoots[$0]
+                requiredComponents.allSatisfy({ validated.componentRoots[$0] == selection.componentRoots[$0]
                     && validated.compatibilityComponentIDs[$0] == selection.compatibilityComponentIDs[$0] }) else {
                 throw LauncherError.io("The selected runtime changed before it could be pinned")
             }
+            if let candidate = helper, let gameMode {
+                do {
+                    try await gameMode.validate(candidate, bundle: bundle)
+                    event("Game Mode helper selected", game: game.id)
+                } catch {
+                    helper = nil
+                    previewChoice = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
+                        wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment,
+                        runtimeBundleID: bundle.id.rawValue)
+                    event("Game Mode unavailable; using normal Wine", game: game.id, metadata: ["reason": "helperValidationFailed"])
+                }
+            }
+            let preview = previewChoice
             guard try await read(game: game.id) == nil else { throw LauncherError.busy("Launch recovery is required") }
             let provenance = sessionProvenance
             let (bootSessionUUID, sessionStartTime) = try await BlockingIO.run { try provenance() }
             let session = LaunchSession(sessionID: UUID(), game: game.id, installRoot: installRoot, installIdentity: identity,
-                prefix: prefix, bundleID: bundle.id.rawValue, runtimeDigest: bundle.digest, wineBinary: bundle.wineBinary,
-                wineserver: bundle.wineBinary.deletingLastPathComponent().appendingPathComponent("wineserver"), componentIDs: ids,
+                prefix: prefix, bundleID: bundle.id.rawValue, runtimeDigest: bundle.digest, wineBinary: helper?.wineBinary ?? bundle.wineBinary,
+                wineserver: helper?.wineserver ?? bundle.wineBinary.deletingLastPathComponent().appendingPathComponent("wineserver"), componentIDs: ids,
                 recipeVersion: recipe.recipeVersion, settings: settings, gameExecutable: recipe.executable,
                 bootSessionUUID: bootSessionUUID, sessionStartTime: sessionStartTime)
             let context = Context(session: session, lock: lock, pin: pin)
@@ -296,7 +325,7 @@ public actor LaunchManager {
             context.session.proxyPort = context.proxy?.port
             let displays = displayProbe.connectedDisplays().map(\.id)
             let resolved = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displays)
+                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displays, gameModeRuntime: helper)
             if !displays.isEmpty {
                 let selection = resolved.displayFallback ? "fallback" : (settings.display == nil ? "main" : "chosen")
                 note(context, "display=\(selection)")
