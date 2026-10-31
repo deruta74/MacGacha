@@ -32,18 +32,37 @@ enum GameModeSweep {
                 guard name.hasPrefix(".incoming-") || name.hasPrefix(".removing-"), try isDirectory(stage, fs: fs) else { continue }
                 try deleting(fs, stage)
             }
-            let app = try SafeRelativePath("\(bundle)/MacGacha Game.app")
-            guard try isDirectory(app, fs: fs) else {
-                if try children(bundle, fs: fs).isEmpty { try deleting(fs, bundle) }
-                continue
+            let legacy = try SafeRelativePath("\(bundle)/MacGacha Game.app")
+            if try isDirectory(legacy, fs: fs) {
+                try reclaim(app: legacy, container: legacy, bundleID: id, runtimes: runtimes, fs: fs, deleting: deleting)
             }
-            let source = try sourceRoot(app: app, id: id, runtimes: runtimes, fs: fs)
-            guard source.components.count > runtimes.components.count,
-                source.components.starts(with: runtimes.components), !source.components.contains("GameMode") else {
-                throw LauncherError.io("Invalid Game Mode source location")
+            for game in GameDefinition.all {
+                let group = try SafeRelativePath("\(bundle)/\(SafeIdentifier(game.id))")
+                guard try isDirectory(group, fs: fs) else { continue }
+                for stage in try children(group, fs: fs) {
+                    let name = stage.components.last!
+                    if (name.hasPrefix(".incoming-") || name.hasPrefix(".removing-")), try isDirectory(stage, fs: fs) { try deleting(fs, stage) }
+                }
+                // Retain title-named helpers for old sessions, but reclaim both
+                // generations when their runtime source no longer exists.
+                for name in [game.id, game.gameApplicationName] {
+                    let app = try SafeRelativePath("\(group)/\(name).app")
+                    if try isDirectory(app, fs: fs) {
+                        try reclaim(app: app, container: group, bundleID: id, runtimes: runtimes, fs: fs, deleting: deleting)
+                    }
+                }
+                if try isDirectory(group, fs: fs), try children(group, fs: fs).isEmpty { try deleting(fs, group) }
             }
-            if try fs.itemType(at: source) != .directory { try deleting(fs, bundle) }
+            if try children(bundle, fs: fs).isEmpty { try deleting(fs, bundle) }
         }
+    }
+
+    private static func reclaim(app: SafeRelativePath, container: SafeRelativePath, bundleID: SafeIdentifier,
+        runtimes: SafeRelativePath, fs: ContainedFileSystem, deleting: (ContainedFileSystem, SafeRelativePath) throws -> Void) throws {
+        let source = try sourceRoot(app: app, id: bundleID, runtimes: runtimes, fs: fs)
+        guard source.components.count > runtimes.components.count, source.components.starts(with: runtimes.components),
+            !source.components.contains("GameMode") else { throw LauncherError.io("Invalid Game Mode source location") }
+        if try fs.itemType(at: source) != .directory { try deleting(fs, container) }
     }
 
     private static func sourceRoot(app: SafeRelativePath, id: SafeIdentifier, runtimes: SafeRelativePath,

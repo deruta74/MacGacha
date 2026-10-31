@@ -97,7 +97,7 @@ public enum LaunchResolver {
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         environment["WINEPREFIX"] = prefix.path
         if let helper {
-            environment["WINELOADER"] = helper.wineBinary.path
+            environment["WINELOADER"] = helper.loader.path
             // ntdll's default server search derives bin from lib, whereas this
             // application uses MacOS. Keep child/server routes in the same mirror.
             environment["WINESERVER"] = helper.wineserver.path

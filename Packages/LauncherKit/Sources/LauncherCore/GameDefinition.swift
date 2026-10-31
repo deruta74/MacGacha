@@ -44,6 +44,11 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
         case (.zzz, .mainlandChina): "绝区零"
         }
     }
+    /// Canonical system app identity, independent of the interface language.
+    public var gameApplicationName: String {
+        region == .mainlandChina ? unityLogProductName : defaultInstallDirectoryName
+    }
+
     /// Unity's product name differs from the installation directory name.
     public var unityLogProductName: String {
         switch (family, region) {
