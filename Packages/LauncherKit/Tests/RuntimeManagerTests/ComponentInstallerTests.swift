@@ -177,6 +177,10 @@ func installerStoreLockIsHeldAndDiscardReleasesIt() async throws {
             catch LauncherError.busy { try await Task.sleep(for: .milliseconds(10)) }
         }
         try #require(released)
+        // The store lock is the outermost lock: once it is free, the session's
+        // component pins must already be free, or an immediate retry is busy.
+        let pins = try RuntimeStore.componentLocks(paths: AppPaths(root: temp.url), componentIDs: [c.id.rawValue], mode: .exclusive)
+        withExtendedLifetime(pins) {}
     }
     for try await _ in installer.install(c) { }
     #expect(cdn.requestLog.count == 1)
