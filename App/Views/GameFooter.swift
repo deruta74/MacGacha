@@ -204,7 +204,7 @@ struct GameFooter: View {
     private var note: String? {
         switch model.launchNotes[game.id] {
         case .starRailSettingsMissing:
-            String(localized: "Open the game's graphics settings once, then play again to use 120 FPS")
+            String(localized: "Change any option in the game's graphics settings once, then play again to use 120 FPS")
         case .surroundUnavailable:
             String(localized: "Surround sound wasn't available for this launch, so the game used stereo")
         case .fpsUnlockUnavailable:
