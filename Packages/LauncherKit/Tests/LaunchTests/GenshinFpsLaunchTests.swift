@@ -201,7 +201,7 @@ private struct FpsLaunchFixture: Sendable {
     static func make(game: String = "genshin", logs: Bool = false, enabled: Bool = true, acknowledged: Bool = true, stub: Bool = true,
         initialGame: Bool = true, gameMode: Bool = false) async throws -> Self {
         let base = try await ManagerFixture.make(logsEnabled: logs, initialGame: initialGame)
-        let root = base.paths.runtimes.appendingPathComponent("genshinFps/1")
+        let root = base.paths.runtimes.appendingPathComponent("genshinFps/\(GenshinFps.version)")
         try await BlockingIO.run {
             var settings = LaunchSettings.defaults(for: game); settings.unlockFPS = enabled; settings.compatibilityPatches = false
             try LaunchSettingsStore(paths: base.paths).save(settings, for: game)

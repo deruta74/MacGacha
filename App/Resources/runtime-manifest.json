@@ -185,23 +185,23 @@
       }
     },
     {
-      "id": "genshin-fps-unlock-1",
+      "id": "genshin-fps-unlock-2",
       "kind": "genshinFps",
-      "version": "1",
+      "version": "2",
       "sourceMode": "download",
-      "url": "https://github.com/deruta74/MacGacha/releases/download/genshin-fps-unlock-1/genshin-fps-unlock-1.zip",
-      "size": 223200,
-      "installedSize": 220360,
+      "url": "https://github.com/deruta74/MacGacha/releases/download/genshin-fps-unlock-2/genshin-fps-unlock-2.zip",
+      "size": 223498,
+      "installedSize": 220658,
       "sha256": {
         "algorithm": "sha256",
-        "hex": "4ee7c3920370e3369f8256132817de0dd9b4b553cc086a2d0eafdacf3de0312c"
+        "hex": "f2fa38aef5ffdcf15aa3480f7acc608cb9266bdcae0af05c4e9802e611671abb"
       },
       "archive": "zip",
       "license": {
         "name": "GPL-3.0-only",
         "url": "https://github.com/deruta74/MacGacha/blob/main/compat/genshin-fps/NOTICE.md",
         "redistributable": true,
-        "termsRevision": "genshin-fps-unlock-1"
+        "termsRevision": "genshin-fps-unlock-2"
       },
       "rootPath": "x86_64-windows"
     }

@@ -163,7 +163,7 @@ int main(int argc, char **argv) {
             if (status == FPS_ERROR) {
                 code = shared->error == FPS_BAD_INITIAL ? 12 : 11; reason = "stub-error"; goto done;
             }
-            if (shared->initial < 30 || shared->initial > 60) { code = 12; reason = "bad-initial-value"; goto done; }
+            if (shared->initial != -1 && (shared->initial < 30 || shared->initial > 60)) { code = 12; reason = "bad-initial-value"; goto done; }
             break;
         }
         if (status != FPS_NONE) { code = 11; reason = "unexpected-shared-status"; goto done; }

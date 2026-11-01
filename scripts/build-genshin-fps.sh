@@ -37,7 +37,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/macgacha-genshin-fps.XXXXXXXX")
 trap 'rm -rf "$work"' EXIT
 cp "$inputs/fpsstub.c" "$inputs/fpsinject.c" "$inputs/fpsshared.h" "$work/"
 flags=(-std=c11 -O2 -Wall -Wextra -Werror -static-libgcc -s -fno-ident
-    -frandom-seed=genshin-fps-unlock-1 "-ffile-prefix-map=$work=." "-fdebug-prefix-map=$work=."
+    -frandom-seed=genshin-fps-unlock-2 "-ffile-prefix-map=$work=." "-fdebug-prefix-map=$work=."
     -Wl,--no-insert-timestamp,--build-id=none)
 (
     cd "$work"
@@ -65,7 +65,7 @@ from pathlib import Path
 import sys
 import zipfile
 root = Path(sys.argv[1])
-with zipfile.ZipFile(root / 'genshin-fps-unlock-1.zip', 'w', compression=zipfile.ZIP_STORED) as archive:
+with zipfile.ZipFile(root / 'genshin-fps-unlock-2.zip', 'w', compression=zipfile.ZIP_STORED) as archive:
     for path in sorted(root.rglob('*')):
         relative = path.relative_to(root)
         if not path.is_file() or relative.parts[0] == 'audit' or path.suffix == '.zip':
@@ -79,4 +79,4 @@ python3 -I "$repo_root/scripts/check-genshin-fps.py" "$output"
 if [[ $verify == 1 ]]; then
     (cd "$output" && shasum -a 256 -c "$inputs/SHA256SUMS")
 fi
-shasum -a 256 "$output/genshin-fps-unlock-1.zip"
+shasum -a 256 "$output/genshin-fps-unlock-2.zip"
