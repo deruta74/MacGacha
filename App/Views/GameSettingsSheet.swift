@@ -11,6 +11,9 @@ struct GameSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let game: LauncherGame
 
+    @State private var showsFpsRisk = false
+    @State private var customFpsTarget = false
+
     private var settings: Binding<LaunchSettings> {
         Binding(
             get: { model.launchSettings(for: game.id) },
@@ -75,6 +78,39 @@ struct GameSettingsSheet: View {
         )
     }
 
+    /// The first time it's turned on, the risk warning has to be confirmed before the switch moves.
+    private var genshinFpsUnlock: Binding<Bool> {
+        Binding(
+            get: { model.genshinFpsUnlock(for: game.id) },
+            set: { isOn in
+                if isOn, !model.genshinFpsRiskAcknowledged {
+                    showsFpsRisk = true
+                    return
+                }
+                do { try model.setGenshinFpsUnlock(isOn, for: game.id) } catch { model.show(error) }
+            }
+        )
+    }
+
+    private var genshinFpsTarget: Binding<Int> {
+        Binding(
+            get: { model.genshinFpsTarget(for: game.id) },
+            set: { target in
+                do { try model.setGenshinFpsTarget(target, for: game.id) } catch { model.show(error) }
+            }
+        )
+    }
+
+    private var genshinFpsCustom: Binding<Bool> {
+        Binding(
+            get: { customFpsTarget },
+            set: { custom in
+                customFpsTarget = custom
+                if !custom { genshinFpsTarget.wrappedValue = 120 }
+            }
+        )
+    }
+
     /// Only Zenless Zone Zero has a DirectX 12 renderer, and only D3DMetal runs it.
     private var offersDirectX12: Bool { Recipes.recipe(for: game.id)?.supportsDirectX12 == true }
 
@@ -110,6 +146,24 @@ struct GameSettingsSheet: View {
                         Text(unlockFooter)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                }
+                if model.offersGenshinFps(for: game.id) {
+                    Section {
+                        Toggle("Unlock frame rate", isOn: genshinFpsUnlock)
+                        if genshinFpsUnlock.wrappedValue {
+                            Picker("Target", selection: genshinFpsCustom) {
+                                Text(120.formatted()).tag(false)
+                                Text("Custom").tag(true)
+                            }
+                            .pickerStyle(.segmented)
+                            if customFpsTarget {
+                                TextField("Frames per second", value: genshinFpsTarget, format: .number,
+                                    prompt: Text(verbatim: "61–360"))
+                            }
+                        }
+                    } footer: {
+                        genshinFpsFooter
                     }
                 }
                 if model.offersSurround(for: game.id) {
@@ -156,6 +210,13 @@ struct GameSettingsSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .onAppear { customFpsTarget = model.genshinFpsTarget(for: game.id) != 120 }
+            .sheet(isPresented: $showsFpsRisk) {
+                FpsRiskSheet(gameName: game.name) {
+                    model.acknowledgeGenshinFpsRisk()
+                    do { try model.setGenshinFpsUnlock(true, for: game.id) } catch { model.show(error) }
+                }
+            }
             .navigationTitle(Text("\(game.name) Settings", comment: "Sheet title; the argument is the game's name"))
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -182,6 +243,23 @@ struct GameSettingsSheet: View {
                 comment: "The argument is the current frame limit")
         }
         return String(localized: "Sets 120 FPS in the game's own graphics settings before each launch. While it's on, the game hides its FPS option. Turning it off sets the game back to 60 FPS.")
+    }
+
+    private var genshinFpsFooter: some View {
+        let value = settings.wrappedValue
+        let on = genshinFpsUnlock.wrappedValue
+        return VStack(alignment: .leading, spacing: 4) {
+            if on, let limit = value.frameLimit, limit < value.unlockTarget {
+                Text("The frame limit is \(limit) FPS, so the game won't go above it. Raise the limit or set it to Off.",
+                    comment: "The argument is the current frame limit")
+            }
+            if on, value.unlockTarget > 120 {
+                Text("Above 120 FPS, recent game versions have disconnected players with error 10310-4001.")
+            }
+            Text("Loads a small helper into the game that raises its 60 FPS limit. HoYoverse may treat it as a third-party tool, so use it at your own risk.")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     private var patchesFooter: String {

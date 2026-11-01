@@ -13,7 +13,7 @@ import sys
 import zipfile
 
 sys.dont_write_bytecode = True
-COMPONENT = "genshin-fps-unlock-1"
+COMPONENT = "genshin-fps-unlock-2"
 ARCHIVE = COMPONENT + ".zip"
 BINARIES = ("x86_64-windows/fpsstub.dll", "x86_64-windows/fpsinject.exe")
 INPUTS = ("fpsstub.c", "fpsinject.c", "fpsshared.h", "build-inject.sh", "README.md", "NOTICE.md")

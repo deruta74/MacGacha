@@ -48,7 +48,7 @@ public struct LiveLaunchRuntimes: LaunchRuntimeProviding {
         let (roots, ids) = try await BlockingIO.run {
             let records = try store.installed()
             var roots: [ComponentKind: URL] = [:], ids: [ComponentKind: String] = [:]
-            for component in manifest.components where [.jadeite, .steamShim].contains(component.kind) || [Crypt32Fix.componentID, SurroundAudio.componentID].contains(component.id.rawValue) {
+            for component in manifest.components where [.jadeite, .steamShim].contains(component.kind) || [Crypt32Fix.componentID, SurroundAudio.componentID, GenshinFps.componentID].contains(component.id.rawValue) {
                 if records.contains(where: { $0.kind == component.kind && $0.version == component.version.rawValue }) {
                     roots[component.kind] = store.installURL(for: component); ids[component.kind] = component.id.rawValue
                 }

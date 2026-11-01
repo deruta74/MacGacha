@@ -36,7 +36,8 @@ struct SessionWatcher: Sendable {
     }
 
     func watch(session: LaunchSession, executable: String, ownedWrapper: ProcessIdentity? = nil,
-        ownedReaper: OwnedWrapperReaper? = nil, observed: @escaping @Sendable ([ProcessIdentity]) async throws -> Void) async throws {
+        ownedReaper: OwnedWrapperReaper? = nil, childrenEnded: @escaping @Sendable () async throws -> Bool = { true },
+        observed: @escaping @Sendable ([ProcessIdentity]) async throws -> Void) async throws {
         // Only a fresh spawn belongs to this process. Reattached processes
         // are not our children, so they are never waited on or signalled.
         let reaper = ownedReaper ?? ownedWrapper.map { OwnedWrapperReaper(identity: $0) }
@@ -80,7 +81,7 @@ struct SessionWatcher: Sendable {
             _ = try await reaper?.poll()
             let scan = try await inspect(session: session, gameName: gameName)
             try await observed(scan.games)
-            if scan.games.isEmpty && !scan.serverAlive { return }
+            if scan.games.isEmpty && !scan.serverAlive, try await childrenEnded() { return }
         }
     }
 
@@ -98,7 +99,7 @@ struct SessionWatcher: Sendable {
         }
     }
 
-    private static func isGame(_ process: InspectedProcess, name: String) -> Bool {
+    static func isGame(_ process: InspectedProcess, name: String) -> Bool {
         let executable = basename(process.executablePath)
         if executable == name { return true }
         // Wine's kernel executable is its Mach-O loader; its argv[0] can name

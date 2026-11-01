@@ -207,6 +207,8 @@ struct GameFooter: View {
             String(localized: "Open the game's graphics settings once, then play again to use 120 FPS")
         case .surroundUnavailable:
             String(localized: "Surround sound wasn't available for this launch, so the game used stereo")
+        case .fpsUnlockUnavailable:
+            String(localized: "The frame-rate unlock didn't apply this time, so the game ran at its normal frame rate")
         case nil: nil
         }
     }

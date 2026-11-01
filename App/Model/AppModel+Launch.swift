@@ -18,6 +18,7 @@ import RuntimeManager
     func saveLaunchSettings(_ settings: LaunchSettings, for id: String) throws {
         guard languageRestart == nil else { throw LauncherError.busy("Application language restart is in progress") }
         guard GameDefinition.all.contains(where: { $0.id == id }) else { throw LauncherError.io("Invalid launch settings") }
+        if GenshinFps.applies(to: id), settings.unlockFPS, !genshinFpsRiskAcknowledged { throw LauncherError.genshinFpsRiskNotAcknowledged }
         try settings.validate(for: id)
         let revision = UUID(), preferences = launchPreferences
         launchSettingsRevision = revision; launchSettingsRevisions[id] = revision; launchSettingsCache[id] = settings
@@ -39,7 +40,7 @@ import RuntimeManager
         set { setGlobalLaunchPreference(\.gameModeEnabled, to: newValue) }
     }
 
-    private func setGlobalLaunchPreference(_ key: WritableKeyPath<GlobalLaunchSettings, Bool>, to value: Bool) {
+    func setGlobalLaunchPreference(_ key: WritableKeyPath<GlobalLaunchSettings, Bool>, to value: Bool) {
         // No settings writes may enter behind the restart's final flush.
         guard languageRestart == nil else { show(LauncherError.busy("Application language restart is in progress")); return }
         let preferences = launchPreferences

@@ -158,7 +158,8 @@ static DWORD WINAPI worker(void *unused) {
     if (result < 0) { fps_error(shared, FPS_AMBIGUOUS); goto done; }
     if (!writable_slot(&image, slot)) { fps_error(shared, FPS_BAD_SLOT); goto done; }
     shared->initial = shared->observed = *(volatile int32_t *)slot;
-    if (shared->initial < 30 || shared->initial > 60) { fps_error(shared, FPS_BAD_INITIAL); goto done; }
+    /* -1 is Unity's unset targetFrameRate: the game hasn't applied its own limit yet. */
+    if (shared->initial != -1 && (shared->initial < 30 || shared->initial > 60)) { fps_error(shared, FPS_BAD_INITIAL); goto done; }
     uint32_t expected = FPS_NONE;
     if (!__atomic_compare_exchange_n(&shared->status, &expected, FPS_READY, 0,
                                     __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)) goto done;

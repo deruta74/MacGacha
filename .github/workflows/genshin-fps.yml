@@ -33,12 +33,12 @@ jobs:
           sandbox-exec -p "$profile" scripts/build-genshin-fps.sh out-b --verify
           cmp out-a/x86_64-windows/fpsstub.dll out-b/x86_64-windows/fpsstub.dll
           cmp out-a/x86_64-windows/fpsinject.exe out-b/x86_64-windows/fpsinject.exe
-          cmp out-a/genshin-fps-unlock-1.zip out-b/genshin-fps-unlock-1.zip
+          cmp out-a/genshin-fps-unlock-2.zip out-b/genshin-fps-unlock-2.zip
           python3 -I scripts/check-genshin-fps.py out-a --manifest App/Resources/runtime-manifest.json
           python3 -I scripts/check-genshin-fps.py out-b --manifest App/Resources/runtime-manifest.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: genshin-fps-unlock-1
+          name: genshin-fps-unlock-2
           path: |
             out-a/
             out-b/
@@ -49,7 +49,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag=genshin-fps-unlock-1
+          tag=genshin-fps-unlock-2
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --draft --title "$tag" --target "$GITHUB_SHA" --notes-file compat/genshin-fps/NOTICE.md
           fi
@@ -59,8 +59,8 @@ jobs:
           }
           # Never --clobber: if the owner publishes between the check above and
           # this upload, a replacing upload would delete the published asset.
-          if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx genshin-fps-unlock-1.zip; then
+          if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx genshin-fps-unlock-2.zip; then
             echo 'The draft already has the ZIP. Delete that asset by hand to rebuild it.' >&2
             exit 1
           fi
-          gh release upload "$tag" out-a/genshin-fps-unlock-1.zip
+          gh release upload "$tag" out-a/genshin-fps-unlock-2.zip

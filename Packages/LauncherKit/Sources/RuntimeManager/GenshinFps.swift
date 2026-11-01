@@ -5,8 +5,8 @@ import LauncherCore
 /// Packaging identity only. Installation never starts or enables the helper.
 /// It is independent of the graphics backend and is not a launch requirement.
 public enum GenshinFps {
-    public static let componentID = "genshin-fps-unlock-1"
-    public static let version = "1"
+    public static let componentID = "genshin-fps-unlock-2"
+    public static let version = "2"
     public static let injectorPath = try! SafeRelativePath("fpsinject.exe")
     public static let stubPath = try! SafeRelativePath("fpsstub.dll")
     public static func applies(to game: String) -> Bool {

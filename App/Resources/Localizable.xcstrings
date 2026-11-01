@@ -1585,6 +1585,170 @@
         }
       }
     },
+    "About genshin-fps-unlock" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Über genshin-fps-unlock"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acerca de genshin-fps-unlock"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À propos de genshin-fps-unlock"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tentang genshin-fps-unlock"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "genshin-fps-unlockについて"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "genshin-fps-unlock 정보"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sobre o genshin-fps-unlock"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "О genshin-fps-unlock"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เกี่ยวกับ genshin-fps-unlock"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Про genshin-fps-unlock"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giới thiệu genshin-fps-unlock"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关于 genshin-fps-unlock"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關於 genshin-fps-unlock"
+          }
+        }
+      }
+    },
+    "Above 120 FPS, recent game versions have disconnected players with error 10310-4001." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Über 120 FPS haben neuere Spielversionen Spieler mit Fehler 10310-4001 getrennt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Por encima de 120 FPS, las versiones recientes del juego han desconectado a jugadores con el error 10310-4001."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Au-delà de 120 FPS, les versions récentes du jeu ont déconnecté des joueurs avec l'erreur 10310-4001."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Di atas 120 FPS, versi game terbaru pernah memutus koneksi pemain dengan kesalahan 10310-4001."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "120 FPSを超えると、最近のゲームバージョンではエラー10310-4001で切断された例があります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "120 FPS를 넘으면 최근 게임 버전에서 오류 10310-4001로 연결이 끊긴 사례가 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acima de 120 FPS, versões recentes do jogo desconectaram jogadores com o erro 10310-4001."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выше 120 FPS последние версии игры отключали игроков с ошибкой 10310-4001."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เมื่อเกิน 120 FPS เกมเวอร์ชันล่าสุดเคยตัดการเชื่อมต่อผู้เล่นด้วยข้อผิดพลาด 10310-4001"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Понад 120 FPS останні версії гри відключали гравців з помилкою 10310-4001."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trên 120 FPS, các phiên bản game gần đây từng ngắt kết nối người chơi với lỗi 10310-4001."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帧率超过 120 时，近期的游戏版本曾以错误 10310-4001 断开玩家连接。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "幀率超過 120 時，近期的遊戲版本曾以錯誤 10310-4001 中斷玩家連線。"
+          }
+        }
+      }
+    },
     "Accept and Download" : {
       "localizations" : {
         "de" : {
@@ -3150,6 +3314,88 @@
         }
       }
     },
+    "Changing a running game goes against HoYoverse's Terms of Service and could lead to an account ban. The genshin-fps-unlock project, whose method this uses, says FPS-only use isn't banned, but MacGacha can't promise that." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein laufendes Spiel zu verändern verstößt gegen die Nutzungsbedingungen von HoYoverse und kann zur Sperrung des Kontos führen. Das Projekt genshin-fps-unlock, dessen Methode hier genutzt wird, sagt, dass reines FPS-Freischalten nicht gesperrt wird, doch MacGacha kann das nicht garantieren."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modificar un juego en ejecución va en contra de los Términos de servicio de HoYoverse y podría causar el bloqueo de la cuenta. El proyecto genshin-fps-unlock, cuyo método se usa aquí, dice que solo desbloquear los FPS no conlleva bloqueo, pero MacGacha no puede garantizarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modifier un jeu en cours d'exécution enfreint les conditions d'utilisation de HoYoverse et peut entraîner le bannissement du compte. Le projet genshin-fps-unlock, dont la méthode est utilisée ici, indique que le seul déblocage des FPS n'entraîne pas de bannissement, mais MacGacha ne peut pas le garantir."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mengubah game yang sedang berjalan melanggar Ketentuan Layanan HoYoverse dan dapat menyebabkan akun diblokir. Proyek genshin-fps-unlock, yang metodenya dipakai di sini, menyatakan bahwa membuka FPS saja tidak diblokir, tetapi MacGacha tidak dapat menjaminnya."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実行中のゲームを変更することはHoYoverseの利用規約に反し、アカウント停止につながる可能性があります。この方法の元となったgenshin-fps-unlockプロジェクトはFPSの解除だけなら停止されないとしていますが、MacGachaはそれを保証できません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실행 중인 게임을 변경하는 것은 HoYoverse 서비스 약관에 어긋나며 계정 정지로 이어질 수 있습니다. 이 방법의 출처인 genshin-fps-unlock 프로젝트는 FPS만 해제하면 정지되지 않는다고 하지만, MacGacha는 이를 보장할 수 없습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alterar um jogo em execução vai contra os Termos de Serviço da HoYoverse e pode levar ao banimento da conta. O projeto genshin-fps-unlock, cujo método é usado aqui, diz que apenas desbloquear o FPS não gera banimento, mas o MacGacha não pode garantir isso."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Изменение запущенной игры нарушает Условия обслуживания HoYoverse и может привести к блокировке аккаунта. Проект genshin-fps-unlock, чей метод здесь используется, утверждает, что за одну лишь разблокировку FPS не банят, но MacGacha не может этого гарантировать."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "การแก้ไขเกมที่กำลังทำงานขัดต่อข้อกำหนดการให้บริการของ HoYoverse และอาจทำให้บัญชีถูกแบน โปรเจกต์ genshin-fps-unlock ซึ่งเป็นที่มาของวิธีนี้ระบุว่าการปลดล็อก FPS อย่างเดียวจะไม่ถูกแบน แต่ MacGacha ไม่สามารถรับประกันได้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Змінення запущеної гри порушує Умови обслуговування HoYoverse і може призвести до блокування акаунта. Проєкт genshin-fps-unlock, чий метод тут використано, стверджує, що за саму лише розблокування FPS не банять, але MacGacha не може цього гарантувати."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thay đổi game đang chạy là vi phạm Điều khoản dịch vụ của HoYoverse và có thể khiến tài khoản bị cấm. Dự án genshin-fps-unlock, nơi có phương pháp được dùng ở đây, cho biết chỉ mở khóa FPS sẽ không bị cấm, nhưng MacGacha không thể đảm bảo điều đó."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改运行中的游戏违反 HoYoverse 的服务条款，可能导致账号被封禁。本功能所用方法来自 genshin-fps-unlock 项目，该项目称仅解锁帧率不会被封号，但 MacGacha 无法保证这一点。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改執行中的遊戲違反 HoYoverse 的服務條款，可能導致帳號被封鎖。本功能所用方法來自 genshin-fps-unlock 專案，該專案稱僅解鎖幀率不會被封號，但 MacGacha 無法保證這一點。"
+          }
+        }
+      }
+    },
     "Check Again" : {
       "localizations" : {
         "de" : {
@@ -3316,16 +3562,28 @@
     },
     "Check for Updates" : {
       "localizations" : {
-        "zh-Hans" : {
+        "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "检查更新"
+            "value" : "Nach Updates suchen"
           }
         },
-        "zh-Hant" : {
+        "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "檢查更新"
+            "value" : "Buscar actualizaciones"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rechercher des mises à jour"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Periksa Pembaruan"
           }
         },
         "ja" : {
@@ -3340,46 +3598,16 @@
             "value" : "업데이트 확인"
           }
         },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Проверить обновления"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Перевірити оновлення"
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nach Updates suchen"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rechercher des mises à jour"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Buscar actualizaciones"
-          }
-        },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Verificar atualizações"
           }
         },
-        "id" : {
+        "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Periksa Pembaruan"
+            "value" : "Проверить обновления"
           }
         },
         "th" : {
@@ -3388,10 +3616,28 @@
             "value" : "ตรวจหาอัปเดต"
           }
         },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перевірити оновлення"
+          }
+        },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kiểm tra cập nhật"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查更新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檢查更新"
           }
         }
       }
@@ -4792,6 +5038,88 @@
         }
       }
     },
+    "Confirm the Genshin Impact FPS unlock risk before enabling it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bestätige vor dem Aktivieren, dass du das Risiko der FPS-Freischaltung für Genshin Impact verstehst."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirma el riesgo de desbloquear los FPS de Genshin Impact antes de activarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avant de l’activer, confirmez les risques du déblocage des FPS de Genshin Impact."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfirmasikan risiko membuka batas FPS Genshin Impact sebelum mengaktifkannya."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効にする前に、原神の FPS 上限解除に伴うリスクを確認してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "활성화하기 전에 원신 FPS 제한 해제의 위험을 확인해 주세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirme o risco de desbloquear os FPS de Genshin Impact antes de ativar."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перед включением подтвердите, что понимаете риск снятия ограничения FPS в Genshin Impact."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "โปรดยืนยันความเสี่ยงของการปลดล็อก FPS ใน Genshin Impact ก่อนเปิดใช้งาน"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перш ніж увімкнути, підтвердьте, що розумієте ризик зняття обмеження FPS у Genshin Impact."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xác nhận rủi ro khi mở khóa FPS của Genshin Impact trước khi bật."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用前，请确认您了解原神 FPS 解锁的风险。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "啟用前，請確認您了解原神 FPS 解鎖的風險。"
+          }
+        }
+      }
+    },
     "Continue in Parts" : {
       "localizations" : {
         "de" : {
@@ -5039,17 +5367,30 @@
       }
     },
     "Couldn't check for updates: %@" : {
+      "comment" : "Manual game update check failed; the argument is the reason",
       "localizations" : {
-        "zh-Hans" : {
+        "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无法检查更新：%@"
+            "value" : "Updates konnten nicht geprüft werden: %@"
           }
         },
-        "zh-Hant" : {
+        "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "無法檢查更新：%@"
+            "value" : "No se pudieron buscar actualizaciones: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de rechercher des mises à jour : %@"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidak dapat memeriksa pembaruan: %@"
           }
         },
         "ja" : {
@@ -5064,46 +5405,16 @@
             "value" : "업데이트를 확인할 수 없음: %@"
           }
         },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Не удалось проверить обновления: %@"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Не вдалося перевірити оновлення: %@"
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Updates konnten nicht geprüft werden: %@"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Impossible de rechercher des mises à jour : %@"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No se pudieron buscar actualizaciones: %@"
-          }
-        },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Não foi possível verificar atualizações: %@"
           }
         },
-        "id" : {
+        "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Tidak dapat memeriksa pembaruan: %@"
+            "value" : "Не удалось проверить обновления: %@"
           }
         },
         "th" : {
@@ -5112,14 +5423,31 @@
             "value" : "ไม่สามารถตรวจหาอัปเดตได้: %@"
           }
         },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не вдалося перевірити оновлення: %@"
+          }
+        },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Không thể kiểm tra cập nhật: %@"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查更新：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法檢查更新：%@"
+          }
         }
-      },
-      "comment" : "Manual game update check failed; the argument is the reason"
+      }
     },
     "Couldn't prepare Wine for %@" : {
       "comment" : "The argument is the game's name",
@@ -5365,6 +5693,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法為%@啟動網路輔助程式"
+          }
+        }
+      }
+    },
+    "Custom" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eigener Wert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personalizado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personnalisé"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kustom"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタム"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자 지정"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personalizado"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Своё"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "กำหนดเอง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Власне"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tùy chỉnh"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂"
           }
         }
       }
@@ -7426,6 +7836,88 @@
         }
       }
     },
+    "Frames per second" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilder pro Sekunde"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotogramas por segundo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Images par seconde"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frame per detik"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フレーム/秒"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "초당 프레임"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quadros por segundo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Кадров в секунду"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เฟรมต่อวินาที"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Кадрів за секунду"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Khung hình mỗi giây"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每秒帧数"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每秒幀數"
+          }
+        }
+      }
+    },
     "Free on this volume" : {
       "localizations" : {
         "de" : {
@@ -7592,16 +8084,28 @@
     },
     "Game Mode for games" : {
       "localizations" : {
-        "zh-Hans" : {
+        "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "为游戏启用游戏模式"
+            "value" : "Spielmodus für Spiele"
           }
         },
-        "zh-Hant" : {
+        "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "為遊戲啟用遊戲模式"
+            "value" : "Modo de juego para los juegos"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mode Jeu pour les jeux"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mode Game untuk game"
           }
         },
         "ja" : {
@@ -7616,46 +8120,16 @@
             "value" : "게임에 게임 모드 사용"
           }
         },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Игровой режим для игр"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ігровий режим для ігор"
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Spielmodus für Spiele"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mode Jeu pour les jeux"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Modo de juego para los juegos"
-          }
-        },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Modo de Jogo para os jogos"
           }
         },
-        "id" : {
+        "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mode Game untuk game"
+            "value" : "Игровой режим для игр"
           }
         },
         "th" : {
@@ -7664,10 +8138,28 @@
             "value" : "โหมดเกมสำหรับเกม"
           }
         },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ігровий режим для ігор"
+          }
+        },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chế độ trò chơi cho game"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为游戏启用游戏模式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為遊戲啟用遊戲模式"
           }
         }
       }
@@ -11131,6 +11623,88 @@
         }
       }
     },
+    "Loads a small helper into the game that raises its 60 FPS limit. HoYoverse may treat it as a third-party tool, so use it at your own risk." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lädt ein kleines Hilfsprogramm in das Spiel, das sein 60-FPS-Limit anhebt. HoYoverse könnte es als Drittanbieter-Tool einstufen. Nutzung auf eigenes Risiko."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Carga en el juego un pequeño asistente que eleva su límite de 60 FPS. HoYoverse podría considerarlo una herramienta de terceros, así que úsalo bajo tu propio riesgo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Charge dans le jeu un petit assistant qui relève sa limite de 60 FPS. HoYoverse peut le considérer comme un outil tiers, utilisez-le à vos risques."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Memuat helper kecil ke dalam game yang menaikkan batas 60 FPS-nya. HoYoverse mungkin menganggapnya alat pihak ketiga, jadi gunakan dengan risiko sendiri."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲームに小さな補助プログラムを読み込み、60 FPSの上限を引き上げます。HoYoverseはこれをサードパーティ製ツールとみなす可能性があるため、自己責任でご利用ください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임에 작은 도우미를 불러와 60 FPS 제한을 높입니다. HoYoverse가 이를 서드파티 도구로 볼 수 있으므로 사용에 따른 책임은 본인에게 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Carrega no jogo um pequeno assistente que eleva o limite de 60 FPS. A HoYoverse pode considerá-lo uma ferramenta de terceiros, então use por sua conta e risco."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загружает в игру небольшой помощник, который поднимает её ограничение в 60 FPS. HoYoverse может считать его сторонним инструментом, поэтому используйте на свой риск."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "โหลดตัวช่วยขนาดเล็กเข้าไปในเกมเพื่อยกเพดาน 60 FPS ของเกม HoYoverse อาจมองว่าเป็นเครื่องมือของบุคคลที่สาม โปรดใช้โดยยอมรับความเสี่ยงเอง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Завантажує в гру невеликий помічник, який піднімає її обмеження в 60 FPS. HoYoverse може вважати його стороннім інструментом, тож використовуйте на власний ризик."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nạp một trình hỗ trợ nhỏ vào game để nâng giới hạn 60 FPS. HoYoverse có thể coi đây là công cụ bên thứ ba, hãy tự chịu rủi ro khi dùng."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会向游戏载入一个小型辅助程序来提高其 60 FPS 上限。HoYoverse 可能将其视为第三方工具，使用风险自负。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "會向遊戲載入一個小型輔助程式來提高其 60 FPS 上限。HoYoverse 可能將其視為第三方工具，使用風險自負。"
+          }
+        }
+      }
+    },
     "Local runtime" : {
       "localizations" : {
         "de" : {
@@ -12111,6 +12685,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "MacGacha 正在還原遊戲檔案，完成後即可遊玩。"
+          }
+        }
+      }
+    },
+    "MacGacha loads a small helper into the game that only raises its frame-rate limit. It doesn't change game files or anything else in the game." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha lädt ein kleines Hilfsprogramm in das Spiel, das nur sein Bildratenlimit anhebt. Es ändert weder Spieldateien noch sonst etwas im Spiel."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha carga en el juego un pequeño asistente que solo eleva su límite de fotogramas. No cambia los archivos del juego ni nada más en el juego."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha charge dans le jeu un petit assistant qui relève uniquement sa limite de fréquence d'images. Il ne modifie ni les fichiers du jeu ni rien d'autre dans le jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha memuat helper kecil ke dalam game yang hanya menaikkan batas frame rate. Helper ini tidak mengubah file game atau hal lain di dalam game."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGachaはゲームに小さな補助プログラムを読み込み、フレームレートの上限だけを引き上げます。ゲームファイルやゲーム内のその他のものは変更しません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha는 게임에 작은 도우미를 불러와 프레임 제한만 높입니다. 게임 파일이나 게임의 다른 부분은 바꾸지 않습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O MacGacha carrega no jogo um pequeno assistente que apenas eleva o limite de quadros. Ele não altera os arquivos do jogo nem mais nada no jogo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha загружает в игру небольшой помощник, который только поднимает ограничение частоты кадров. Он не меняет файлы игры и ничего больше в игре."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha จะโหลดตัวช่วยขนาดเล็กเข้าไปในเกม ซึ่งยกเพดานเฟรมเรตเท่านั้น ไม่เปลี่ยนไฟล์เกมหรือสิ่งอื่นใดในเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha завантажує в гру невеликий помічник, який лише піднімає обмеження частоти кадрів. Він не змінює файли гри й нічого іншого в грі."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha nạp một trình hỗ trợ nhỏ vào game, chỉ để nâng giới hạn tốc độ khung hình. Nó không thay đổi tệp game hay bất cứ thứ gì khác trong game."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 会向游戏载入一个小型辅助程序，它只会提高帧率上限，不会更改游戏文件或游戏中的其他任何内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 會向遊戲載入一個小型輔助程式，它只會提高幀率上限，不會更改遊戲檔案或遊戲中的其他任何內容。"
           }
         }
       }
@@ -17130,16 +17786,28 @@
     },
     "Surround sound" : {
       "localizations" : {
-        "zh-Hans" : {
+        "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "环绕声"
+            "value" : "Surround-Sound"
           }
         },
-        "zh-Hant" : {
+        "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "環繞聲"
+            "value" : "Sonido envolvente"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Son surround"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suara surround"
           }
         },
         "ja" : {
@@ -17154,46 +17822,16 @@
             "value" : "서라운드 사운드"
           }
         },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Объёмный звук"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Об'ємний звук"
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Surround-Sound"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Son surround"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sonido envolvente"
-          }
-        },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Som surround"
           }
         },
-        "id" : {
+        "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Suara surround"
+            "value" : "Объёмный звук"
           }
         },
         "th" : {
@@ -17202,26 +17840,56 @@
             "value" : "เสียงเซอร์ราวด์"
           }
         },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Об'ємний звук"
+          }
+        },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Âm thanh vòm"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "环绕声"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "環繞聲"
           }
         }
       }
     },
     "Surround sound wasn't available for this launch, so the game used stereo" : {
       "localizations" : {
-        "zh-Hans" : {
+        "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本次启动无法使用环绕声，游戏使用了立体声"
+            "value" : "Surround-Sound war bei diesem Start nicht verfügbar, daher lief das Spiel in Stereo"
           }
         },
-        "zh-Hant" : {
+        "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本次啟動無法使用環繞聲，遊戲使用了立體聲"
+            "value" : "El sonido envolvente no estaba disponible en este inicio, así que el juego usó estéreo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le son surround n'était pas disponible pour ce lancement, le jeu a donc utilisé la stéréo"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suara surround tidak tersedia untuk peluncuran ini, jadi game menggunakan stereo"
           }
         },
         "ja" : {
@@ -17236,46 +17904,16 @@
             "value" : "이번 실행에서는 서라운드를 사용할 수 없어 게임이 스테레오로 재생되었습니다"
           }
         },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Объёмный звук был недоступен при этом запуске, поэтому игра использовала стерео"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Об'ємний звук був недоступний під час цього запуску, тому гра використала стерео"
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Surround-Sound war bei diesem Start nicht verfügbar, daher lief das Spiel in Stereo"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Le son surround n'était pas disponible pour ce lancement, le jeu a donc utilisé la stéréo"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "El sonido envolvente no estaba disponible en este inicio, así que el juego usó estéreo"
-          }
-        },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "O som surround não estava disponível nesta abertura, então o jogo usou estéreo"
           }
         },
-        "id" : {
+        "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Suara surround tidak tersedia untuk peluncuran ini, jadi game menggunakan stereo"
+            "value" : "Объёмный звук был недоступен при этом запуске, поэтому игра использовала стерео"
           }
         },
         "th" : {
@@ -17284,10 +17922,28 @@
             "value" : "เสียงเซอร์ราวด์ใช้ไม่ได้ในการเปิดครั้งนี้ เกมจึงใช้เสียงสเตอริโอ"
           }
         },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Об'ємний звук був недоступний під час цього запуску, тому гра використала стерео"
+          }
+        },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Âm thanh vòm không khả dụng trong lần khởi chạy này, nên trò chơi dùng âm thanh stereo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本次启动无法使用环绕声，游戏使用了立体声"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本次啟動無法使用環繞聲，遊戲使用了立體聲"
           }
         }
       }
@@ -17699,6 +18355,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "耗時比平常更長"
+          }
+        }
+      }
+    },
+    "Target" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ziel"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Objetivo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cible"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Target"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目標"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "목표"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alvo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Цель"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เป้าหมาย"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ціль"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mục tiêu"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目标"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目標"
           }
         }
       }
@@ -18196,6 +18934,89 @@
         }
       }
     },
+    "The frame limit is %lld FPS, so the game won't go above it. Raise the limit or set it to Off." : {
+      "comment" : "The argument is the current frame limit",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Bildratenlimit liegt bei %lld FPS, darüber geht das Spiel nicht. Erhöhe das Limit oder stelle es auf Aus."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El límite de fotogramas es de %lld FPS, así que el juego no lo superará. Sube el límite o desactívalo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La limite est de %lld FPS, le jeu ne la dépassera pas. Augmentez la limite ou désactivez-la."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Batas frame rate adalah %lld FPS, jadi game tidak akan melebihinya. Naikkan batasnya atau matikan."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フレームレート上限が%lld FPSのため、ゲームはそれを超えません。上限を上げるか、オフにしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프레임 제한이 %lld FPS라서 게임이 그 이상 올라가지 않습니다. 제한을 높이거나 끄세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O limite de quadros é %lld FPS, então o jogo não passará disso. Aumente o limite ou desative-o."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ограничение частоты кадров — %lld FPS, поэтому игра не поднимется выше. Повысьте ограничение или выключите его."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "จำกัดเฟรมเรตไว้ที่ %lld FPS เกมจะไม่สูงกว่านี้ เพิ่มขีดจำกัดหรือปิดไป"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обмеження частоти кадрів — %lld FPS, тому гра не підніметься вище. Підвищте обмеження або вимкніть його."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giới hạn khung hình là %lld FPS nên game sẽ không vượt quá. Hãy nâng giới hạn hoặc tắt nó."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帧率上限为 %lld FPS，游戏不会超过此值。请提高上限或将其设为“关”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "幀率上限為 %lld FPS，遊戲不會超過此值。請提高上限或將其設為「關」。"
+          }
+        }
+      }
+    },
     "The frame limit is %lld FPS, so the game won't go above it. Set the limit to 120 or Off to play at 120 FPS." : {
       "comment" : "The argument is the current frame limit",
       "localizations" : {
@@ -18361,6 +19182,88 @@
         }
       }
     },
+    "The frame-rate unlock didn't apply this time, so the game ran at its normal frame rate" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Freischalten der Bildrate hat diesmal nicht gegriffen, das Spiel lief mit normaler Bildrate"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El desbloqueo de la tasa de fotogramas no se aplicó esta vez, así que el juego funcionó a su tasa normal"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le déblocage de la fréquence d'images n'a pas fonctionné cette fois, le jeu a tourné à sa fréquence normale"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buka batas frame rate tidak berlaku kali ini, jadi game berjalan dengan frame rate normal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今回はフレームレートの上限を解除できなかったため、ゲームは通常のフレームレートで動作しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이번에는 프레임 제한 해제가 적용되지 않아 게임이 기본 프레임으로 실행되었습니다"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O desbloqueio da taxa de quadros não foi aplicado desta vez, então o jogo rodou na taxa normal"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "В этот раз разблокировка частоты кадров не сработала, игра шла с обычной частотой кадров"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ครั้งนี้การปลดล็อกเฟรมเรตไม่ทำงาน เกมจึงทำงานที่เฟรมเรตปกติ"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Цього разу розблокування частоти кадрів не спрацювало, гра йшла зі звичайною частотою кадрів"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lần này mở khóa tốc độ khung hình không áp dụng được, nên game chạy ở tốc độ bình thường"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本次未能解锁帧率，游戏以正常帧率运行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本次未能解鎖幀率，遊戲以正常幀率執行"
+          }
+        }
+      }
+    },
     "The game closed during startup." : {
       "localizations" : {
         "de" : {
@@ -18445,16 +19348,28 @@
     },
     "The game mixes 7.1 audio. On headphones and AirPods it plays as Spatial Audio, and a 5.1 or 7.1 output gets the channels directly. Also pick surround output in the game's audio settings." : {
       "localizations" : {
-        "zh-Hans" : {
+        "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "游戏将混合 7.1 声道音频。在耳机和 AirPods 上以空间音频播放，5.1 或 7.1 输出设备则直接获得各声道。还需在游戏的音频设置中选择环绕声输出。"
+            "value" : "Das Spiel mischt 7.1-Audio. Auf Kopfhörern und AirPods klingt es als 3D-Audio, und ein 5.1- oder 7.1-Ausgang erhält die Kanäle direkt. Wähle auch in den Audioeinstellungen des Spiels die Surround-Ausgabe."
           }
         },
-        "zh-Hant" : {
+        "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "遊戲將混合 7.1 聲道音訊。在耳機和 AirPods 上以空間音訊播放，5.1 或 7.1 輸出裝置則直接取得各聲道。也需在遊戲的音訊設定中選擇環繞聲輸出。"
+            "value" : "El juego mezcla audio 7.1. En auriculares y AirPods se reproduce como audio espacial, y una salida 5.1 o 7.1 recibe los canales directamente. Elige también la salida envolvente en los ajustes de audio del juego."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le jeu mixe l'audio en 7.1. Sur un casque et des AirPods, il est lu en audio spatial, et une sortie 5.1 ou 7.1 reçoit directement les canaux. Choisissez aussi la sortie surround dans les réglages audio du jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Game mencampur audio 7.1. Di headphone dan AirPods diputar sebagai Audio Spasial, dan output 5.1 atau 7.1 menerima kanal secara langsung. Pilih juga output surround di pengaturan audio game."
           }
         },
         "ja" : {
@@ -18469,46 +19384,16 @@
             "value" : "게임이 7.1 채널로 오디오를 믹스합니다. 헤드폰과 AirPods에서는 공간 음향으로 재생되고, 5.1 또는 7.1 출력 장치에는 각 채널이 그대로 전달됩니다. 게임의 오디오 설정에서도 서라운드 출력을 선택하세요."
           }
         },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Игра сводит звук в 7.1. В наушниках и AirPods он звучит как пространственное аудио, а выход 5.1 или 7.1 получает каналы напрямую. Также выберите объёмный звук в настройках звука игры."
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Гра зводить звук у 7.1. У навушниках і AirPods він звучить як просторове аудіо, а вихід 5.1 або 7.1 отримує канали напряму. Також виберіть об'ємний звук у налаштуваннях звуку гри."
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Das Spiel mischt 7.1-Audio. Auf Kopfhörern und AirPods klingt es als 3D-Audio, und ein 5.1- oder 7.1-Ausgang erhält die Kanäle direkt. Wähle auch in den Audioeinstellungen des Spiels die Surround-Ausgabe."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Le jeu mixe l'audio en 7.1. Sur un casque et des AirPods, il est lu en audio spatial, et une sortie 5.1 ou 7.1 reçoit directement les canaux. Choisissez aussi la sortie surround dans les réglages audio du jeu."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "El juego mezcla audio 7.1. En auriculares y AirPods se reproduce como audio espacial, y una salida 5.1 o 7.1 recibe los canales directamente. Elige también la salida envolvente en los ajustes de audio del juego."
-          }
-        },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "O jogo mixa áudio 7.1. Em fones e AirPods, ele toca como Áudio Espacial, e uma saída 5.1 ou 7.1 recebe os canais diretamente. Escolha também a saída surround nos ajustes de áudio do jogo."
           }
         },
-        "id" : {
+        "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Game mencampur audio 7.1. Di headphone dan AirPods diputar sebagai Audio Spasial, dan output 5.1 atau 7.1 menerima kanal secara langsung. Pilih juga output surround di pengaturan audio game."
+            "value" : "Игра сводит звук в 7.1. В наушниках и AirPods он звучит как пространственное аудио, а выход 5.1 или 7.1 получает каналы напрямую. Также выберите объёмный звук в настройках звука игры."
           }
         },
         "th" : {
@@ -18517,10 +19402,28 @@
             "value" : "เกมจะมิกซ์เสียงแบบ 7.1 บนหูฟังและ AirPods จะเล่นเป็นเสียงรอบทิศทาง ส่วนเอาต์พุต 5.1 หรือ 7.1 จะได้รับแต่ละช่องโดยตรง เลือกเอาต์พุตเซอร์ราวด์ในการตั้งค่าเสียงของเกมด้วย"
           }
         },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Гра зводить звук у 7.1. У навушниках і AirPods він звучить як просторове аудіо, а вихід 5.1 або 7.1 отримує канали напряму. Також виберіть об'ємний звук у налаштуваннях звуку гри."
+          }
+        },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Trò chơi trộn âm thanh 7.1. Trên tai nghe và AirPods, âm thanh phát dưới dạng Âm thanh không gian, còn đầu ra 5.1 hoặc 7.1 nhận trực tiếp từng kênh. Hãy chọn cả đầu ra vòm trong cài đặt âm thanh của trò chơi."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏将混合 7.1 声道音频。在耳机和 AirPods 上以空间音频播放，5.1 或 7.1 输出设备则直接获得各声道。还需在游戏的音频设置中选择环绕声输出。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遊戲將混合 7.1 聲道音訊。在耳機和 AirPods 上以空間音訊播放，5.1 或 7.1 輸出裝置則直接取得各聲道。也需在遊戲的音訊設定中選擇環繞聲輸出。"
           }
         }
       }
@@ -19764,6 +20667,88 @@
         }
       }
     },
+    "This warning appears only once. You can turn the unlock off at any time in the game's settings." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Warnung erscheint nur einmal. Du kannst das Freischalten jederzeit in den Einstellungen des Spiels ausschalten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta advertencia solo aparece una vez. Puedes desactivar el desbloqueo en cualquier momento en los ajustes del juego."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cet avertissement n'apparaît qu'une fois. Vous pouvez désactiver le déblocage à tout moment dans les réglages du jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Peringatan ini hanya muncul sekali. Kamu bisa mematikan buka batas kapan saja di pengaturan game."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この警告は一度だけ表示されます。解除はゲームの設定からいつでもオフにできます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 경고는 한 번만 표시됩니다. 언제든 게임 설정에서 해제를 끌 수 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este aviso aparece só uma vez. Você pode desativar o desbloqueio a qualquer momento nos ajustes do jogo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Это предупреждение показывается только один раз. Разблокировку можно выключить в любой момент в настройках игры."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "คำเตือนนี้จะแสดงเพียงครั้งเดียว คุณปิดการปลดล็อกได้ทุกเมื่อในการตั้งค่าของเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Це попередження показується лише один раз. Розблокування можна вимкнути будь-коли в налаштуваннях гри."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cảnh báo này chỉ hiện một lần. Bạn có thể tắt mở khóa bất cứ lúc nào trong cài đặt của game."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此警告只会显示一次。你可以随时在游戏设置中关闭解锁。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此警告只會顯示一次。你可以隨時在遊戲設定中關閉解鎖。"
+          }
+        }
+      }
+    },
     "Try Again" : {
       "localizations" : {
         "de" : {
@@ -19924,6 +20909,171 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "再次嘗試還原"
+          }
+        }
+      }
+    },
+    "Turn On" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einschalten"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activer"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktifkan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンにする"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "켜기"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ativar"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Включить"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เปิด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Увімкнути"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bật"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟"
+          }
+        }
+      }
+    },
+    "Turn On (%lld)" : {
+      "comment" : "Confirm button while its countdown runs; the argument is seconds left",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einschalten (%lld)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activar (%lld)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activer (%lld)"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktifkan (%lld)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンにする（%lld）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "켜기(%lld)"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ativar (%lld)"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Включить (%lld)"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เปิด (%lld)"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Увімкнути (%lld)"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bật (%lld)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启（%lld）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟（%lld）"
           }
         }
       }
@@ -20498,6 +21648,171 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "解鎖 120 FPS"
+          }
+        }
+      }
+    },
+    "Unlock frame rate" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bildrate freischalten"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desbloquear la tasa de fotogramas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Débloquer la fréquence d'images"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buka batas frame rate"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フレームレートの上限を解除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프레임 제한 해제"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desbloquear taxa de quadros"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разблокировать частоту кадров"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ปลดล็อกเฟรมเรต"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Розблокувати частоту кадрів"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mở khóa tốc độ khung hình"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解锁帧率"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解鎖幀率"
+          }
+        }
+      }
+    },
+    "Unlock the frame rate in %@?" : {
+      "comment" : "Warning title; the argument is the game's name",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bildrate in %@ freischalten?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Desbloquear la tasa de fotogramas de %@?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Débloquer la fréquence d'images de %@ ?"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buka batas frame rate di %@?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@のフレームレート上限を解除しますか？"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 프레임 제한을 해제할까요?"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desbloquear a taxa de quadros de %@?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разблокировать частоту кадров в %@?"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ปลดล็อกเฟรมเรตใน %@ ไหม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Розблокувати частоту кадрів у %@?"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mở khóa tốc độ khung hình trong %@?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要解锁《%@》的帧率吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要解鎖《%@》的幀率嗎？"
           }
         }
       }
@@ -21079,17 +22394,30 @@
       }
     },
     "Version %@ · Up to date" : {
+      "comment" : "Game status after a manual update check; the argument is the game version",
       "localizations" : {
-        "zh-Hans" : {
+        "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "版本 %@ · 已是最新"
+            "value" : "Version %@ · Aktuell"
           }
         },
-        "zh-Hant" : {
+        "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "版本 %@ · 已是最新"
+            "value" : "Versión %@ · Actualizado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version %@ · À jour"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Versi %@ · Terbaru"
           }
         },
         "ja" : {
@@ -21104,46 +22432,16 @@
             "value" : "버전 %@ · 최신 상태"
           }
         },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Версия %@ · Обновлений нет"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Версія %@ · Оновлень немає"
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Version %@ · Aktuell"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Version %@ · À jour"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Versión %@ · Actualizado"
-          }
-        },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Versão %@ · Atualizado"
           }
         },
-        "id" : {
+        "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Versi %@ · Terbaru"
+            "value" : "Версия %@ · Обновлений нет"
           }
         },
         "th" : {
@@ -21152,14 +22450,31 @@
             "value" : "เวอร์ชัน %@ · เป็นเวอร์ชันล่าสุด"
           }
         },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Версія %@ · Оновлень немає"
+          }
+        },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Phiên bản %@ · Đã cập nhật"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本 %@ · 已是最新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本 %@ · 已是最新"
+          }
         }
-      },
-      "comment" : "Game status after a manual update check; the argument is the game version"
+      }
     },
     "Version %@ · Version %@ is available" : {
       "comment" : "Game status: installed version, then the newer one",
@@ -22655,16 +23970,28 @@
     },
     "macOS gives a full-screen game priority on the CPU and GPU and lowers latency for AirPods and controllers. Takes effect the next time you play." : {
       "localizations" : {
-        "zh-Hans" : {
+        "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "macOS 会让全屏游戏优先使用 CPU 和 GPU，并降低 AirPods 和手柄的延迟。下次开始游戏时生效。"
+            "value" : "macOS gibt einem Spiel im Vollbild Vorrang bei CPU und GPU und senkt die Latenz von AirPods und Controllern. Wirkt beim nächsten Spielstart."
           }
         },
-        "zh-Hant" : {
+        "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "macOS 會讓全螢幕遊戲優先使用 CPU 和 GPU，並降低 AirPods 和控制器的延遲。下次開始遊戲時生效。"
+            "value" : "macOS da prioridad de CPU y GPU al juego a pantalla completa y reduce la latencia de los AirPods y los mandos. Se aplica la próxima vez que juegues."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS donne la priorité CPU et GPU au jeu en plein écran et réduit la latence des AirPods et des manettes. Prend effet au prochain lancement du jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS memberi game layar penuh prioritas CPU dan GPU serta menurunkan latensi AirPods dan kontroler. Berlaku saat berikutnya Anda bermain."
           }
         },
         "ja" : {
@@ -22679,46 +24006,16 @@
             "value" : "macOS가 전체 화면 게임에 CPU와 GPU를 우선 할당하고 AirPods 및 컨트롤러의 지연 시간을 줄입니다. 다음에 게임을 시작할 때 적용됩니다."
           }
         },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "macOS отдаёт полноэкранной игре приоритет на CPU и GPU и снижает задержку AirPods и контроллеров. Вступит в силу при следующем запуске игры."
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "macOS надає повноекранній грі пріоритет на CPU і GPU та зменшує затримку AirPods і контролерів. Набуде чинності під час наступного запуску гри."
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "macOS gibt einem Spiel im Vollbild Vorrang bei CPU und GPU und senkt die Latenz von AirPods und Controllern. Wirkt beim nächsten Spielstart."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "macOS donne la priorité CPU et GPU au jeu en plein écran et réduit la latence des AirPods et des manettes. Prend effet au prochain lancement du jeu."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "macOS da prioridad de CPU y GPU al juego a pantalla completa y reduce la latencia de los AirPods y los mandos. Se aplica la próxima vez que juegues."
-          }
-        },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "O macOS dá prioridade de CPU e GPU ao jogo em tela cheia e reduz a latência dos AirPods e controles. Entra em vigor na próxima vez que você jogar."
           }
         },
-        "id" : {
+        "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "macOS memberi game layar penuh prioritas CPU dan GPU serta menurunkan latensi AirPods dan kontroler. Berlaku saat berikutnya Anda bermain."
+            "value" : "macOS отдаёт полноэкранной игре приоритет на CPU и GPU и снижает задержку AirPods и контроллеров. Вступит в силу при следующем запуске игры."
           }
         },
         "th" : {
@@ -22727,10 +24024,28 @@
             "value" : "macOS จะให้เกมแบบเต็มหน้าจอใช้ CPU และ GPU ก่อน และลดความหน่วงของ AirPods และคอนโทรลเลอร์ มีผลเมื่อคุณเล่นครั้งถัดไป"
           }
         },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS надає повноекранній грі пріоритет на CPU і GPU та зменшує затримку AirPods і контролерів. Набуде чинності під час наступного запуску гри."
+          }
+        },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "macOS ưu tiên CPU và GPU cho game toàn màn hình và giảm độ trễ của AirPods và tay cầm. Có hiệu lực từ lần chơi tiếp theo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 会让全屏游戏优先使用 CPU 和 GPU，并降低 AirPods 和手柄的延迟。下次开始游戏时生效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 會讓全螢幕遊戲優先使用 CPU 和 GPU，並降低 AirPods 和控制器的延遲。下次開始遊戲時生效。"
           }
         }
       }

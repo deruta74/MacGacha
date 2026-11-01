@@ -29,7 +29,8 @@ worker outside the loader lock. The worker opens
 signature `unlocker35-il2cpp-e9-v2`: `B9 3C 00 00 00 E8 rel32`, initial `E9`,
 up to eight cycle-checked E8/E9 thunks, then `89 0D disp32 C3`.
 The first qualifying caller supplies the slot. Different qualifying slots,
-unreadable scan bytes and an initial value outside 30–60 refuse all writes.
+unreadable scan bytes and an initial value other than -1 (Unity's unset limit, seen
+when the game has just started) or 30–60 refuse all writes.
 Bounds are 96 sections, 2 GiB per image and 256 distinct slots.
 
 The slot must be four-byte aligned, inside writable non-executable main-image
@@ -73,7 +74,7 @@ Statuses: 0 None, 1 Ready, 2 Error, 3 Stop. Shared errors: 1 invalid image,
 | 0 | Game exit or handled cancellation |
 | 10 | No game |
 | 11 | Ambiguous games, injection/pattern/deadline failure or stub Error |
-| 12 | Initial value outside 30–60, before any write |
+| 12 | Initial value other than -1 or 30–60, before any write |
 | 13 | Invalid CLI or other setup failure |
 
 ## Reproduce without Wine
@@ -98,7 +99,7 @@ maps, no build IDs and zero PE timestamps. No executable is run. ZIP entries are
 sorted, stored without compression (independent of host zlib), dated 1980-01-01
 and carry fixed regular-file permissions. Audits stay outside the ZIP.
 
-`genshin-fps-unlock-1.zip` contains `x86_64-windows/fpsstub.dll` and
+`genshin-fps-unlock-2.zip` contains `x86_64-windows/fpsstub.dll` and
 `x86_64-windows/fpsinject.exe`, documentation, GPL license/notice and the exact
 source/build inputs. The manifest selects `x86_64-windows` as the installed root,
 keeping the DLL next to the injector. `SHA256SUMS` pins the whole ZIP.

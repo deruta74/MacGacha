@@ -13,7 +13,7 @@ import TestSupport
         let manifest = try RuntimeManifest(components: [component])
         let decoded = try JSONDecoder().decode(RuntimeManifest.self, from: JSONEncoder().encode(manifest))
         let value = try #require(decoded.components.first)
-        #expect(value.id.rawValue == "genshin-fps-unlock-1")
+        #expect(value.id.rawValue == "genshin-fps-unlock-2")
         #expect(value.kind == .genshinFps && value.kind.rawValue == "genshinFps")
         #expect(value.kind.idPrefix == "genshin-fps-unlock")
         #expect(value.version.rawValue == GenshinFps.version)
@@ -22,7 +22,7 @@ import TestSupport
         #expect(value.consent == nil && value.wineBinary == nil && value.overlay.isEmpty)
         #expect(throws: (any Error).self) {
             _ = try RuntimeComponent(id: SafeIdentifier("genshinFps-1"), kind: .genshinFps,
-                version: SafeIdentifier("1"), sourceMode: .download, url: component.url, size: component.size,
+                version: SafeIdentifier(GenshinFps.version), sourceMode: .download, url: component.url, size: component.size,
                 installedSize: component.installedSize, sha256: component.sha256, archive: .zip, license: component.license)
         }
     }
@@ -40,7 +40,7 @@ import TestSupport
         cdn.serve("archive", data: bytes)
         for try await _ in fpsInstaller(store, cdn).install(component) { }
         let installed = try #require(store.installed().first)
-        #expect(installed.kind == .genshinFps && installed.version == "1")
+        #expect(installed.kind == .genshinFps && installed.version == GenshinFps.version)
         #expect(installed.archiveDigest == component.sha256)
         let fs = try ContainedFileSystem(root: store.installURL(for: component))
         #expect(try fs.readFile(at: GenshinFps.injectorPath, maxBytes: 100) == Data("injector".utf8))
@@ -92,7 +92,7 @@ private func fpsArchive() -> Data {
 private func fpsComponent(_ bytes: Data) throws -> RuntimeComponent {
     var hash = StreamingHasher(.sha256); hash.update(bytes)
     return try RuntimeComponent(id: SafeIdentifier(GenshinFps.componentID), kind: .genshinFps,
-        version: SafeIdentifier("1"), sourceMode: .download, url: URL(string: "https://fixtures.invalid/archive"),
+        version: SafeIdentifier(GenshinFps.version), sourceMode: .download, url: URL(string: "https://fixtures.invalid/archive"),
         size: Int64(bytes.count), installedSize: 1024, sha256: hash.finalize(), archive: .zip,
         license: ComponentLicense(name: "GPL-3.0-only", url: URL(string: "https://fixtures.invalid/license")!,
             redistributable: true, termsRevision: "1"), rootPath: SafeRelativePath("x86_64-windows"))
@@ -112,7 +112,7 @@ struct GenshinFpsBuiltArchiveTests {
         let manifest = try RuntimeManifest.load(from: repository.appendingPathComponent("App/Resources/runtime-manifest.json"))
         let component = try #require(manifest.components.first { $0.id.rawValue == GenshinFps.componentID })
         let buildFS = try ContainedFileSystem(root: built)
-        let bytes = try buildFS.readFile(at: SafeRelativePath("genshin-fps-unlock-1.zip"), maxBytes: Int(try #require(component.size)))
+        let bytes = try buildFS.readFile(at: SafeRelativePath("genshin-fps-unlock-2.zip"), maxBytes: Int(try #require(component.size)))
         var hash = StreamingHasher(.sha256); hash.update(bytes)
         #expect(Int64(bytes.count) == component.size && hash.finalize() == component.sha256)
         let temp = try TempDir(), store = RuntimeStore(paths: AppPaths(root: temp.url)), cdn = MockCDN()
