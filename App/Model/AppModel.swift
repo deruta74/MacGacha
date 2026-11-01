@@ -790,6 +790,7 @@ final class AppModel {
         switch kind {
         case .wine: "Wine"; case .dxmt: "DXMT"; case .d3dmetal: "D3DMetal"
         case .surroundAudio: String(localized: "Wine surround audio", comment: "Runtime component name")
+        case .genshinFps: String(localized: "Genshin FPS unlocker", comment: "Runtime component name")
         case .crypt32Fix: String(localized: "Wine crypt32 fix", comment: "Runtime component name")
         case .jadeite: String(localized: "Jadeite", comment: "Runtime component name"); case .steamShim: String(localized: "Steam shim", comment: "Runtime component name")
         }
