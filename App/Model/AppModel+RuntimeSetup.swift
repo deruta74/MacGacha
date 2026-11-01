@@ -72,7 +72,10 @@ enum RuntimeSetupItemState {
                 size: RuntimeSetupPlan.total(components.map(\.size))), components: components))
         }
         guard let recipe = Recipes.recipe(for: gameID) else { return nil }
-        let required = LaunchResolver.requiredComponents(recipe: recipe, settings: launchSettings(for: gameID),
+        var settings = launchSettings(for: gameID)
+        // Launch ignores an unconfirmed Genshin unlock, so setup must not ask for its helper.
+        if GenshinFps.applies(to: gameID) && !genshinFpsRiskAcknowledged { settings.unlockFPS = false }
+        let required = LaunchResolver.requiredComponents(recipe: recipe, settings: settings,
             runtimeBundleID: bundle.id.rawValue)
         // Keep the ABI-specific Wine correction beside its bundle, before optional wrappers.
         let scoped: Set<ComponentKind> = [.crypt32Fix, .surroundAudio, .genshinFps]
