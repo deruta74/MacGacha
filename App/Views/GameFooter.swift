@@ -176,6 +176,17 @@ struct GameFooter: View {
         }
         // A disabled button shows no tooltip on macOS, so the reason it waits goes here.
         if let busy = busyElsewhere { return busy }
+        // The result of a manual check stays until the status changes for another reason.
+        switch model.gameUpdateCheck[game.id] {
+        case .checking: return String(localized: "Checking for updates…")
+        case .upToDate:
+            if case .installed(let tag) = state.status {
+                return String(localized: "Version \(tag) · Up to date", comment: "Game status after a manual update check; the argument is the game version")
+            }
+        case .failed(let error):
+            return String(localized: "Couldn't check for updates: \(error.userMessage)", comment: "Manual game update check failed; the argument is the reason")
+        case .updateAvailable, nil: break
+        }
         switch state.status {
         case .unknown: return String(localized: "Checking for updates…")
         case .notInstalled: return String(localized: "Not installed")
@@ -570,6 +581,8 @@ struct GameMenu: View {
                 Button("Game Settings…", systemImage: "slider.horizontal.3") { gameSheet = .settings(game.id) }
             }
             if isInstalled, !waitingForApproval, !model.isGameOperationRunning, !isLive {
+                Button("Check for Updates", systemImage: "arrow.triangle.2.circlepath") { model.checkForGameUpdate(game.id) }
+                    .disabled(model.gameUpdateCheck[game.id] == .checking)
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
                 Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
             }

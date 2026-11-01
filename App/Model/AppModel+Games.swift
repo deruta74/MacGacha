@@ -6,6 +6,10 @@ import LauncherCore
 import DownloadEngine
 import GameLibrary
 
+enum GameUpdateCheckResult: Sendable, Equatable {
+    case checking, upToDate(Date), updateAvailable, failed(LauncherError)
+}
+
 struct GameOperationToken: Sendable, Equatable {
     let id: String; let generation: UUID
     var kind: OtherRegionActivity = .downloading
@@ -40,6 +44,63 @@ private struct GameSnapshot: Sendable {
 }
 
 @MainActor extension AppModel {
+    func checkForGameUpdate(_ id: String) {
+        guard gameUpdateCheckTasks[id] == nil, canCheckGameUpdate(id) else { return }
+        let revision = UUID()
+        gameRevisions[id] = revision // Supersede any older automatic status read.
+        gameUpdateCheck[id] = .checking
+        let startup = ensureGameStartup(), services = gameServices
+        gameUpdateCheckTasks[id] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.gameUpdateCheckTasks[id] = nil }
+            do {
+                await startup.value
+                try Task.checkCancellation()
+                guard self.isCurrentGameUpdateCheck(id, revision: revision) else {
+                    self.clearCheckingGameUpdate(id); return
+                }
+                if let error = self.launchStartupError { throw error }
+                let status = try await services.checkForUpdate(id)
+                let record = try await services.record(id)
+                try Task.checkCancellation()
+                guard self.isCurrentGameUpdateCheck(id, revision: revision) else {
+                    self.clearCheckingGameUpdate(id); return
+                }
+                self.applyGame(GameSnapshot(status: status, record: record), id: id, activity: nil)
+                self.gameRevisions[id] = UUID() // Invalidate automatic reads begun during the check.
+                switch status {
+                case .installed: self.gameUpdateCheck[id] = .upToDate(self.eventsNow())
+                case .updateAvailable: self.gameUpdateCheck[id] = .updateAvailable
+                default: break // A missing or paused installation is not an up-to-date claim.
+                }
+            } catch {
+                guard self.isCurrentGameUpdateCheck(id, revision: revision) else {
+                    self.clearCheckingGameUpdate(id); return
+                }
+                self.gameUpdateCheck[id] = .failed(launcherError(error))
+            }
+        }
+    }
+
+    private func canCheckGameUpdate(_ id: String) -> Bool {
+        guard GameDefinition.find(id) != nil, languageRestart == nil, !updater.isInstallingUpdate,
+            gameOperation?.id != id, games[id]?.activity == nil, gameRecords[id]?.pending == nil,
+            gameRecords[id]?.uninstalling != true, launchSlotOwner != id, launchTasks[id] == nil,
+            !liveLaunchGames.contains(id) else { return false }
+        switch launchStates[id] {
+        case .starting, .running, .ready, .recoveryNeeded: return false
+        case nil, .failed: return true
+        }
+    }
+
+    private func isCurrentGameUpdateCheck(_ id: String, revision: UUID) -> Bool {
+        gameRevisions[id] == revision && gameUpdateCheck[id] == .checking && canCheckGameUpdate(id)
+    }
+
+    private func clearCheckingGameUpdate(_ id: String) {
+        if gameUpdateCheck[id] == .checking { gameUpdateCheck[id] = nil }
+    }
+
     func refreshGames() async {
         await refreshGames(in: region)
     }
@@ -60,7 +121,9 @@ private struct GameSnapshot: Sendable {
             return result
         }
         guard !Task.isCancelled else { return }
-        for (id, snapshot) in results where gameRevisions[id] == revisions[id] {
+        // A manual check in flight owns this game's status until it finishes,
+        // so a cached automatic read cannot discard its fresh result.
+        for (id, snapshot) in results where gameRevisions[id] == revisions[id] && gameUpdateCheckTasks[id] == nil {
             applyGame(snapshot, id: id, activity: games[id]?.activity)
         }
         // Records are local; only the selected region performs remote status reads.
