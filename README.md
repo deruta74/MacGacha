@@ -39,6 +39,7 @@ This only changes MacGacha itself, not any system setting. The first launch can 
 ## Roadmap
 
 **Done**
+- **Genshin Impact frame-rate unlock (opt-in).** A switch in Genshin's game settings, off by default, with a target of 120 FPS or a custom value. MacGacha loads a small helper into the game that only raises its frame-rate limit, using the method of [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock). We build it ourselves, reproducibly ([release](https://github.com/deruta74/MacGacha/releases/tag/genshin-fps-unlock-1)). Turning it on the first time shows a ban-risk warning. Tested on Global Genshin 7.1 with D3DMetal: 120 FPS held through a 3.5-hour online session.
 - **Surround sound.** Optional spatial mixing for Genshin Impact and Zenless Zone Zero on D3DMetal Wine 11.20. Multichannel outputs retain their native layout. Head tracking is planned.
 
 - **Game Mode preparation.** MacGacha stays a utility. Each game edition launches through its own named app, using its cached game icon when available. Wine’s game processes stay inside that app so macOS can identify them. Normal launch remains the fallback. Game Mode is confirmed on D3DMetal Genshin. DXMT still needs live verification.
@@ -75,9 +76,8 @@ DXMT works for every game and stays available as the open-source alternative. Th
 
 **Next**
 1. **Wine 11.21 runtime**, which has the crypt32 fix built in. Our separate fix then goes away.
-2. **FPS unlocker (opt-in)** for games capped at 60 fps, off by default, with a ban-risk warning before you enable it.
-3. **Pre-download.** Downloading the next version before release.
-4. **Spatial Audio head tracking.** Follow headphone motion during spatial playback.
+2. **Pre-download.** Downloading the next version before release.
+3. **Spatial Audio head tracking.** Follow headphone motion during spatial playback.
 
 ## Feedback
 
@@ -89,7 +89,7 @@ Use at your own risk. To run under Wine, MacGacha uses community anti-cheat work
 
 By default MacGacha downloads games only from HoYoverse's official servers and verifies every file. It doesn't change the game process, never edits `/etc/hosts` and never asks for your password. Each game runs in its own Wine prefix with no access to your Desktop or Documents.
 
-Optional features that do change the game process, such as an FPS unlocker, are **off by default**. Before you turn one on, MacGacha warns you about the extra ban risk.
+Optional features that do change the game process, such as the Genshin Impact frame-rate unlock, are **off by default**. Before you turn one on for the first time, MacGacha warns you about the extra ban risk.
 
 ## Disclaimer
 
@@ -111,6 +111,7 @@ MacGacha is an unofficial, community project. It is not affiliated with, endorse
 - 3Shain for DXMT and yaagl, whose launch research MacGacha builds on.
 - dbc-hbin for the Wine 11.20 + D3DMetal builds.
 - mkrsym1 for jadeite.
+- 34736384 for [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock), whose method our Genshin Impact frame-rate unlock uses.
 - Valve for Proton, the source of our Steam launcher shim.
 - an-anime-team, whose bug tracker traced the Mainland China crash ([AAGL #572](https://github.com/an-anime-team/an-anime-game-launcher/issues/572)), and Michael Nelson for the upstream Wine fix ([MR 11824](https://gitlab.winehq.org/wine/wine/-/merge_requests/11824)).
 - Apple for D3DMetal and the Game Porting Toolkit.
