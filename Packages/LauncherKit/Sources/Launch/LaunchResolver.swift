@@ -41,8 +41,8 @@ public struct ResolvedLaunch: Equatable, Sendable {
 }
 
 public enum LaunchResolver {
-    /// The Mainland China registry key is unverified; only Global supports this setting.
-    public static func offersStarRailUnlock(_ game: String) -> Bool { game == "starrail" }
+    /// Both editions store graphics settings under their own registry key (see `StarRailFrameRate`).
+    public static func offersStarRailUnlock(_ game: String) -> Bool { GameDefinition.find(game)?.family == .starrail }
 
     public static func offersSurroundSound(_ game: String, backend: RuntimeBackend, runtimeBundleID: String?) -> Bool {
         SurroundAudio.applies(game: game, backend: backend, bundleID: runtimeBundleID)

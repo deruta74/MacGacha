@@ -172,13 +172,16 @@ func starRailUnlockRequestsOneTwenty(patches: Bool) throws {
     #expect(throws: LauncherError.self) { try resolve(game, settings: settings) }
 }
 @Test(arguments: [false, true], [RuntimeBackend.d3dmetal, .dxmt])
-func unverifiedChinaStarRailNeverPreparesFrameRate(unlock: Bool, backend: RuntimeBackend) throws {
+func chinaStarRailPreparesFrameRateWithItsOwnKey(unlock: Bool, backend: RuntimeBackend) throws {
     var settings = LaunchSettings.defaults(for: "starrail-cn"); settings.unlockFPS = unlock; settings.backend = backend
-    #expect(try resolve("starrail-cn", settings: settings).preparation.starRailFrameRate == nil)
+    let preparation = try resolve("starrail-cn", settings: settings).preparation
+    #expect(preparation.starRailFrameRate == (unlock ? .unlock120 : .restore))
+    #expect(preparation.starRailRegion == .mainlandChina)
+    #expect(try resolve("starrail").preparation.starRailRegion == .global)
 }
-@Test(arguments: [("starrail", true), ("starrail-cn", false), ("genshin", false), ("genshin-cn", false),
+@Test(arguments: [("starrail", true), ("starrail-cn", true), ("genshin", false), ("genshin-cn", false),
     ("zzz", false), ("zzz-cn", false), ("unknown", false)])
-func starRailUnlockEligibilityIsGlobalOnly(game: String, offered: Bool) {
+func starRailUnlockEligibilityCoversBothEditions(game: String, offered: Bool) {
     #expect(LaunchResolver.offersStarRailUnlock(game) == offered)
 }
 @Test(arguments: ["genshin", "genshin-cn", "zzz", "zzz-cn"], [false, true])

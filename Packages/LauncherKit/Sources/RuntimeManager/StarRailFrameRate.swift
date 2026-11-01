@@ -11,7 +11,7 @@ public enum StarRailFrameRate: Sendable, Equatable {
     static func registryKey(for region: Region) -> String {
         switch region {
         case .global: "HKCU\\Software\\Cognosphere\\Star Rail"
-        // UNVERIFIED: the CN edition's key has not been confirmed in a real prefix.
+        // Confirmed in a real CN prefix, alongside the same GraphicsSettings_* values as Global.
         case .mainlandChina: "HKCU\\Software\\miHoYo\\崩坏：星穹铁道"
         }
     }
