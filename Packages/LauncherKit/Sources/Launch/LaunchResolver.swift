@@ -10,6 +10,13 @@ public struct LaunchComponentCopy: Equatable, Sendable {
     public let toSystem32: String
 }
 
+public struct ResolvedFpsInjector: Equatable, Sendable {
+    public let executable: URL
+    public let arguments: [String]
+    public let environment: [String: String]
+    public let currentDirectory: URL
+}
+
 public struct ResolvedLaunch: Equatable, Sendable {
     public let executable: URL
     public let arguments: [String]
@@ -22,13 +29,14 @@ public struct ResolvedLaunch: Equatable, Sendable {
     public let requiredComponents: [ComponentKind]
     public let componentCopies: [LaunchComponentCopy]
     public let displayFallback: Bool
+    public let fpsInjector: ResolvedFpsInjector?
 
     public static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.executable == rhs.executable && lhs.arguments == rhs.arguments && lhs.environment == rhs.environment
             && lhs.currentDirectory == rhs.currentDirectory && lhs.hidden == rhs.hidden
             && lhs.copyIfPresent.elementsEqual(rhs.copyIfPresent, by: { $0.source == $1.source && $0.toSystem32 == $1.toSystem32 })
             && lhs.blockedHosts == rhs.blockedHosts && lhs.preparation == rhs.preparation && lhs.requiredComponents == rhs.requiredComponents
-            && lhs.componentCopies == rhs.componentCopies && lhs.displayFallback == rhs.displayFallback
+            && lhs.componentCopies == rhs.componentCopies && lhs.displayFallback == rhs.displayFallback && lhs.fpsInjector == rhs.fpsInjector
     }
 }
 
@@ -56,7 +64,8 @@ public enum LaunchResolver {
     public static func resolve(recipe: LaunchRecipe, settings: LaunchSettings, installRoot: URL, prefix: URL,
         wineBinary: URL, proxyPort: UInt16, componentRoots: [ComponentKind: URL], baseEnvironment: [String: String],
         runtimeBundleID: String? = nil, displays: [String] = [],
-        gameModeRuntime: GameModeRuntime? = nil, gameModeEnabled: Bool = true) throws -> ResolvedLaunch {
+        gameModeRuntime: GameModeRuntime? = nil, gameModeEnabled: Bool = true,
+        genshinFpsRiskAcknowledged: Bool = false) throws -> ResolvedLaunch {
         guard Recipes.recipe(for: recipe.game) != nil else { throw LauncherError.io("Unknown launch game: \(recipe.game)") }
         try settings.validate(for: recipe.game)
         for url in [installRoot, prefix, wineBinary] { try validateLocalURL(url) }
@@ -141,7 +150,15 @@ public enum LaunchResolver {
             }
             if !config.isEmpty { environment["DXMT_CONFIG"] = config.joined(separator: ";") }
         }
-        return ResolvedLaunch(executable: helper?.wineBinary ?? wineBinary, arguments: arguments, environment: environment,
+        let executable = helper?.wineBinary ?? wineBinary
+        let fpsInjector: ResolvedFpsInjector?
+        if settings.unlockFPS, GenshinFps.applies(to: recipe.game), genshinFpsRiskAcknowledged {
+            let root = try requiredRoot(.genshinFps, in: componentRoots)
+            fpsInjector = ResolvedFpsInjector(executable: executable,
+                arguments: [WinePath.windowsPath(for: GenshinFps.injectorPath.resolved(against: root)), "--target", String(settings.unlockTarget)],
+                environment: environment, currentDirectory: root)
+        } else { fpsInjector = nil }
+        return ResolvedLaunch(executable: executable, arguments: arguments, environment: environment,
             currentDirectory: installRoot, hidden: settings.compatibilityPatches ? recipe.hidden : [],
             copyIfPresent: settings.compatibilityPatches ? recipe.copyIfPresent : [],
             blockedHosts: settings.compatibilityPatches ? recipe.blockedHosts : [],
@@ -150,7 +167,7 @@ public enum LaunchResolver {
                 crypt32Native: requiredComponents.contains(.crypt32Fix),
                 starRailFrameRate: offersStarRailUnlock(recipe.game) ? (settings.unlockFPS ? .unlock120 : .restore) : nil,
                 starRailRegion: starRail ? (GameDefinition.find(recipe.game)?.region ?? .global) : .global),
-            requiredComponents: requiredComponents, componentCopies: componentCopies, displayFallback: displayFallback)
+            requiredComponents: requiredComponents, componentCopies: componentCopies, displayFallback: displayFallback, fpsInjector: fpsInjector)
     }
 
     private static func requiredRoot(_ kind: ComponentKind, in roots: [ComponentKind: URL]) throws -> URL {
