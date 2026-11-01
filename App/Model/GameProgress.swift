@@ -22,7 +22,6 @@ struct GameProgress {
     private var rateSample: Sample?
     private var batchStarted: ContinuousClock.Instant?
     private var emaRate: Double?
-    private var measuredRate: Double?
     private var lastUpdate: ContinuousClock.Instant?
     private var speedSamples: [Sample] = []
     private(set) var timing: GameTiming?
@@ -31,7 +30,7 @@ struct GameProgress {
         guard self.phase != phase else { return }
         self.phase = phase; counter = nil; lastObservedBytes = nil
         lastObservedDownloaded = nil; lastObservedStaged = nil
-        rateSample = nil; batchStarted = nil; emaRate = nil; measuredRate = nil; speedSamples = []
+        rateSample = nil; batchStarted = nil; emaRate = nil; speedSamples = []
         timing = GameTiming(phaseStarted: time, lastAdvance: time, remaining: nil, hasFraction: false)
     }
 
@@ -45,7 +44,7 @@ struct GameProgress {
         let reset = lastObservedBytes.map { count < $0 } ?? false
         if counter != source || reset {
             if counter != nil { timing?.lastAdvance = time }
-            counter = source; batchStarted = time; emaRate = nil; measuredRate = nil
+            counter = source; batchStarted = time; emaRate = nil
             rateSample = Sample(time: time, bytes: count); speedSamples = []
         } else if let previous = rateSample {
             let dt = seconds(previous.time.duration(to: time))
@@ -53,7 +52,7 @@ struct GameProgress {
                 let rate = Double(max(0, count - previous.bytes)) / dt
                 let alpha = 1 - exp(-dt / seconds(Self.emaTimeConstant))
                 emaRate = emaRate.map { $0 + alpha * (rate - $0) } ?? rate
-                measuredRate = rate; rateSample = Sample(time: time, bytes: count)
+                rateSample = Sample(time: time, bytes: count)
             }
         }
         // Observe every event before throttling: growth, batch resets and source
@@ -78,8 +77,10 @@ struct GameProgress {
     }
 
     private func remaining(at time: ContinuousClock.Instant, count: Int64, total: Int64) -> Duration? {
+        // Only the average decides: events between chunks often carry no new bytes,
+        // and a real stop is reported by the stall threshold instead.
         guard total > 0, let batchStarted, batchStarted.duration(to: time) >= Self.etaWarmup,
-            let measuredRate, measuredRate > 0, let emaRate, emaRate > 0, emaRate.isFinite else { return nil }
+            let emaRate, emaRate > 0, emaRate.isFinite else { return nil }
         let seconds = Double(max(0, total - count)) / emaRate
         return .seconds(min(seconds, self.seconds(Self.maximumRemaining)))
     }
