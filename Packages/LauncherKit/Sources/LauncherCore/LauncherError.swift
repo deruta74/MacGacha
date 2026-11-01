@@ -20,6 +20,7 @@ public enum LauncherError: Error, Sendable, Equatable {
     case gameEditionUnknown
     case gameDistributionUnsupported
     case languageRestartFailed
+    case genshinFpsRiskNotAcknowledged
     case rosettaMissing
     case rosettaInstallerUnavailable
     case cancelled

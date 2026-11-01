@@ -50,6 +50,7 @@ public enum LaunchResolver {
         if settings.surroundSound && offersSurroundSound(recipe.game, backend: settings.backend, runtimeBundleID: runtimeBundleID) {
             required.append(.surroundAudio)
         }
+        if settings.unlockFPS && GenshinFps.applies(to: recipe.game) { required.append(.genshinFps) }
         return required
     }
     public static func resolve(recipe: LaunchRecipe, settings: LaunchSettings, installRoot: URL, prefix: URL,

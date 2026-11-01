@@ -24,6 +24,7 @@ public extension LauncherError {
         case .gameEditionUnknown: "gameEditionUnknown"
         case .gameDistributionUnsupported: "gameDistributionUnsupported"
         case .languageRestartFailed: "languageRestartFailed"
+        case .genshinFpsRiskNotAcknowledged: "genshinFpsRiskNotAcknowledged"
         case .rosettaMissing: "rosettaMissing"
         case .rosettaInstallerUnavailable: "rosettaInstallerUnavailable"
         case .cancelled: "cancelled"

@@ -4792,6 +4792,88 @@
         }
       }
     },
+    "Confirm the Genshin Impact FPS unlock risk before enabling it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bestätige vor dem Aktivieren, dass du das Risiko der FPS-Freischaltung für Genshin Impact verstehst."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirma el riesgo de desbloquear los FPS de Genshin Impact antes de activarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avant de l’activer, confirmez les risques du déblocage des FPS de Genshin Impact."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfirmasikan risiko membuka batas FPS Genshin Impact sebelum mengaktifkannya."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効にする前に、原神の FPS 上限解除に伴うリスクを確認してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "활성화하기 전에 원신 FPS 제한 해제의 위험을 확인해 주세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirme o risco de desbloquear os FPS de Genshin Impact antes de ativar."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перед включением подтвердите, что понимаете риск снятия ограничения FPS в Genshin Impact."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "โปรดยืนยันความเสี่ยงของการปลดล็อก FPS ใน Genshin Impact ก่อนเปิดใช้งาน"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перш ніж увімкнути, підтвердьте, що розумієте ризик зняття обмеження FPS у Genshin Impact."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xác nhận rủi ro khi mở khóa FPS của Genshin Impact trước khi bật."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用前，请确认您了解原神 FPS 解锁的风险。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "啟用前，請確認您了解原神 FPS 解鎖的風險。"
+          }
+        }
+      }
+    },
     "Continue in Parts" : {
       "localizations" : {
         "de" : {

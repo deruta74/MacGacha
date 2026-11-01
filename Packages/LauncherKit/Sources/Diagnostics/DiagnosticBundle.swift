@@ -116,7 +116,7 @@ public struct DiagnosticBundle: Sendable {
             case .processFailed(let executable, let code, let stderr):
                 throw LauncherError.processFailed(executable: Redactor.redact(executable), exitCode: code,
                     stderrTail: Redactor.redact(stderr))
-            case .gameEditionMismatch, .gameEditionUnknown, .gameDistributionUnsupported, .rosettaMissing, .rosettaInstallerUnavailable, .languageRestartFailed: throw error
+            case .gameEditionMismatch, .gameEditionUnknown, .gameDistributionUnsupported, .rosettaMissing, .rosettaInstallerUnavailable, .languageRestartFailed, .genshinFpsRiskNotAcknowledged: throw error
             case .cancelled: throw LauncherError.cancelled
             case .journalCorrupt(let message): throw LauncherError.journalCorrupt(Redactor.redact(message))
             }
