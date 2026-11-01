@@ -137,7 +137,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
 - **Done:**
   - Game Mode: utility launcher, on-by-default switch, per-edition named/icon-bearing apps with Unix loaders and ntdll in MacOS, verified runtime links and resources, local cached-icon/launcher fallback, native or wrapper routing, migration/cleanup and recovery from old or new persisted paths. The owner confirmed the generated per-game helper activates Game Mode on D3DMetal Genshin; DXMT awaits live acceptance;
   - opt-in surround sound model and runtime routing for eligible Genshin/ZZZ editions, recommended component installation, private verified helper overlays and launch/recovery pins;
-  - standalone Genshin FPS helper component: pinned reproducible Windows injector/DLL archive, Global/CN opt-in settings and one-time risk acknowledgment, recommended setup and readiness, matching Wine routes and session-owned injector supervision; UI presentation is separate;
+  - standalone Genshin FPS helper component: pinned reproducible Windows injector/DLL archive, Global/CN opt-in settings and one-time risk acknowledgment, recommended setup and readiness, matching Wine routes and session-owned injector supervision, the settings switch, one-time 10 s warning sheet and footer notes;
   - download engine;
   - game install, update, verify and repair, voice packs, uninstall; manual update-check model with per-edition checking/up-to-date/update/failure results, injected dates, busy guards and path-free start/result events;
   - runtime manager with Wine, DXMT and D3DMetal bundles plus jadeite and Steam shim components;
@@ -152,7 +152,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
   - app icon (`App/Resources/Assets.xcassets`);
   - Rosetta prerequisite model: async status checks at startup, activation and before Play/setup, bounded install polling, and an embedded x86_64 prompt helper; the SwiftUI presentation is integrated separately.
 - **In progress:** Mainland China editions. Region selection, the three CN editions with their own IDs, folders, recipes and edition-aware adopt, and the region picker are done. CN Genshin/ZZZ on Wine 11.20 have a pinned crypt32 signature-verification correction (Wine MR 11824), included in recommended runtime setup independently of the game-patches toggle; release publication remains the owner’s step. ZZZ CN installs from the live CN CDN and reaches the login screen; full CN live acceptance remains pending.
-- **Released:** v0.1.0-beta (2026-10-25), an ad-hoc signed DMG built with `scripts/package-dmg.sh`. Don't promise Apple signing or notarization in user-facing text.
-- **Planned (README order):** Wine 11.21 runtime (retires the crypt32 fix), opt-in FPS unlocker (off by default, ban-risk warning), pre-download, spatial-audio head tracking.
+- **Released:** v0.2.0 (2026-11-01), the first release without the beta tag, after v0.1.0–0.1.3 betas. Ad-hoc signed DMGs built with `scripts/package-dmg.sh`. Don't promise Apple signing or notarization in user-facing text.
+- **Planned (README order):** Wine 11.21 runtime (retires the crypt32 fix), pre-download, spatial-audio head tracking.
 
 Update this section when a milestone task lands.

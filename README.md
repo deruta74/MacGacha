@@ -1,8 +1,8 @@
 # MacGacha — universal launcher for HoYoverse games on Apple Silicon
 
-> 🧪 **Beta.** [MacGacha 0.1.3 beta](https://github.com/deruta74/MacGacha/releases/tag/v0.1.3-beta) is out: install, update and play all three games with one click. Expect rough edges, and please [report what you find](#feedback).
+> ✨ **[MacGacha 0.2.0](https://github.com/deruta74/MacGacha/releases/tag/v0.2.0) is out**, the first release without the beta tag: 14 languages, HoYoPlay-style backgrounds and events, a Genshin Impact frame-rate unlock, Star Rail at 120 FPS, surround with Spatial Audio and Game Mode. Already on 0.1.x? MacGacha updates itself. Found something? Please [report it](#feedback).
 
-A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenless Zone Zero** on Apple Silicon. It aims to provide reliable resumable downloads, file verification, and managed Wine / DXMT / D3DMetal runtimes.
+A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenless Zone Zero** on Apple Silicon. It installs, updates and verifies the games from HoYoverse's official servers, manages Wine / DXMT / D3DMetal runtimes, and starts each game with one click.
 
 - Requirements: Apple Silicon Mac with Rosetta 2 (MacGacha offers to install it), macOS 27 or later.
 
@@ -22,41 +22,45 @@ xattr -dr com.apple.quarantine /Applications/MacGacha.app
 
 This only changes MacGacha itself, not any system setting. The first launch can take a while as macOS checks the app.
 
+Later versions arrive through **Check for Updates…** in the MacGacha menu, so you only do this once.
+
 ## Screenshots
 
-![Launcher with the current Honkai: Star Rail banner, ready to play](assets/screenshots/launcher.jpg)
+![Launcher with the current Genshin Impact background, Version Highlights and events](assets/screenshots/launcher.jpg)
+
+| Game settings | Frame-rate unlock warning |
+|---|---|
+| ![Genshin Impact settings with the frame-rate unlock and surround sound](assets/screenshots/game-settings.jpg) | ![One-time warning before the Genshin Impact frame-rate unlock, with a countdown](assets/screenshots/fps-warning.jpg) |
 
 | Install | Downloading |
 |---|---|
 | ![Install sheet with location, voice packs and a disk-space estimate](assets/screenshots/install.jpg) | ![Download in progress, with pause](assets/screenshots/progress.jpg) |
 
-| One-click setup | Runtimes |
+| One-click setup | Mainland China |
 |---|---|
-| ![Set Up sheet listing the runtime a game needs, with its size](assets/screenshots/setup.jpg) | ![Runtimes panel with Wine, DXMT, D3DMetal and jadeite](assets/screenshots/runtimes.jpg) |
+| ![Set Up sheet listing the runtime a game needs, with its size](assets/screenshots/setup.jpg) | ![Mainland China region with the interface in Simplified Chinese](assets/screenshots/region-cn.jpg) |
 
-![Mainland China region with the interface in Simplified Chinese](assets/screenshots/region-cn.jpg)
+<p align="center"><img src="assets/screenshots/settings.jpg" width="360" alt="Settings with language, region, updates and Game Mode"></p>
 
 ## Roadmap
 
 **Done**
-- **Genshin Impact frame-rate unlock (opt-in).** A switch in Genshin's game settings, off by default, with a target of 120 FPS or a custom value. MacGacha loads a small helper into the game that only raises its frame-rate limit, using the method of [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock). We build it ourselves, reproducibly ([release](https://github.com/deruta74/MacGacha/releases/tag/genshin-fps-unlock-2)). Turning it on the first time shows a ban-risk warning. Tested on Global Genshin 7.1 with D3DMetal: 120 FPS held through a 3.5-hour online session.
-- **Surround sound.** Optional spatial mixing for Genshin Impact and Zenless Zone Zero on D3DMetal Wine 11.20. Multichannel outputs retain their native layout. Head tracking is planned.
-
-- **Game Mode preparation.** MacGacha stays a utility. Each game edition launches through its own named app, using its cached game icon when available. Wine’s game processes stay inside that app so macOS can identify them. Normal launch remains the fallback. Game Mode is confirmed on D3DMetal Genshin. DXMT still needs live verification.
-- **Display choice.** Each game can open on a chosen monitor, with the main display as the default and fallback.
-- **Progress timing.** An estimated time remaining for downloads and full verification, elapsed time for phases without a percentage, and a signal when progress is taking longer than usual.
-- **Automatic updates** (Sparkle). **Check for Updates…** in the MacGacha menu and a switch in Settings. MacGacha asks before it downloads an update and installs it only when no game, recovery or installation is running.
-- **Download engine.** Resumable, verified downloads with a crash-safe journal. A file reaches the game folder only after its hash matches. Files are downloaded and assembled in parallel, close to the full speed of a 2.5 Gbit link.
-- **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space".
-- **Runtimes.** Wine, DXMT and D3DMetal are downloaded and kept side by side, so an update never breaks a working version. D3DMetal is installed only after you accept Apple's terms, or imported from an existing Game Porting Toolkit. The default DXMT build now uses CrossOver's Wine, which needs about 2.5× less CPU than the previous one.
-- **Compatibility components.** jadeite and a Steam launcher shim are installed and removed from the Runtimes window. We build the shim ourselves, reproducibly, from Valve's Proton source ([release](https://github.com/deruta74/MacGacha/releases/tag/steam-shim-proton-10.0-4)).
-- **Launcher.** One window for all three games with the official banners and background art, plus a diagnostics bundle for bug reports. Backgrounds keep HoYoPlay’s order and remember the selection for each game. A new app session starts at the next background, and dots at the top let you choose one. Stills crossfade over 800 ms. Each background's Version Highlights button and the current events from HoYoPlay, listed below it, open in the browser. Animated backgrounds play with MacGacha's own video player, which uses about a third less memory than the previous web view.
 - **One-click Play.** Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game and minimizes itself to the Dock. When the game closes, it comes back and puts back any game files it hid. Accepted in all three games on D3DMetal and DXMT.
-- **One-click setup.** When a game needs runtimes, "Set Up…" lists exactly what it needs for its settings (the Wine bundle and its compatibility component) and installs it all in one go, asking for Apple's terms only when D3DMetal is part of it. The Runtimes panel stays available for picking versions by hand.
-- **Per-game settings:** graphics backend, frame limit (Off, 30, 60, 90 or 120), Retina mode, DirectX 12 for Zenless Zone Zero, a switch for the compatibility workaround, and Unlock 120 FPS for Honkai: Star Rail, which sets the game's own saved frame rate before each launch.
+- **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space". **Check for Updates** in a game's menu looks for a new version right away.
+- **Download engine.** Resumable, verified downloads with a crash-safe journal. A file reaches the game folder only after its hash matches. Files are downloaded and assembled in parallel, close to the full speed of a 2.5 Gbit link. Downloads and full verification show the time left, and long steps show how long they have been running.
+- **Launcher.** One window for all three games with HoYoPlay's backgrounds, in HoYoPlay's order. Each time you open MacGacha, the next background appears, and the dots at the top switch between them. Animated backgrounds play with MacGacha's own video player, which uses about a third less memory than a web view. Each background's Version Highlights and the current events from HoYoPlay open in the browser.
+- **Genshin Impact frame-rate unlock (opt-in).** A switch in Genshin's game settings, off by default, with a target of 120 FPS or a custom value up to 360. MacGacha loads a small helper into the game that only raises its frame-rate limit, using the method of [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock). We build it ourselves, reproducibly ([release](https://github.com/deruta74/MacGacha/releases/tag/genshin-fps-unlock-2)). The first time you turn it on, a warning explains the ban risk. Tested on Global Genshin 7.1: 120 FPS held through a 3.5-hour online session.
+- **Star Rail at 120 FPS.** A switch in Star Rail's game settings sets the game's own saved frame rate to 120 before each launch. On a new install, change any option in the game's graphics settings once so the game saves its settings, then play again.
+- **Surround sound.** Genshin Impact and Zenless Zone Zero can play in surround on D3DMetal, mixed into Spatial Audio for AirPods and other supported headphones. Speakers with six or more channels keep their own layout. Off by default, one switch per game.
+- **Game Mode.** macOS turns on Game Mode for the games, not for the launcher. Each game runs as its own app with its name and icon, so macOS recognizes it. Confirmed on D3DMetal and DXMT. You can turn it off in Settings.
+- **Per-game settings:** graphics backend, frame limit (Off, 30, 60, 90 or 120), display, Retina mode, DirectX 12 for Zenless Zone Zero and a switch for the compatibility workaround.
+- **Runtimes.** Wine, DXMT and D3DMetal are downloaded and kept side by side, so an update never breaks a working version. D3DMetal is installed only after you accept Apple's terms, or imported from an existing Game Porting Toolkit. The default DXMT build uses CrossOver's Wine, which needs about 2.5× less CPU than the previous one.
+- **One-click setup.** When a game needs runtimes, "Set Up…" lists exactly what it needs for its settings and installs it all in one go, asking for Apple's terms only when D3DMetal is part of it. The Runtimes panel stays available for picking versions by hand.
+- **Compatibility components.** jadeite and a Steam launcher shim are installed and removed from the Runtimes window. We build the shim ourselves, reproducibly, from Valve's Proton source ([release](https://github.com/deruta74/MacGacha/releases/tag/steam-shim-proton-10.0-4)).
+- **Languages.** The interface comes in English, Simplified and Traditional Chinese, Japanese, Korean, Russian, Ukrainian, German, French, Spanish, Portuguese, Indonesian, Thai and Vietnamese. It follows your Mac's language order, or you pick one in Settings. Game news and art follow the interface language (English for Ukrainian, which HoYoPlay doesn't offer). Changing the language restarts MacGacha, and a running download picks up again by itself.
+- **Automatic updates** (Sparkle). **Check for Updates…** in the MacGacha menu and a switch in Settings. MacGacha asks before it downloads an update and installs it only when no game, recovery or installation is running. The update window shows what changed.
 - **Recovery.** If the launcher crashes or is quit while a game runs, it finds the game again on restart and restores everything once the game exits. Quitting during a game asks first.
-- **Privacy.** Games run in their own Wine prefix with no links to your Desktop, Documents or other home folders. Session logs stay on your Mac and can be turned off in Settings.
-- **Languages.** The interface comes in English, Simplified and Traditional Chinese, Japanese, Korean, Russian, Ukrainian, German, French, Spanish, Portuguese, Indonesian, Thai and Vietnamese. It follows your Mac's language order, or you pick one in Settings. Game news and art follow the interface language (English for Ukrainian, which HoYoPlay doesn't offer). Changing the language restarts MacGacha, and a running download pauses and picks up again by itself.
+- **Privacy.** Games run in their own Wine prefix with no links to your Desktop, Documents or other home folders. Session logs stay on your Mac and can be turned off in Settings. A diagnostics bundle for bug reports removes paths and tokens.
 
 **Verified by hand (macOS 27.0.1)**
 
@@ -66,7 +70,7 @@ All three games start and play with a community anti-cheat workaround. None of t
 |---|---|---|---|
 | Honkai: Star Rail 4.6 | D3DMetal, 60 fps cap | 60 fps on Ultra. About half the CPU of DXMT, GPU time about 6.5 ms against 9 ms. | Not measured yet. |
 | Zenless Zone Zero | D3DMetal, DirectX 12 | 120 fps on High, battle dips stay above 115. With ray tracing on Low, 70–90 fps. | 70–110 fps on High in battle, depending on how many enemies and effects are on screen. With ray tracing on Low, 50–60 fps. |
-| Genshin Impact 7.1 | D3DMetal, 60 fps cap | Steady 60 fps on Ultra at 1800×1169 with render scale 1.2, even frame time. | 60 fps at 1512×982 with render scale 1.2. |
+| Genshin Impact 7.1 | D3DMetal, 60 fps cap | Steady 60 fps on Ultra at 1800×1169 with render scale 1.2, even frame time. With the frame-rate unlock, 120 fps. | 60 fps at 1512×982 with render scale 1.2. |
 
 DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin, and it can be changed per game.
 
@@ -96,7 +100,7 @@ Optional features that do change the game process, such as the Genshin Impact fr
 MacGacha is an unofficial, community project. It is not affiliated with, endorsed by, or supported by HoYoverse (COGNOSPHERE) or Apple Inc. All game names and trademarks belong to their respective owners.
 
 - Using third-party launchers may conflict with HoYoverse's Terms of Service. Use at your own risk.
-- Under Wine, the games' anti-cheat stops them from starting. To launch them, MacGacha uses community workarounds: [jadeite](https://codeberg.org/mkrsym1/jadeite) for Star Rail, which also blocks one game server through a local proxy while the game runs, and a Steam launcher shim for Genshin Impact and Zenless Zone Zero. These workarounds may conflict with the Terms of Service and could lead to an account ban. By default, MacGacha doesn't change the game process. Optional features that do, such as an FPS unlocker, are off by default, and MacGacha warns you about the ban risk before you enable them.
+- Under Wine, the games' anti-cheat stops them from starting. To launch them, MacGacha uses community workarounds: [jadeite](https://codeberg.org/mkrsym1/jadeite) for Star Rail, which also blocks one game server through a local proxy while the game runs, and a Steam launcher shim for Genshin Impact and Zenless Zone Zero. These workarounds may conflict with the Terms of Service and could lead to an account ban. By default, MacGacha doesn't change the game process. Optional features that do, such as the Genshin Impact frame-rate unlock, are off by default, and MacGacha warns you about the ban risk before you enable them.
 - The software is provided as is. The authors aren't responsible for account bans, data loss or any other damage.
 - D3DMetal and the Game Porting Toolkit are © Apple Inc. and licensed under Apple's terms. The launcher will ask you to accept those terms before it downloads the component.
 
@@ -104,6 +108,7 @@ MacGacha is an unofficial, community project. It is not affiliated with, endorse
 
 - [DXMT](https://github.com/3Shain/dxmt): a Metal-based Direct3D 11 translation layer, one of MacGacha's two graphics backends.
 - [jadeite](https://codeberg.org/mkrsym1/jadeite): the anti-cheat workaround MacGacha uses for Star Rail.
+- [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock): the frame-rate unlocker whose method MacGacha's Genshin Impact unlock uses.
 
 ## Special thanks
 
@@ -120,4 +125,4 @@ MacGacha is an unofficial, community project. It is not affiliated with, endorse
 
 Copyright (C) 2026 deruta74. MacGacha is free software under the [GNU General Public License v3.0](LICENSE), with one additional term under GPL section 7(b) (see [NOTICE](NOTICE)): the link to the original project, https://github.com/deruta74/MacGacha, must be kept by every conveyed (distributed) copy and every distributed work based on MacGacha, both in its source and in its About screen. Private modifications that aren't distributed aren't affected. Any distributed version, modified or paid, must stay under GPL-3.0 with its source available.
 
-Components the launcher downloads at runtime (Wine, DXMT, D3DMetal, jadeite, the Steam shim) and the games themselves are under their own licenses and terms.
+Components the launcher downloads at runtime (Wine, DXMT, D3DMetal, jadeite, the Steam shim, the surround-audio module and the Genshin frame-rate helper) and the games themselves are under their own licenses and terms.
