@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+name: Genshin FPS helper (manual build)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    permissions:
+      contents: write # Only the explicit final draft-release step uses the token.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install the locked Steam shim toolchain
+        run: |
+          set -euo pipefail
+          export STEAM_SHIM_TOOLCHAIN_PREFIX="$RUNNER_TEMP/genshin-fps-toolchain"
+          echo "STEAM_SHIM_TOOLCHAIN_PREFIX=$STEAM_SHIM_TOOLCHAIN_PREFIX" >> "$GITHUB_ENV"
+          python3 -I scripts/test-steam-shim-toolchain.py
+          python3 -I scripts/install-steam-shim-toolchain.py "$STEAM_SHIM_TOOLCHAIN_PREFIX" --lock compat/steam-shim/toolchain.lock
+          echo "$STEAM_SHIM_TOOLCHAIN_PREFIX/bin" >> "$GITHUB_PATH"
+      - name: Build twice without networking or Homebrew fallback
+        run: |
+          set -euo pipefail
+          export PATH="$STEAM_SHIM_TOOLCHAIN_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          profile='(version 1) (allow default) (deny network*) (deny file-read* (subpath "/opt/homebrew")) (deny file-write* (subpath "/opt/homebrew"))'
+          python3 -I scripts/check-genshin-fps.py --self-check
+          sandbox-exec -p "$profile" scripts/build-genshin-fps.sh out-a --verify
+          sandbox-exec -p "$profile" scripts/build-genshin-fps.sh out-b --verify
+          cmp out-a/x86_64-windows/fpsstub.dll out-b/x86_64-windows/fpsstub.dll
+          cmp out-a/x86_64-windows/fpsinject.exe out-b/x86_64-windows/fpsinject.exe
+          cmp out-a/genshin-fps-unlock-1.zip out-b/genshin-fps-unlock-1.zip
+          python3 -I scripts/check-genshin-fps.py out-a --manifest App/Resources/runtime-manifest.json
+          python3 -I scripts/check-genshin-fps.py out-b --manifest App/Resources/runtime-manifest.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: genshin-fps-unlock-1
+          path: |
+            out-a/
+            out-b/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Attach the component ZIP to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=genshin-fps-unlock-1
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --draft --title "$tag" --target "$GITHUB_SHA" --notes-file compat/genshin-fps/NOTICE.md
+          fi
+          [[ $(gh release view "$tag" --json isDraft --jq .isDraft) == true ]] || {
+            echo 'Refusing to change a published release' >&2
+            exit 1
+          }
+          gh release upload "$tag" out-a/genshin-fps-unlock-1.zip --clobber
