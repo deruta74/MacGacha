@@ -57,4 +57,10 @@ jobs:
             echo 'Refusing to change a published release' >&2
             exit 1
           }
-          gh release upload "$tag" out-a/genshin-fps-unlock-1.zip --clobber
+          # Never --clobber: if the owner publishes between the check above and
+          # this upload, a replacing upload would delete the published asset.
+          if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx genshin-fps-unlock-1.zip; then
+            echo 'The draft already has the ZIP. Delete that asset by hand to rebuild it.' >&2
+            exit 1
+          fi
+          gh release upload "$tag" out-a/genshin-fps-unlock-1.zip
