@@ -2077,6 +2077,88 @@
         }
       }
     },
+    "After you turn it on, this warning won't appear again. You can turn the unlock off at any time in the game's settings." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nachdem du es eingeschaltet hast, erscheint diese Warnung nicht mehr. Du kannst das Freischalten jederzeit in den Einstellungen des Spiels ausschalten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cuando lo actives, esta advertencia no volverá a aparecer. Puedes desactivar el desbloqueo en cualquier momento en los ajustes del juego."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une fois activé, cet avertissement ne réapparaîtra plus. Vous pouvez désactiver le déblocage à tout moment dans les réglages du jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setelah kamu menyalakannya, peringatan ini tidak akan muncul lagi. Kamu bisa mematikan buka batas kapan saja di pengaturan game."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンにすると、この警告は今後表示されません。解除はゲームの設定からいつでもオフにできます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "켜고 나면 이 경고는 다시 표시되지 않습니다. 언제든 게임 설정에서 해제를 끌 수 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Depois que você ativar, este aviso não aparecerá de novo. Você pode desativar o desbloqueio a qualquer momento nos ajustes do jogo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "После включения это предупреждение больше не появится. Разблокировку можно выключить в любой момент в настройках игры."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เมื่อเปิดใช้แล้ว คำเตือนนี้จะไม่แสดงอีก คุณปิดการปลดล็อกได้ทุกเมื่อในการตั้งค่าของเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Після ввімкнення це попередження більше не з'явиться. Розблокування можна вимкнути будь-коли в налаштуваннях гри."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sau khi bạn bật, cảnh báo này sẽ không hiện lại. Bạn có thể tắt mở khóa bất cứ lúc nào trong cài đặt của game."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启后，此警告将不再显示。你可以随时在游戏设置中关闭解锁。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟後，此警告將不再顯示。你可以隨時在遊戲設定中關閉解鎖。"
+          }
+        }
+      }
+    },
     "Animated backgrounds" : {
       "localizations" : {
         "de" : {
@@ -20663,88 +20745,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "這需要一次占用 %1$@，但只有 %2$@ 可用。MacGacha 可以改為分批完成。完成前無法遊玩%3$@。"
-          }
-        }
-      }
-    },
-    "This warning appears only once. You can turn the unlock off at any time in the game's settings." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Diese Warnung erscheint nur einmal. Du kannst das Freischalten jederzeit in den Einstellungen des Spiels ausschalten."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Esta advertencia solo aparece una vez. Puedes desactivar el desbloqueo en cualquier momento en los ajustes del juego."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cet avertissement n'apparaît qu'une fois. Vous pouvez désactiver le déblocage à tout moment dans les réglages du jeu."
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Peringatan ini hanya muncul sekali. Kamu bisa mematikan buka batas kapan saja di pengaturan game."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "この警告は一度だけ表示されます。解除はゲームの設定からいつでもオフにできます。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 경고는 한 번만 표시됩니다. 언제든 게임 설정에서 해제를 끌 수 있습니다."
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Este aviso aparece só uma vez. Você pode desativar o desbloqueio a qualquer momento nos ajustes do jogo."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Это предупреждение показывается только один раз. Разблокировку можно выключить в любой момент в настройках игры."
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "คำเตือนนี้จะแสดงเพียงครั้งเดียว คุณปิดการปลดล็อกได้ทุกเมื่อในการตั้งค่าของเกม"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Це попередження показується лише один раз. Розблокування можна вимкнути будь-коли в налаштуваннях гри."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cảnh báo này chỉ hiện một lần. Bạn có thể tắt mở khóa bất cứ lúc nào trong cài đặt của game."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此警告只会显示一次。你可以随时在游戏设置中关闭解锁。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此警告只會顯示一次。你可以隨時在遊戲設定中關閉解鎖。"
           }
         }
       }

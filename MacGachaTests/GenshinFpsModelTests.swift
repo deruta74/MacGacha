@@ -87,6 +87,16 @@ import Launch
         try await model.flushLaunchSettings()
     }
 
+    @Test func importedUnlockWithoutAcknowledgmentNeedsNoSetup() async throws {
+        var imported = LaunchSettings.defaults(for: "genshin"); imported.unlockFPS = true
+        let model = try fixture(FpsPreferences(games: ["genshin": imported]))
+        await model.reattachOnStart()
+        // Launch ignores the unconfirmed switch, so setup and Play readiness must too.
+        #expect(model.runtimeSetupPlan(for: "genshin")?.items.contains { $0.id == GenshinFps.componentID } == false)
+        model.acknowledgeGenshinFpsRisk()
+        #expect(model.runtimeSetupPlan(for: "genshin")?.items.contains { $0.id == GenshinFps.componentID } == true)
+    }
+
     @Test func injectorFailureNoteIsExposedWithoutChangingTheRunningGame() async throws {
         let model = try fixture()
         model.launchStates["genshin"] = .running
@@ -106,7 +116,8 @@ import Launch
 
 private final class FpsPreferences: LaunchPreferencesPersistence, Sendable {
     private struct Values { var games: [String: LaunchSettings] = [:]; var global = GlobalLaunchSettings() }
-    private let values = Mutex(Values())
+    private let values: Mutex<Values>
+    init(games: [String: LaunchSettings] = [:]) { values = Mutex(Values(games: games)) }
     func loadGames() throws -> [String: LaunchSettings] { values.withLock { $0.games } }
     func loadGlobal() throws -> GlobalLaunchSettings { values.withLock { $0.global } }
     func save(_ settings: LaunchSettings, game: String) throws { values.withLock { $0.games[game] = settings } }

@@ -27,7 +27,7 @@ struct FpsRiskSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("MacGacha loads a small helper into the game that only raises its frame-rate limit. It doesn't change game files or anything else in the game.")
                 Text("Changing a running game goes against HoYoverse's Terms of Service and could lead to an account ban. The genshin-fps-unlock project, whose method this uses, says FPS-only use isn't banned, but MacGacha can't promise that.")
-                Text("This warning appears only once. You can turn the unlock off at any time in the game's settings.")
+                Text("After you turn it on, this warning won't appear again. You can turn the unlock off at any time in the game's settings.")
                     .foregroundStyle(.secondary)
             }
             .font(.callout)
