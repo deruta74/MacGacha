@@ -6,10 +6,11 @@ Method from genshin-fps-unlock by 34736384, MIT:
 <https://github.com/34736384/genshin-fps-unlock/tree/v3.5.0>.
 This is independently written GPL-3.0-only code. No upstream source is copied.
 
-This component packages the proven FPS-only spike. It does not integrate into
-launch recipes or enable an FPS setting. Installing it does not start anything.
-The owner reported 120 FPS for 3 h 35 min online on 2026-11-01 without a kick or
-crash. That observation is not a promise about future game builds or sanctions.
+Installing this component does not start anything. MacGacha runs the injector
+only while the Genshin FPS unlock is turned on for a game.
+Tested on Genshin Impact 7.1 (Global) with the D3DMetal runtime: 120 FPS held
+for 3 h 35 min online without a kick or crash. That is not a promise about
+future game builds or account sanctions.
 The upstream README's FPS-only ban claim is not a guarantee from MacGacha.
 
 ## Scope and protocol
@@ -106,5 +107,5 @@ The offline checker needs only Python's standard library. Its synthetic tests
 require no toolchain and run in `scripts/test.sh` even when MinGW is absent.
 
 The manual workflow builds twice, verifies the pin and manifest, and attaches
-the ZIP to a draft release. It refuses published releases. Only the owner
-publishes releases. Do not run the helper or Wine as part of build verification.
+the ZIP to a draft release. It refuses published releases and never replaces
+an existing asset. Do not run the helper or Wine as part of build verification.

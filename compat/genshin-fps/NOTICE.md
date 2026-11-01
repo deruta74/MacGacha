@@ -17,9 +17,8 @@ mingw-w64 bottle contains their notices. Windows API/UCRT DLLs are supplied by
 Windows or Wine and are not distributed in this archive.
 
 Only FPS data writes are implemented. There is no mobile UI, power-save code
-patch or page-protection change in the game. The owner is responsible for
-choosing whether to use the helper and for publication. This notice does not
-promise compatibility, anti-cheat acceptance or freedom from account sanctions.
+patch or page-protection change in the game. This notice does not promise
+compatibility, anti-cheat acceptance or freedom from account sanctions.
 
 ## MinGW-w64 license and runtime notices (verbatim)
 
