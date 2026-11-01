@@ -3232,6 +3232,88 @@
         }
       }
     },
+    "Change any option in the game's graphics settings once, then play again to use 120 FPS" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändere einmal eine beliebige Option in den Grafikeinstellungen und starte das Spiel erneut für 120 FPS"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cambia cualquier opción de los ajustes gráficos del juego una vez y vuelve a pulsar Comenzar juego para jugar a 120 FPS"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modifiez une fois n'importe quelle option des paramètres graphiques du jeu, puis cliquez à nouveau sur Démarrer pour jouer à 120 FPS"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ubah salah satu opsi di pengaturan grafis game sekali, lalu tekan Mulai Main lagi untuk bermain di 120 FPS"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲーム内のグラフィックス設定でいずれかの項目を一度変更し、再び「ゲーム開始」を押すと120 FPSを利用できます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임 내 그래픽 설정에서 아무 항목이나 한 번 변경한 뒤 다시 '게임 시작'을 누르면 120 FPS를 사용할 수 있습니다"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Altere qualquer opção das configurações gráficas do jogo uma vez e clique em Começar Jogo novamente para jogar a 120 FPS"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Измените любой параметр в настройках графики в игре, затем снова нажмите «Начать игру» для 120 FPS"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เปลี่ยนตัวเลือกใดก็ได้ในการตั้งค่ากราฟิกในเกมหนึ่งครั้ง แล้วกดเริ่มเกมอีกครั้งเพื่อใช้ 120 FPS"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Змініть будь-який параметр у налаштуваннях графіки в грі, потім знову натисніть «Почати гру» для 120 FPS"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thay đổi một tùy chọn bất kỳ trong cài đặt đồ họa của game một lần, rồi nhấn Bắt Đầu Game lần nữa để chơi ở 120 FPS"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在游戏内的图形设置中任意修改一项，再点击“开始游戏”即可使用 120 FPS"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在遊戲內的圖形設定中任意修改一項，再按「開始遊戲」即可使用 120 FPS"
+          }
+        }
+      }
+    },
     "Change…" : {
       "localizations" : {
         "de" : {
@@ -13752,88 +13834,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打開 Apple 的 Game Porting Toolkit 磁碟映像檔後重新掃描，或選擇包含它的資料夾。"
-          }
-        }
-      }
-    },
-    "Open the game's graphics settings once, then play again to use 120 FPS" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Öffne einmal die Grafikeinstellungen und starte das Spiel erneut für 120 FPS"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Abre los ajustes gráficos del juego una vez y vuelve a pulsar Comenzar juego para jugar a 120 FPS"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ouvrez une fois les paramètres graphiques du jeu, puis cliquez à nouveau sur Démarrer pour jouer à 120 FPS"
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Buka pengaturan grafis game sekali, lalu tekan Mulai Main lagi untuk bermain di 120 FPS"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲーム内のグラフィックス設定を一度開き、再び「ゲーム開始」を押すと120 FPSを利用できます"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게임 내 그래픽 설정을 한 번 연 뒤 다시 '게임 시작'을 누르면 120 FPS를 사용할 수 있습니다"
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Abra as configurações gráficas do jogo uma vez e clique em Começar Jogo novamente para jogar a 120 FPS"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Откройте настройки графики в игре, затем снова нажмите «Начать игру» для 120 FPS"
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "เปิดการตั้งค่ากราฟิกในเกมหนึ่งครั้ง แล้วกดเริ่มเกมอีกครั้งเพื่อใช้ 120 FPS"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Відкрийте налаштування графіки в грі, потім знову натисніть «Почати гру» для 120 FPS"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mở cài đặt đồ họa trong game một lần, rồi nhấn Bắt Đầu Game lần nữa để chơi ở 120 FPS"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开一次游戏内的图形设置，再点击“开始游戏”即可使用 120 FPS"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟一次遊戲內的圖形設定，再按「開始遊戲」即可使用 120 FPS"
           }
         }
       }
