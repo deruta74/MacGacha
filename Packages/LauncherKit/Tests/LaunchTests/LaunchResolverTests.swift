@@ -10,7 +10,7 @@ private let installRoot = URL(fileURLWithPath: "/Users/x/Games/MacGacha/Honkai: 
 private let prefix = URL(fileURLWithPath: "/Prefixes/game-bundle", isDirectory: true)
 private let wine = URL(fileURLWithPath: "/Runtimes/bundle/bin/wine")
 private let roots: [ComponentKind: URL] = [.jadeite: URL(fileURLWithPath: "/Components/jadeite 4.1.0"),
-    .steamShim: URL(fileURLWithPath: "/Components/steam-shim")]
+    .steamShim: URL(fileURLWithPath: "/Components/steam-shim"), .genshinFps: URL(fileURLWithPath: "/Components/genshin-fps")]
 
 private func resolve(_ game: String, settings: LaunchSettings? = nil, components: [ComponentKind: URL] = roots,
     base: [String: String] = [:]) throws -> ResolvedLaunch {

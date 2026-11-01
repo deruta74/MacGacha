@@ -11,7 +11,7 @@ import RuntimeManager
     func genshinFpsTarget(for gameID: String) -> Int { launchSettings(for: gameID).unlockTarget }
 
     func setGenshinFpsUnlock(_ enabled: Bool, for gameID: String) throws {
-        guard offersGenshinFps(for: gameID) else { throw LauncherError.io("Unsupported FPS unlock game") }
+        try requireMutableGenshinFpsSettings(for: gameID)
         if enabled, !genshinFpsRiskAcknowledged { throw LauncherError.genshinFpsRiskNotAcknowledged }
         var settings = launchSettings(for: gameID)
         if enabled, !settings.unlockFPS, let limit = settings.frameLimit, limit < settings.unlockTarget {
@@ -22,9 +22,14 @@ import RuntimeManager
     }
 
     func setGenshinFpsTarget(_ target: Int, for gameID: String) throws {
-        guard offersGenshinFps(for: gameID) else { throw LauncherError.io("Unsupported FPS unlock game") }
+        try requireMutableGenshinFpsSettings(for: gameID)
         var settings = launchSettings(for: gameID)
         settings.unlockTarget = min(360, max(61, target))
         try saveLaunchSettings(settings, for: gameID)
+    }
+
+    private func requireMutableGenshinFpsSettings(for gameID: String) throws {
+        guard languageRestart == nil else { throw LauncherError.busy("Application language restart is in progress") }
+        guard offersGenshinFps(for: gameID) else { throw LauncherError.io("Unsupported FPS unlock game") }
     }
 }

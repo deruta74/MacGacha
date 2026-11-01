@@ -26,6 +26,7 @@ public actor LaunchManager {
     private let prefixes: any LaunchPrefixProviding
     private let preparation: any LaunchPreparing
     private let spawner: any ProcessSpawner
+    private let fpsInjectorStatus: @Sendable (ProcessIdentity) throws -> SessionChildStatus
     private let inspector: any ProcessInspector
     private let runner: any ProcessRunner
     private let clock: any Clock<Duration>
@@ -62,6 +63,10 @@ public actor LaunchManager {
         var endOutcome = "while MacGacha was closed"
         var restoreEntryCount = 0
         var ownedWrapper: ProcessIdentity?
+        var fpsInjector: ResolvedFpsInjector?
+        var fpsAttempted = false
+        var fpsChild: OwnedSessionChild?
+        var fpsWorker: Task<Void, Never>?
         var unverifiedBuild = false
         var deferredFailure: LaunchFailure?
         // Keep the verified restore across unlink/fsync failure. The journal can
@@ -84,6 +89,7 @@ public actor LaunchManager {
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: {})
         self.paths = paths; self.runtimes = runtimes; self.prefixes = prefixes; self.preparation = preparation
         self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock; self.displayProbe = displayProbe
+        self.fpsInjectorStatus = OwnedSessionChild.systemStatus
         self.baseEnvironment = ProcessInfo.processInfo.environment; self.journalFileOps = SystemFileOps()
         self.recipeOverrides = [:]
         self.hideHooks = .none; self.beforeJournalRead = {}; self.beforeRecoveryRead = {}
@@ -100,12 +106,14 @@ public actor LaunchManager {
         beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {},
         recipeOverrides: [String: LaunchRecipe] = [:],
         sessionProvenance: @escaping @Sendable () throws -> (bootSessionUUID: String, sessionStartTime: UInt64) = LaunchManager.currentSessionProvenance,
-        beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) {
+        beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {},
+        fpsInjectorStatus: @escaping @Sendable (ProcessIdentity) throws -> SessionChildStatus = OwnedSessionChild.systemStatus) {
         self.gameMode = gameMode
         self.eventLog = log ?? EventLog(directory: paths.logs)
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: beforeSessionLogWrite)
         self.paths = paths; self.runtimes = runtimes; self.prefixes = prefixes; self.preparation = preparation
         self.spawner = spawner; self.inspector = inspector; self.runner = runner; self.clock = clock; self.displayProbe = displayProbe
+        self.fpsInjectorStatus = fpsInjectorStatus
         self.proxyFactory = proxyFactory; self.baseEnvironment = baseEnvironment; self.journalFileOps = journalFileOps
         self.recipeOverrides = recipeOverrides
         self.hideHooks = hideHooks; self.beforeJournalRead = beforeJournalRead; self.beforeRecoveryRead = beforeRecoveryRead
@@ -158,6 +166,7 @@ public actor LaunchManager {
     }
 
     package func waitForSupervision(game: String) async { await supervision[game]?.value }
+    package func waitForFpsInjector(game: String) async { await contexts[game]?.fpsWorker?.value }
 
     public func liveSession(for game: String) -> LaunchSession? { contexts[game]?.session }
 
@@ -199,10 +208,17 @@ public actor LaunchManager {
             events.yield(.stage(stage))
             guard let recipe = (recipeOverrides[game.id] ?? Recipes.recipe(for: game.id)) else { throw LauncherError.io("Unknown launch game") }
             let paths = paths, journalFileOps = journalFileOps
-            let (settings, globalSettings) = try await BlockingIO.run {
-                let settings = try LaunchSettingsStore(paths: paths).load(game.id)
+            let (settings, globalSettings, riskRefused) = try await BlockingIO.run {
+                var settings = try LaunchSettingsStore(paths: paths).load(game.id)
                 let global = try GlobalLaunchSettingsStore(paths: paths).load()
-                return (settings, global)
+                let refused = GenshinFps.applies(to: game.id) && settings.unlockFPS && !global.genshinFpsRiskAcknowledged
+                // Hand-edited or imported settings cannot bypass the one-time warning.
+                if refused { settings.unlockFPS = false }
+                return (settings, global, refused)
+            }
+            if riskRefused {
+                events.yield(.note(.fpsUnlockUnavailable))
+                event("FPS unlock unavailable", game: game.id, metadata: ["reason": "riskNotAcknowledged"])
             }
             let logsEnabled = globalSettings.sessionLogsEnabled
             event("Launch started", game: game.id, metadata: ["backend": settings.backend.rawValue,
@@ -238,7 +254,8 @@ public actor LaunchManager {
             }
             var previewChoice = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
                 wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment,
-                runtimeBundleID: bundle.id.rawValue, displays: displayProbe.connectedDisplays().map(\.id), gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled)
+                runtimeBundleID: bundle.id.rawValue, displays: displayProbe.connectedDisplays().map(\.id), gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled,
+                genshinFpsRiskAcknowledged: globalSettings.genshinFpsRiskAcknowledged)
             stage = .lock; events.yield(.stage(stage))
             let (lock, pin) = try await BlockingIO.run {
                 let lock = try SessionLock.acquire(paths: paths, game: game.id)
@@ -260,7 +277,7 @@ public actor LaunchManager {
                     helper = nil
                     previewChoice = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
                         wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment,
-                        runtimeBundleID: bundle.id.rawValue)
+                        runtimeBundleID: bundle.id.rawValue, genshinFpsRiskAcknowledged: globalSettings.genshinFpsRiskAcknowledged)
                     event("Game Mode unavailable; using normal Wine", game: game.id, metadata: ["reason": "helperValidationFailed"])
                 }
             }
@@ -335,7 +352,9 @@ public actor LaunchManager {
             context.session.proxyPort = context.proxy?.port
             let displays = displayProbe.connectedDisplays().map(\.id)
             let resolved = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displays, gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled)
+                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displays, gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled,
+                genshinFpsRiskAcknowledged: globalSettings.genshinFpsRiskAcknowledged)
+            context.fpsInjector = resolved.fpsInjector // Fresh launches only; reattachment never resolves a command.
             if !displays.isEmpty {
                 let selection = resolved.displayFallback ? "fallback" : (settings.display == nil ? "main" : "chosen")
                 note(context, "display=\(selection)")
@@ -401,10 +420,12 @@ public actor LaunchManager {
             do {
                 var watching = context.session
                 watching.state = context.watchPhase
-                try await watcher.watch(session: watching, executable: executable, ownedWrapper: context.ownedWrapper, ownedReaper: reaper) { processes in
+                try await watcher.watch(session: watching, executable: executable, ownedWrapper: context.ownedWrapper, ownedReaper: reaper,
+                    childrenEnded: { try await self.fpsChildHasEnded(game: game) }) { processes in
                     try await self.observed(game: game, processes: processes)
                 }
                 context.hasEnded = true
+                context.fpsWorker?.cancel()
                 context.endOutcome = context.ready ? "normal" : "before ready"
                 context.session.state = .ending; try await persist(context.session)
                 context.continuation?.yield(.ended(normal: context.ready))
@@ -419,6 +440,7 @@ public actor LaunchManager {
                 return
             } catch SessionWatchError.startup {
                 context.hasEnded = true
+                context.fpsWorker?.cancel()
                 context.endOutcome = "startup failure"
                 noteFailure(LauncherError.io("The game did not start"), stage: .watch, context: context)
                 context.continuation?.yield(.ended(normal: false)); await stopProxy(context)
@@ -453,6 +475,79 @@ public actor LaunchManager {
             event("Game running", game: game, metadata: ["pid": String(process.pid)])
             context.continuation?.yield(.running)
         }
+        if !processes.isEmpty { try await startFpsInjector(context) }
+    }
+
+    private func startFpsInjector(_ context: Context) async throws {
+        guard let command = context.fpsInjector, !context.fpsAttempted, !context.hasEnded else { return }
+        context.fpsAttempted = true
+        let spawner = spawner, output = context.log?.processOutput ?? .discard
+        let identity: ProcessIdentity
+        do {
+            identity = try await BlockingIO.run {
+                let fs = try ContainedFileSystem(root: command.currentDirectory).pinRoot()
+                for path in [GenshinFps.injectorPath, GenshinFps.stubPath] {
+                    guard try fs.itemType(at: path) == .regularFile else { throw LauncherError.io("FPS helper files unavailable") }
+                }
+                return try spawner.spawn(command.executable, arguments: command.arguments, environment: command.environment,
+                    currentDirectory: command.currentDirectory, output: output)
+            }
+        } catch { fpsUnavailable(context, reason: "startupFailed"); return }
+        let child = OwnedSessionChild(identity: identity, read: fpsInjectorStatus)
+        context.fpsChild = child
+        context.session.processes = Array(Set(context.session.processes + [identity])).sorted { $0.pid < $1.pid }
+        context.session.processGroupIDs = (context.session.processGroupIDs ?? []).union([identity.pid])
+        // The child is irrevocably ours even if this journal write fails.
+        // Retain its reaper and let the normal watch/recovery retry own durability.
+        do { try await persist(context.session) }
+        catch { context.fpsWorker = Task { await self.watchFpsInjector(context, child: child) }; throw error }
+        context.fpsWorker = Task { await self.watchFpsInjector(context, child: child) }
+        event("FPS injector started", game: context.session.game)
+    }
+
+    private func fpsChildHasEnded(game: String) async throws -> Bool {
+        guard let child = contexts[game]?.fpsChild else { return true }
+        if case .exited = try await child.poll() { return true }
+        return false
+    }
+
+    private func watchFpsInjector(_ context: Context, child: OwnedSessionChild) async {
+        var reportedUncertainty = false
+        while !Task.isCancelled && !context.hasEnded {
+            do {
+                if case .exited(let code) = try await child.poll() {
+                    if code != 0 {
+                        let inspector = inspector, session = context.session
+                        let scope = session.inspectionScope(runtimesRoot: paths.runtimes)
+                        let name = Self.executable(session)?.lowercased() ?? ""
+                        let liveGame = try await BlockingIO.run {
+                            try inspector.processes(environmentContains: "WINEPREFIX", value: session.prefix.path, scope: scope)
+                                .contains { SessionWatcher.isGame($0, name: name) }
+                        }
+                        if liveGame, !context.hasEnded, contexts[session.game] === context {
+                            fpsUnavailable(context, reason: code == nil ? "exitStatusUnavailable" : "injectorExit", code: code)
+                        }
+                    }
+                    return
+                }
+            } catch {
+                guard !Task.isCancelled && !context.hasEnded else { return }
+                if !reportedUncertainty {
+                    event("FPS injector observation deferred", game: context.session.game, metadata: ["reason": "inspectionUnavailable"])
+                    reportedUncertainty = true
+                }
+            }
+            do { try await clock.sleep(for: .seconds(1)) } catch { return }
+        }
+    }
+
+    private func fpsUnavailable(_ context: Context, reason: String, code: Int32? = nil) {
+        guard !context.hasEnded else { return }
+        context.continuation?.yield(.note(.fpsUnlockUnavailable))
+        var fields = ["reason": reason]
+        if let code { fields["exitCode"] = String(code) }
+        event("FPS unlock unavailable", game: context.session.game, level: .warning, metadata: fields)
+        note(context, "FPS unlock unavailable: " + reason + (code.map { " exitCode=\($0)" } ?? ""))
     }
 
     private func restore(_ context: Context) async -> RestoreOutcome {

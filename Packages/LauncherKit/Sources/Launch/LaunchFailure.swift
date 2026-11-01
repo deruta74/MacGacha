@@ -17,7 +17,7 @@ public struct LaunchFailure: Error, Sendable {
 }
 
 public enum LaunchNote: Sendable, Equatable {
-    case starRailSettingsMissing, surroundUnavailable
+    case starRailSettingsMissing, surroundUnavailable, fpsUnlockUnavailable
 }
 
 public enum LaunchEvent: Sendable {

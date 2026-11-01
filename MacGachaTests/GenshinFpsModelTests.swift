@@ -67,6 +67,7 @@ import Launch
         model.setLanguageRestart(UUID())
         model.acknowledgeGenshinFpsRisk()
         #expect(!model.genshinFpsRiskAcknowledged)
+        #expect(throws: LauncherError.busy("Application language restart is in progress")) { try model.setGenshinFpsUnlock(true, for: "genshin") }
         #expect(throws: (any Error).self) { try model.setGenshinFpsUnlock(false, for: "genshin") }
         #expect(throws: (any Error).self) { try model.setGenshinFpsTarget(90, for: "genshin") }
         #expect(model.genshinFpsTarget(for: "genshin") == 120)
@@ -84,6 +85,15 @@ import Launch
         try model.setGenshinFpsUnlock(false, for: "genshin")
         #expect(model.runtimeSetupPlan(for: "genshin")?.items.contains { $0.id == GenshinFps.componentID } == false)
         try await model.flushLaunchSettings()
+    }
+
+    @Test func injectorFailureNoteIsExposedWithoutChangingTheRunningGame() async throws {
+        let model = try fixture()
+        model.launchStates["genshin"] = .running
+        await model.handleLaunch(.note(.fpsUnlockUnavailable), id: "genshin")
+        #expect(model.launchNotes["genshin"] == .fpsUnlockUnavailable)
+        #expect(model.launchStates["genshin"] == .running)
+        #expect(model.lastError == nil)
     }
 
     private func fixture(_ preferences: FpsPreferences = FpsPreferences()) throws -> AppModel {
