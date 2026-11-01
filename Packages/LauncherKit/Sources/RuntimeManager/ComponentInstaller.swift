@@ -239,7 +239,7 @@ fileprivate actor ComponentInstallSession {
                 let fs = try filesystem()
                 if let incoming { try fs.removeItem(at: incoming) }
                 if let downloads { try fs.removeItem(at: downloads) }
-                step = .done; lock = nil; lease = nil; pins = nil
+                step = .done; releaseLocks()
                 return .phase(.completed)
             case .done: return nil
             }
@@ -273,7 +273,13 @@ fileprivate actor ComponentInstallSession {
                 try? fs.removeItem(at: parent)
             }
         }
-        step = .done; lock = nil; lease = nil; pins = nil
+        step = .done; releaseLocks()
+    }
+
+    /// The store lock is the outermost lock: release component pins first, so a
+    /// caller that sees the store free can immediately take its pins too.
+    private func releaseLocks() {
+        pins = nil; lease = nil; lock = nil
     }
 
     private func filesystem() throws -> ContainedFileSystem {
