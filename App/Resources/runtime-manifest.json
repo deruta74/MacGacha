@@ -183,6 +183,27 @@
         "redistributable": true,
         "termsRevision": "surround-audio-wine-11.20-1"
       }
+    },
+    {
+      "id": "genshin-fps-unlock-1",
+      "kind": "genshinFps",
+      "version": "1",
+      "sourceMode": "download",
+      "url": "https://github.com/deruta74/MacGacha/releases/download/genshin-fps-unlock-1/genshin-fps-unlock-1.zip",
+      "size": 223342,
+      "installedSize": 220502,
+      "sha256": {
+        "algorithm": "sha256",
+        "hex": "f1075621a139ac1d925bfdce742e572d678dacdeb746ec4d9f6855e06bccf413"
+      },
+      "archive": "zip",
+      "license": {
+        "name": "GPL-3.0-only",
+        "url": "https://github.com/deruta74/MacGacha/blob/main/compat/genshin-fps/NOTICE.md",
+        "redistributable": true,
+        "termsRevision": "genshin-fps-unlock-1"
+      },
+      "rootPath": "x86_64-windows"
     }
   ],
   "bundles": [

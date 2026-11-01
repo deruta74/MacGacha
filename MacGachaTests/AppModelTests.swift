@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Observation
 import Synchronization
 import Testing
 import LauncherCore
@@ -344,7 +345,15 @@ struct AppModelTests {
         let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: url))
         #expect(manifest.schemaVersion == 3)
-        #expect(manifest.components.count == 8)
+        #expect(manifest.components.count == 9)
+        let fps = try #require(manifest.components.first { $0.id.rawValue == GenshinFps.componentID })
+        #expect(fps.kind == .genshinFps && fps.archive == .zip)
+        #expect(fps.license.name == "GPL-3.0-only" && fps.license.redistributable && fps.consent == nil)
+        #expect(fps.rootPath == (try SafeRelativePath("x86_64-windows")))
+        #expect(fps.size == 223342 && fps.installedSize == 220502)
+        #expect(fps.sha256?.hex == "f1075621a139ac1d925bfdce742e572d678dacdeb746ec4d9f6855e06bccf413")
+        #expect(fps.url?.absoluteString == "https://github.com/deruta74/MacGacha/releases/download/genshin-fps-unlock-1/genshin-fps-unlock-1.zip")
+        #expect(manifest.bundles.allSatisfy { !$0.components.contains(fps.id) })
         let surround = try #require(manifest.components.first { $0.id.rawValue == SurroundAudio.componentID })
         #expect(surround.kind == .surroundAudio && surround.archive == .zip)
         #expect(surround.license.name == "LGPL-2.1-or-later" && surround.license.redistributable)
@@ -367,7 +376,7 @@ struct AppModelTests {
         let manifest = try RuntimeManifest.load(from: url)
         let model = AppModel(paths: testPaths(), manifest: manifest, services: PreviewRuntimeServices(), defaults: nil)
         await model.start()
-        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + ["jadeite-4.1.0", "steam-shim-proton-10.0-4", Crypt32Fix.componentID, SurroundAudio.componentID])
+        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + ["jadeite-4.1.0", "steam-shim-proton-10.0-4", Crypt32Fix.componentID, SurroundAudio.componentID, GenshinFps.componentID])
         #expect(manifest.bundles.first?.id.rawValue == "dxmt-wine11.0cx-dxmt0.80")
         #expect(model.rows.contains { $0.id == "dxmt-wine11.0-dxmt0.80" })
         let dxmt = manifest.bundles[0].id.rawValue
@@ -404,6 +413,34 @@ struct AppModelTests {
             await model.remove(id)
             #expect(model.rows.first { $0.id == id }?.state == .notInstalled)
         }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func genshinFpsRowInstallsRefreshesAndRemovesWithoutChangingReadiness() async throws {
+        let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
+        let manifest = try RuntimeManifest.load(from: url), services = PreviewRuntimeServices()
+        let model = AppModel(paths: testPaths(), manifest: manifest, services: services, defaults: nil)
+        await model.start()
+        let row = try #require(model.rows.first { $0.id == GenshinFps.componentID })
+        let plans = GameDefinition.all.map { model.runtimeSetupPlan(for: $0.id) }
+        #expect(plans.allSatisfy { $0?.items.contains { $0.id == GenshinFps.componentID } != true })
+        #expect(row.kindName == String(localized: "Genshin FPS unlocker"))
+        #expect(row.licenseName == "GPL-3.0-only" && row.downloadSize == 223342)
+        #expect(!row.needsConsent && !row.canImportGPTK)
+        model.install(GenshinFps.componentID)
+        let changes = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { changes.continuation.finish() }
+        var iterator = changes.stream.makeAsyncIterator()
+        while model.rows.first(where: { $0.id == GenshinFps.componentID })?.state != .installed(source: .download) {
+            withObservationTracking { _ = model.rows } onChange: { changes.continuation.yield(()) }
+            _ = await iterator.next()
+        }
+        await model.refreshRuntimes()
+        #expect(model.rows.filter { $0.id == GenshinFps.componentID }.count == 1)
+        #expect(model.rows.first { $0.id == GenshinFps.componentID }?.state == .installed(source: .download))
+        #expect(!model.runtimesReady)
+        #expect(GameDefinition.all.map { model.runtimeSetupPlan(for: $0.id) } == plans)
+        await model.remove(GenshinFps.componentID)
+        #expect(model.rows.first { $0.id == GenshinFps.componentID }?.state == .notInstalled)
     }
 
     @Test func progressIsThrottledAndPreviewHasNoLiveDependencies() async throws {
