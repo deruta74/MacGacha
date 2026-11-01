@@ -665,7 +665,8 @@ public actor LaunchManager {
         // in-memory status; the next supervision/guard attempt reads it again.
         do {
             if var persisted = try await read(game: context.session.game), persisted.sessionID == context.session.sessionID {
-                if let owned = context.ownedWrapper {
+                // Spawned children stay ours even when their first journal write failed.
+                for owned in [context.ownedWrapper, context.fpsChild?.identity].compactMap({ $0 }) {
                     if !persisted.processes.contains(owned) { persisted.processes.append(owned) }
                     persisted.processGroupIDs = (persisted.processGroupIDs ?? []).union([owned.pid])
                 }

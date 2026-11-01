@@ -9,6 +9,24 @@ import TestSupport
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct GenshinFpsLaunchTests {
+    @Test func failedFirstInjectorJournalWriteKeepsRecoveryOwnership() async throws {
+        let f = try await FpsLaunchFixture.make(), manager = f.manager(), events = ManagerEvents()
+        f.spawner.afterSpawn { [ops = f.base.journalOps] in ops.arm() }
+        let consumer = await f.consume(manager, events)
+        // pending() emits this only after attempting to publish the recovery journal.
+        await events.wait { if case .restored(.pending) = $0 { true } else { false } }
+        #expect(f.spawner.calls.count == 1)
+        let session = try #require(try await f.journal())
+        #expect(session.state == .recoveryPending)
+        #expect(session.processes.contains(FpsSpawner.identity))
+        #expect(session.processGroupIDs?.contains(FpsSpawner.identity.pid) == true)
+        await manager.markReady(game: f.game.id)
+        await f.base.clock.waitForSleep(2, duration: .seconds(1))
+        f.base.clock.advance(by: .seconds(1))
+        try await f.end(manager); await consumer.value
+        await manager.waitForSupervision(game: f.game.id)
+    }
+
     @Test func injectorWaitsForTheActualGameProcess() async throws {
         let f = try await FpsLaunchFixture.make(initialGame: false), events = ManagerEvents(), manager = f.manager()
         let consumer = await f.consume(manager, events)
@@ -162,8 +180,10 @@ private final class FpsSpawner: ProcessSpawner, Sendable {
     let base: ManagerSpawner
     let fails = Mutex(false)
     private let recorded = Mutex<[Call]>([])
+    private let spawnHook = Mutex<@Sendable () -> Void>({})
     var calls: [Call] { recorded.withLock { $0 } }
     init(_ base: ManagerSpawner) { self.base = base }
+    func afterSpawn(_ hook: @escaping @Sendable () -> Void) { spawnHook.withLock { $0 = hook } }
     func spawn(_ executable: URL, arguments: [String], environment: [String: String], currentDirectory: URL, output: ProcessOutput) throws -> ProcessIdentity {
         guard arguments.first?.hasSuffix("\\fpsinject.exe") == true else {
             return try base.spawn(executable, arguments: arguments, environment: environment, currentDirectory: currentDirectory, output: output)
@@ -171,6 +191,7 @@ private final class FpsSpawner: ProcessSpawner, Sendable {
         recorded.withLock { $0.append(Call(executable: executable, arguments: arguments, environment: environment, directory: currentDirectory,
             discarded: { if case .discard = output { true } else { false } }())) }
         if fails.withLock({ $0 }) { throw LauncherError.io("Synthetic private spawn path") }
+        spawnHook.withLock { $0 }()
         return Self.identity
     }
 }
@@ -199,7 +220,7 @@ private struct FpsLaunchFixture: Sendable {
             componentIDs: ["wine-a"], componentRoots: [.genshinFps: component], compatibilityComponentIDs: [.genshinFps: GenshinFps.componentID])),
             prefixes: base.prefixes, preparation: base.preparation, spawner: spawner, inspector: base.inspector,
             runner: base.runner, clock: base.clock, gameMode: gameMode, proxyFactory: { [proxy = base.proxy] _, log in proxy.start(log: log); return proxy },
-            recipeOverrides: [game.id: recipe], sessionProvenance: { (ManagerFixture.bootSessionUUID, ManagerFixture.sessionStartTime) },
+            journalFileOps: base.journalOps, recipeOverrides: [game.id: recipe], sessionProvenance: { (ManagerFixture.bootSessionUUID, ManagerFixture.sessionStartTime) },
             fpsInjectorStatus: { [probe] in probe.poll($0) })
     }
     func consume(_ manager: LaunchManager, _ events: ManagerEvents) async -> Task<Void, Never> {
