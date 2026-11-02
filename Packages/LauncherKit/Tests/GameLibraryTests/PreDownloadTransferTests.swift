@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Dispatch
 import Synchronization
 import Testing
 import LauncherCore
@@ -10,6 +11,62 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.timeLimit(.minutes(1))) struct PreDownloadTransferTests {
+    @Test func latePreDownloadDrainWaiterCannotBypassLocksStillBeingReleased() async throws {
+        let fixture = try await CacheTransferFixture(count: 1, http: CacheTransferHTTP(size: 64, gate: nil))
+        let records = AppPaths(root: fixture.root.url).games, library = fixture.library
+        let owner = UUID()
+        let retention = try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: records)
+            let session = try InstallLock(fs: fs, path: SafeRelativePath("genshin/.session.lock"))
+            let lease = try GameOperationLease.acquire(fs: fs, retainedGameLock: session)
+            let retention = PipelineRootRetention(key: UUID().uuidString)
+            retention.hold(session, owner: owner, retaining: lease)
+            retention.activate(owner); retention.abandon(owner)
+            return retention
+        }
+        let releasing = TestEvent(), observed = TestEvent(), returned = Mutex(false)
+        // Only the dedicated BlockingIO thread waits synchronously inside deinit.
+        // Both the test's arrival handshake and the drain waiter use TestEvent.
+        let finishRelease = DispatchSemaphore(value: 0)
+        let release = Task {
+            try await BlockingIO.run {
+                GameOperationLease.$beforeLocksRelease.withValue({
+                    releasing.signal(); finishRelease.wait()
+                }) { retention.release(owner) }
+            }
+        }
+        defer { finishRelease.signal() }
+        try await releasing.wait()
+        let waiter = Task {
+            try await OperationWork.$observer.withValue({ work in
+                if work == .ownershipDrainWait { observed.signal() }
+            }) { try await library.waitForPreDownloadDrain("genshin") }
+            returned.withLock { $0 = true }; observed.signal()
+        }
+        defer { waiter.cancel(); finishRelease.signal() }
+        // Either a registered drain is joined or a premature return signals this
+        // event. No timing assumption decides which outcome the assertion sees.
+        try await observed.wait()
+        #expect(!returned.withLock { $0 })
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: records)
+            for path in [".operation.lock", "genshin/.session.lock"] {
+                #expect(throws: LauncherError.busy("install root in use")) {
+                    _ = try InstallLock(fs: fs, path: SafeRelativePath(path))
+                }
+            }
+        }
+        finishRelease.signal()
+        try await release.value; try await waiter.value
+        try await library.waitUntilIdle("genshin")
+        try await BlockingIO.run {
+            let session = try InstallLock(fs: ContainedFileSystem(root: records), path: SafeRelativePath("genshin/.session.lock"))
+            withExtendedLifetime(session) {} // Play can claim the session lock.
+        }
+        for try await _ in await library.resumePreDownload(GameDefinition.all[0]) {}
+        #expect(try fixture.cache.load()?.completed == true)
+    }
+
     @Test func containerStreamsOverlapAndRespectNormalConcurrencyLimit() async throws {
         let gate = CacheTransferGate(count: 35), hashes = Mutex([String: Int]())
         let fixture = try await CacheTransferFixture(count: 35, http: CacheTransferHTTP(size: 64, gate: gate))

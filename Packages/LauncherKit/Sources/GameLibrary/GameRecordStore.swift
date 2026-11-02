@@ -337,6 +337,9 @@ public actor GameRecordStore {
 
 /// Only active leases occupy the registry; filesystem work never holds its mutex.
 package final class GameOperationLease: PipelineDrainOwner {
+    /// Synchronous teardown observation. Tests that suspend this boundary run
+    /// release on BlockingIO; ordinary operations leave the hook unset.
+    @TaskLocal package static var beforeLocksRelease: (@Sendable () -> Void)? = nil
     private struct Registry {
         var active = Set<FileSystemIdentity>()
         var drains: [FileSystemIdentity: @Sendable () async throws -> Void] = [:]
@@ -372,6 +375,11 @@ package final class GameOperationLease: PipelineDrainOwner {
         }
     }
     deinit {
+        Self.beforeLocksRelease?()
+        // Late waiters must still find the drain until both OS exclusions are
+        // gone. Stored-property destruction occurs after this deinit body.
+        lock.release()
+        retainedGameLock?.release()
         Self.registry.withLock { state in
             state.drains.removeValue(forKey: key); state.active.remove(key)
         }
