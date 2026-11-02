@@ -7,6 +7,7 @@ import Testing
 import LauncherCore
 import DownloadEngine
 import TestSupport
+import Sophon
 
 @Test func unsharedPartsBudgetUsesPeakInsteadOfWholeDownload() throws {
     let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url)
@@ -1072,4 +1073,145 @@ func plannedFallbacksFitExactPreflightWithDecreasingSpace(batched: Bool) async t
         let path = batched ? file.path : try stagedPath(plan, file.path)
         #expect(try fs.readFile(at: path, maxBytes: 8192) == Data((body + body).utf8))
     }
+}
+
+
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
+func independentSamePathPatchesCommitProgressivelyWithLimitedSpace(pinReplacements: Bool) async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let plan = try progressivePatchPlan(fs: fs, cdn: cdn)
+    let ops = try PeakDiskOps(root: temp.url), capacity: Int64 = 12_288
+    let disk = PatchBatchCapacity(ops: ops, capacity: capacity)
+    ops.setPayloadLimit(ops.baseline.payload + capacity)
+    let observed = Mutex((commits: 0, firstBeforeLastOutput: false))
+    let hooks = CrashHooks(at: .afterRenameBeforeJournal, action: {
+        observed.withLock { state in
+            if state.commits == 0 {
+                let last = try! stagedPath(plan, plan.files.last!.path)
+                state.firstBeforeLastOutput = (try? fs.size(at: last)) == nil
+            }
+            state.commits += 1
+        }
+        if pinReplacements { disk.retained.withLock { $0 += 8_192 } }
+    })
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: disk,
+        mode: .batched(approved: true), fileOps: ops, crashHooks: hooks, patchApplier: HDiff13PatchApplier())
+    if pinReplacements {
+        do { _ = try await opCollect(engine.run()); Issue.record("Pinned growth must exhaust capacity") }
+        catch let error as LauncherError {
+            guard case .insufficientSpace = error else { Issue.record("Expected capacity refusal"); return }
+        }
+        #expect(observed.withLock { $0.commits } > 0)
+        #expect(observed.withLock { $0.commits } < plan.files.count)
+    } else {
+        let events = try await opCollect(engine.run())
+        #expect(events.last == .phase(.completed))
+        #expect(observed.withLock { $0.commits } == plan.files.count)
+        #expect(!cdn.requestLog.contains { $0.path.hasPrefix("fallback-") })
+    }
+    #expect(observed.withLock { $0.firstBeforeLastOutput })
+    #expect(ops.deniedWrites == 0)
+    #expect(ops.peak.payload - ops.baseline.payload <= capacity)
+}
+
+@Test(.timeLimit(.minutes(1))) func automaticPatchUpdatesKeepIndependentBatchesWithAmpleSpace() async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let plan = try progressivePatchPlan(fs: fs, cdn: cdn), firstCommit = Mutex(true), earlyCommit = Mutex(false)
+    let hooks = CrashHooks(at: .afterRenameBeforeJournal, action: {
+        let last = try! stagedPath(plan, plan.files.last!.path)
+        let first = firstCommit.withLock { value in let first = value; value = false; return first }
+        if first, (try? fs.size(at: last)) == nil { earlyCommit.withLock { $0 = true } }
+    })
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn),
+        disk: FixedDiskSpace(bytes: Int64.max), crashHooks: hooks, patchApplier: HDiff13PatchApplier())
+    #expect(try await opCollect(engine.run()).last == .phase(.completed))
+    #expect(earlyCommit.withLock { $0 })
+}
+
+private final class PatchBatchCapacity: DiskSpaceProbe {
+    let ops: PeakDiskOps, capacity: Int64
+    let retained = Mutex<Int64>(0)
+    init(ops: PeakDiskOps, capacity: Int64) { self.ops = ops; self.capacity = capacity }
+    func availableBytes(at url: URL) throws -> Int64 {
+        let growth = try ops.currentPayload - ops.baseline.payload + retained.withLock { $0 }
+        return max(0, SpaceBudget.margin + capacity - growth)
+    }
+}
+
+private func progressivePatchPlan(fs: ContainedFileSystem, cdn: MockCDN) throws -> InstallPlan {
+    let size: UInt64 = 8_192
+    let covers = Data([0, 0]) + patchBatchUInt(size - 1)
+    let control = patchBatchUInt(size - 1, tagBits: 2)
+    var patch = Data("HDIFF13&\0".utf8)
+    for n in [size, size, 1, UInt64(covers.count), 0, UInt64(control.count), 0, 0, 0, 1, 0] { patch.append(patchBatchUInt(n)) }
+    patch += covers + control + Data("!".utf8)
+    var objects: [String: ChunkObject] = [:], files: [FileTask] = []
+    let container = patch + patch + patch + patch
+    for index in 0..<3 {
+        let id = "container-\(index)", digest = patchBatchDigest(container)
+        objects[id] = ChunkObject(id: id, urls: [URL(string: "https://cdn.test/\(id)")!], transferSize: Int64(container.count),
+            transferDigest: digest, decodedSize: Int64(container.count), decodedDigest: digest)
+        cdn.serve(id, data: container)
+    }
+    for index in 0..<12 {
+        let path = try SafeRelativePath(String(format: "file-%02d", index)), old = Data(repeating: UInt8(65 + index), count: Int(size))
+        let target = Data(old.dropLast()) + Data("!".utf8), digest = patchBatchDigest(target), fallback = "fallback-\(index)"
+        try fs.writeAtomically(old, to: path)
+        objects[fallback] = ChunkObject(id: fallback, urls: [URL(string: "https://cdn.test/\(fallback)")!], transferSize: Int64(size),
+            transferDigest: digest, decodedSize: Int64(size), decodedDigest: digest)
+        cdn.serve(fallback, data: target)
+        files.append(FileTask(path: path, size: Int64(size), digest: digest,
+            extents: [Extent(source: .chunk(id: fallback), fileOffset: 0, length: Int64(size), digest: digest)],
+            recipe: .patch(source: path, sourceSize: Int64(size), sourceDigest: patchBatchDigest(old), container: "container-\(index % 3)",
+                offset: Int64(index / 3 * patch.count), length: Int64(patch.count))))
+    }
+    return InstallPlan(id: try SafeIdentifier("progressive-patches"), objects: objects, files: files)
+}
+private func patchBatchDigest(_ data: Data) -> Digest { var hash = StreamingHasher(.md5); hash.update(data); return hash.finalize() }
+private func patchBatchUInt(_ value: UInt64, tagBits: Int = 0) -> Data {
+    var rest = value, tail: [UInt8] = []
+    while rest >= (1 << (7 - tagBits)) { tail.append(UInt8(rest & 127)); rest >>= 7 }
+    var bytes = [UInt8(rest) | (tail.isEmpty ? 0 : 1 << (7 - tagBits))]
+    for (index, byte) in tail.reversed().enumerated() { bytes.append(byte | (index + 1 < tail.count ? 128 : 0)) }
+    return Data(bytes)
+}
+
+
+@Test(.timeLimit(.minutes(1))) func progressivePatchFallbackIsAdmittedLazilyAgainstLiveCapacity() async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let plan = try progressivePatchPlan(fs: fs, cdn: cdn)
+    try fs.writeAtomically(Data(repeating: 0, count: 8_192), to: plan.files[2].path)
+    let ops = try PeakDiskOps(root: temp.url), disk = PatchBatchCapacity(ops: ops, capacity: 12_288)
+    ops.setPayloadLimit(ops.baseline.payload + 12_288)
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: disk,
+        mode: .batched(approved: true), fileOps: ops, patchApplier: HDiff13PatchApplier())
+    do { _ = try await opCollect(engine.run()); Issue.record("Fallback must reserve its chunk and output") }
+    catch let error as LauncherError {
+        guard case .insufficientSpace = error else { Issue.record("Expected fallback admission refusal"); return }
+    }
+    let state = try OperationJournal.replay(fs: fs, path: opJournal(plan))
+    #expect(state.committedFiles.count == 2)
+    #expect(!cdn.requestLog.contains { $0.path.hasPrefix("fallback-") })
+    #expect(ops.deniedWrites == 0)
+}
+
+@Test(.timeLimit(.minutes(1))) func patchBatchResumeKeepsProgressivePolicyForRemainingChunkFiles() async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let original = try progressivePatchPlan(fs: fs, cdn: cdn)
+    let files = original.files.enumerated().map { index, file in
+        FileTask(path: file.path, size: file.size, digest: file.digest, extents: file.extents, recipe: index < 10 ? file.recipe : nil)
+    }
+    let plan = InstallPlan(id: original.id, objects: original.objects, files: files)
+    let ops = try PeakDiskOps(root: temp.url), disk = PatchBatchCapacity(ops: ops, capacity: 20_480)
+    ops.setPayloadLimit(ops.baseline.payload + 20_480)
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: disk,
+        mode: .batched(approved: true), fileOps: ops, patchApplier: HDiff13PatchApplier())
+    for try await event in engine.run() where event == .phase(.checkingSpace) {
+        let state = try OperationJournal.replay(fs: fs, path: opJournal(plan))
+        if state.committedFiles.count == 10 { break }
+    }
+    #expect(try OperationJournal.replay(fs: fs, path: opJournal(plan)).committedFiles.count == 10)
+    #expect(try await opCollect(engine.run()).last == .phase(.completed))
+    #expect(ops.deniedWrites == 0)
+    for file in files { #expect(try fs.size(at: file.path) == file.size) }
 }

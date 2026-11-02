@@ -350,10 +350,14 @@ private actor CommitSession {
             }
             let available = try fs.availableBytes(using: disk)
             let required = try SpaceBudget.required(plan: pending, state: state, fs: fs, maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline).disk
-            if required <= available { plannedBatches = [pending.files] }
+            let patchUpdate = plan.files.contains { $0.recipe != nil }
+            if !patchUpdate, required <= available { plannedBatches = [pending.files] }
             else {
-                plannedBatches = try partitionAll(pending, available: available)
-                if state.commitStartedBatches.isEmpty, mode != .batched(approved: true) {
+                // Keep independent patch batches even when the whole update
+                // fits. Pass the saved plan so resume retains this policy after
+                // the last recipe file commits, leaving chunk-route files.
+                plannedBatches = try partitionAll(patchUpdate ? plan : pending, available: available)
+                if required > available, state.commitStartedBatches.isEmpty, mode != .batched(approved: true) {
                     pendingError = .insufficientSpace(required: required, available: available)
                     return .needsBatchApproval(required: required, available: available)
                 }

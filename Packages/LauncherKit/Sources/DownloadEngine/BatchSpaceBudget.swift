@@ -5,8 +5,9 @@ import LauncherCore
 
 extension SpaceBudget {
     /// Minimal contiguous batches preserve every local dependency without a
-    /// fallback. Their reservation covers the entire sequence, including output
-    /// kept after commits and parts retained for later batches.
+    /// fallback. Patch plans admit the next batch's primary recipe, then probe
+    /// actual capacity again between commits. Chunk-only plans keep their legacy
+    /// whole-sequence reservation.
     package static func batchedPreflight(plan: InstallPlan, state: JournalState, fs: ContainedFileSystem,
         available: Int64, maxConcurrentObjects: Int = defaultMaxConcurrentObjects, pipeline: PipelineConfiguration = .default) throws -> (batches: [[FileTask]], required: Int64) {
         try plan.validate(supportedCodecs: Set(ChunkCodec.allCases))
@@ -41,6 +42,15 @@ extension SpaceBudget {
                 batches.append(pending.filter { selected.contains($0.path) })
             } else { batches.append(Array(remaining[start...end])) }
             start = end + 1
+        }
+        if plan.files.contains(where: { $0.recipe != nil }) {
+            // Fallback extents are conditional: Stager admits them with a live
+            // capacity check if the primary recipe fails. Committed growth and
+            // resident containers already reduce the next probe's free space;
+            // neither replacement nor unlink supplies a forecast credit.
+            let required = try estimate(plan: plan, files: batches[0], state: state, fs: fs,
+                maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline).disk
+            return (batches, required)
         }
         let sequential = try sequencePeak(batches, plan: plan, state: state, fs: fs, limit: maxConcurrentObjects, pipeline: pipeline)
         let whole = try required(plan: plan, state: state, fs: fs, maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline).disk
