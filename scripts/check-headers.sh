@@ -17,7 +17,7 @@ tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
 if ! find App Packages MacGachaTests -type f -name '*.swift' -not -path '*/.build/*' \
-  -not -path '*/Sources/CZstd/*' -print0 > "$tmp"; then
+  -not -path '*/Sources/CZstd/*' -not -path '*/Sources/CHDiffPatch/vendor/*' -print0 > "$tmp"; then
   printf 'error: failed to enumerate Swift files under App/ and Packages/\n' >&2
   exit 1
 fi

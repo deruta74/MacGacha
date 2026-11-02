@@ -28,6 +28,12 @@ let package = Package(
             .define("ZSTD_DISABLE_ASM", to: "1"), .define("ZSTD_LEGACY_SUPPORT", to: "0"),
             .unsafeFlags(["-Wno-everything"]),
         ]),
+        // Six unchanged upstream patch-side files; no threads or whole-file caches.
+        .target(name: "CHDiffPatch", exclude: ["LICENSE", "VENDOR.txt", "SHA256SUMS"], publicHeadersPath: "include", cSettings: [
+            .define("_IS_USED_MULTITHREAD", to: "0"), .define("_HPATCH_IS_USED_MULTITHREAD", to: "0"),
+            .define("_IS_NEED_CACHE_OLD_ALL", to: "0"), .define("_IS_NEED_CACHE_OLD_BY_COVERS", to: "0"),
+            .unsafeFlags(["-Wno-everything"]),
+        ]),
         .target(name: "DownloadEngine", dependencies: ["LauncherCore", "CZstd"]),
         .systemLibrary(name: "CArchive"),
         .target(name: "RuntimeManager", dependencies: ["LauncherCore", "DownloadEngine", "CArchive"],
@@ -46,7 +52,7 @@ let package = Package(
         .testTarget(name: "RuntimeManagerTests", dependencies: ["RuntimeManager", "TestSupport", "Launch", "CrashHarness"]),
         .testTarget(name: "DiagnosticsTests", dependencies: ["Diagnostics", "LauncherCore", "TestSupport"]),
         .testTarget(name: "HoYoPlayAPITests", dependencies: ["HoYoPlayAPI", "TestSupport"], resources: [.copy("Fixtures/CN"), .copy("Fixtures/Events")]),
-        .testTarget(name: "SophonTests", dependencies: ["Sophon", "TestSupport"], resources: [.copy("Fixtures/CN")]),
+        .testTarget(name: "SophonTests", dependencies: ["Sophon", "TestSupport", "CHDiffPatch"], resources: [.copy("Fixtures/CN")]),
         .testTarget(name: "GameLibraryTests", dependencies: ["GameLibrary", "TestSupport", "CrashHarness"],
             resources: [.copy("Fixtures/Adopt")]),
         .testTarget(name: "LaunchTests", dependencies: ["Launch", "TestSupport", "CrashHarness"]),

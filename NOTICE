@@ -12,3 +12,7 @@ with the following additional term, added under section 7(b) of the GPL:
   The notice must appear in the source distribution (for example this NOTICE
   file or the README) and, if the work has an interactive user interface, in
   its "About" screen or an equivalent place visible to users.
+
+HDiffPatch patch-side decoder: Copyright (c) HouSisong, MIT license.
+Source: https://github.com/sisong/HDiffPatch/tree/06961361340085ddb2a551775dc402172b8ca67c
+Unchanged sources and full upstream license: Packages/LauncherKit/Sources/CHDiffPatch/.
