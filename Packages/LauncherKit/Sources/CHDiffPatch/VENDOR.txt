@@ -17,3 +17,9 @@ Build: _IS_USED_MULTITHREAD=0, _HPATCH_IS_USED_MULTITHREAD=0,
 _IS_NEED_CACHE_OLD_ALL=0, _IS_NEED_CACHE_OLD_BY_COVERS=0.
 No generator, CLI, directory patcher, C++, multithread implementation or
 upstream codec plugin is included. Local glue lives outside vendor/.
+
+Local HDiffBridge.c uses CZstd's custom allocator API with a 64 MiB total
+session heap budget (including buffers and the 96 KiB patch cache), an 8 MiB
+window per zstd stream, and at most 64 KiB per file I/O step. Clang modules
+are disabled only for this C target so ZSTD_STATIC_LINKING_ONLY selects the
+allocator declarations textually. No upstream bytes are modified.

@@ -29,10 +29,11 @@ let package = Package(
             .unsafeFlags(["-Wno-everything"]),
         ]),
         // Six unchanged upstream patch-side files; no threads or whole-file caches.
-        .target(name: "CHDiffPatch", exclude: ["LICENSE", "VENDOR.txt", "SHA256SUMS"], publicHeadersPath: "include", cSettings: [
+        .target(name: "CHDiffPatch", dependencies: ["CZstd"], exclude: ["LICENSE", "VENDOR.txt", "SHA256SUMS"], publicHeadersPath: "include", cSettings: [
             .define("_IS_USED_MULTITHREAD", to: "0"), .define("_HPATCH_IS_USED_MULTITHREAD", to: "0"),
             .define("_IS_NEED_CACHE_OLD_ALL", to: "0"), .define("_IS_NEED_CACHE_OLD_BY_COVERS", to: "0"),
-            .unsafeFlags(["-Wno-everything"]),
+            // The private zstd allocator API is selected textually, outside its public Clang module.
+            .unsafeFlags(["-Wno-everything", "-fno-modules"]),
         ]),
         .target(name: "DownloadEngine", dependencies: ["LauncherCore", "CZstd"]),
         .systemLibrary(name: "CArchive"),

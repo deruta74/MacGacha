@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Darwin
 import Foundation
+import Synchronization
 import Testing
 import LauncherCore
 import TestSupport
@@ -87,6 +88,29 @@ import TestSupport
         }
     }
 
+    @Test func malformedCoverAndRleIntegersStayInsideRanges() async throws {
+        let fixture = try HDiffFixture()
+        let huge = hdiffUInt(UInt64.max)
+        let cases: [(Data, Data)] = [
+            (Data([3, 0, 1]), Data([2])), // old position beyond the old file
+            (Data([0x83, 0, 1]), Data([2])), // negative old position underflow
+            (Data([0]) + huge + Data([1]), Data([2])), // overflowing new position
+            (Data([0, 0]) + huge, Data([2])), // overflowing cover length
+            (Data(repeating: 255, count: 11), Data([2])), // non-terminating packed integer
+            (Data([0, 0, 2]), Data(repeating: 255, count: 11)) // corrupt RLE length
+        ]
+        for (covers, control) in cases {
+            let patch = hdiffPatch(oldSize: 2, newSize: 3, covers: covers, coverCount: 1, control: control, newData: Data([33]))
+            try fixture.store(old: Data([1, 2]), patch: patch)
+            let output = try fixture.output(); defer { try? output.close() }
+            await #expect(throws: LauncherError.malformedPatch) {
+                try await HDiff13.apply(old: fixture.range("old", length: 2), patch: fixture.range("patch", length: Int64(patch.count)),
+                    expectedSize: 3, output: output)
+            }
+            #expect(try fixture.fs.readFile(at: SafeRelativePath("old"), maxBytes: 10) == Data([1, 2]))
+        }
+    }
+
     @Test func cancellationBeforeStartAndBetweenWrites() async throws {
         let fixture = try HDiffFixture(), expected = Data(repeating: 65, count: 250_000)
         let patch = hdiffPatch(oldSize: 0, newSize: UInt64(expected.count),
@@ -106,6 +130,43 @@ import TestSupport
         }
         // Cancellation happens at the first write boundary, before those bytes are stored.
         #expect(try fixture.readOutput().isEmpty)
+    }
+
+    @Test func callerCancellationReachesTheBlockingWorker() async throws {
+        let fixture = try HDiffFixture(), expected = Data(repeating: 65, count: 250_000)
+        let patch = hdiffPatch(oldSize: 0, newSize: UInt64(expected.count),
+            control: hdiffUInt(UInt64(expected.count - 1), tagBits: 2), newData: expected)
+        try fixture.store(old: Data(), patch: patch)
+        let output = try fixture.output(); defer { try? output.close() }
+        let source = try fixture.range("old", length: 0), slice = try fixture.range("patch", length: Int64(patch.count))
+        let start = TestEvent(), holder = Mutex<Task<Void, any Error>?>(nil)
+        let task = Task {
+            try await start.wait()
+            try await HDiff13.apply(old: source, patch: slice, expectedSize: Int64(expected.count), output: output,
+                onStep: { step in if step == .writeOutput { holder.withLock { $0?.cancel() } } })
+        }
+        defer { task.cancel(); holder.withLock { $0 = nil } }
+        holder.withLock { $0 = task }; start.signal()
+        await #expect(throws: LauncherError.cancelled) { try await task.value }
+        #expect(try fixture.readOutput().isEmpty)
+    }
+
+    @Test func refusesSymlinkInputsThroughContainedFileSystem() async throws {
+        let fixture = try HDiffFixture(), patch = hdiffPatch(oldSize: 1, newSize: 1, control: Data([0]), newData: Data([2]))
+        try fixture.store(old: Data([1]), patch: patch)
+        try fixture.fs.createSymbolicLink(at: SafeRelativePath("old-link"), target: "old")
+        try fixture.fs.createSymbolicLink(at: SafeRelativePath("patch-link"), target: "patch")
+        let output = try fixture.output(); defer { try? output.close() }
+        for (old, container) in [("old-link", "patch"), ("old", "patch-link")] {
+            do {
+                try await HDiff13.apply(old: fixture.range(old, length: 1), patch: fixture.range(container, length: Int64(patch.count)),
+                    expectedSize: 1, output: output)
+                Issue.record("A symlink input must be refused")
+            } catch let error as LauncherError {
+                guard case .unsafePath = error else { Issue.record("Expected a contained-path refusal"); continue }
+            }
+            #expect(try fixture.readOutput().isEmpty)
+        }
     }
 
     @Test func refusesAliasedOutputAndUnsafeInputs() async throws {

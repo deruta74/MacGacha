@@ -8,6 +8,7 @@ import CHDiffPatch
 /// One HDIFF13 file reconstruction. Inputs stay read-only; output is caller-owned
 /// scratch space and may contain a partial result on failure. Verify its digest
 /// before committing it. Positional I/O preserves all handles' seek positions.
+/// Supports raw and zstd sections (8 MiB window per stream, 64 MiB total C heap).
 public enum HDiff13 {
     public struct FileRange: Sendable {
         public let fileSystem: ContainedFileSystem
