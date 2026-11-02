@@ -65,6 +65,9 @@ public struct HTTPResponseHead: Sendable {
 }
 
 public protocol HTTPClient: Sendable {
+    /// Empty-body POST for delivery metadata, using the same bounded response stream as GET.
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody)
+
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws
         -> (HTTPResponseHead, HTTPBody)
 }

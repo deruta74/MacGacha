@@ -413,6 +413,10 @@ func collectStaging(_ stream: AsyncThrowingStream<OperationEvent, any Error>) as
 }
 
 private final class StagingStallClient: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     private struct State { var calls = 0; var cancelled = false }
     private let state = Mutex(State())
     private let stalled = TestEvent()
@@ -439,6 +443,10 @@ private final class StagingStallClient: HTTPClient {
 }
 
 private final class ConcurrentStagingClient: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     private let cdn = MockCDN()
     private let counts = Mutex((active: 0, peak: 0))
     private let threeEntered = TestEvent()

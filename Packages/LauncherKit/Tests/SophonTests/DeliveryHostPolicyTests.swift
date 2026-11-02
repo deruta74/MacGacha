@@ -25,31 +25,31 @@ import LauncherCore
         client.invalidate()
     }
 
-    @Test(arguments: [Region.global, .mainlandChina]) func redirectsCannotCrossRegion(region: Region) async throws {
+    @Test(arguments: [Region.global, .mainlandChina], [false, true]) func redirectsCannotCrossRegion(region: Region, post: Bool) async throws {
         let client = redirectClient(region: region); defer { client.invalidate() }
         let host = region == .global ? "cdn.hoyoverse.com" : "cdn.mihoyo.com"
-        let (head, _) = try await client.get(URL(string: "https://\(host)/other-region")!, byteRangeFrom: nil)
+        let (head, _) = try await (post ? client.post(URL(string: "https://\(host)/other-region")!) : client.get(URL(string: "https://\(host)/other-region")!, byteRangeFrom: nil))
         #expect(head.status == 302)
         #expect(DeliveryRedirectStub.requests.withLock { $0.map(\.host) } == [host])
     }
 
-    @Test func redirectToForeignHostRejected() async throws {
+    @Test(arguments: [false, true]) func redirectToForeignHostRejected(post: Bool) async throws {
         let client = redirectClient(); defer { client.invalidate() }
-        let (head, _) = try await client.get(URL(string: "https://cdn.hoyoverse.com/foreign")!, byteRangeFrom: nil)
+        let (head, _) = try await (post ? client.post(URL(string: "https://cdn.hoyoverse.com/foreign")!) : client.get(URL(string: "https://cdn.hoyoverse.com/foreign")!, byteRangeFrom: nil))
         #expect(head.status == 302)
         #expect(DeliveryRedirectStub.requests.withLock { $0.map(\.host) } == ["cdn.hoyoverse.com"])
     }
 
-    @Test func redirectToHTTPRejected() async throws {
+    @Test(arguments: [false, true]) func redirectToHTTPRejected(post: Bool) async throws {
         let client = redirectClient(); defer { client.invalidate() }
-        let (head, _) = try await client.get(URL(string: "https://cdn.hoyoverse.com/http")!, byteRangeFrom: nil)
+        let (head, _) = try await (post ? client.post(URL(string: "https://cdn.hoyoverse.com/http")!) : client.get(URL(string: "https://cdn.hoyoverse.com/http")!, byteRangeFrom: nil))
         #expect(head.status == 302)
         #expect(DeliveryRedirectStub.requests.withLock { $0.count } == 1)
     }
 
-    @Test func relativeRedirectAllowed() async throws {
+    @Test(arguments: [false, true]) func relativeRedirectAllowed(post: Bool) async throws {
         let client = redirectClient(); defer { client.invalidate() }
-        let (head, body) = try await client.get(URL(string: "https://cdn.hoyoverse.com/relative")!, byteRangeFrom: nil)
+        let (head, body) = try await (post ? client.post(URL(string: "https://cdn.hoyoverse.com/relative")!) : client.get(URL(string: "https://cdn.hoyoverse.com/relative")!, byteRangeFrom: nil))
         var bytes = Data(); for try await piece in body { bytes.append(piece) }
         #expect(head.status == 200)
         #expect(String(decoding: bytes, as: UTF8.self) == "ok")

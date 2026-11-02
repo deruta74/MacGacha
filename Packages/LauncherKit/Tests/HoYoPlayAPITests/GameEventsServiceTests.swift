@@ -173,6 +173,10 @@ import TestSupport
 }
 
 private final class EventsHTTP: HTTPClient, Sendable {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let region: Region
     private let recorded = Mutex<[URL]>([])
     private let state = Mutex((content: Data?.none, games: Data?.none, fail: false, failedID: String?.none, length: Int64?.none))

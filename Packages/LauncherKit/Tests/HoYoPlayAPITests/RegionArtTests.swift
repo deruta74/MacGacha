@@ -72,6 +72,10 @@ import TestSupport
 private let regionPNG = Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])
 
 private final class RegionArtHTTP: HTTPClient, Sendable {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let global = MockCDN(), cn = MockCDN()
     private let recorded = Mutex<[URL]>([])
     var requests: [URL] { recorded.withLock { $0 } }

@@ -6,6 +6,10 @@ import LauncherCore
 import DownloadEngine
 
 public final class MockCDN: HTTPClient, @unchecked Sendable {
+    public func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        return try await get(url, byteRangeFrom: nil)
+    }
+
     public enum Fault: Sendable {
         case status(Int, retryAfter: Duration? = nil)
         case dropAfter(bytes: Int)

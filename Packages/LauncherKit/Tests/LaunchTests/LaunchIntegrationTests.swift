@@ -306,6 +306,10 @@ private func assertClosed(_ port: UInt16) async throws {
 
 /// Fixture reads retain the production component size/hash checks and never use the network.
 struct ProbeFixtureHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (DownloadEngine.HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let root: URL
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (DownloadEngine.HTTPResponseHead, HTTPBody) {
         try await BlockingIO.run {

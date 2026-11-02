@@ -98,6 +98,10 @@ import TestSupport
 }
 
 private final class HeaderGateHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn: MockCDN, peak = Mutex(0)
     private let active = Mutex(0)
     private let reached = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -121,6 +125,10 @@ private final class ProgressBodyGate: Sendable {
     func wait() async { var iterator = stream.stream.makeAsyncIterator(); _ = await iterator.next() }
 }
 private struct ProgressGateHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn: MockCDN, gate: ProgressBodyGate
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         let (head, body) = try await cdn.get(url, byteRangeFrom: offset)
@@ -219,6 +227,10 @@ private actor ProgressGateIterator {
 }
 
 private struct SlowPipelineHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn: MockCDN
     let parts: ThroughputFileOps
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {

@@ -74,7 +74,18 @@ public struct URLSessionHTTPClient: HTTPClient {
     public func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         if let offset, offset < 0 { throw LauncherError.io("Invalid resume offset \(offset)") }
+        return try await request(url, method: "GET", offset: offset)
+    }
+
+    public func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        try await request(url, method: "POST", offset: nil)
+    }
+
+    private func request(_ url: URL, method: String, offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
+        guard !Task.isCancelled else { throw LauncherError.cancelled }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.httpMethod = method
+        if method == "POST" { request.httpBody = Data() }
         // CFNetwork's idle timer keeps running while a task is suspended for
         // consumer backpressure. Own that timer instead, pausing it at the high
         // watermark. An explicitly configured whole-resource deadline still applies.
