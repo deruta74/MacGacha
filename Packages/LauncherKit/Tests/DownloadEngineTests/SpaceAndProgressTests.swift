@@ -1138,7 +1138,7 @@ private final class PatchBatchCapacity: DiskSpaceProbe {
     }
 }
 
-private func progressivePatchPlan(fs: ContainedFileSystem, cdn: MockCDN) throws -> InstallPlan {
+private func progressivePatchPlan(fs: ContainedFileSystem, cdn: MockCDN, fileCount: Int = 12, containerCount: Int = 3, containerSize: Int? = nil) throws -> InstallPlan {
     let size: UInt64 = 8_192
     let covers = Data([0, 0]) + patchBatchUInt(size - 1)
     let control = patchBatchUInt(size - 1, tagBits: 2)
@@ -1146,14 +1146,16 @@ private func progressivePatchPlan(fs: ContainedFileSystem, cdn: MockCDN) throws 
     for n in [size, size, 1, UInt64(covers.count), 0, UInt64(control.count), 0, 0, 0, 1, 0] { patch.append(patchBatchUInt(n)) }
     patch += covers + control + Data("!".utf8)
     var objects: [String: ChunkObject] = [:], files: [FileTask] = []
-    let container = patch + patch + patch + patch
-    for index in 0..<3 {
+    var container = Data()
+    for _ in 0..<((fileCount + containerCount - 1) / containerCount) { container.append(patch) }
+    if let containerSize { container.append(Data(repeating: 0, count: containerSize - container.count)) }
+    for index in 0..<containerCount {
         let id = "container-\(index)", digest = patchBatchDigest(container)
         objects[id] = ChunkObject(id: id, urls: [URL(string: "https://cdn.test/\(id)")!], transferSize: Int64(container.count),
             transferDigest: digest, decodedSize: Int64(container.count), decodedDigest: digest)
         cdn.serve(id, data: container)
     }
-    for index in 0..<12 {
+    for index in 0..<fileCount {
         let path = try SafeRelativePath(String(format: "file-%02d", index)), old = Data(repeating: UInt8(65 + index), count: Int(size))
         let target = Data(old.dropLast()) + Data("!".utf8), digest = patchBatchDigest(target), fallback = "fallback-\(index)"
         try fs.writeAtomically(old, to: path)
@@ -1162,8 +1164,8 @@ private func progressivePatchPlan(fs: ContainedFileSystem, cdn: MockCDN) throws 
         cdn.serve(fallback, data: target)
         files.append(FileTask(path: path, size: Int64(size), digest: digest,
             extents: [Extent(source: .chunk(id: fallback), fileOffset: 0, length: Int64(size), digest: digest)],
-            recipe: .patch(source: path, sourceSize: Int64(size), sourceDigest: patchBatchDigest(old), container: "container-\(index % 3)",
-                offset: Int64(index / 3 * patch.count), length: Int64(patch.count))))
+            recipe: .patch(source: path, sourceSize: Int64(size), sourceDigest: patchBatchDigest(old), container: "container-\(index % containerCount)",
+                offset: Int64(index / containerCount * patch.count), length: Int64(patch.count))))
     }
     return InstallPlan(id: try SafeIdentifier("progressive-patches"), objects: objects, files: files)
 }
@@ -1214,4 +1216,30 @@ private func patchBatchUInt(_ value: UInt64, tagBits: Int = 0) -> Data {
     #expect(try await opCollect(engine.run()).last == .phase(.completed))
     #expect(ops.deniedWrites == 0)
     for file in files { #expect(try fs.size(at: file.path) == file.size) }
+}
+
+
+@Test(.timeLimit(.minutes(1))) func futureBatchContainerDoesNotInflateExactFallbackAdmission() async throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url), cdn = MockCDN()
+    let plan = try progressivePatchPlan(fs: fs, cdn: cdn, fileCount: 2, containerCount: 1, containerSize: 100)
+    try fs.writeAtomically(Data(repeating: 0, count: 8_192), to: plan.files[0].path)
+    let ops = try PeakDiskOps(root: temp.url), capacity: Int64 = 16_384
+    let disk = PatchBatchCapacity(ops: ops, capacity: capacity)
+    #expect(try disk.availableBytes(at: temp.url) == SpaceBudget.margin + capacity)
+    ops.setPayloadLimit(ops.baseline.payload + capacity)
+    let container = try objectPath(plan, plan.objects["container-0"]!), commits = Mutex([Bool]())
+    let hooks = CrashHooks(at: .afterRenameBeforeJournal, action: {
+        commits.withLock { $0.append((try? fs.size(at: container)) == 100) }
+    })
+    let engine = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: disk,
+        mode: .batched(approved: true), fileOps: ops, crashHooks: hooks, patchApplier: HDiff13PatchApplier())
+    #expect(try await opCollect(engine.run()).last == .phase(.completed))
+    #expect(cdn.requestLog.map(\.path) == ["fallback-0", "container-0"])
+    #expect(commits.withLock { $0 } == [false, true])
+    #expect(ops.peak.payload - ops.baseline.payload == capacity)
+    #expect(ops.deniedWrites == 0)
+    for (index, file) in plan.files.enumerated() {
+        let expected = Data(repeating: UInt8(65 + index), count: 8_191) + Data("!".utf8)
+        #expect(try fs.readFile(at: file.path, maxBytes: 8_192) == expected)
+    }
 }

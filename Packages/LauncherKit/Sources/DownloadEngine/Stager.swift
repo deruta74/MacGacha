@@ -571,8 +571,11 @@ private actor StagingSession {
     private func fallbackFile(_ file: FileTask, reason: String) throws {
         guard chunkFallbackFiles.insert(file.path).inserted else { return }
         log?.post(.notice, "download", "Patch fallback", metadata: ["count": "1", "reason": reason])
+        // Allocation belongs to this batch. Future referrers still retain a
+        // fetched container through commit, but cannot reserve an unfetched one.
         if let id = file.recipe?.containerID,
-            referrers[id]?.contains(where: { !donePaths.contains($0) && !chunkFallbackFiles.contains($0) }) != true {
+            !files.contains(where: { referrers[id]?.contains($0.path) == true
+                && !donePaths.contains($0.path) && !chunkFallbackFiles.contains($0.path) }) {
             try allocation?.setCost(id, to: 0)
         }
     }
