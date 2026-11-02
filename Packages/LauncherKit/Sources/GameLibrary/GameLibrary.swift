@@ -56,6 +56,13 @@ public actor GameLibrary {
         withExtendedLifetime(lease) {}
     }
 
+    /// Join cache readers after its stream has completed, failed or been
+    /// discarded. This is separate from claiming the global mutation lease.
+    public func waitForPreDownloadDrain(_ id: String) async throws {
+        _ = try SafeIdentifier(id)
+        try await store.waitForPipelineDrain()
+    }
+
     public init(paths: AppPaths, api: DeliveryAPI, runner: OperationRunner, store: GameRecordStore,
         disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(), guard operationGuard: (any GameOperationGuard)? = nil) {
         self.paths = paths; self.api = api; self.runner = runner; self.store = store
@@ -281,7 +288,15 @@ public actor GameLibrary {
         kind: PendingOperation.Kind, approved: Bool, lease: GameOperationLease) async throws -> LibraryPrepared {
         let snapshot = InstalledSnapshot(categories: try await planned(installed.categories, game: game))
         let id = try planID(game, kind: kind, build: target.build, categories: target.categories)
-        let patch = kind == .update ? try await patchPlan(game, id: id, target: target, installed: installed, snapshot: snapshot) : nil
+        var requiresPatchMetadata = false
+        if kind == .update {
+            let cache = try PreDownloadStore(fs: ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity))
+            if let saved = try cache.load() {
+                requiresPatchMetadata = saved.plan.edition == game.id && saved.plan.sourceTag == installed.tag && saved.plan.targetTag == target.build.tag
+            }
+        }
+        let patch = kind == .update ? try await patchPlan(game, id: id, target: target, installed: installed, snapshot: snapshot,
+            requiresPatchMetadata: requiresPatchMetadata) : nil
         let plan = try patch ?? SophonPlanner.plan(id: id, target: target.categories, installed: snapshot)
         return LibraryPrepared(lease: lease, stream: await runner.start(game.id, record: record, plan: plan, kind: kind,
             target: target.build, approved: approved, lease: lease, managedPaths: target.managedPaths,
@@ -289,10 +304,15 @@ public actor GameLibrary {
     }
 
     private func patchPlan(_ game: GameDefinition, id: SafeIdentifier, target: LibraryTarget,
-        installed: InstalledBuild, snapshot: InstalledSnapshot) async throws -> InstallPlan? {
-        guard let branch = target.branch, branch.diffTags.contains(installed.tag) else { return nil }
+        installed: InstalledBuild, snapshot: InstalledSnapshot, requiresPatchMetadata: Bool) async throws -> InstallPlan? {
+        guard let branch = target.branch else {
+            if requiresPatchMetadata { throw LauncherError.transport("Update metadata unavailable") }
+            return nil
+        }
+        if !branch.diffTags.contains(installed.tag), !requiresPatchMetadata { return nil }
         do {
             guard try await api.config(biz: game.biz).enableLdiff else { return nil }
+            guard branch.diffTags.contains(installed.tag) else { throw LauncherError.io("patch source unavailable") }
             let build = try await api.patchBuild(branch)
             guard build.tag == target.build.tag, build.buildID == target.build.buildID else {
                 throw LauncherError.io("patch target changed")
@@ -313,6 +333,9 @@ public actor GameLibrary {
             return try SophonPlanner.patchPlan(id: id, target: target.categories, patch: selected, installed: snapshot, sourceTag: installed.tag)
         } catch {
             if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled { throw LauncherError.cancelled }
+            // A matching cache represents an explicit patch transfer. Do not
+            // silently replace it with a much larger chunk update on an outage.
+            if requiresPatchMetadata { throw LauncherError.transport("Update metadata unavailable") }
             // Discovery is optional. Only a fully validated patch plan can
             // replace the existing chunk route; resume never enters this path.
             return nil

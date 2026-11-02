@@ -12,6 +12,7 @@ typealias GameEventStream = AsyncThrowingStream<OperationEvent, any Error>
 protocol GameServices: Sendable {
     func start() async
     func waitUntilIdle(_ id: String) async throws
+    func waitForPreDownloadDrain(_ id: String) async throws
     func status(_ id: String) async -> GameStatus
     func checkForUpdate(_ id: String) async throws -> GameStatus
     func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo
@@ -31,6 +32,7 @@ protocol GameServices: Sendable {
 
 /// Existing fakes and previews opt out without touching delivery or disk.
 extension GameServices {
+    func waitForPreDownloadDrain(_ id: String) async throws { try await waitUntilIdle(id) }
     func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo { .unavailable }
     func preDownload(_ id: String) async -> GameEventStream { GameEventStream { $0.finish() } }
     func resumePreDownload(_ id: String, expectedPlanID: String?) async -> GameEventStream { GameEventStream { $0.finish() } }
@@ -69,6 +71,10 @@ final class LiveGameServices: GameServices, Sendable {
     func waitUntilIdle(_ id: String) async throws {
         let game = try Self.requireGame(id)
         try await library(for: game).waitUntilIdle(id)
+    }
+    func waitForPreDownloadDrain(_ id: String) async throws {
+        let game = try Self.requireGame(id)
+        try await library(for: game).waitForPreDownloadDrain(id)
     }
     func status(_ id: String) async -> GameStatus {
         guard let game = Self.game(id) else { return .unknown }

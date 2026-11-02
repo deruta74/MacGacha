@@ -1267,6 +1267,102 @@ private func expectOnlyRetainedSessionLock(_ fixture: borrowing LibraryFixture) 
 }
 
 extension GameLibraryTests {
+    @Test func preDownloadDrainDoesNotClaimLeaseHeldByAnotherGamesRefresh() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame(); try f.advertisePreDownload()
+        _ = try await libraryCollect(await f.library.preDownload(game))
+        let entered = TestEvent(), release = TestEvent(), store = f.store
+        let refresh = Task {
+            let lease = try await store.acquireOperationLease()
+            defer { withExtendedLifetime(lease) {} }
+            entered.signal(); try await release.wait()
+        }
+        defer { refresh.cancel(); release.signal() }
+        do {
+            try await entered.wait()
+            try await f.library.waitForPreDownloadDrain(game.id)
+            #expect(try await f.library.preDownloadInfo(game, refresh: false).state == .ready)
+            // Ordinary mutation/idle claims still refuse the competing owner.
+            await #expect(throws: LauncherError.self) { try await f.library.waitUntilIdle(game.id) }
+            release.signal(); try await refresh.value
+        } catch {
+            release.signal(); _ = await refresh.result
+            throw error
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func releaseDayMetadataFailureKeepsMatchingCacheAndRefusesChunkFallback(partial: Bool) async throws {
+        for failure in ["config", "build", "manifest"] {
+            let disk = LibraryDisk(), f = try LibraryFixture(disk: disk)
+            try f.advertise(1); try await f.installGame(); try f.advertisePreDownload()
+            _ = try await libraryCollect(await f.library.preDownload(game))
+            let cache = try PreDownloadStore(fs: f.fs)
+            if partial {
+                var state = try #require(try cache.load())
+                state.completed = false; state.verified = []; try cache.save(state)
+                for entry in state.plan.containers.values {
+                    let bytes = try f.fs.readFile(at: cache.part(entry.object), maxBytes: 1 << 20)
+                    try f.fs.writeAtomically(Data(bytes.prefix(max(1, bytes.count / 2))), to: cache.part(entry.object))
+                }
+            }
+            let before = try libraryStateFiles(at: f.install), record = try await f.store.load(game.id)
+            try f.advertise(2, enableLdiff: true, diffTags: ["1.0"]); try f.advertisePatches()
+            let path = failure == "config" ? "hyp/hyp-connect/api/getGameConfigs" :
+                failure == "build" ? "downloader/sophon_chunk/api/getPatchBuild" : "patch-manifests/voice"
+            f.cdn.enqueueFault(path, .status(503))
+            disk.bytes.withLock { $0 = 0 }
+            let start = f.cdn.requestLog.count
+            await #expect(throws: LauncherError.transport("Update metadata unavailable")) {
+                _ = try await libraryCollect(await f.library.update(game, approved: true))
+            }
+            #expect(try await f.store.load(game.id) == record)
+            #expect(try libraryStateFiles(at: f.install) == before)
+            #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path.hasPrefix("chunks/") || $0.path.hasPrefix("diffs/") })
+            // A later explicit retry reads metadata again and can finish normally.
+            disk.bytes.withLock { $0 = Int64.max }
+            #expect(try await libraryCollect(await f.library.update(game, approved: true)).last == .phase(.completed))
+        }
+    }
+
+    @Test func disabledLdiffChunkPreflightKeepsMatchingCacheUntilDurableCompletion() async throws {
+        let disk = LibraryDisk(), f = try LibraryFixture(disk: disk)
+        try f.advertise(1); try await f.installGame(); try f.advertisePreDownload()
+        _ = try await libraryCollect(await f.library.preDownload(game))
+        let cache = try PreDownloadStore(fs: f.fs), before = try #require(try cache.load())
+        let parts = try before.plan.containers.values.map { try f.fs.readFile(at: cache.part($0.object), maxBytes: 1 << 20) }
+        try f.advertise(2, enableLdiff: false, diffTags: ["1.0"])
+        disk.bytes.withLock { $0 = 0 }
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.update(game, approved: true)) }
+        #expect(try cache.load() == before)
+        #expect(try before.plan.containers.values.map { try f.fs.readFile(at: cache.part($0.object), maxBytes: 1 << 20) } == parts)
+        disk.bytes.withLock { $0 = Int64.max }
+        let start = f.cdn.requestLog.count
+        #expect(try await libraryCollect(await f.library.resume(game, approved: true)).last == .phase(.completed))
+        #expect(f.cdn.requestLog.dropFirst(start).contains { $0.path.hasPrefix("chunks/") })
+        #expect(try cache.load() == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func transientPreDownloadMetadataFailurePreservesReadyAndPausedState(partial: Bool) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame(); try f.advertisePreDownload()
+        _ = try await libraryCollect(await f.library.preDownload(game))
+        let cache = try PreDownloadStore(fs: f.fs)
+        if partial {
+            var state = try #require(try cache.load()); state.completed = false; try cache.save(state)
+        }
+        let before = try #require(try cache.load()), info = try await f.library.preDownloadInfo(game, refresh: false)
+        for path in ["hyp/hyp-connect/api/getGameBranches", "hyp/hyp-connect/api/getGameConfigs",
+            "downloader/sophon_chunk/api/getPatchBuild", "patch-manifests/voice"] {
+            f.cdn.enqueueFault(path, .status(503))
+            #expect(try await f.library.preDownloadInfo(game) == info)
+            #expect(try cache.load() == before)
+        }
+        // A successful read can still establish withdrawal and hide the overlay.
+        try f.advertise(1, enableLdiff: true)
+        let withdrawn = try await f.library.preDownloadInfo(game)
+        #expect(withdrawn.state == .unavailable && withdrawn.canDelete)
+    }
+
     @Test(arguments: [CrashPoint.afterPreDownloadObjectStored, .afterPreDownloadCompleted])
     func preDownloadSurvivesProcessDeathWithoutAdvancingInstalled(point: CrashPoint) async throws {
         let disk = LibraryDisk(), f = try LibraryFixture(disk: disk), fixtures = try TempDir()

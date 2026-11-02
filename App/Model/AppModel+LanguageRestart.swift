@@ -67,7 +67,8 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
             } else if let previous = lastGameConsumerOutcome?.token {
                 // A pause can release the UI reservation before its detached workers drain.
                 // Join them too, but do not resume an operation the user had already paused.
-                try await gameServices.waitUntilIdle(previous.id)
+                if previous.isPreDownload { try await gameServices.waitForPreDownloadDrain(previous.id) }
+                else { try await gameServices.waitUntilIdle(previous.id) }
             }
             try await flushLaunchSettings()
             try Task.checkCancellation()

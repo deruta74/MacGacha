@@ -20,6 +20,10 @@ struct PreDownloadObjectCache: InstallObjectCache {
             return nil
         }
         let needed = Set(plan.files.compactMap { $0.recipe?.containerID })
+        // A chunk plan is not evidence of replacement patch metadata: ldiff may
+        // be disabled or discovery may have failed. Keep cache ownership until
+        // durable completion rather than deleting it before space preflight.
+        guard !needed.isEmpty else { return nil }
         let matching = Set(saved.plan.containers.compactMap { id, container -> String? in
             guard needed.contains(id), let target = plan.objects[id], target.codec == .identity,
                 target.transferSize == container.object.transferSize, target.decodedDigest == container.object.decodedDigest else { return nil }

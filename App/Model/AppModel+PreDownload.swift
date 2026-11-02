@@ -160,7 +160,9 @@ struct PreDownloadOverlay: Sendable, Equatable {
     private func finishPreDownload(_ token: GameOperationToken, services: any GameServices, completed: Bool, failed: Bool) async {
         // Cancellation of the consumer must not cancel the pipeline join or local status read.
         let (drained, result) = await Task.detached { () -> (Bool, Result<PreDownloadInfo, LauncherError>) in
-            do { try await services.waitUntilIdle(token.id) }
+            // Finishing cache readers does not need the global mutation lease;
+            // another game's refresh may own it after our transfer has joined.
+            do { try await services.waitForPreDownloadDrain(token.id) }
             catch { return (false, .failure(launcherError(error))) }
             do { return (true, .success(try await services.preDownloadInfo(token.id, refresh: false))) }
             catch { return (true, .failure(launcherError(error))) }
@@ -187,7 +189,7 @@ struct PreDownloadOverlay: Sendable, Equatable {
     func stopPreDownloadOperation(_ token: GameOperationToken) async throws -> GameStopOutcome {
         let task = gameOperation == token ? gameTask : nil
         task?.cancel(); await task?.value
-        try await gameServices.waitUntilIdle(token.id)
+        try await gameServices.waitForPreDownloadDrain(token.id)
         let info = try await gameServices.preDownloadInfo(token.id, refresh: false)
         preDownloads[token.id] = PreDownloadOverlay(info: info)
         // A successful retry can release a reservation retained after a failed drain.

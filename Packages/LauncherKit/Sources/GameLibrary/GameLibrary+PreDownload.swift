@@ -31,7 +31,7 @@ extension GameLibrary {
         do { branches = try await api.branches(biz: game.biz) }
         catch {
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
-            return PreDownloadInfo(state: .unavailable, canDelete: saved != nil)
+            return try cache.info(saved, installed: installed, edition: game.id)
         }
         var offered: PreDownloadPlan?
         var discoveryFailed = false
@@ -55,7 +55,7 @@ extension GameLibrary {
             }
             // Branch selectors already establish staleness even if the new
             // campaign's config/build/manifest could not be loaded.
-            if discoveryFailed { return PreDownloadInfo(state: .unavailable, canDelete: current != nil) }
+            if discoveryFailed { return try scope.cache.info(current, installed: installed, edition: game.id) }
             if let offered {
                 if current != nil {
                     let state = try scope.cache.replace(offered)
@@ -73,10 +73,11 @@ extension GameLibrary {
             // A live session or another operation can defer mutation. Preserve
             // the existing overlay when the discovered campaign still agrees;
             // do not hide a paused/ready cache merely because it cannot prune.
-            let offeredDigest = try offered?.digest
-            if let saved, !discoveryFailed,
+            if let saved,
                 saved.plan.edition == game.id, saved.plan.sourceTag == installed.tag,
-                branches.main.tag == saved.plan.targetTag || offeredDigest == saved.planDigest {
+                branches.main.tag == saved.plan.sourceTag || branches.main.tag == saved.plan.targetTag,
+                branches.preDownload.map({ $0.tag == saved.plan.targetTag }) ?? true,
+                discoveryFailed || branches.main.tag == saved.plan.targetTag || offered != nil {
                 return try cache.info(saved, installed: installed, edition: game.id)
             }
             return PreDownloadInfo(state: .unavailable, canDelete: saved != nil)

@@ -53,6 +53,22 @@ import GameLibrary
         model.pausePreDownload("genshin"); await model.gameTask?.value
     }
 
+    @Test func completionReleasesReservationWhenOtherGameRefreshOwnsMutationLease() async throws {
+        let gate = PreDownloadModelGate()
+        let service = try PreDownloadModelServices(drain: gate, busyAfterDrain: true)
+        let model = try makeModel(service, defaults: nil)
+        defer { service.finish() }
+        await model.start(); model.startPreDownload("genshin"); await service.waitForOpen()
+        let worker = try #require(model.gameTask)
+        service.setInfo(try info(.ready, downloaded: 100)); service.emit(.phase(.completed)); service.finish()
+        await gate.waitForEntry()
+        #expect(model.gameOperation?.isPreDownload == true && model.isBusyForUpdates)
+        await gate.release(); await worker.value
+        #expect(model.preDownloadState(for: "genshin").state == .ready(version: "2.0"))
+        #expect(model.gameOperation == nil && model.gameTask == nil)
+        #expect(!model.isBusyForUpdates)
+    }
+
     @Test func activeOverlaySurvivesOrdinaryRefresh() async throws {
         let (model, service) = try fixture(); defer { service.finish() }
         await model.start(); model.startPreDownload("genshin"); await service.waitForOpen()
@@ -241,8 +257,11 @@ private final class PreDownloadModelServices: GameServices, Sendable {
     private let base = PreviewGameServices(states: ["genshin": GameState(status: .installed(tag: "1.0"))])
     private let opened = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private let drain: PreDownloadModelGate?, resolve: PreDownloadModelGate?, infoRead: PreDownloadModelGate?
-    init(drain: PreDownloadModelGate? = nil, resolve: PreDownloadModelGate? = nil, infoRead: PreDownloadModelGate? = nil) throws {
+    private let busyAfterDrain: Bool
+    init(drain: PreDownloadModelGate? = nil, resolve: PreDownloadModelGate? = nil, infoRead: PreDownloadModelGate? = nil,
+        busyAfterDrain: Bool = false) throws {
         self.drain = drain; self.resolve = resolve; self.infoRead = infoRead
+        self.busyAfterDrain = busyAfterDrain
         state = Mutex(State(info: try preDownloadModelInfo(.available), paused: try preDownloadModelInfo(.paused, downloaded: 25)))
     }
     var calls: [String] { state.withLock { $0.calls } }
@@ -252,7 +271,11 @@ private final class PreDownloadModelServices: GameServices, Sendable {
     func finish() { state.withLock { $0.continuation }?.finish() }
     func waitForOpen() async { var iterator = opened.stream.makeAsyncIterator(); _ = await iterator.next() }
     func start() async {}
-    func waitUntilIdle(_ id: String) async throws { await drain?.wait() }
+    func waitUntilIdle(_ id: String) async throws {
+        await drain?.wait()
+        if busyAfterDrain { throw LauncherError.busy("another game's refresh owns the lease") }
+    }
+    func waitForPreDownloadDrain(_ id: String) async throws { await drain?.wait() }
     func status(_ id: String) async -> GameStatus { await base.status(id) }
     func checkForUpdate(_ id: String) async throws -> GameStatus { await base.status(id) }
     func record(_ id: String) async throws -> GameRecord? { try await base.record(id) }
