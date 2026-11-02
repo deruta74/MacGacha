@@ -48,17 +48,24 @@ struct PreDownloadStore: Sendable {
         // Publication precedes pruning: a crash leaves harmless extra parts,
         // never a resumable plan whose required parts were removed first.
         try save(state)
-        let keep = try Set(plan.containers.values.map { try part($0.object) })
-        for path in try fs.contentsOfDirectory(at: Self.objects) where !keep.contains(path) { try fs.removeItem(at: path) }
+        try pruneUnreferencedParts(state)
         return state
+    }
+    func pruneUnreferencedParts(_ state: PreDownloadState) throws {
+        let keep = try Set(state.plan.containers.values.map { try part($0.object) })
+        for path in try fs.contentsOfDirectory(at: Self.objects) where !keep.contains(path) { try fs.removeItem(at: path) }
     }
     func remove() throws {
         guard try fs.itemType(at: Self.directory) != nil else { return }
         try fs.writeAtomically(Data([1]), to: Self.deleting)
+        // Retire resumability durably before an unordered recursive walk can
+        // unlink the tombstone. Absence of state also identifies partial cleanup.
+        try fs.removeFile(at: Self.statePath)
         try fs.removeItem(at: Self.directory)
         try fs.synchronizeParentDirectory(of: Self.directory)
     }
     func finishDeletion() throws {
-        if try fs.size(at: Self.deleting) != nil { try remove() }
+        if try fs.size(at: Self.deleting) != nil ||
+            (fs.itemType(at: Self.directory) != nil && fs.itemType(at: Self.statePath) == nil) { try remove() }
     }
 }

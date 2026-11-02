@@ -4,12 +4,36 @@ import Foundation
 import Synchronization
 import Testing
 import LauncherCore
-import DownloadEngine
+@testable import DownloadEngine
 import Sophon
 import TestSupport
 @testable import GameLibrary
 
 @Suite struct PreDownloadStoreTests {
+    @Test func adoptionMovesTheSamePayloadInodeAndHashesOnce() async throws {
+        let root = try TempDir(), fs = try ContainedFileSystem(root: root.url), cache = try PreDownloadStore(fs: fs), future = try cachePlan(fs: fs)
+        var state = try cache.replace(future)
+        let object = try #require(future.containers.values.first).object
+        try fs.writeAtomically(Data("cache".utf8), to: cache.part(object))
+        state.verified.insert(object.id); state.completed = true; try cache.save(state)
+        let identity = try fs.regularFileIdentity(at: cache.part(object)), hashes = Mutex(0)
+        let file = FileTask(path: try SafeRelativePath("file"), size: 5, digest: object.decodedDigest,
+            extents: [Extent(source: .chunk(id: object.id), fileOffset: 0, length: 5, digest: object.decodedDigest)],
+            recipe: .copy(container: object.id, offset: 0, length: 5))
+        let plan = InstallPlan(id: try SafeIdentifier("adoption"), objects: [object.id: object], files: [file])
+        let source = InstalledBuild(tag: "1.0", buildID: "source", categories: [], voices: [])
+        let target = InstalledBuild(tag: "2.0", buildID: "promoted", categories: [], voices: [])
+        let record = GameRecord(installPath: root.url, ownership: .created, executable: file.path, installed: source, installIdentity: try fs.rootIdentity())
+        let adapter = try #require(try PreDownloadObjectCache.prepare(edition: "genshin", record: record, target: target, plan: plan, fs: fs, hooks: .none))
+        let destination = try StagingLayout(id: plan.id).object(object)
+        let adopted = try await OperationWork.$objectHashObserver.withValue({ _ in hashes.withLock { $0 += 1 } }) {
+            try await adapter.adopt(object, to: destination, fs: fs)
+        }
+        #expect(adopted && hashes.withLock { $0 } == 1)
+        #expect(try fs.regularFileIdentity(at: destination) == identity)
+        #expect(try fs.size(at: cache.part(object)) == nil)
+    }
+
     @Test func descriptorIdentityIsCanonicalAndChangesWithSelectors() throws {
         let root = try TempDir(), fs = try ContainedFileSystem(root: root.url)
         let a = try cachePlan(fs: fs), b = try cachePlan(fs: fs, build: "promoted")
@@ -43,6 +67,46 @@ import TestSupport
         let store = try PreDownloadStore(fs: fs); _ = try store.replace(cachePlan(fs: fs))
         try other.writeAtomically(fs.readFile(at: PreDownloadStore.statePath, maxBytes: PreDownloadStore.maximumBytes), to: PreDownloadStore.statePath)
         #expect(throws: LauncherError.self) { try PreDownloadStore(fs: other).load() }
+    }
+
+    @Test(arguments: [false, true]) func staleInstalledIdentityPrunesStore(changedEdition: Bool) throws {
+        let root = try TempDir(), fs = try ContainedFileSystem(root: root.url), cache = try PreDownloadStore(fs: fs)
+        _ = try cache.replace(cachePlan(fs: fs))
+        let installed = InstalledBuild(tag: changedEdition ? "1.0" : "2.0", buildID: "build", categories: [], voices: [])
+        try cache.reconcileInstalled(edition: changedEdition ? "hkrpg" : "genshin", installed: installed)
+        #expect(try fs.itemType(at: PreDownloadStore.directory) == nil)
+    }
+
+    @Test func removingVoiceKeepsContainerSharedWithGame() throws {
+        let root = try TempDir(), fs = try ContainedFileSystem(root: root.url), cache = try PreDownloadStore(fs: fs)
+        let base = try cachePlan(fs: fs), id = try #require(base.containers.keys.first)
+        let plan = try PreDownloadPlan(edition: base.edition, region: base.region, installation: base.installation,
+            sourceTag: base.sourceTag, targetTag: base.targetTag, buildID: base.buildID, patchID: base.patchID,
+            categories: base.categories + [PreDownloadCategory(id: "voice", matchingField: "en-us", containers: [id])],
+            voices: ["en-us"], containers: base.containers)
+        var state = try cache.replace(plan)
+        let object = try #require(plan.containers[id]?.object)
+        try fs.writeAtomically(Data("cache".utf8), to: cache.part(object))
+        state.verified.insert(id); state.completed = true; state.withdrawn = true; try cache.save(state)
+        try cache.reconcileInstalled(edition: "genshin", installed: InstalledBuild(tag: "1.0", buildID: "source", categories: [], voices: []))
+        let pruned = try #require(try cache.load())
+        #expect(pruned.plan.categories == base.categories && pruned.plan.voices.isEmpty)
+        #expect(pruned.verified == [id] && pruned.completed && pruned.withdrawn)
+        #expect(try fs.readFile(at: cache.part(object), maxBytes: 5) == Data("cache".utf8))
+    }
+
+    @Test func reconciliationFinishesInterruptedPruneAndStateLessDeletion() throws {
+        let root = try TempDir(), fs = try ContainedFileSystem(root: root.url), cache = try PreDownloadStore(fs: fs)
+        _ = try cache.replace(cachePlan(fs: fs))
+        let orphan = try SafeRelativePath(".macgacha-predownload/objects/orphan.part")
+        try fs.writeAtomically(Data([1]), to: orphan)
+        try cache.reconcileInstalled(edition: "genshin", installed: InstalledBuild(tag: "1.0", buildID: "source", categories: [], voices: []))
+        #expect(try fs.size(at: orphan) == nil)
+        // State is durably removed before recursive deletion. Recovery must
+        // finish even if the recursive walk already unlinked its tombstone.
+        try fs.removeFile(at: PreDownloadStore.statePath)
+        try cache.finishDeletion()
+        #expect(try fs.itemType(at: PreDownloadStore.directory) == nil)
     }
 
     @Test func unsafeDescriptorAndOrphanReceiptAreRejected() throws {

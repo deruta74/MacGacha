@@ -173,7 +173,7 @@ public actor GameLibrary {
                         } catch LauncherError.unsafePath { skipped += 1 }
                     }
                     if skipped > 0 { await log?.log(.info, "game-library", "Managed paths left untouched", metadata: ["count": String(skipped)]) }
-                    for name in [".macgacha-staging", ".macgacha-receipts"] { try fs.removeItem(at: SafeRelativePath(name)) }
+                    for name in [".macgacha-staging", ".macgacha-receipts", ".macgacha-predownload"] { try fs.removeItem(at: SafeRelativePath(name)) }
                     try fs.removeFile(at: SafeRelativePath(".macgacha-state.json"))
                     try fs.pruneEmptyDirectories()
                     try fs.removePinnedRoot(onlyIfEmpty: true)

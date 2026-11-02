@@ -19,6 +19,7 @@ public struct InstallOperation: Sendable {
     private let mode: Mode
     private let crashHooks: CrashHooks
     private let patchApplier: (any WholeFilePatchApplier)?
+    private let objectCache: (any InstallObjectCache)?
     private let log: EventLog?
     private let writesCompletionReceipt: Bool
     private let requireRequestedPlan: Bool
@@ -28,13 +29,13 @@ public struct InstallOperation: Sendable {
         fileOps: any FileOps = SystemFileOps(), crashHooks: CrashHooks = .none,
         writesCompletionReceipt: Bool = false, requireRequestedPlan: Bool = false,
         expectedRootIdentity: FileSystemIdentity? = nil, identityProvider: any FileSystemIdentityProvider = SystemFileSystemIdentityProvider(),
-        maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, pipeline: PipelineConfiguration = .default, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil) throws {
+        maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, pipeline: PipelineConfiguration = .default, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil, objectCache: (any InstallObjectCache)? = nil) throws {
         try pipeline.validate()
         guard maxConcurrentObjects > 0 else { throw LauncherError.io("Invalid object concurrency limit") }
         self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline
         try plan.validate(supportedCodecs: ChunkCodec.supportedCodecs)
         self.plan = plan; fs = try ContainedFileSystem(root: installRoot, fileOps: fileOps, expectedRootIdentity: expectedRootIdentity, identityProvider: identityProvider)
-        self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log
+        self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log; self.objectCache = objectCache
         self.writesCompletionReceipt = writesCompletionReceipt
         self.requireRequestedPlan = requireRequestedPlan
     }
@@ -47,7 +48,7 @@ public struct InstallOperation: Sendable {
     /// workers join, even if the caller discards its iterator between events.
     package func run(retaining owner: (any Sendable)?) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = CommitSession(requested: plan, fs: fs, fetcher: fetcher, disk: disk, mode: mode, crashHooks: crashHooks,
-            writesCompletionReceipt: writesCompletionReceipt, requireRequestedPlan: requireRequestedPlan, maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, retainedOwner: owner, patchApplier: patchApplier, log: log)
+            writesCompletionReceipt: writesCompletionReceipt, requireRequestedPlan: requireRequestedPlan, maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, retainedOwner: owner, patchApplier: patchApplier, log: log, objectCache: objectCache)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
 }
@@ -87,6 +88,7 @@ private actor CommitSession {
     private let mode: InstallOperation.Mode
     private let crashHooks: CrashHooks
     private let patchApplier: (any WholeFilePatchApplier)?
+    private let objectCache: (any InstallObjectCache)?
     private let log: EventLog?
     private let writesCompletionReceipt: Bool
     private let requireRequestedPlan: Bool
@@ -110,8 +112,8 @@ private actor CommitSession {
 
     init(requested: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe, mode: InstallOperation.Mode, crashHooks: CrashHooks, writesCompletionReceipt: Bool,
-        requireRequestedPlan: Bool, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, retainedOwner: (any Sendable)?, patchApplier: (any WholeFilePatchApplier)?, log: EventLog?) {
-        self.requested = requested; self.fs = fs; self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log
+        requireRequestedPlan: Bool, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, retainedOwner: (any Sendable)?, patchApplier: (any WholeFilePatchApplier)?, log: EventLog?, objectCache: (any InstallObjectCache)?) {
+        self.requested = requested; self.fs = fs; self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log; self.objectCache = objectCache
         self.writesCompletionReceipt = writesCompletionReceipt
         self.requireRequestedPlan = requireRequestedPlan
         self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline; self.retainedOwner = retainedOwner
@@ -338,6 +340,19 @@ private actor CommitSession {
             for (id, object) in plan.objects where !outstanding.contains(id) {
                 let part = try paths.object(object)
                 if try fs.size(at: part) != nil { try fs.removeFile(at: part) }
+            }
+            if let objectCache {
+                let ids = Set(plan.files.filter { !state.committedFiles.contains($0.path) && !state.stagedFiles.contains($0.path) }.compactMap { $0.recipe?.containerID })
+                for id in ids.sorted() {
+                    try Task.checkCancellation()
+                    let object = plan.objects[id]!, destination = try paths.object(object)
+                    if state.verifiedObjects.contains(id), try fs.size(at: destination) == object.transferSize { continue }
+                    if try await objectCache.adopt(object, to: destination, fs: fs) {
+                        try await record(.objectVerified(id: id))
+                        crashHooks.reach(.afterObjectVerified)
+                        verifiedContainers.insert(destination, digest: object.decodedDigest)
+                    }
+                }
             }
             let pending = try pendingPlan()
             if pending.files.isEmpty {

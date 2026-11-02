@@ -34,12 +34,13 @@ extension GameLibrary {
             return PreDownloadInfo(state: .unavailable, canDelete: saved != nil)
         }
         var offered: PreDownloadPlan?
+        var discoveryFailed = false
         if let future = branches.preDownload, future.diffTags.contains(installed.tag), future.tag != installed.tag {
             do {
                 if try await api.config(biz: game.biz).enableLdiff { offered = try await discoverPreDownload(game, record: record, branch: future) }
             } catch {
                 if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
-                return PreDownloadInfo(state: .unavailable, canDelete: saved != nil)
+                discoveryFailed = true
             }
         }
         do {
@@ -52,6 +53,9 @@ extension GameLibrary {
                 || branches.preDownload.map({ $0.tag != old.plan.targetTag }) == true {
                 try scope.cache.remove(); current = nil
             }
+            // Branch selectors already establish staleness even if the new
+            // campaign's config/build/manifest could not be loaded.
+            if discoveryFailed { return PreDownloadInfo(state: .unavailable, canDelete: current != nil) }
             if let offered {
                 if current != nil {
                     let state = try scope.cache.replace(offered)
@@ -66,6 +70,15 @@ extension GameLibrary {
             }
             return .unavailable
         } catch LauncherError.busy {
+            // A live session or another operation can defer mutation. Preserve
+            // the existing overlay when the discovered campaign still agrees;
+            // do not hide a paused/ready cache merely because it cannot prune.
+            let offeredDigest = try offered?.digest
+            if let saved, !discoveryFailed,
+                saved.plan.edition == game.id, saved.plan.sourceTag == installed.tag,
+                branches.main.tag == saved.plan.targetTag || offeredDigest == saved.planDigest {
+                return try cache.info(saved, installed: installed, edition: game.id)
+            }
             return PreDownloadInfo(state: .unavailable, canDelete: saved != nil)
         }
     }

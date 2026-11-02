@@ -71,6 +71,7 @@ public actor OperationRunner {
         if record.uninstalling { return record }
         let fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
         try CompletionReceipt.discardInterruptedWrites(fs: fs)
+        if let installed = record.installed { try PreDownloadStore(fs: fs).reconcileInstalled(edition: game, installed: installed) }
         if let pending = record.pending {
             for receipt in try CompletionReceipt.unacknowledged(fs: fs) where receipt.planID != pending.planID {
                 try receipt.finishCleanup(fs: fs)
@@ -246,10 +247,14 @@ private actor RunnerSession {
                 expectedRootIdentity: saved.installIdentity, identityProvider: identityProvider).rootIdentity()
         }
         record = current
+        let cacheFS = try ContainedFileSystem(root: current.installPath, fileOps: fileOps,
+            expectedRootIdentity: current.installIdentity, identityProvider: identityProvider)
+        let cache = try PreDownloadObjectCache.prepare(edition: game, record: current, target: current.pending!.target,
+            plan: plan, fs: cacheFS, hooks: hooks)
         let engine = try InstallOperation(plan: plan, installRoot: current.installPath, fetcher: fetcher, disk: disk,
             mode: .batched(approved: approved), fileOps: fileOps, crashHooks: hooks, writesCompletionReceipt: true,
             requireRequestedPlan: true, expectedRootIdentity: current.installIdentity, identityProvider: identityProvider,
-            patchApplier: HDiff13PatchApplier(), log: log)
+            patchApplier: HDiff13PatchApplier(), log: log, objectCache: cache)
         iterator = engine.run(retaining: lease).makeAsyncIterator()
         return false
     }
@@ -297,6 +302,7 @@ private enum GameCompletion {
             "game": game, "tag": pending.target.tag, "build_id": pending.target.buildID,
         ])
         hooks.reach(.afterGameRecordSaved)
+        try PreDownloadStore(fs: fs).reconcileInstalled(edition: game, installed: pending.target)
         try await store.deletePlan(for: game)
         hooks.reach(.afterGamePlanDeleted)
         try CompletionReceipt.acknowledge(fs: fs, planID: receipt.planID)
