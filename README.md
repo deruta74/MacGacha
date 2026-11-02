@@ -1,5 +1,13 @@
 # MacGacha — universal launcher for HoYoverse games on Apple Silicon
 
+[![English](https://img.shields.io/badge/English-0078D4?style=for-the-badge)](README.md)
+[![Русский](https://img.shields.io/badge/%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-555555?style=for-the-badge)](readme/README.ru.md)
+[![Українська](https://img.shields.io/badge/%D0%A3%D0%BA%D1%80%D0%B0%D1%97%D0%BD%D1%81%D1%8C%D0%BA%D0%B0-555555?style=for-the-badge)](readme/README.uk.md)
+[![Deutsch](https://img.shields.io/badge/Deutsch-555555?style=for-the-badge)](readme/README.de.md)
+[![Français](https://img.shields.io/badge/Fran%C3%A7ais-555555?style=for-the-badge)](readme/README.fr.md)
+[![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-555555?style=for-the-badge)](readme/README.zh-CN.md)
+[![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-555555?style=for-the-badge)](readme/README.ja.md)
+
 > ✨ **[MacGacha 0.2.0](https://github.com/deruta74/MacGacha/releases/tag/v0.2.0) is out**, the first release without the beta tag: 14 languages, HoYoPlay-style backgrounds and events, a Genshin Impact frame-rate unlock, Star Rail at 120 FPS, surround with Spatial Audio and Game Mode. Already on 0.1.x? MacGacha updates itself. Found something? Please [report it](#feedback).
 
 A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenless Zone Zero** on Apple Silicon. It installs, updates and verifies the games from HoYoverse's official servers, manages Wine / DXMT / D3DMetal runtimes, and starts each game with one click.
