@@ -25,10 +25,18 @@ public enum HDiff13 {
     }
 
     enum Step: Sendable { case readOld, readPatch, writeOutput }
+    // Smaller buffers exercise real compressed blocks across decoder boundaries.
+    struct BufferSizes: Sendable {
+        var read = 64 << 10
+        var output = 16 << 10
+    }
     static func apply(old: FileRange, patch: FileRange, expectedSize: Int64, output: FileHandle,
-        onStep: @escaping @Sendable (Step) -> Void) async throws {
+        buffers: BufferSizes = BufferSizes(), onStep: @escaping @Sendable (Step) -> Void) async throws {
         do {
             try await BlockingIO.run {
+                guard (1...(64 << 10)).contains(buffers.read), (512...(16 << 10)).contains(buffers.output) else {
+                    throw LauncherError.io("Invalid HDiff buffer size")
+                }
                 guard expectedSize >= 0 else { throw LauncherError.io("Invalid HDiff range") }
                 try validateRange(old); try validateRange(patch)
                 let oldFile = try old.fileSystem.openForReading(at: old.path)
@@ -56,7 +64,7 @@ public enum HDiff13 {
                         return Unmanaged<HDiffContext>.fromOpaque(context).takeUnretainedValue().write(position, bytes, count)
                     }, cancelled: { _ in Task.isCancelled ? 1 : 0 })
                 var info = MGHDiffInfo()
-                let result = mg_hdiff_apply(&callbacks, UInt64(old.length), UInt64(patch.length), UInt64(expectedSize), &info)
+                let result = mg_hdiff_apply(&callbacks, UInt64(old.length), UInt64(patch.length), UInt64(expectedSize), &info, buffers.read, buffers.output)
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 if let error = context.error { throw error }
                 switch result {

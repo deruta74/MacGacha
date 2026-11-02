@@ -8,7 +8,7 @@
 #include "CZstd.h"
 
 #define MG_IO_SIZE (64u << 10)
-#define MG_CACHE_SIZE (6u * (16u << 10))
+#define MG_CACHE_STEP_MAX (16u << 10)
 
 #define MG_MEMORY_LIMIT (64u << 20)
 #define MG_ZSTD_WINDOW_LOG 23
@@ -18,6 +18,7 @@ typedef struct {
     uint64_t written;
     size_t allocated;
     int memory_failed;
+    size_t read_step;
 } MGState;
 
 // Includes the allocation headers, stream input buffers, patch cache and all
@@ -54,7 +55,7 @@ static hpatch_BOOL mg_read(const hpatch_TStreamInput* stream, hpatch_StreamPos_t
     size_t length = (size_t)(end - output);
     if (position > stream->streamSize || length > stream->streamSize - position) return hpatch_FALSE;
     while (length) {
-        size_t count = length < MG_IO_SIZE ? length : MG_IO_SIZE;
+        size_t count = length < input->state->read_step ? length : input->state->read_step;
         if (mg_cancelled(input->state) || !input->read(input->state->callbacks->context, position, output, count)) return hpatch_FALSE;
         position += count; output += count; length -= count;
     }
@@ -99,7 +100,7 @@ static int mg_zstd_fill(MGZstd* decoder) {
     if (decoder->input_position < decoder->input_size) return 1;
     remaining = decoder->end - decoder->position;
     if (!remaining) return 1; // The decoder can still have buffered output or an end marker.
-    count = remaining < MG_IO_SIZE ? (size_t)remaining : MG_IO_SIZE;
+    count = remaining < decoder->state->read_step ? (size_t)remaining : decoder->state->read_step;
     if (!decoder->source->read(decoder->source, decoder->position, decoder->input, decoder->input + count)) {
         decoder->failed = 1; return 0;
     }
@@ -190,8 +191,9 @@ static int mg_sections(const _THDiffzHead* head, uint64_t patch_size) {
 }
 
 MGHDiffResult mg_hdiff_apply(const MGHDiffCallbacks* callbacks, uint64_t old_size,
-                            uint64_t patch_size, uint64_t new_size, MGHDiffInfo* info) {
-    MGState state = {callbacks, 0, 0, 0};
+                            uint64_t patch_size, uint64_t new_size, MGHDiffInfo* info,
+                            size_t read_step, size_t output_cache_step) {
+    MGState state = {callbacks, 0, 0, 0, read_step};
     MGPlugin plugin = {{mg_zstd_can_open, mg_zstd_open, mg_zstd_close, mg_zstd_part, 0, hpatch_dec_ok, 1}, &state};
     MGInput old_input = {&state, callbacks->read_old}, patch_input = {&state, callbacks->read_patch};
     hpatch_TStreamInput old = {&old_input, old_size, mg_read, 0}, patch = {&patch_input, patch_size, mg_read, 0};
@@ -200,6 +202,10 @@ MGHDiffResult mg_hdiff_apply(const MGHDiffCallbacks* callbacks, uint64_t old_siz
     _THDiffzHead head;
     unsigned char* cache;
     MGHDiffResult result;
+    size_t cache_size;
+    if (!read_step || read_step > MG_IO_SIZE || output_cache_step < 512 || output_cache_step > MG_CACHE_STEP_MAX)
+        return mg_hdiff_malformed;
+    cache_size = 6 * output_cache_step;
     if (mg_cancelled(&state)) return mg_hdiff_cancelled;
     if (!read_diffz_head(&header, &head, &patch)) return mg_cancelled(&state) ? mg_hdiff_cancelled : mg_hdiff_malformed;
     if (header.newDataSize > INT64_MAX || header.oldDataSize > INT64_MAX) return mg_hdiff_malformed;
@@ -208,9 +214,9 @@ MGHDiffResult mg_hdiff_apply(const MGHDiffCallbacks* callbacks, uint64_t old_siz
     if (header.oldDataSize != old_size) return mg_hdiff_old_size;
     if (header.newDataSize != new_size) return mg_hdiff_new_size;
     if ((!header.compressType[0] && header.compressedCount) || !mg_sections(&head, patch_size)) return mg_hdiff_malformed;
-    cache = (unsigned char*)mg_allocate(&state, MG_CACHE_SIZE);
+    cache = (unsigned char*)mg_allocate(&state, cache_size);
     if (!cache) return mg_hdiff_memory;
-    result = patch_decompress_with_cache(&output, &old, &patch, &plugin.base, cache, cache + MG_CACHE_SIZE)
+    result = patch_decompress_with_cache(&output, &old, &patch, &plugin.base, cache, cache + cache_size)
              && state.written == new_size ? mg_hdiff_ok : mg_hdiff_malformed;
     mg_free(&state, cache);
     if (mg_cancelled(&state)) return mg_hdiff_cancelled;

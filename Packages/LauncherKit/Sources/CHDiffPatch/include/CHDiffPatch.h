@@ -31,5 +31,6 @@ typedef enum {
     mg_hdiff_old_size, mg_hdiff_new_size, mg_hdiff_cancelled, mg_hdiff_memory
 } MGHDiffResult;
 MGHDiffResult mg_hdiff_apply(const MGHDiffCallbacks* callbacks, uint64_t old_size,
-                            uint64_t patch_size, uint64_t new_size, MGHDiffInfo* info);
+                            uint64_t patch_size, uint64_t new_size, MGHDiffInfo* info,
+                            size_t read_step, size_t output_cache_step);
 #endif

@@ -1,3 +1,7 @@
 # Preserve pinned upstream bytes, including line endings and existing whitespace.
 Packages/LauncherKit/Sources/CHDiffPatch/vendor/** -text -whitespace
 Packages/LauncherKit/Sources/CHDiffPatch/LICENSE -text
+
+# Synthetic upstream-generated decoder fixtures must retain their exact bytes.
+Packages/LauncherKit/Tests/SophonTests/Fixtures/HDiffUpstream/*.bin binary
+Packages/LauncherKit/Tests/SophonTests/Fixtures/HDiffUpstream/*.hdiff binary
