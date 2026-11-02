@@ -13,14 +13,15 @@ extension AppModel {
         let notice = defaults.bool(forKey: "MacGachaDebugRecoveryNotice")
         let games = LauncherGame.games(in: region)
         let model: AppModel?
-        if let name, ["predownloadAvailable", "predownloading", "predownloadReady"].contains(name) {
+        if let name, ["predownloadAvailable", "predownloading", "predownloadPaused", "predownloadReady"].contains(name) {
             let preview = preview(logLines: [], games: Dictionary(uniqueKeysWithValues:
                 games.map { ($0.id, GameState(status: .installed(tag: "7.1.0"))) }), region: region)
             preview.debugLaunchRuntimesReady = true
             for game in games {
                 let ready = name == "predownloadReady"
-                let info = PreDownloadInfo(state: ready ? .ready : .available, version: "7.2.0", bytes: 8_400_000_000,
-                    downloaded: ready ? 8_400_000_000 : 0, canDelete: ready)
+                let paused = name == "predownloadPaused"
+                let info = PreDownloadInfo(state: ready ? .ready : paused ? .paused : .available, version: "7.2.0",
+                    bytes: 8_400_000_000, downloaded: ready ? 8_400_000_000 : paused ? 3_528_000_000 : 0, canDelete: ready || paused)
                 var overlay = PreDownloadOverlay(info: info)
                 if name == "predownloading" {
                     overlay.state = .downloading(PreDownloadProgress(isResolving: false, downloaded: 3_528_000_000,

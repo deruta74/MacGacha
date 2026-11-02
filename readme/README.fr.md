@@ -54,8 +54,9 @@ Les versions suivantes sont proposées via **Rechercher les mises à jour…** d
 
 **Terminé**
 
-- **Jouer en un clic.** Cliquez sur « Démarrer » : le lanceur prépare le préfixe Wine et le contournement de compatibilité, démarre le jeu et se réduit dans le Dock. À la fermeture du jeu, il réapparaît et remet en place les fichiers du jeu qu’il avait masqués. Validé sur les trois jeux avec D3DMetal et DXMT.
+- **Démarrer en un clic.** Cliquez sur « Démarrer » : le lanceur prépare le préfixe Wine et le contournement de compatibilité, démarre le jeu et se réduit dans le Dock. À la fermeture du jeu, il réapparaît et remet en place les fichiers du jeu qu’il avait masqués. Validé sur les trois jeux avec D3DMetal et DXMT.
 - **Installation des jeux** via le système officiel de distribution de HoYoverse : installation, mise à jour, vérification et réparation, packs de voix, utilisation d’une installation existante et désinstallation. La pause et la reprise fonctionnent même après un redémarrage de l’application. L’espace libre est vérifié avant et pendant le téléchargement. Si macOS retient encore de l’espace (instantanés Time Machine, caches), le lanceur l’explique au lieu d’indiquer seulement « espace insuffisant ». **Rechercher les mises à jour** dans le menu d’un jeu cherche immédiatement une nouvelle version.
+- **Mises à jour plus légères et pré-téléchargement.** Genshin Impact et Honkai: Star Rail se mettent à jour avec les fichiers de correctif de HoYoverse, comme dans HoYoPlay. La mise à jour de Genshin 7.1 vers 7.2 avec les voix anglaises fait 8,4 Go au lieu de 22,7 Go. Lorsque HoYoverse propose la prochaine version à l’avance, le **pré-téléchargement** la télécharge avant sa sortie, et la version installée reste jouable. Appuyer sur « Démarrer » met le pré-téléchargement en pause, et vous le reprenez après avoir joué. Le jour de la sortie, la mise à jour s’installe à partir de ces fichiers. Un fichier qui ne peut pas être corrigé est téléchargé normalement.
 - **Moteur de téléchargement.** Téléchargements vérifiés et pouvant être repris, avec un journal résistant aux plantages. Un fichier n’arrive dans le dossier du jeu qu’après validation de son empreinte. Les fichiers sont téléchargés et assemblés en parallèle, à une vitesse proche du débit maximal d’une connexion à 2,5 Gbit/s. Les téléchargements et vérifications complètes affichent le temps restant ; les étapes longues affichent leur durée écoulée.
 - **Lanceur.** Une fenêtre pour les trois jeux avec les arrière-plans de HoYoPlay, dans leur ordre d’origine. À chaque ouverture de MacGacha, l’arrière-plan suivant apparaît ; les points en haut permettent de passer de l’un à l’autre. Les arrière-plans animés sont lus par le lecteur vidéo de MacGacha, qui consomme environ un tiers de mémoire en moins qu’une vue web. Les nouveautés de version associées à chaque arrière-plan et les événements actuels de HoYoPlay s’ouvrent dans le navigateur.
 - **Déblocage de la fréquence d’images de Genshin Impact (facultatif).** Un interrupteur dans les réglages de Genshin, désactivé par défaut, vise 120 FPS ou une valeur personnalisée jusqu’à 360. MacGacha charge dans le jeu un petit module auxiliaire qui relève uniquement sa limite de fréquence d’images, selon la méthode de [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock). Nous le compilons nous-mêmes, de manière reproductible ([version publiée](https://github.com/deruta74/MacGacha/releases/tag/genshin-fps-unlock-2)). À la première activation, un avertissement explique le risque de bannissement. Testé sur Genshin 7.1 Global : 120 FPS maintenus pendant une session en ligne de 3,5 heures.
@@ -88,12 +89,12 @@ DXMT fonctionne avec tous les jeux et reste disponible comme solution open sourc
 
 - **Éditions pour la Chine continentale (bêta).** Un sélecteur de région dans les réglages affiche 原神, 崩坏：星穹铁道 et 绝区零 avec leurs propres installations, préfixes et réglages. 绝区零 s’installe depuis les serveurs miHoYo et fonctionne au-delà de l’écran de connexion grâce à notre [correctif Wine crypt32](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 et 崩坏：星穹铁道 doivent encore être testés en jeu, et la connexion au compte n’a été testée sur aucune édition de Chine continentale. Les testeurs disposant de comptes de cette région sont les bienvenus.
 - **Redémarrage après un correctif intégré à Star Rail**, qui n’a pas encore été testé.
+- **Jour de sortie avec un pré-téléchargement**, qui reste à tester de bout en bout avec la prochaine version du jeu.
 
 **À venir**
 
 1. **Environnement Wine 11.21**, qui intègre le correctif crypt32. Notre correctif séparé ne sera alors plus nécessaire.
-2. **Pré-téléchargement.** Télécharger la prochaine version avant sa sortie.
-3. **Suivi des mouvements de la tête pour l’Audio spatial.** Prendre en compte les mouvements du casque pendant la lecture spatiale.
+2. **Suivi des mouvements de la tête pour l’Audio spatial.** Prendre en compte les mouvements du casque pendant la lecture spatiale.
 
 <a id="feedback"></a>
 

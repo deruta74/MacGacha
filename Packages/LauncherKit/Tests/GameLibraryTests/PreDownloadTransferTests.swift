@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Dispatch
 import Synchronization
 import Testing
 import LauncherCore
@@ -10,6 +11,62 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.timeLimit(.minutes(1))) struct PreDownloadTransferTests {
+    @Test func latePreDownloadDrainWaiterCannotBypassLocksStillBeingReleased() async throws {
+        let fixture = try await CacheTransferFixture(count: 1, http: CacheTransferHTTP(size: 64, gate: nil))
+        let records = AppPaths(root: fixture.root.url).games, library = fixture.library
+        let owner = UUID()
+        let retention = try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: records)
+            let session = try InstallLock(fs: fs, path: SafeRelativePath("genshin/.session.lock"))
+            let lease = try GameOperationLease.acquire(fs: fs, retainedGameLock: session)
+            let retention = PipelineRootRetention(key: UUID().uuidString)
+            retention.hold(session, owner: owner, retaining: lease)
+            retention.activate(owner); retention.abandon(owner)
+            return retention
+        }
+        let releasing = TestEvent(), observed = TestEvent(), returned = Mutex(false)
+        // Only the dedicated BlockingIO thread waits synchronously inside deinit.
+        // Both the test's arrival handshake and the drain waiter use TestEvent.
+        let finishRelease = DispatchSemaphore(value: 0)
+        let release = Task {
+            try await BlockingIO.run {
+                GameOperationLease.$beforeLocksRelease.withValue({
+                    releasing.signal(); finishRelease.wait()
+                }) { retention.release(owner) }
+            }
+        }
+        defer { finishRelease.signal() }
+        try await releasing.wait()
+        let waiter = Task {
+            try await OperationWork.$observer.withValue({ work in
+                if work == .ownershipDrainWait { observed.signal() }
+            }) { try await library.waitForPreDownloadDrain("genshin") }
+            returned.withLock { $0 = true }; observed.signal()
+        }
+        defer { waiter.cancel(); finishRelease.signal() }
+        // Either a registered drain is joined or a premature return signals this
+        // event. No timing assumption decides which outcome the assertion sees.
+        try await observed.wait()
+        #expect(!returned.withLock { $0 })
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: records)
+            for path in [".operation.lock", "genshin/.session.lock"] {
+                #expect(throws: LauncherError.busy("install root in use")) {
+                    _ = try InstallLock(fs: fs, path: SafeRelativePath(path))
+                }
+            }
+        }
+        finishRelease.signal()
+        try await release.value; try await waiter.value
+        try await library.waitUntilIdle("genshin")
+        try await BlockingIO.run {
+            let session = try InstallLock(fs: ContainedFileSystem(root: records), path: SafeRelativePath("genshin/.session.lock"))
+            withExtendedLifetime(session) {} // Play can claim the session lock.
+        }
+        for try await _ in await library.resumePreDownload(GameDefinition.all[0]) {}
+        #expect(try fixture.cache.load()?.completed == true)
+    }
+
     @Test func containerStreamsOverlapAndRespectNormalConcurrencyLimit() async throws {
         let gate = CacheTransferGate(count: 35), hashes = Mutex([String: Int]())
         let fixture = try await CacheTransferFixture(count: 35, http: CacheTransferHTTP(size: 64, gate: gate))
@@ -74,15 +131,68 @@ import TestSupport
         #expect(try fixture.cache.load()?.completed == true)
     }
 
-    @Test func cancellationJoinsEveryStreamBeforeResumeAndLeavesNoReceiptForBlockedBodies() async throws {
+    @Test(arguments: CacheTransferCancellationPoint.allCases)
+    func cancellationJoinsEveryStreamBeforeResumeAndLeavesNoReceiptForBlockedBodies(point: CacheTransferCancellationPoint) async throws {
         let gate = CacheTransferGate(count: 6)
+        let between = TestEvent(), nextPull = TestEvent(), pulling = TestEvent()
+        let released = TestEvent(), finishWorker = TestEvent()
+        let afterStaging = Mutex(false), events = Mutex([OperationEvent]())
         let fixture = try await CacheTransferFixture(count: 6, http: CacheTransferHTTP(size: 64, gate: gate), maxConcurrentObjects: 2)
         let library = fixture.library
-        let transfer = Task { for try await _ in await library.resumePreDownload(GameDefinition.all[0]) {} }
-        defer { transfer.cancel(); gate.releaseAll() }
+        let afterRelease: @Sendable () async -> Void = {
+            guard point == .betweenPulls else { return }
+            released.signal()
+            _ = await Task.detached { try await finishWorker.wait() }.result
+        }
+        let transfer = Task {
+            try await PreDownloadSession.$afterWorkerRelease.withValue(afterRelease) {
+                try await OperationWork.$observer.withValue({ work in
+                    if work == .pipelinePullWaiting && afterStaging.withLock({ $0 }) { pulling.signal() }
+                }) {
+                    for try await event in await library.resumePreDownload(GameDefinition.all[0]) {
+                        events.withLock { $0.append(event) }
+                        if point != .bodiesStarted && event == .phase(.staging) {
+                            afterStaging.withLock { $0 = true }; between.signal()
+                            // Cancel between next() calls without the test gate
+                            // itself throwing. Always release/join the detached
+                            // waiter, including on a failed handshake's cancellation.
+                            try await withTaskCancellationHandler {
+                                try await Task.detached { try await nextPull.wait() }.value
+                            } onCancel: { nextPull.signal() }
+                        }
+                    }
+                }
+            }
+        }
+        defer { transfer.cancel(); nextPull.signal(); finishWorker.signal(); gate.releaseAll() }
         try await cacheTransferHandshake(gate.started[1], transfer: transfer, gate: gate)
+        if point != .bodiesStarted { try await cacheTransferHandshake(between, transfer: transfer, gate: gate) }
+        if point == .pendingPull {
+            nextPull.signal()
+            try await cacheTransferHandshake(pulling, transfer: transfer, gate: gate)
+        }
         transfer.cancel()
-        await #expect(throws: LauncherError.cancelled) { try await transfer.value }
+        nextPull.signal()
+        switch point {
+        case .betweenPulls:
+            // AsyncThrowingStream skips its unfolding closure when next() starts
+            // in an already-cancelled task. Quiet exhaustion is not completion.
+            try await transfer.value
+        case .pendingPull:
+            await #expect(throws: LauncherError.cancelled) { try await transfer.value }
+        case .bodiesStarted:
+            // The original CI interleaving: cancellation can land on either side
+            // of next(). Require the typed error if it throws, but allow nil.
+            do { try await transfer.value }
+            catch { #expect(error as? LauncherError == .cancelled) }
+        }
+        #expect(!events.withLock { $0.contains(.phase(.completed)) })
+        if point == .betweenPulls {
+            try await cacheTransferHandshake(released, transfer: transfer, gate: gate)
+        }
+        // AppModel joins readers after termination. A completed drain must also
+        // release exclusion, even while the worker's task is still returning.
+        try await library.waitForPreDownloadDrain("genshin")
         try await library.waitUntilIdle("genshin")
         #expect(gate.active == 0)
         let paused = try #require(try fixture.cache.load())
@@ -90,6 +200,33 @@ import TestSupport
         let restart = fixture.restarted(http: CacheTransferHTTP(size: 64, gate: nil))
         for try await _ in await restart.resumePreDownload(GameDefinition.all[0]) {}
         #expect(try fixture.cache.load()?.completed == true)
+        finishWorker.signal()
+    }
+
+    @Test(arguments: ["preDownload", "resumePreDownload", "update", "resume", "runnerResume"])
+    func cancelledBeforeFirstPullMatchesOtherOperationStreams(route: String) async throws {
+        let fixture = try await CacheTransferFixture(count: 1, http: CacheTransferHTTP(size: 64, gate: nil))
+        let library = fixture.library, store = fixture.store
+        let runner = OperationRunner(store: store, fetcher: ChunkFetcher(http: CacheTransferHTTP(size: 64, gate: nil),
+            retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()),
+            disk: FixedDiskSpace(bytes: Int64.max), log: nil)
+        let saved = try fixture.cache.load(), record = try await store.load("genshin")
+        let consumer = Task {
+            let stream: AsyncThrowingStream<OperationEvent, any Error>
+            switch route {
+            case "preDownload": stream = await library.preDownload(GameDefinition.all[0])
+            case "resumePreDownload": stream = await library.resumePreDownload(GameDefinition.all[0])
+            case "update": stream = await library.update(GameDefinition.all[0], approved: true)
+            case "resume": stream = await library.resume(GameDefinition.all[0], approved: true)
+            default: stream = await runner.resume("genshin", approved: true)
+            }
+            withUnsafeCurrentTask { $0?.cancel() }
+            for try await _ in stream { Issue.record("Cancelled stream must not start work") }
+        }
+        try await consumer.value
+        try await library.waitUntilIdle("genshin")
+        #expect(try fixture.cache.load() == saved)
+        #expect(try await store.load("genshin") == record)
     }
 
     @Test func concurrentRouteUsesTheExistingFetcherRetryPolicy() async throws {
@@ -104,6 +241,10 @@ import TestSupport
         #expect(hashes.withLock { $0 } == 1)
         #expect(try fixture.cache.load()?.completed == true)
     }
+}
+
+enum CacheTransferCancellationPoint: String, Sendable, CaseIterable {
+    case bodiesStarted, betweenPulls, pendingPull
 }
 
 struct CacheTransferLimits: Sendable {

@@ -21,6 +21,19 @@ func secondLockHolderGetsBusy() throws {
 }
 
 @Test
+func explicitLockReleaseDoesNotUnlockNextOwner() throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url)
+    let path = try SafeRelativePath(".macgacha-staging/lock")
+    var first: InstallLock? = try InstallLock(fs: fs, path: path)
+    first?.release()
+    let next = try InstallLock(fs: fs, path: path)
+    first?.release(); first = nil
+    _ = withExtendedLifetime(next) {
+        #expect(throws: LauncherError.busy("install root in use")) { try InstallLock(fs: fs, path: path) }
+    }
+}
+
+@Test
 func releasingLockUnlocksBeforeDuplicatedDescriptionCloses() throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
     let path = try SafeRelativePath(".macgacha-staging/lock")

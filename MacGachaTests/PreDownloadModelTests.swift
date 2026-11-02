@@ -48,6 +48,10 @@ import GameLibrary
         #expect(model.preDownloadState(for: "genshin").state == .paused)
         #expect(model.preDownloadState(for: "genshin").canDelete)
         #expect(model.gameOperation == nil)
+        // The service uses AsyncThrowingStream's quiet cancellation. Exhaustion
+        // without .completed must stay stopped, never completed or failed.
+        #expect(model.lastGameConsumerOutcome?.outcome == .stopped)
+        #expect(model.lastError == nil)
         model.resumePreDownload("genshin"); await service.waitForOpen()
         #expect(service.calls.last == "resume:cache-plan")
         model.pausePreDownload("genshin"); await model.gameTask?.value

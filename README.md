@@ -55,6 +55,7 @@ Later versions arrive through **Check for Updates…** in the MacGacha menu, so 
 **Done**
 - **One-click Play.** Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game and minimizes itself to the Dock. When the game closes, it comes back and puts back any game files it hid. Accepted in all three games on D3DMetal and DXMT.
 - **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space". **Check for Updates** in a game's menu looks for a new version right away.
+- **Smaller updates and pre-download.** Genshin Impact and Honkai: Star Rail update with HoYoverse's patch files, the way HoYoPlay does. Genshin 7.1 to 7.2 with English voice is 8.4 GB instead of 22.7 GB. When HoYoverse offers the next version early, **Pre-download** fetches it ahead of release, and the installed version stays playable. Pressing Play pauses the pre-download, and you resume it after playing. On release day the update installs from the downloaded files. A file that can't be patched is downloaded normally.
 - **Download engine.** Resumable, verified downloads with a crash-safe journal. A file reaches the game folder only after its hash matches. Files are downloaded and assembled in parallel, close to the full speed of a 2.5 Gbit link. Downloads and full verification show the time left, and long steps show how long they have been running.
 - **Launcher.** One window for all three games with HoYoPlay's backgrounds, in HoYoPlay's order. Each time you open MacGacha, the next background appears, and the dots at the top switch between them. Animated backgrounds play with MacGacha's own video player, which uses about a third less memory than a web view. Each background's Version Highlights and the current events from HoYoPlay open in the browser.
 - **Genshin Impact frame-rate unlock (opt-in).** A switch in Genshin's game settings, off by default, with a target of 120 FPS or a custom value up to 360. MacGacha loads a small helper into the game that only raises its frame-rate limit, using the method of [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock). We build it ourselves, reproducibly ([release](https://github.com/deruta74/MacGacha/releases/tag/genshin-fps-unlock-2)). The first time you turn it on, a warning explains the ban risk. Tested on Global Genshin 7.1: 120 FPS held through a 3.5-hour online session.
@@ -86,11 +87,11 @@ DXMT works for every game and stays available as the open-source alternative. Th
 **In progress**
 - **Mainland China editions (beta).** A region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and runs past the login screen with our [Wine crypt32 fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 and 崩坏：星穹铁道 still need in-game testing, and login hasn't been tested on any mainland edition. Testers with mainland accounts are welcome.
 - **Star Rail's in-game hotfix restart**, which hasn't been tested yet.
+- **Release day with a pre-download**, which waits for the next game version to be tested end to end.
 
 **Next**
 1. **Wine 11.21 runtime**, which has the crypt32 fix built in. Our separate fix then goes away.
-2. **Pre-download.** Downloading the next version before release.
-3. **Spatial Audio head tracking.** Follow headphone motion during spatial playback.
+2. **Spatial Audio head tracking.** Follow headphone motion during spatial playback.
 
 ## Feedback
 

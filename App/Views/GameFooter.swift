@@ -34,6 +34,7 @@ struct GameFooter: View {
     @Binding var animated: Bool
     @State private var confirmingParts = false
     @State private var confirmingUninstall = false
+    @State private var confirmingPreDownloadDeletion = false
     @State private var progressHovered = false
 
     private var state: GameState { model.games[game.id] ?? GameState(status: .unknown) }
@@ -56,6 +57,9 @@ struct GameFooter: View {
             VStack(alignment: .trailing, spacing: 10) {
                 if let note = otherRegionNote {
                     OtherRegionNote(text: note.text) { model.region = note.region }
+                }
+                if showsPreDownload {
+                    PreDownloadBar(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
                 }
                 HStack(spacing: 8) {
                     // Hovering the progress capsule swaps the hint for the numbers, as HoYoPlay does.
@@ -81,7 +85,8 @@ struct GameFooter: View {
                         backgroundToggle
                     }
                     if showsMenu {
-                        GameMenu(game: game, state: state, gameSheet: $gameSheet, confirmingUninstall: $confirmingUninstall)
+                        GameMenu(game: game, state: state, gameSheet: $gameSheet, confirmingUninstall: $confirmingUninstall,
+                            confirmingPreDownloadDeletion: $confirmingPreDownloadDeletion)
                     }
                     PrimaryActionButton(game: game, action: action, state: state, panel: $panel,
                         gameSheet: $gameSheet, confirmingParts: $confirmingParts, confirmingUninstall: $confirmingUninstall,
@@ -101,6 +106,13 @@ struct GameFooter: View {
             }
         } message: {
             Text(partsMessage)
+        }
+        .confirmationDialog("Delete the pre-download?", isPresented: $confirmingPreDownloadDeletion) {
+            Button("Delete Pre-download", role: .destructive) {
+                Task { await model.deletePreDownload(game.id) }
+            }
+        } message: {
+            Text("The update will download these files again when it's released.")
         }
         .confirmationDialog("Uninstall \(game.name)?", isPresented: $confirmingUninstall) {
             Button("Uninstall", role: .destructive) {
@@ -141,6 +153,16 @@ struct GameFooter: View {
                 .font(.system(size: 34, weight: .bold))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.45), radius: 6)
+        }
+    }
+
+    /// The pre-download sits beside an installed game, never over another operation's progress.
+    private var showsPreDownload: Bool {
+        if case .working = state.activity { return false }
+        if case .resolving = state.activity { return false }
+        return switch state.status {
+        case .installed, .updateAvailable, .paused: true
+        default: false
         }
     }
 
@@ -567,6 +589,7 @@ struct GameMenu: View {
     let state: GameState
     @Binding var gameSheet: GameSheet?
     @Binding var confirmingUninstall: Bool
+    @Binding var confirmingPreDownloadDeletion: Bool
 
     /// While waiting for approval only folder actions make sense; verify and voices would start new work.
     private var waitingForApproval: Bool {
@@ -594,6 +617,10 @@ struct GameMenu: View {
                 }
             }
             Divider()
+            if model.preDownloadState(for: game.id).canDelete {
+                Button("Delete Pre-download…", systemImage: "xmark.bin") { confirmingPreDownloadDeletion = true }
+                .disabled(model.isGameOperationRunning || isLive)
+            }
             Button("Uninstall…", systemImage: "trash", role: .destructive) { confirmingUninstall = true }
                 .disabled(model.isGameOperationRunning || isLive)
         } label: {

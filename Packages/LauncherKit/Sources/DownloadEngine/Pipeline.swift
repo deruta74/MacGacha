@@ -159,6 +159,9 @@ package final class PipelineProgress: Sendable {
 }
 
 /// Keep the lifetime implementation private while sharing stream construction.
+/// AsyncThrowingStream may end quietly when cancellation precedes a pull, just
+/// like normal GameLibrary streams. Consumers require an explicit completed
+/// event for success and join outstanding readers after either terminal outcome.
 package func pipelineStream(abandon: @escaping @Sendable () -> Void,
     _ pull: @escaping @Sendable (@escaping @Sendable (Task<Void, Never>) -> Void) async throws -> OperationEvent?) -> AsyncThrowingStream<OperationEvent, any Error> {
     let lifetime = PipelineLifetime(abandon: abandon)

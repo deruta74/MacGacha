@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Darwin
 import Foundation
+import Synchronization
 import LauncherCore
 
 /// Hold one shared install-root lock path for the operation's lifetime. Explicitly
@@ -9,7 +10,7 @@ import LauncherCore
 /// description even with CLOEXEC. Retain the lock file so its inode stays stable.
 public final class InstallLock: Sendable {
     public enum Mode: Sendable { case exclusive, shared }
-    private let handle: FileHandle
+    private let handle: Mutex<FileHandle?>
 
     public init(fs: ContainedFileSystem, path: SafeRelativePath, mode: Mode = .exclusive) throws {
         let opened = try fs.openForWriting(at: path, truncate: false)
@@ -21,15 +22,23 @@ public final class InstallLock: Sendable {
                 guard errno == EINTR else { throw LauncherError.io("Cannot lock install root") }
             }
         } catch { try? opened.close(); throw error }
-        handle = opened
+        handle = Mutex(opened)
     }
 
-    deinit {
-        // flock belongs to the shared open-file description, not just this descriptor.
-        // Closing alone can leave it held until a concurrent posix_spawn reaches exec.
-        while flock(handle.fileDescriptor, LOCK_UN) != 0 {
-            if errno != EINTR { break }
+    /// Ownership barriers must unlock before publishing completion, even if
+    /// references to this wrapper outlive the barrier. Repeated release is inert.
+    package func release() {
+        handle.withLock { value in
+            guard let opened = value else { return }
+            // flock belongs to the shared open-file description, not just this descriptor.
+            // Closing alone can leave it held until a concurrent posix_spawn reaches exec.
+            while flock(opened.fileDescriptor, LOCK_UN) != 0 {
+                if errno != EINTR { break }
+            }
+            try? opened.close()
+            value = nil
         }
-        try? handle.close()
     }
+
+    deinit { release() }
 }
