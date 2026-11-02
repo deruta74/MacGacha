@@ -959,7 +959,7 @@ private struct LibraryFixture: ~Copyable {
         if let requestGate { http = LibraryGatedHTTP(cdn: cdn, gate: requestGate) }
         else if let metadataGate { http = LibraryDelayedHTTP(cdn: cdn, gate: metadataGate) } else { http = cdn }
         library = GameLibrary(paths: paths, api: DeliveryAPI(http: http), runner: OperationRunner(store: store,
-            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: log), store: store, disk: disk, log: log, fileOps: fileOps, purgeable: purgeable)
+            fetcher: ChunkFetcher(http: http, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: log), store: store, disk: disk, log: log, fileOps: fileOps, purgeable: purgeable)
     }
     func restarted(http: (any HTTPClient)? = nil, runnerHooks: CrashHooks = .none, operationGuard: (any GameOperationGuard)? = nil) -> GameLibrary {
         GameLibrary(paths: paths, api: DeliveryAPI(http: http ?? cdn), runner: OperationRunner(store: store,
@@ -1264,4 +1264,127 @@ private func expectOnlyRetainedSessionLock(_ fixture: borrowing LibraryFixture) 
     let retained = try SafeRelativePath("\(game.id)/.session.lock")
     #expect(try fs.contentsOfDirectory(at: SafeRelativePath(game.id)) == [retained])
     #expect(try fs.itemType(at: retained) == .regularFile)
+}
+
+extension GameLibraryTests {
+    @Test(arguments: [CrashPoint.afterPreDownloadObjectStored, .afterPreDownloadCompleted])
+    func preDownloadSurvivesProcessDeathWithoutAdvancingInstalled(point: CrashPoint) async throws {
+        let disk = LibraryDisk(), f = try LibraryFixture(disk: disk), fixtures = try TempDir()
+        try f.advertise(1); try await f.installGame(); try f.advertisePreDownload()
+        let before = try await f.store.load(game.id)
+        disk.bytes.withLock { $0 = 0 }
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.preDownload(game)) }
+        let state = try #require(try PreDownloadStore(fs: f.fs).load()), fixtureFS = try ContainedFileSystem(root: fixtures.url)
+        for container in state.plan.containers.values {
+            let url = try #require(container.object.urls.first), (_, body) = try await f.cdn.get(url, byteRangeFrom: nil)
+            var data = Data(); for try await bytes in body { data.append(bytes) }
+            try fixtureFS.writeAtomically(data, to: SafeRelativePath(String(url.path.dropFirst())))
+        }
+        let executable = Bundle(for: LibraryBundleToken.self).bundleURL.deletingLastPathComponent().appendingPathComponent("CrashHarness")
+        let result = try await SystemProcessRunner().run(executable,
+            arguments: [fixtures.url.path, f.install.path, point.rawValue, f.paths.games.path, "predownload"], environment: [:], currentDirectory: nil)
+        #expect(result.exitCode == 137)
+        #expect(try await f.store.load(game.id) == before)
+        let interrupted = try #require(try PreDownloadStore(fs: f.fs).load())
+        #expect(!interrupted.verified.isEmpty)
+        disk.bytes.withLock { $0 = Int64.max }
+        let start = f.cdn.requestLog.count
+        #expect(try await libraryCollect(await f.library.resumePreDownload(game, expectedPlanID: state.plan.id)).last == .phase(.completed))
+        #expect(f.cdn.requestLog.count - start == state.plan.containers.count - interrupted.verified.count)
+        #expect(try await f.store.load(game.id) == before)
+        try f.assertFiles(1)
+    }
+
+    @Test func preDownloadPauseDrainsExclusionAndLeavesASeparatePlan() async throws {
+        let gate = LibraryRequestGate(pathSuffix: "diffs/base"), f = try LibraryFixture(requestGate: gate)
+        try f.advertise(1); try await f.installGame(); try f.advertisePreDownload()
+        let before = try await f.store.load(game.id)
+        let library = f.library
+        let task = Task { try await libraryCollect(await library.preDownload(game)) }
+        defer { task.cancel(); gate.release() }
+        try await gate.waitUntilEntered()
+        await #expect(throws: LauncherError.self) { try await f.library.deletePreDownload(game) }
+        task.cancel(); gate.release()
+        await #expect(throws: LauncherError.cancelled) { try await task.value }
+        try await f.library.waitUntilIdle(game.id)
+        #expect(try await f.library.preDownloadInfo(game, refresh: false).state == .paused)
+        #expect(try await f.store.load(game.id) == before)
+        try await f.library.deletePreDownload(game)
+        #expect(try f.fs.itemType(at: PreDownloadStore.directory) == nil)
+    }
+
+    @Test(arguments: [false, true]) func preDownloadRequiresEnabledConfigAndSupportedSource(enabled: Bool) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        try f.advertisePreDownload(enableLdiff: enabled, diffTags: enabled ? ["0.9"] : ["1.0"])
+        let start = f.cdn.requestLog.count
+        #expect(try await f.library.preDownloadInfo(game).state == .unavailable)
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.preDownload(game)) }
+        #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path.hasSuffix("getPatchBuild") })
+        #expect(try f.fs.itemType(at: PreDownloadStore.directory) == nil)
+    }
+
+    @Test func preDownloadOnlyWritesCacheAndPreservesInstalledFiles() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        let record = try await f.store.load(game.id)
+        let before = try syntheticFiles(1).keys.sorted().map { path in
+            let path = try SafeRelativePath(path)
+            return (path, try f.fs.regularFileIdentity(at: path), try f.fs.modificationDate(at: path), try f.fs.readFile(at: path, maxBytes: 100))
+        }
+        try f.advertisePreDownload()
+        let info = try await f.library.preDownloadInfo(game)
+        #expect(info.state == .available && info.version == "2.0" && info.bytes > 0 && !info.canDelete)
+        let start = f.cdn.requestLog.count
+        #expect(try await libraryCollect(await f.library.preDownload(game)).last == .phase(.completed))
+        #expect(try await f.store.load(game.id) == record)
+        for (path, identity, modified, data) in before {
+            #expect(try f.fs.regularFileIdentity(at: path) == identity)
+            #expect(try f.fs.modificationDate(at: path) == modified)
+            #expect(try f.fs.readFile(at: path, maxBytes: 100) == data)
+        }
+        let requests = f.cdn.requestLog.dropFirst(start).map(\.path)
+        #expect(Set(requests.filter { $0.hasPrefix("diffs/") }) == ["diffs/base", "diffs/voice"])
+        #expect(!requests.contains { $0.hasPrefix("chunks/") || $0.hasPrefix("manifests/") })
+        let ready = try await f.library.preDownloadInfo(game, refresh: false)
+        #expect(ready.state == .ready && ready.canDelete && ready.planID != nil)
+    }
+
+    @Test func preDownloadResumeUsesExactSavedDescriptorsWithoutDiscovery() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame(); try f.advertisePreDownload()
+        for try await event in await f.library.preDownload(game) {
+            if case .progress(let downloaded, _, _, _) = event, downloaded > 0 { break }
+        }
+        try await f.library.waitUntilIdle(game.id)
+        let saved = try await f.library.preDownloadInfo(game, refresh: false), start = f.cdn.requestLog.count
+        #expect(saved.planID != nil)
+        let restart = f.restarted()
+        #expect(try await libraryCollect(await restart.resumePreDownload(game, expectedPlanID: saved.planID)).last == .phase(.completed))
+        #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path.contains("api/") || $0.path.contains("manifests/") })
+        #expect(try await restart.preDownloadInfo(game, refresh: false).state == .ready)
+    }
+
+    @Test func withdrawnCacheIsDeleteOnlyAndStaleCampaignIsPruned() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame(); try f.advertisePreDownload()
+        _ = try await libraryCollect(await f.library.preDownload(game))
+        try f.advertise(1, enableLdiff: true)
+        let withdrawn = try await f.library.preDownloadInfo(game)
+        #expect(withdrawn.state == .unavailable && withdrawn.canDelete)
+        #expect(try f.fs.itemType(at: PreDownloadStore.directory) == .directory)
+        try f.advertise(3, enableLdiff: true)
+        let stale = try await f.library.preDownloadInfo(game)
+        #expect(stale.state == .unavailable && !stale.canDelete)
+        #expect(try f.fs.itemType(at: PreDownloadStore.directory) == nil)
+    }
+}
+
+private extension LibraryFixture {
+    func advertisePreDownload(enableLdiff: Bool = true, diffTags: [String] = ["1.0"]) throws {
+        try advertise(2, enableLdiff: enableLdiff)
+        try advertisePatches()
+        let groups = [("base", "game"), ("extra", "extra"), ("voice", "en-us")]
+        let categories: [[String: Any]] = groups.map { id, matching in ["category_id": id, "matching_field": matching,
+            "type": id == "voice" ? "CATEGORY_TYPE_AUDIO" : "CATEGORY_TYPE_RESOURCE", "scenarios": ["CATEGORY_SCENARIO_FULL"]] }
+        cdn.serve("hyp/hyp-connect/api/getGameBranches", data: try jsonData(["game_branches": [["game": ["id": "test", "biz": game.biz],
+            "main": ["package_id": "public-package", "password": "public-selector", "branch": "main", "tag": "1.0", "categories": categories],
+            "pre_download": ["package_id": "public-package", "password": "public-selector", "branch": "pre_download", "tag": "2.0", "diff_tags": diffTags, "categories": categories]]]]))
+    }
 }

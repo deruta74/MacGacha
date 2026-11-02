@@ -35,15 +35,15 @@ public actor GameLibrary {
     public nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
 
     private let paths: AppPaths
-    private let api: DeliveryAPI
-    private let runner: OperationRunner
-    private let store: GameRecordStore
-    private let disk: any DiskSpaceProbe
+    let api: DeliveryAPI
+    let runner: OperationRunner
+    let store: GameRecordStore
+    let disk: any DiskSpaceProbe
     private let purgeable: any PurgeableSpaceProbe
-    private let log: EventLog?
-    private let operationGuard: (any GameOperationGuard)?
-    private let hooks: CrashHooks
-    private let fileOps: any FileOps
+    let log: EventLog?
+    let operationGuard: (any GameOperationGuard)?
+    let hooks: CrashHooks
+    let fileOps: any FileOps
     private var started = false
     private static let cleanupName = "uninstall-cleaned.json"
 
@@ -201,7 +201,7 @@ public actor GameLibrary {
         try await store.deleteGameDirectory(game.id)
     }
 
-    private func acquireGameLock(_ game: String) throws -> InstallLock {
+    func acquireGameLock(_ game: String) throws -> InstallLock {
         let id = try SafeIdentifier(game)
         let fs = try ContainedFileSystem(root: paths.root, fileOps: fileOps)
         try fs.createRootDurably()

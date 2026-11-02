@@ -59,6 +59,8 @@ public actor OperationRunner {
         stream(game, request: .start(.fresh(root, executable), plan, .install, target, managedPaths, reservedLocations), approved: approved, lease: lease)
     }
 
+    func preDownloadFetcher() -> ChunkFetcher { fetcher }
+
     public func reconcile(_ game: String) async throws -> GameRecord? {
         let lease = try await store.acquireOperationLease(waitForPipelineDrain: true)
         defer { withExtendedLifetime(lease) {} }

@@ -42,11 +42,12 @@ package final class PipelineChannel: Sendable {
         var error: (any Error)?
     }
     private let state = Mutex(State())
-    func send(_ event: OperationEvent) {
+    package init() {}
+    package func send(_ event: OperationEvent) {
         if case .progress = event { preconditionFailure("Progress publication requires a sequenced snapshot") }
         publish(event, sequence: nil)
     }
-    func send(_ snapshot: PipelineProgressSnapshot) { publish(snapshot.event, sequence: snapshot.sequence) }
+    package func send(_ snapshot: PipelineProgressSnapshot) { publish(snapshot.event, sequence: snapshot.sequence) }
     private func publish(_ event: OperationEvent, sequence: UInt64?) {
         let waiter = state.withLock { s -> CheckedContinuation<OperationEvent?, any Error>? in
             guard !s.ended else { return nil }
@@ -61,11 +62,11 @@ package final class PipelineChannel: Sendable {
         }
         waiter?.resume(returning: event)
     }
-    func finish(_ error: (any Error)? = nil) {
+    package func finish(_ error: (any Error)? = nil) {
         let waiter = state.withLock { s in s.ended = true; s.error = error; let w = s.waiter; s.waiter = nil; return w }
         if let error { waiter?.resume(throwing: error) } else { waiter?.resume(returning: nil) }
     }
-    func next() async throws -> OperationEvent? {
+    package func next() async throws -> OperationEvent? {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let result: Result<OperationEvent?, any Error>? = state.withLock { s in
@@ -125,12 +126,13 @@ package final class PipelineProgress: Sendable {
     private let state = Mutex(State())
     private let sizes: [String: Int64]
     init(_ plan: InstallPlan) { sizes = plan.objects.mapValues(\.transferSize) }
-    func initialize(downloaded: Int64, total: Int64, credited: Set<String>, predicted: Set<String>) {
+    package init(sizes: [String: Int64]) { self.sizes = sizes }
+    package func initialize(downloaded: Int64, total: Int64, credited: Set<String>, predicted: Set<String>) {
         state.withLock { s in s.downloaded = downloaded; s.total = total; s.credited = credited; s.predicted = predicted }
     }
     func stage(_ staged: Int64, total: Int64) { state.withLock { $0.staged = staged; $0.totalStaged = total } }
     func total(_ value: Int64) { state.withLock { $0.total = max(value, $0.downloaded) } }
-    func update(_ id: String, _ bytes: Int64) -> PipelineProgressSnapshot? {
+    package func update(_ id: String, _ bytes: Int64) -> PipelineProgressSnapshot? {
         state.withLock { s in
             let size = sizes[id] ?? 0
             if s.predicted.insert(id).inserted { s.total = Self.add(s.total, size) }
@@ -144,7 +146,7 @@ package final class PipelineProgress: Sendable {
             return Self.snapshot(&s)
         }
     }
-    func snapshot() -> PipelineProgressSnapshot { state.withLock { Self.snapshot(&$0) } }
+    package func snapshot() -> PipelineProgressSnapshot { state.withLock { Self.snapshot(&$0) } }
     private static func snapshot(_ s: inout State) -> PipelineProgressSnapshot {
         s.sequence += 1
         return PipelineProgressSnapshot(sequence: s.sequence, event: event(s))
@@ -281,12 +283,12 @@ package final class PipelineRootRetention: Sendable {
     private static let draining = Mutex<[String: Entry]>([:])
     private let key: String
     private let state = Mutex(State())
-    init(key: String) { self.key = key }
-    func hold(_ lock: InstallLock?, owner: UUID, retaining retainedOwner: (any Sendable)?) {
+    package init(key: String) { self.key = key }
+    package func hold(_ lock: InstallLock?, owner: UUID, retaining retainedOwner: (any Sendable)?) {
         state.withLock { if !$0.active { $0.lock = lock; $0.owner = owner; $0.retainedOwner = retainedOwner } }
     }
-    func activate(_ owner: UUID?) { state.withLock { if $0.owner == owner { $0.active = true } } }
-    func abandon(_ owner: UUID?) {
+    package func activate(_ owner: UUID?) { state.withLock { if $0.owner == owner { $0.active = true } } }
+    package func abandon(_ owner: UUID?) {
         state.withLock { s in
             guard s.owner == owner else { return }
             if !s.active { s.lock = nil; s.retainedOwner = nil; return }
@@ -297,7 +299,7 @@ package final class PipelineRootRetention: Sendable {
             }
         }
     }
-    func release(_ owner: UUID?) {
+    package func release(_ owner: UUID?) {
         let drain = state.withLock { s -> Drain? in
             guard s.owner == owner else { return nil }
             s.lock = nil; s.active = false; s.retainedOwner = nil

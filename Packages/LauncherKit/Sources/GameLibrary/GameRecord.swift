@@ -72,7 +72,7 @@ public struct GameRecord: Codable, Sendable, Equatable {
     }
 }
 
-public enum GameAction: Sendable, Equatable { case install, adopt, update, repair, voices, resume, uninstall }
+public enum GameAction: Sendable, Equatable { case install, adopt, update, repair, voices, resume, uninstall, preDownload }
 
 public enum GameRecordRules {
     /// Pure transition policy. Paused records of other games do not establish a
@@ -91,7 +91,7 @@ public enum GameRecordRules {
         switch action {
         case .install, .adopt:
             guard record == nil else { throw LauncherError.io("game already has a record") }
-        case .update, .repair, .voices:
+        case .update, .repair, .voices, .preDownload:
             guard record?.installed != nil else { throw LauncherError.io("game is not installed") }
         case .resume: throw LauncherError.io("no pending operation")
         case .uninstall:
