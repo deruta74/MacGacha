@@ -15,6 +15,7 @@ struct GameOperationToken: Sendable, Equatable {
     var kind: OtherRegionActivity = .downloading
     var isVerification = false
     var isUninstall = false
+    var isPreDownload = false
 }
 private enum GameRequest: Sendable {
     case install(Set<String>, URL, Bool), adopt(URL, Set<String>), update, resume(Bool), verify, voices(Set<String>), uninstall
@@ -29,7 +30,7 @@ private enum GameRequest: Sendable {
     }
 }
 enum GameStopOutcome: Sendable, Equatable {
-    case resume(planID: String), verify, finished, failed
+    case resume(planID: String), preDownload(planID: String, planDigest: Digest), verify, finished, failed
 }
 enum GameConsumerOutcome: Sendable { case stopped, completed, failed }
 private struct GameSnapshot: Sendable {
@@ -126,6 +127,7 @@ private struct GameSnapshot: Sendable {
         for (id, snapshot) in results where gameRevisions[id] == revisions[id] && gameUpdateCheckTasks[id] == nil {
             applyGame(snapshot, id: id, activity: games[id]?.activity)
         }
+        await refreshPreDownloads(in: region)
         // Records are local; only the selected region performs remote status reads.
         let others = GameDefinition.all.filter { $0.region != region && $0.id != gameOperation?.id }.map(\.id)
         let records = await withTaskGroup(of: (String, GameRecord?, LauncherError?).self) { group in
@@ -259,6 +261,10 @@ private struct GameSnapshot: Sendable {
             if !completed, failure == nil, let approval { activity = .needsApproval(required: approval.required, available: approval.available) }
             else { activity = nil }
             self.applyGame(snapshot, id: id, activity: activity, reportError: failure == nil)
+            if let info = try? await services.preDownloadInfo(id, refresh: false), self.gameOperation == token {
+                self.preDownloadRevisions[id] = UUID()
+                self.preDownloads[id] = PreDownloadOverlay(info: info)
+            }
             if case .insufficientSpace(let required, let available) = failure, case .paused = snapshot.status {
                 var state = self.games[id] ?? GameState(status: snapshot.status)
                 state.spaceShortage = GameSpaceShortage(required: required, available: available)
@@ -288,6 +294,7 @@ private struct GameSnapshot: Sendable {
     }
 
     func stopGameOperation(_ token: GameOperationToken) async throws -> GameStopOutcome {
+        if token.isPreDownload { return try await stopPreDownloadOperation(token) }
         let task = gameOperation == token ? gameTask : nil
         task?.cancel()
         await task?.value
@@ -307,6 +314,10 @@ private struct GameSnapshot: Sendable {
 
     private func applyGame(_ snapshot: GameSnapshot, id: String, activity: GameActivity?, reportError: Bool = true) {
         setGameRecord(id, snapshot.record)
+        if snapshot.record?.installed == nil {
+            preDownloadRevisions[id] = UUID()
+            preDownloads[id] = nil
+        }
         let shortage: GameSpaceShortage?
         if case .paused = snapshot.status { shortage = games[id]?.spaceShortage } else { shortage = nil }
         setGameState(id, GameState(status: snapshot.status, activity: activity, spaceShortage: shortage))

@@ -183,6 +183,18 @@ struct CrashHarness {
             let fileOps: any FileOps = [.duringCompletionReceiptWrite, .duringGamePlanWrite].contains(point)
                 ? ReceiptWriteCrashOps(gameMetadata: point == .duringGamePlanWrite) : SystemFileOps()
             let fs = try ContainedFileSystem(root: fixtures)
+            if args.count == 6, ["predownload", "patch-update"].contains(args[5]) {
+                let storeURL = URL(fileURLWithPath: args[4]), store = GameRecordStore(directory: URL(fileURLWithPath: args[4]))
+                let http = try FileBackedHTTPClient(root: fixtures)
+                let library = GameLibrary(paths: AppPaths(root: storeURL.deletingLastPathComponent()), api: DeliveryAPI(http: http),
+                    runner: OperationRunner(store: store, fetcher: ChunkFetcher(http: http, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()),
+                        disk: FixedDiskSpace(bytes: Int64.max), log: nil, crashHooks: CrashHooks(at: point, action: { _exit(137) })), store: store, disk: FixedDiskSpace(bytes: Int64.max), log: nil,
+                    crashHooks: CrashHooks(at: point, action: { _exit(137) }))
+                let stream = if args[5] == "predownload" { await library.resumePreDownload(GameDefinition.all[0]) }
+                    else { await library.update(GameDefinition.all[0], approved: true) }
+                for try await _ in stream {}
+                _exit(1)
+            }
             if args.count == 6, args[5] == "uninstall" {
                 let storeURL = URL(fileURLWithPath: args[4])
                 let store = GameRecordStore(directory: storeURL)

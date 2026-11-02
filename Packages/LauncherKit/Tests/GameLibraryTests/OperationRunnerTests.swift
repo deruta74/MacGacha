@@ -59,7 +59,7 @@ import TestSupport
         #expect(try await store.load("genshin")?.pending?.planDigest == plan.planDigest)
     }
 
-    @Test func waitUntilIdleWaitsForHeldWorker() async throws {
+    @Test(arguments: [false, true]) func waitUntilIdleWaitsForHeldWorker(cacheDrain: Bool) async throws {
         let root = try TempDir(), records = try TempDir(), cdn = MockCDN(), ops = BridgeBlockedAssembly()
         let plan = try bridgePlan(); bridgeServe(cdn, plan)
         let rootURL = root.url, store = GameRecordStore(directory: records.url)
@@ -78,7 +78,11 @@ import TestSupport
                 }
             }
             try await consumer.value
-            let idle = Task { try await library.waitUntilIdle("genshin"); returned.withLock { $0 = true } }
+            let idle = Task {
+                if cacheDrain { try await library.waitForPreDownloadDrain("genshin") }
+                else { try await library.waitUntilIdle("genshin") }
+                returned.withLock { $0 = true }
+            }
             defer { idle.cancel() }
             var iterator = waiting.stream.makeAsyncIterator(); _ = await iterator.next()
             #expect(!returned.withLock { $0 })

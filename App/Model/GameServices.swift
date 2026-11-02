@@ -12,8 +12,13 @@ typealias GameEventStream = AsyncThrowingStream<OperationEvent, any Error>
 protocol GameServices: Sendable {
     func start() async
     func waitUntilIdle(_ id: String) async throws
+    func waitForPreDownloadDrain(_ id: String) async throws
     func status(_ id: String) async -> GameStatus
     func checkForUpdate(_ id: String) async throws -> GameStatus
+    func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo
+    func preDownload(_ id: String) async -> GameEventStream
+    func resumePreDownload(_ id: String, expectedPlanID: String?) async -> GameEventStream
+    func deletePreDownload(_ id: String) async throws
     func record(_ id: String) async throws -> GameRecord?
     func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate
     func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool) async -> GameEventStream
@@ -23,6 +28,15 @@ protocol GameServices: Sendable {
     func verify(_ id: String, mode: Verifier.Mode) async -> GameEventStream
     func setVoices(_ id: String, _ voices: Set<String>) async -> GameEventStream
     func uninstall(_ id: String) async throws
+}
+
+/// Existing fakes and previews opt out without touching delivery or disk.
+extension GameServices {
+    func waitForPreDownloadDrain(_ id: String) async throws { try await waitUntilIdle(id) }
+    func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo { .unavailable }
+    func preDownload(_ id: String) async -> GameEventStream { GameEventStream { $0.finish() } }
+    func resumePreDownload(_ id: String, expectedPlanID: String?) async -> GameEventStream { GameEventStream { $0.finish() } }
+    func deletePreDownload(_ id: String) async throws {}
 }
 
 /// Construction does no filesystem work. All core work runs on service/core
@@ -58,6 +72,10 @@ final class LiveGameServices: GameServices, Sendable {
         let game = try Self.requireGame(id)
         try await library(for: game).waitUntilIdle(id)
     }
+    func waitForPreDownloadDrain(_ id: String) async throws {
+        let game = try Self.requireGame(id)
+        try await library(for: game).waitForPreDownloadDrain(id)
+    }
     func status(_ id: String) async -> GameStatus {
         guard let game = Self.game(id) else { return .unknown }
         return await library(for: game).status(game)
@@ -83,6 +101,25 @@ final class LiveGameServices: GameServices, Sendable {
             log.post(.warning, "game", "Game update check finished", metadata: fields)
             throw error
         }
+    }
+    func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo {
+        do { let game = try Self.requireGame(id); return try await library(for: game).preDownloadInfo(game, refresh: refresh) }
+        catch { throw await failure(error, id: id) }
+    }
+    func preDownload(_ id: String) async -> GameEventStream {
+        guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
+        return logged(await library(for: game).preDownload(game), id: id)
+    }
+    func resumePreDownload(_ id: String, expectedPlanID: String?) async -> GameEventStream {
+        guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
+        do {
+            let planID = try expectedPlanID.map { try SafeIdentifier($0) }
+            return logged(await library(for: game).resumePreDownload(game, expectedPlanID: planID), id: id)
+        } catch { return logged(GameEventStream { $0.finish(throwing: error) }, id: id) }
+    }
+    func deletePreDownload(_ id: String) async throws {
+        do { let game = try Self.requireGame(id); try await library(for: game).deletePreDownload(game) }
+        catch { throw await failure(error, id: id) }
     }
     func record(_ id: String) async throws -> GameRecord? {
         do { _ = try Self.requireGame(id); return try await store.load(id) }

@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 
 public enum CrashPoint: String, CaseIterable, Sendable {
+    case afterPreDownloadPlanStored, afterPreDownloadObjectStored, afterPreDownloadCompleted, afterPreDownloadContainerMoved
     case afterObjectVerified
     case afterFileStagedBeforeJournal
     case afterRenameBeforeJournal
