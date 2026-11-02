@@ -405,10 +405,12 @@ func deliveryHTTP(branches: Data = branchesJSON(), config: Data = configJSON(), 
 }
 final class RecordingHTTP: HTTPClient, Sendable {
     func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
-        recorded.withLock { $0.append(url) }; return try await cdn.post(url)
+        posted.withLock { $0.append(url) }; recorded.withLock { $0.append(url) }; return try await cdn.post(url)
     }
 
     let cdn = MockCDN(); private let recorded = Mutex<[URL]>([])
+    private let posted = Mutex<[URL]>([])
+    var posts: [URL] { posted.withLock { $0 } }
     var requests: [URL] { recorded.withLock { $0 } }
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         recorded.withLock { $0.append(url) }; return try await cdn.get(url, byteRangeFrom: offset)

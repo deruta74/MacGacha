@@ -39,15 +39,26 @@ public struct DeliveryAPI: Sendable {
     }
 
     public func build(_ branch: GameBranch, tag: String? = nil) async throws -> SophonBuild {
-        var components = URLComponents(url: region.sophonBuildURL, resolvingAgainstBaseURL: false)!
+        let url = try buildURL(branch, endpoint: "getBuild", tag: tag)
+        let wire: BuildWire = try await json(url)
+        return try SophonBuild(buildID: wire.build_id, tag: wire.tag, categories: wire.manifests.map { try $0.model(region: region) })
+    }
+
+    public func patchBuild(_ branch: GameBranch) async throws -> SophonPatchBuild {
+        let wire: PatchBuildWire = try await json(buildURL(branch, endpoint: "getPatchBuild"), post: true)
+        return try SophonPatchBuild(buildID: wire.build_id, patchID: wire.patch_id, tag: wire.tag,
+            categories: wire.manifests.map { try $0.model(region: region) })
+    }
+
+    private func buildURL(_ branch: GameBranch, endpoint: String, tag: String? = nil) throws -> URL {
+        var components = URLComponents(url: region.sophonBuildURL.deletingLastPathComponent().appendingPathComponent(endpoint), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "branch", value: branch.branch),
             URLQueryItem(name: "package_id", value: branch.packageID), URLQueryItem(name: "password", value: branch.password)]
         if let tag, branch.branch != "predownload" { components.queryItems?.append(URLQueryItem(name: "tag", value: tag)) }
         // Form-query decoders treat '+' as space, although URLComponents leaves it literal.
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let url = components.url else { throw LauncherError.io("invalid delivery request") }
-        let wire: BuildWire = try await json(url)
-        return try SophonBuild(buildID: wire.build_id, tag: wire.tag, categories: wire.manifests.map { try $0.model(region: region) })
+        return url
     }
 
     public func manifest(_ category: BuildCategory) async throws -> (compressed: Data, manifest: SophonManifest) {
@@ -77,18 +88,18 @@ public struct DeliveryAPI: Sendable {
         region.hypAPIURL(name)
     }
 
-    private func json<T: Decodable & Sendable>(_ url: URL) async throws -> T {
-        let data = try await deadline { try await bytes(url, limit: Self.metadataLimit) }
+    private func json<T: Decodable & Sendable>(_ url: URL, post: Bool = false) async throws -> T {
+        let data = try await deadline { try await bytes(url, limit: Self.metadataLimit, post: post) }
         do { return try JSONDecoder().decode(Envelope<T>.self, from: data).data }
         catch let error as LauncherError { throw error }
         catch { throw LauncherError.io("invalid delivery response") }
     }
 
-    private func bytes(_ url: URL, limit: Int, expected: Int64? = nil) async throws -> Data {
+    private func bytes(_ url: URL, limit: Int, expected: Int64? = nil, post: Bool = false) async throws -> Data {
         guard DeliveryHostPolicy.allows(url, region: region) else { throw LauncherError.io("untrusted delivery host") }
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         let head: HTTPResponseHead; let body: HTTPBody
-        do { (head, body) = try await http.get(url, byteRangeFrom: nil) }
+        do { (head, body) = try await (post ? http.post(url) : http.get(url, byteRangeFrom: nil)) }
         catch { throw await requestFailure(error) }
         // Fixed descriptions and numeric fields only: no selector, URL, server message or error text.
         await log?.log(.info, "sophon", "HTTP response", metadata: ["status": String(head.status)])
@@ -205,8 +216,8 @@ private struct BuildWire: Decodable, Sendable {
     struct Stats: Decodable, Sendable { let compressed_size: DecimalSize; let uncompressed_size: DecimalSize }
     struct Descriptor: Decodable, Sendable {
         let url_prefix: String; let url_suffix: String; let compression: Int; let encryption: Int; let password: String
-        func validate(region: Region) throws -> (URL, String) {
-            guard compression == 1, encryption == 0, password.isEmpty else { throw LauncherError.io("unsupported delivery: descriptor") }
+        func validate(region: Region, diff: Bool = false) throws -> (URL, String) {
+            guard (compression == 1 || (diff && compression == 0)), encryption == 0, password.isEmpty else { throw LauncherError.io("unsupported delivery: descriptor") }
             guard let prefix = URL(string: url_prefix, encodingInvalidCharacters: false), DeliveryHostPolicy.allows(prefix, region: region) else {
                 throw LauncherError.io("untrusted delivery host")
             }
@@ -227,5 +238,34 @@ private struct DecimalSize: Decodable, Sendable {
             value = try c.decode(Int64.self)
             guard value >= 0 else { throw LauncherError.io("invalid delivery response") }
         }
+    }
+}
+
+private struct PatchBuildWire: Decodable, Sendable {
+    let build_id: String; let patch_id: String; let tag: String; let manifests: [Category]
+    struct Category: Decodable, Sendable {
+        let category_id: String; let matching_field: String; let manifest: BuildWire.Manifest
+        let manifest_download: BuildWire.Descriptor; let diff_download: BuildWire.Descriptor
+        let stats: [String: Stats]
+        func model(region: Region) throws -> PatchBuildCategory {
+            let (mp, ms) = try manifest_download.validate(region: region)
+            let (dp, ds) = try diff_download.validate(region: region, diff: true)
+            let digest: Digest
+            do { digest = try Digest(algorithm: .md5, hex: manifest.checksum) }
+            catch { throw LauncherError.io("invalid delivery checksum") }
+            let ref = ManifestRef(id: manifest.id, decodedMD5: digest,
+                compressedSize: manifest.compressed_size.value, decodedSize: manifest.uncompressed_size.value)
+            let result = PatchBuildCategory(region: region, id: category_id, matchingField: matching_field,
+                manifest: ref, manifestPrefix: mp, manifestSuffix: ms, diffPrefix: dp, diffSuffix: ds,
+                diffCodec: diff_download.compression == 0 ? .identity : .zstd,
+                stats: stats.mapValues { PatchBuildStats(compressedSize: $0.compressed_size.value,
+                    decodedSize: $0.uncompressed_size.value, fileCount: $0.file_count.value, chunkCount: $0.chunk_count.value) })
+            try result.validate()
+            return result
+        }
+    }
+    struct Stats: Decodable, Sendable {
+        let compressed_size: DecimalSize; let uncompressed_size: DecimalSize
+        let file_count: DecimalSize; let chunk_count: DecimalSize
     }
 }
