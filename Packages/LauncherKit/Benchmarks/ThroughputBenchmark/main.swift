@@ -116,6 +116,10 @@ final class Metrics: Sendable {
 }
 struct FixedDisk: DiskSpaceProbe { func availableBytes(at url: URL) throws -> Int64 { Int64.max } }
 struct MemoryHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let payloads: [Data]
     let latency: Duration
     let metrics: Metrics

@@ -404,6 +404,10 @@ func deliveryHTTP(branches: Data = branchesJSON(), config: Data = configJSON(), 
     return h
 }
 final class RecordingHTTP: HTTPClient, Sendable {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        recorded.withLock { $0.append(url) }; return try await cdn.post(url)
+    }
+
     let cdn = MockCDN(); private let recorded = Mutex<[URL]>([])
     var requests: [URL] { recorded.withLock { $0 } }
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
@@ -411,11 +415,19 @@ final class RecordingHTTP: HTTPClient, Sendable {
     }
 }
 private struct FailingHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         throw LauncherError.transport("Failed \(url.absoluteString)")
     }
 }
 private struct BodyHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let body: ByteBody
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         (HTTPResponseHead(status: 200), HTTPBody(next: { try await body.next() }, onCancel: { body.cancel() }))

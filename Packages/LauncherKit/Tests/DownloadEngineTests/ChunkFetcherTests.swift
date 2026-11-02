@@ -419,6 +419,10 @@ private func testFetcher(_ http: any HTTPClient, sleeper: InstantSleeper = Insta
 }
 
 private struct FixedFetchClient: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let head: HTTPResponseHead
     let state: FetchTestBodyState
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
@@ -447,6 +451,10 @@ private final class FetchTestBodyState: Sendable {
 }
 
 private final class RecoveringFetchClient: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let ranges = Mutex([Int64?]())
     let malformedRange: Bool
     init(malformedRange: Bool) { self.malformedRange = malformedRange }

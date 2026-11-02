@@ -9,6 +9,32 @@ import LauncherCore
 
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct URLSessionHTTPClientTests {
+    @Test func emptyPostUsesStreamingTransport() async throws {
+        let fixture = HTTPFixture(.response(200, ["Content-Length": "6"], [Data("abc".utf8), Data("def".utf8)]))
+        defer { fixture.close() }
+        let (head, stream) = try await fixture.client.post(fixture.url)
+        var bytes = Data(); for try await piece in stream { bytes.append(piece) }
+        #expect(head.contentLength == 6)
+        #expect(bytes == Data("abcdef".utf8))
+        let request = try #require(fixture.control.request)
+        #expect(request.httpMethod == "POST")
+        #expect(request.httpBody?.isEmpty != false)
+        #expect(request.value(forHTTPHeaderField: "Range") == nil)
+        #expect(request.value(forHTTPHeaderField: "Accept-Encoding") == "identity")
+        #expect(request.cachePolicy == .reloadIgnoringLocalCacheData)
+    }
+
+    @Test func postCancellationBeforeHeadersStopsTask() async throws {
+        let fixture = HTTPFixture(.stallBeforeResponse)
+        defer { fixture.close() }
+        let task = Task { try await fixture.client.post(fixture.url) }
+        defer { task.cancel() }
+        try await fixture.control.didStart.wait()
+        task.cancel()
+        await #expect(throws: LauncherError.cancelled) { try await task.value }
+        try await fixture.control.didStop.wait()
+    }
+
     @Test(.timeLimit(.minutes(1))) func shardedSessionsDoNotSerializeDataCallbacks() async throws {
         let first = HTTPFixture(.response(200, ["Content-Length": "1"], [Data([1])]))
         let second = HTTPFixture(.response(200, ["Content-Length": "2"], [Data([2, 2])]))
@@ -307,15 +333,15 @@ struct URLSessionHTTPClientTests {
         }
     }
 
-    @Test(.timeLimit(.minutes(1)))
-    func requestIdleTimeoutPausesForBackpressureAndRearmsAfterResume() async throws {
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func requestIdleTimeoutPausesForBackpressureAndRearmsAfterResume(post: Bool) async throws {
         let timer = ManualHTTPRequestTimer(), metrics = HTTPBufferMetrics()
         let data = Data(repeating: 42, count: 256 * 1024)
         let fixture = HTTPFixture(.controlledResponse(data.count + 1), highWaterMark: data.count,
             lowWaterMark: 64 * 1024, timeout: 15, timer: timer,
             bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
         defer { fixture.close() }
-        let (_, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+        let (_, body) = try await (post ? fixture.client.post(fixture.url) : fixture.client.get(fixture.url, byteRangeFrom: nil))
         #expect(try #require(fixture.control.request).timeoutInterval > 3600)
         fixture.control.send(data)
         _ = try await metrics.waitForSnapshot { $0.suspended }

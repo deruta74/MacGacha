@@ -262,6 +262,10 @@ func cancellingInstallerCancelsNetworkAndReleasesStoreLock(point: String) async 
 }
 
 private final class InstallerStalledHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     private let body: Data?
     private let started = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private let cancellation = Mutex(false)

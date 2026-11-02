@@ -67,6 +67,10 @@ struct RuntimeBundleIntegrationTests {
 
 /// Resolves the pinned remote basename to a local fixture; never creates a network session.
 private struct RuntimeFixtureHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let root: URL
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         try await BlockingIO.run {

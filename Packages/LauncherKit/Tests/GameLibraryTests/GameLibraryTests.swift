@@ -983,6 +983,10 @@ private final class LibraryRequestGate: Sendable {
     }
 }
 private struct LibraryGatedHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn: MockCDN
     let gate: LibraryRequestGate
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
@@ -1007,6 +1011,10 @@ private actor LibraryMetadataGate {
     func release() { continuation?.resume(); continuation = nil }
 }
 private struct LibraryDelayedHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn: MockCDN
     let gate: LibraryMetadataGate
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {

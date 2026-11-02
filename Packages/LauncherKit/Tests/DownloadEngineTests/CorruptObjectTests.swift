@@ -205,6 +205,10 @@ private func corruptedZstd(_ valid: Bool) throws -> Data {
     var bytes = try zstdVector("good"); bytes[0] ^= 1; return bytes
 }
 private final class CorruptFirstHTTP: HTTPClient, Sendable {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn = MockCDN()
     private let count = Mutex(0)
     private let first: Data; private let good: Data

@@ -166,6 +166,10 @@ private func followupCompressedPlan() throws -> InstallPlan {
     return try stagingPlan([object], [compressedFile(object, path: "new")])
 }
 private final class WrongTotalClient: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let ranges = Mutex([Int64?]())
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         let first = ranges.withLock { values in values.append(offset); return values.count == 1 }

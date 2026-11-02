@@ -82,6 +82,10 @@ private final class OutstandingFetchWork: Sendable {
     }
 }
 private final class ReviewHeaderGate: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn: MockCDN
     private let count = Mutex(0)
     private let ready = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))

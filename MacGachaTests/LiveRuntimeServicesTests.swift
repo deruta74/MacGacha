@@ -272,6 +272,10 @@ struct LiveRuntimeServicesTests {
 }
 
 private struct FailedHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     var error = LauncherError.transport("connection failed token=planted-secret")
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         #expect(!onMainThread())
@@ -296,6 +300,10 @@ private actor LiveTestGate {
 }
 
 private final class CleanupHeldHTTP: HTTPClient, Sendable {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let bytes: Data
     let started = LiveTestGate(), cancelled = LiveTestGate(), release = LiveTestGate()
     init(bytes: Data) { self.bytes = bytes }

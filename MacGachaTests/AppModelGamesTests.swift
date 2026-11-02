@@ -616,6 +616,10 @@ private actor SuspendedApprovalEvents {
 }
 
 private final class GameFailingHTTP: HTTPClient, Sendable {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let error: LauncherError
     private let urls = Mutex<[URL]>([])
     init(error: LauncherError) { self.error = error }

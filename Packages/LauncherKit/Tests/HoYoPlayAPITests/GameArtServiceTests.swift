@@ -236,6 +236,10 @@ private func artFixtures(_ cdn: MockCDN, background: String = "https://fastcdn.h
 
 private func hashURL(_ string: String) -> String { var h = StreamingHasher(.sha256); h.update(Data(string.utf8)); return h.finalize().hex }
 private struct NoLengthHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn: MockCDN
     func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         guard url.lastPathComponent == "preferred" else { return try await cdn.get(url, byteRangeFrom: offset) }
@@ -299,6 +303,10 @@ func skippedAssetsAndInvalidResponsesLogSafeReasons() async throws {
 }
 
 private final class StallingArtHTTP: HTTPClient, Sendable {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn: MockCDN
     let started = Mutex(false)
     init(cdn: MockCDN) { self.cdn = cdn }
@@ -329,6 +337,10 @@ func refreshRequestsTheInjectedLanguageAndRefetchesWhenItChanges() async throws 
 }
 
 private final class QueryRecordingHTTP: HTTPClient, Sendable {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        throw LauncherError.io("Unexpected POST")
+    }
+
     let cdn: MockCDN
     private let urls = Mutex<[URL]>([])
     init(cdn: MockCDN) { self.cdn = cdn }
