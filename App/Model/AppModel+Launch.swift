@@ -111,9 +111,11 @@ import RuntimeManager
 
     func play(_ id: String) {
         guard canBeginGameOrRuntimeOperation() else { return }
-        guard launchSlotOwner == nil, launchTasks.isEmpty, gameOperation?.id != id,
+        guard launchSlotOwner == nil, launchTasks.isEmpty,
+            (gameOperation?.id != id || (gameOperation?.isPreDownload == true && gameOperation?.isUninstall == false)),
             let game = GameDefinition.all.first(where: { $0.id == id }) else { return }
         if case .recoveryNeeded = launchStates[id] { return }
+        let preDownload = gameOperation.flatMap { $0.id == id && $0.isPreDownload ? $0 : nil }
         // Reserve before any await, and assume potentially live before spawning.
         // A post-spawn journal write may suspend before the .watch event arrives.
         launchSlotOwner = id; liveLaunchGames.insert(id)
@@ -129,6 +131,7 @@ import RuntimeManager
                 if self.launchTaskGenerations[id] == generation { self.launchTasks[id] = nil; self.launchTaskGenerations[id] = nil }
             }
             do {
+                if let preDownload { _ = try await self.stopPreDownloadOperation(preDownload) }
                 await self.reattachOnStart()
                 if let error = self.launchStartupError { throw error }
                 await self.refreshRosetta()

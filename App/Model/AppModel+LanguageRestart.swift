@@ -18,13 +18,14 @@ enum LanguageRestartBlocker: Equatable {
 }
 
 struct LanguageRestartContinuation: Codable, Equatable, Sendable {
-    enum Action: String, Codable, Sendable { case resume, verify }
+    enum Action: String, Codable, Sendable { case resume, verify, preDownload }
     static let defaultsKey = "languageRestartContinuation"
     static let argument = "-MacGachaLanguageRestart"
     let restartID: UUID
     let gameID: String
     let action: Action
     let planID: String?
+    var planDigest: Digest? = nil
 }
 
 @MainActor extension AppModel {
@@ -41,7 +42,7 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
             !runtimeSetupRosettaChecks.isEmpty { return .runtimeWork }
         if let operation = gameOperation {
             let record = gameRecords[operation.id]
-            if operation.isUninstall || record?.uninstalling == true || (record?.pending == nil && !operation.isVerification) {
+            if operation.isUninstall || record?.uninstalling == true || (record?.pending == nil && !operation.isVerification && !operation.isPreDownload) {
                 return .unresumableOperation(operation.id)
             }
         }
@@ -58,6 +59,8 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
             if let operation {
                 switch try await stopGameOperation(operation) {
                 case .resume(let planID): continuation = .init(restartID: id, gameID: operation.id, action: .resume, planID: planID)
+                case .preDownload(let planID, let planDigest):
+                    continuation = .init(restartID: id, gameID: operation.id, action: .preDownload, planID: planID, planDigest: planDigest)
                 case .verify: continuation = .init(restartID: id, gameID: operation.id, action: .verify, planID: nil)
                 case .finished, .failed: break
                 }
@@ -101,6 +104,14 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
                 guard let planID = continuation.planID, record.pending?.planID.rawValue == planID else { return }
                 setLanguageRestart(nil)
                 resumeGame(continuation.gameID)
+            case .preDownload:
+                guard record.installed != nil, record.pending == nil, let planID = continuation.planID,
+                    let digest = continuation.planDigest else { return }
+                let info = try await gameServices.preDownloadInfo(continuation.gameID, refresh: false)
+                guard info.state == .paused, info.planID?.rawValue == planID, info.planDigest == digest else { return }
+                preDownloads[continuation.gameID] = PreDownloadOverlay(info: info)
+                setLanguageRestart(nil)
+                resumePreDownload(continuation.gameID, expectedPlanID: planID, expectedPlanDigest: digest)
             case .verify:
                 guard continuation.planID == nil, record.installed != nil, record.pending == nil else { return }
                 setLanguageRestart(nil)

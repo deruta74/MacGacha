@@ -52,6 +52,8 @@ final class AppModel {
     }
     private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
     private(set) var gameRecords: [String: GameRecord] = [:]
+    var preDownloads: [String: PreDownloadOverlay] = [:]
+    @ObservationIgnored var preDownloadRevisions: [String: UUID] = [:]
     var gameUpdateCheck: [String: GameUpdateCheckResult] = [:]
     @ObservationIgnored var gameUpdateCheckTasks: [String: Task<Void, Never>] = [:]
     var isGameOperationRunning: Bool { gameOperation != nil }
