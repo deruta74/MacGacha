@@ -112,8 +112,9 @@ extension GameLibrary {
             hooks.reach(.afterPreDownloadPlanStored)
         }
         state.completed = false
-        return PreparedPreDownload(state: state, cache: scope.cache, lease: scope.lease, lock: scope.lock,
-            fetcher: settings.fetcher, disk: disk, hooks: hooks, maxConcurrentObjects: settings.maxConcurrentObjects, pipeline: settings.pipeline)
+        return PreparedPreDownload(transfer: PreDownloadTransfer(state: state, cache: scope.cache,
+            fetcher: settings.fetcher, disk: disk, hooks: hooks, maxConcurrentObjects: settings.maxConcurrentObjects, pipeline: settings.pipeline),
+            lease: scope.lease, lock: scope.lock)
     }
 
     private func preDownloadScope(_ game: GameDefinition, action: GameAction = .preDownload) async throws -> PreDownloadScope {

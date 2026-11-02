@@ -6,10 +6,16 @@ import LauncherCore
 import DownloadEngine
 
 struct PreparedPreDownload: Sendable {
-    let state: PreDownloadState
-    let cache: PreDownloadStore
+    let transfer: PreDownloadTransfer
     let lease: GameOperationLease
     let lock: InstallLock
+}
+
+/// Transfer tasks must not capture exclusion ownership: the drain barrier drops
+/// that ownership before waking callers, independently of the task's lifetime.
+struct PreDownloadTransfer: Sendable {
+    let state: PreDownloadState
+    let cache: PreDownloadStore
     let fetcher: ChunkFetcher
     let disk: any DiskSpaceProbe
     let hooks: CrashHooks
@@ -20,6 +26,9 @@ struct PreparedPreDownload: Sendable {
 /// Owns only cache transfer work. There is no normal completion receipt or
 /// installed-record advancement, even when every container has arrived.
 actor PreDownloadSession {
+    /// Scoped diagnostic seam after transfer work and ownership release, before
+    /// the worker task returns. Normal operations leave it unset.
+    @TaskLocal static var afterWorkerRelease: (@Sendable () async -> Void)? = nil
     nonisolated private let queue = DispatchSerialQueue(label: "org.macgacha.predownload")
     nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
     private let library: GameLibrary
@@ -44,16 +53,13 @@ actor PreDownloadSession {
         pulling = true; defer { pulling = false }
         do {
             if worker == nil {
-                // Discovery runs in the consumer task. Cancellation cannot leave
-                // an unregistered lease behind before a producer exists.
-                let prepared = try await library.preparePreDownload(game, resume: resume, expected: expected)
-                try Task.checkCancellation()
-                retention.hold(prepared.lock, owner: owner, retaining: prepared.lease); retention.activate(owner)
+                let prepared = try await prepareTransfer()
                 let retention = retention, owner = owner, channel = channel
                 let task = Task {
-                    defer { retention.release(owner) }
                     do { try await Self.transfer(prepared, channel: channel); channel.finish() }
                     catch { channel.finish(Task.isCancelled || error is CancellationError ? LauncherError.cancelled : error) }
+                    retention.release(owner)
+                    await Self.afterWorkerRelease?()
                 }
                 worker = task; register(task)
             }
@@ -68,7 +74,16 @@ actor PreDownloadSession {
     }
     private func abandon() async { worker?.cancel(); await worker?.value; retention.release(owner) }
 
-    @concurrent private static func transfer(_ prepared: PreparedPreDownload, channel: PipelineChannel) async throws {
+    private func prepareTransfer() async throws -> PreDownloadTransfer {
+        // Discovery runs in the consumer task. Return only transfer inputs, so
+        // this frame's extra lease/lock references are gone before work starts.
+        let prepared = try await library.preparePreDownload(game, resume: resume, expected: expected)
+        try Task.checkCancellation()
+        retention.hold(prepared.lock, owner: owner, retaining: prepared.lease); retention.activate(owner)
+        return prepared.transfer
+    }
+
+    @concurrent private static func transfer(_ prepared: PreDownloadTransfer, channel: PipelineChannel) async throws {
         try await BlockingIO.run {
             var state = prepared.state
             let cache = prepared.cache, plan = state.plan

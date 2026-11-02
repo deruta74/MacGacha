@@ -78,28 +78,36 @@ import TestSupport
     func cancellationJoinsEveryStreamBeforeResumeAndLeavesNoReceiptForBlockedBodies(point: CacheTransferCancellationPoint) async throws {
         let gate = CacheTransferGate(count: 6)
         let between = TestEvent(), nextPull = TestEvent(), pulling = TestEvent()
+        let released = TestEvent(), finishWorker = TestEvent()
         let afterStaging = Mutex(false), events = Mutex([OperationEvent]())
         let fixture = try await CacheTransferFixture(count: 6, http: CacheTransferHTTP(size: 64, gate: gate), maxConcurrentObjects: 2)
         let library = fixture.library
+        let afterRelease: @Sendable () async -> Void = {
+            guard point == .betweenPulls else { return }
+            released.signal()
+            _ = await Task.detached { try await finishWorker.wait() }.result
+        }
         let transfer = Task {
-            try await OperationWork.$observer.withValue({ work in
-                if work == .pipelinePullWaiting && afterStaging.withLock({ $0 }) { pulling.signal() }
-            }) {
-                for try await event in await library.resumePreDownload(GameDefinition.all[0]) {
-                    events.withLock { $0.append(event) }
-                    if point != .bodiesStarted && event == .phase(.staging) {
-                        afterStaging.withLock { $0 = true }; between.signal()
-                        // Cancel between next() calls without the test gate
-                        // itself throwing. Always release/join the detached
-                        // waiter, including on a failed handshake's cancellation.
-                        try await withTaskCancellationHandler {
-                            try await Task.detached { try await nextPull.wait() }.value
-                        } onCancel: { nextPull.signal() }
+            try await PreDownloadSession.$afterWorkerRelease.withValue(afterRelease) {
+                try await OperationWork.$observer.withValue({ work in
+                    if work == .pipelinePullWaiting && afterStaging.withLock({ $0 }) { pulling.signal() }
+                }) {
+                    for try await event in await library.resumePreDownload(GameDefinition.all[0]) {
+                        events.withLock { $0.append(event) }
+                        if point != .bodiesStarted && event == .phase(.staging) {
+                            afterStaging.withLock { $0 = true }; between.signal()
+                            // Cancel between next() calls without the test gate
+                            // itself throwing. Always release/join the detached
+                            // waiter, including on a failed handshake's cancellation.
+                            try await withTaskCancellationHandler {
+                                try await Task.detached { try await nextPull.wait() }.value
+                            } onCancel: { nextPull.signal() }
+                        }
                     }
                 }
             }
         }
-        defer { transfer.cancel(); nextPull.signal(); gate.releaseAll() }
+        defer { transfer.cancel(); nextPull.signal(); finishWorker.signal(); gate.releaseAll() }
         try await cacheTransferHandshake(gate.started[1], transfer: transfer, gate: gate)
         if point != .bodiesStarted { try await cacheTransferHandshake(between, transfer: transfer, gate: gate) }
         if point == .pendingPull {
@@ -122,6 +130,12 @@ import TestSupport
             catch { #expect(error as? LauncherError == .cancelled) }
         }
         #expect(!events.withLock { $0.contains(.phase(.completed)) })
+        if point == .betweenPulls {
+            try await cacheTransferHandshake(released, transfer: transfer, gate: gate)
+        }
+        // AppModel joins readers after termination. A completed drain must also
+        // release exclusion, even while the worker's task is still returning.
+        try await library.waitForPreDownloadDrain("genshin")
         try await library.waitUntilIdle("genshin")
         #expect(gate.active == 0)
         let paused = try #require(try fixture.cache.load())
@@ -129,6 +143,7 @@ import TestSupport
         let restart = fixture.restarted(http: CacheTransferHTTP(size: 64, gate: nil))
         for try await _ in await restart.resumePreDownload(GameDefinition.all[0]) {}
         #expect(try fixture.cache.load()?.completed == true)
+        finishWorker.signal()
     }
 
     @Test(arguments: ["preDownload", "resumePreDownload", "update", "resume", "runnerResume"])
