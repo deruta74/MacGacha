@@ -22,7 +22,7 @@ public enum SpaceBudget {
         let requested = files.map { Set($0.map(\.path)) }
         let remaining = outstanding.filter { requested?.contains($0.path) ?? true }
         let selected = Set(remaining.map(\.path))
-        var external = Set<String>()
+        var external = Set(plan.files.compactMap { $0.recipe?.containerID })
         for file in outstanding where !selected.contains(file.path) { external.formUnion(references(file)) }
         let objects = try networkObjectIDs(files: remaining, plan: plan, state: state, fs: fs)
         let network = try transferBytes(objects: objects, plan: plan)
@@ -74,6 +74,7 @@ public enum SpaceBudget {
         let layout = StagingLayout(id: plan.id)
         var needed = Set<String>()
         for file in files {
+            if let recipe = file.recipe { needed.insert(recipe.containerID); continue }
             for extent in file.extents {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 switch extent.source {
@@ -96,6 +97,7 @@ public enum SpaceBudget {
 
     package static func references(_ file: FileTask) -> Set<String> {
         var ids = Set<String>()
+        if let recipe = file.recipe { ids.insert(recipe.containerID) }
         for extent in file.extents {
             if case .chunk(let id) = extent.source { ids.insert(id) }
             if let fallback = extent.fallbackChunkID { ids.insert(fallback) }

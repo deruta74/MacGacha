@@ -9,6 +9,9 @@ package enum OperationWork: Hashable, Sendable {
 
     @TaskLocal package static var observer: (@Sendable (OperationWork) -> Void)? = nil
 
+    /// One observation per full object digest pass, including streaming fetches.
+    @TaskLocal package static var objectHashObserver: (@Sendable (String) -> Void)? = nil
+
     @TaskLocal package static var progressClock: (@Sendable () -> ContinuousClock.Instant)? = nil
 
     @inline(__always) static func record(_ work: OperationWork) { observer?(work) }

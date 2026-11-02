@@ -139,6 +139,7 @@ public actor ChunkFetcher {
         }
         try handle.seek(toOffset: UInt64(offset))
         var hasher = object.transferDigest.map { StreamingHasher($0.algorithm) }
+        if hasher != nil { OperationWork.objectHashObserver?(object.id) }
         if offset > 0, hasher != nil {
             let prefix = try fs.openForReading(at: part)
             defer { try? prefix.close() }
@@ -187,7 +188,7 @@ public actor ChunkFetcher {
             throw LauncherError.sizeMismatch(path: object.id, expected: object.transferSize, actual: size)
         }
         if let expected = object.transferDigest {
-            let actual = try await Self.digest(fs: fs, part: part, size: size, algorithm: expected.algorithm)
+            let actual = try await Self.digest(objectID: object.id, fs: fs, part: part, size: size, algorithm: expected.algorithm)
             guard expected == actual else {
                 throw LauncherError.digestMismatch(path: object.id, expected: expected.hex, actual: actual.hex)
             }
@@ -204,10 +205,11 @@ public actor ChunkFetcher {
     @concurrent private static func verifyRecoveredPart(_ object: ChunkObject, fs: ContainedFileSystem, part: SafeRelativePath) async throws -> Bool {
         guard try fs.size(at: part) == object.transferSize else { return false }
         if let digest = object.transferDigest ?? (object.codec == .identity ? object.decodedDigest : nil) {
-            return try await Self.digest(fs: fs, part: part, size: object.transferSize, algorithm: digest.algorithm) == digest
+            return try await Self.digest(objectID: object.id, fs: fs, part: part, size: object.transferSize, algorithm: digest.algorithm) == digest
         }
         let input = try fs.openForReading(at: part)
         defer { try? input.close() }
+        OperationWork.objectHashObserver?(object.id)
         do {
             return try Zstd.decodedDigest(input, encodedSize: object.transferSize, decodedSize: object.decodedSize,
                 algorithm: object.decodedDigest.algorithm) == object.decodedDigest
@@ -219,8 +221,9 @@ public actor ChunkFetcher {
     }
 
     @concurrent
-    private static func digest(fs: ContainedFileSystem, part: SafeRelativePath, size: Int64,
+    private static func digest(objectID: String, fs: ContainedFileSystem, part: SafeRelativePath, size: Int64,
         algorithm: DigestAlgorithm) async throws -> Digest {
+        OperationWork.objectHashObserver?(objectID)
         let span = OperationWork.begin(.hashing); defer { span?.end() }
         let handle = try fs.openForReading(at: part)
         defer { try? handle.close() }

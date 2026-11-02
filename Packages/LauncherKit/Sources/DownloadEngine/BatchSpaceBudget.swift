@@ -5,8 +5,9 @@ import LauncherCore
 
 extension SpaceBudget {
     /// Minimal contiguous batches preserve every local dependency without a
-    /// fallback. Their reservation covers the entire sequence, including output
-    /// kept after commits and parts retained for later batches.
+    /// fallback. Patch plans admit the next batch's primary recipe, then probe
+    /// actual capacity again between commits. Chunk-only plans keep their legacy
+    /// whole-sequence reservation.
     package static func batchedPreflight(plan: InstallPlan, state: JournalState, fs: ContainedFileSystem,
         available: Int64, maxConcurrentObjects: Int = defaultMaxConcurrentObjects, pipeline: PipelineConfiguration = .default) throws -> (batches: [[FileTask]], required: Int64) {
         try plan.validate(supportedCodecs: Set(ChunkCodec.allCases))
@@ -19,6 +20,11 @@ extension SpaceBudget {
         let indexes = Dictionary(uniqueKeysWithValues: remaining.enumerated().map { (batchPathKey($0.element.path), $0.offset) })
         var ends = Array(remaining.indices)
         for (index, file) in remaining.enumerated() {
+            // Keep original patch sources until every dependent output has staged.
+            if let source = file.recipe?.sourcePath {
+                if let earlier = indexes[batchPathKey(source)], earlier < index { ends[earlier] = max(ends[earlier], index) }
+                if stagedKeys.contains(batchPathKey(source)) { ends[0] = max(ends[0], index) }
+            }
             for extent in file.extents {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 if case .local(let source, _) = extent.source, extent.fallbackChunkID == nil {
@@ -36,6 +42,15 @@ extension SpaceBudget {
                 batches.append(pending.filter { selected.contains($0.path) })
             } else { batches.append(Array(remaining[start...end])) }
             start = end + 1
+        }
+        if plan.files.contains(where: { $0.recipe != nil }) {
+            // Fallback extents are conditional: Stager admits them with a live
+            // capacity check if the primary recipe fails. Committed growth and
+            // resident containers already reduce the next probe's free space;
+            // neither replacement nor unlink supplies a forecast credit.
+            let required = try estimate(plan: plan, files: batches[0], state: state, fs: fs,
+                maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline).disk
+            return (batches, required)
         }
         let sequential = try sequencePeak(batches, plan: plan, state: state, fs: fs, limit: maxConcurrentObjects, pipeline: pipeline)
         let whole = try required(plan: plan, state: state, fs: fs, maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline).disk
@@ -73,10 +88,11 @@ extension SpaceBudget {
             newParts[first[id]!].append(id)
             expiredParts[last[id]!].append(id)
         }
+        let containers = Set(plan.files.compactMap { $0.recipe?.containerID })
         for (index, batch) in batches.enumerated() {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let newCosts = Dictionary(uniqueKeysWithValues: newParts[index].map { ($0, costs[$0]!) })
-            let retained = Set(newParts[index].filter { last[$0]! > index })
+            let retained = Set(newParts[index].filter { last[$0]! > index }).union(containers)
             var allocation = PeakAllocation(limit: limit, retainedObjects: retained, pipeline: pipeline)
             for file in batch where !state.stagedFiles.contains(file.path) { try allocation.append(file, costs: newCosts) }
             let batchDecoded = try batch.filter { !state.stagedFiles.contains($0.path) }.reduce(Int64(0)) { try adding($0, $1.size) }
@@ -91,7 +107,7 @@ extension SpaceBudget {
                 // Only the live disk probe may report that capacity as freed.
             }
             for id in newParts[index] { growth = try adding(growth, costs[id]!) }
-            for id in expiredParts[index] { growth -= costs[id]! }
+            for id in expiredParts[index] where !containers.contains(id) { growth -= costs[id]! }
         }
         peak = max(peak, try adding(adding(decoded, largestBatchParts), margin))
         return peak

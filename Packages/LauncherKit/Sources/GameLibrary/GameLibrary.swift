@@ -280,10 +280,43 @@ public actor GameLibrary {
     private func updateStream(_ game: GameDefinition, record: GameRecord, installed: InstalledBuild, target: LibraryTarget,
         kind: PendingOperation.Kind, approved: Bool, lease: GameOperationLease) async throws -> LibraryPrepared {
         let snapshot = InstalledSnapshot(categories: try await planned(installed.categories, game: game))
-        let plan = try SophonPlanner.plan(id: planID(game, kind: kind, build: target.build, categories: target.categories), target: target.categories, installed: snapshot)
+        let id = try planID(game, kind: kind, build: target.build, categories: target.categories)
+        let patch = kind == .update ? try await patchPlan(game, id: id, target: target, installed: installed, snapshot: snapshot) : nil
+        let plan = try patch ?? SophonPlanner.plan(id: id, target: target.categories, installed: snapshot)
         return LibraryPrepared(lease: lease, stream: await runner.start(game.id, record: record, plan: plan, kind: kind,
             target: target.build, approved: approved, lease: lease, managedPaths: target.managedPaths,
                 reservedLocations: [paths.root, paths.runtimes]))
+    }
+
+    private func patchPlan(_ game: GameDefinition, id: SafeIdentifier, target: LibraryTarget,
+        installed: InstalledBuild, snapshot: InstalledSnapshot) async throws -> InstallPlan? {
+        guard let branch = target.branch, branch.diffTags.contains(installed.tag) else { return nil }
+        do {
+            guard try await api.config(biz: game.biz).enableLdiff else { return nil }
+            let build = try await api.patchBuild(branch)
+            guard build.tag == target.build.tag, build.buildID == target.build.buildID else {
+                throw LauncherError.io("patch target changed")
+            }
+            var available: [String: PatchBuildCategory] = [:]
+            for category in build.categories {
+                guard available.updateValue(category, forKey: category.id) == nil else { throw LauncherError.io("duplicate patch category") }
+            }
+            var selected: [PlannedPatchCategory] = []
+            for full in target.categories {
+                guard let category = available[full.category.id], category.matchingField == full.category.matchingField else {
+                    throw LauncherError.io("missing patch category")
+                }
+                let manifest = try await api.patchManifest(category).manifest
+                selected.append(PlannedPatchCategory(category: category, manifest: manifest))
+            }
+            try Task.checkCancellation()
+            return try SophonPlanner.patchPlan(id: id, target: target.categories, patch: selected, installed: snapshot, sourceTag: installed.tag)
+        } catch {
+            if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled { throw LauncherError.cancelled }
+            // Discovery is optional. Only a fully validated patch plan can
+            // replace the existing chunk route; resume never enters this path.
+            return nil
+        }
     }
 
     private func verifyAndRun(_ game: GameDefinition, record: GameRecord, target: LibraryTarget, kind: PendingOperation.Kind,
@@ -320,7 +353,7 @@ public actor GameLibrary {
         let build = try await api.build(branch, tag: tag)
         let selected = try SophonPlanner.selectCategories(branch, build: build, voices: voices)
         return LibraryTarget(build: InstalledBuild(tag: build.tag, buildID: build.buildID, categories: selected, voices: voices),
-            categories: try await planned(selected, game: game))
+            categories: try await planned(selected, game: game), branch: branch)
     }
 
     private func branch(_ game: GameDefinition, cachedFallback: Bool) async throws -> GameBranch {
@@ -415,6 +448,10 @@ public actor GameLibrary {
 private struct LibraryTarget: Sendable {
     let build: InstalledBuild
     let categories: [PlannedCategory]
+    let branch: GameBranch?
+    init(build: InstalledBuild, categories: [PlannedCategory], branch: GameBranch? = nil) {
+        self.build = build; self.categories = categories; self.branch = branch
+    }
     var managedPaths: Set<SafeRelativePath> { Set(categories.flatMap { $0.manifest.files.map(\.path) }) }
 }
 fileprivate struct LibraryPrepared: Sendable { let lease: GameOperationLease; let stream: AsyncThrowingStream<OperationEvent, any Error> }

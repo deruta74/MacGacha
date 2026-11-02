@@ -20,8 +20,8 @@ public enum HDiff13 {
         }
     }
 
-    public static func apply(old: FileRange, patch: FileRange, expectedSize: Int64, output: FileHandle) async throws {
-        try await apply(old: old, patch: patch, expectedSize: expectedSize, output: output, onStep: { _ in })
+    public static func apply(old: FileRange, patch: FileRange, expectedSize: Int64, output: FileHandle, fileOps: any FileOps = SystemFileOps()) async throws {
+        try await apply(old: old, patch: patch, expectedSize: expectedSize, output: output, fileOps: fileOps, onStep: { _ in })
     }
 
     enum Step: Sendable { case readOld, readPatch, writeOutput }
@@ -31,7 +31,7 @@ public enum HDiff13 {
         var output = 16 << 10
     }
     static func apply(old: FileRange, patch: FileRange, expectedSize: Int64, output: FileHandle,
-        buffers: BufferSizes = BufferSizes(), onStep: @escaping @Sendable (Step) -> Void) async throws {
+        fileOps: any FileOps = SystemFileOps(), buffers: BufferSizes = BufferSizes(), onStep: @escaping @Sendable (Step) -> Void) async throws {
         do {
             try await BlockingIO.run {
                 guard (1...(64 << 10)).contains(buffers.read), (512...(16 << 10)).contains(buffers.output) else {
@@ -51,7 +51,7 @@ public enum HDiff13 {
                     throw LauncherError.io("HDiff requires distinct regular files")
                 }
                 try checkSize(old, info: oldInfo); try checkSize(patch, info: patchInfo)
-                let context = HDiffContext(old: old, oldFile: oldFile, patch: patch, patchFile: patchFile, output: output, onStep: onStep)
+                let context = HDiffContext(old: old, oldFile: oldFile, patch: patch, patchFile: patchFile, output: output, fileOps: fileOps, onStep: onStep)
                 var callbacks = MGHDiffCallbacks(context: Unmanaged.passUnretained(context).toOpaque(),
                     read_old: { context, position, bytes, count in
                         guard let context, let bytes else { return 0 }
@@ -103,11 +103,12 @@ public enum HDiff13 {
 private final class HDiffContext {
     let old: HDiff13.FileRange, patch: HDiff13.FileRange
     let oldFile: FileHandle, patchFile: FileHandle, output: FileHandle
+    let fileOps: any FileOps
     let onStep: @Sendable (HDiff13.Step) -> Void
     var error: LauncherError?
-    init(old: HDiff13.FileRange, oldFile: FileHandle, patch: HDiff13.FileRange, patchFile: FileHandle, output: FileHandle,
+    init(old: HDiff13.FileRange, oldFile: FileHandle, patch: HDiff13.FileRange, patchFile: FileHandle, output: FileHandle, fileOps: any FileOps,
         onStep: @escaping @Sendable (HDiff13.Step) -> Void) {
-        self.old = old; self.oldFile = oldFile; self.patch = patch; self.patchFile = patchFile; self.output = output; self.onStep = onStep
+        self.old = old; self.oldFile = oldFile; self.patch = patch; self.patchFile = patchFile; self.output = output; self.fileOps = fileOps; self.onStep = onStep
     }
     func read(_ step: HDiff13.Step, _ position: UInt64, _ bytes: UnsafeMutablePointer<UInt8>, _ count: Int) -> Int32 {
         let range = step == .readOld ? old : patch, file = step == .readOld ? oldFile : patchFile
@@ -117,17 +118,21 @@ private final class HDiffContext {
         }
     }
     func write(_ position: UInt64, _ bytes: UnsafePointer<UInt8>, _ count: Int) -> Int32 {
-        transfer(.writeOutput, count: count) { done, size in pwrite(output.fileDescriptor, bytes + done, size, Int64(position) + Int64(done)) }
+        transfer(.writeOutput, count: count) { done, size in
+            try fileOps.write(output.fileDescriptor, bytes: UnsafeRawBufferPointer(start: bytes + done, count: size), at: Int64(position) + Int64(done))
+        }
     }
-    private func transfer(_ step: HDiff13.Step, count: Int, operation: (Int, Int) -> Int) -> Int32 {
+    private func transfer(_ step: HDiff13.Step, count: Int, operation: (Int, Int) throws -> Int) -> Int32 {
         guard error == nil else { return 0 }
         onStep(step)
         var done = 0
         while done < count {
             guard !Task.isCancelled else { error = .cancelled; return 0 }
-            let result = operation(done, min(64 << 10, count - done))
+            let result: Int
+            do { result = try operation(done, min(64 << 10, count - done)) }
+            catch { self.error = (LauncherError.normalizingFileSystemError(error) as? LauncherError) ?? .io("Cannot transfer HDiff file bytes"); return 0 }
             if result < 0 && errno == EINTR { continue }
-            guard result > 0 else { error = .io("Cannot transfer HDiff file bytes"); return 0 }
+            guard result > 0, result <= min(64 << 10, count - done) else { error = .io("Cannot transfer HDiff file bytes"); return 0 }
             done += result
         }
         return 1
