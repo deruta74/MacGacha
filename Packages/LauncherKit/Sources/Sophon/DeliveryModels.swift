@@ -11,10 +11,28 @@ public struct GameBranch: Sendable, Codable {
     public let branch: String
     public let tag: String
     public let categories: [BranchCategory]
-    public init(gameID: String, biz: String, packageID: String, password: String, branch: String, tag: String, categories: [BranchCategory]) {
+    public let diffTags: [String]
+    public let requiredClientVersion: String
+    public init(gameID: String, biz: String, packageID: String, password: String, branch: String, tag: String, categories: [BranchCategory],
+        diffTags: [String] = [], requiredClientVersion: String = "") {
         self.gameID = gameID; self.biz = biz; self.packageID = packageID; self.password = password
         self.branch = branch; self.tag = tag; self.categories = categories
+        self.diffTags = diffTags; self.requiredClientVersion = requiredClientVersion
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case gameID, biz, packageID, password, branch, tag, categories, diffTags, requiredClientVersion
+    }
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(gameID: try c.decode(String.self, forKey: .gameID), biz: try c.decode(String.self, forKey: .biz),
+            packageID: try c.decode(String.self, forKey: .packageID), password: try c.decode(String.self, forKey: .password),
+            branch: try c.decode(String.self, forKey: .branch), tag: try c.decode(String.self, forKey: .tag),
+            categories: try c.decode([BranchCategory].self, forKey: .categories),
+            diffTags: try c.decodeIfPresent([String].self, forKey: .diffTags) ?? [],
+            requiredClientVersion: try c.decodeIfPresent(String.self, forKey: .requiredClientVersion) ?? "")
+    }
+
 }
 
 public struct BranchCategory: Sendable, Codable, Hashable {
@@ -30,8 +48,17 @@ public struct BranchCategory: Sendable, Codable, Hashable {
 public struct GameConfig: Sendable, Codable {
     public let installationDir: SafeRelativePath
     public let executable: SafeRelativePath
-    public init(installationDir: SafeRelativePath, executable: SafeRelativePath) {
-        self.installationDir = installationDir; self.executable = executable
+    public let enableLdiff: Bool
+    public init(installationDir: SafeRelativePath, executable: SafeRelativePath, enableLdiff: Bool = false) {
+        self.installationDir = installationDir; self.executable = executable; self.enableLdiff = enableLdiff
+    }
+
+    private enum CodingKeys: String, CodingKey { case installationDir, executable, enableLdiff }
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(installationDir: try c.decode(SafeRelativePath.self, forKey: .installationDir),
+            executable: try c.decode(SafeRelativePath.self, forKey: .executable),
+            enableLdiff: try c.decodeIfPresent(Bool.self, forKey: .enableLdiff) ?? false)
     }
 }
 

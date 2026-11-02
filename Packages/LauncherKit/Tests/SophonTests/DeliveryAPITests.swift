@@ -33,6 +33,52 @@ import TestSupport
         #expect(try await DeliveryAPI(http: http).branch(biz: "test_global").branch == "main")
     }
 
+    @Test func decodesBothBranchesAndSupportMetadata() async throws {
+        let future: [String: Any] = ["package_id": "future-package", "password": "future-password",
+            "branch": "predownload", "tag": "2.0.0", "diff_tags": ["1.2.3", "1.2.2"],
+            "required_client_version": "1.16.0", "categories": []]
+        let http = deliveryHTTP(branches: branchesJSON(preDownload: future))
+        let result = try await DeliveryAPI(http: http).branches(biz: "test_global")
+        #expect(result.main.tag == "1.2.3")
+        #expect(result.main.diffTags.isEmpty)
+        let pre = try #require(result.preDownload)
+        #expect(pre.gameID == result.main.gameID)
+        #expect(pre.biz == result.main.biz)
+        #expect(pre.packageID == "future-package")
+        #expect(pre.diffTags == ["1.2.3", "1.2.2"])
+        #expect(pre.requiredClientVersion == "1.16.0")
+        _ = try await DeliveryAPI(http: http).build(pre, tag: pre.tag)
+        #expect(URLComponents(url: try #require(http.requests.last), resolvingAgainstBaseURL: false)?
+            .queryItems?.contains { $0.name == "tag" } == false)
+    }
+
+    @Test func absentPreDownloadAndLegacySnapshotsHaveSafeDefaults() async throws {
+        var payload = try #require(JSONSerialization.jsonObject(with: branchesJSON()) as? [String: Any])
+        var data = payload["data"] as! [String: Any]
+        var entries = data["game_branches"] as! [[String: Any]]
+        entries[1].removeValue(forKey: "pre_download")
+        data["game_branches"] = entries; payload["data"] = data
+        let result = try await DeliveryAPI(http: deliveryHTTP(branches: json(payload))).branches(biz: "test_global")
+        #expect(result.preDownload == nil)
+        var snapshot = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(result.main)) as? [String: Any])
+        snapshot.removeValue(forKey: "diffTags"); snapshot.removeValue(forKey: "requiredClientVersion")
+        let restored = try JSONDecoder().decode(GameBranch.self, from: json(snapshot))
+        #expect(restored.diffTags.isEmpty)
+        #expect(restored.requiredClientVersion.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func decodesLdiffGate(enabled: Bool) async throws {
+        var payload = try #require(JSONSerialization.jsonObject(with: configJSON()) as? [String: Any])
+        var data = payload["data"] as! [String: Any]
+        var entries = data["launch_configs"] as! [[String: Any]]
+        entries[1]["enable_ldiff"] = enabled
+        data["launch_configs"] = entries; payload["data"] = data
+        #expect(try await DeliveryAPI(http: deliveryHTTP(config: json(payload))).config(biz: "test_global").enableLdiff == enabled)
+        let legacy = Data(#"{"installationDir":"Game","executable":"Game.exe"}"#.utf8)
+        #expect(try JSONDecoder().decode(GameConfig.self, from: legacy).enableLdiff == false)
+    }
+
     @Test func wireBranchStringIsPreserved() async throws {
         let http = deliveryHTTP(branches: branchesJSON(branch: "predownload"))
         #expect(try await DeliveryAPI(http: http).branch(biz: "test_global").branch == "predownload")

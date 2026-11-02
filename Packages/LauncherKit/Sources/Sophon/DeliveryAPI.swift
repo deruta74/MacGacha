@@ -16,15 +16,15 @@ public struct DeliveryAPI: Sendable {
     }
 
     public func branch(biz: String) async throws -> GameBranch {
+        try await branches(biz: biz).main
+    }
+
+    public func branches(biz: String) async throws -> (main: GameBranch, preDownload: GameBranch?) {
         let data: BranchesWire = try await json(endpoint("getGameBranches"))
         guard let entry = data.game_branches.first(where: { $0.game.biz == biz }), let main = entry.main else {
             throw LauncherError.io("delivery branch unavailable")
         }
-        return GameBranch(gameID: entry.game.id, biz: entry.game.biz, packageID: main.package_id,
-            password: main.password, branch: main.branch, tag: main.tag, categories: main.categories.map {
-                BranchCategory(id: $0.category_id, matchingField: $0.matching_field, isAudio: $0.type == "CATEGORY_TYPE_AUDIO",
-                    inFullScenario: $0.scenarios.contains("CATEGORY_SCENARIO_FULL"))
-            })
+        return (main.model(game: entry.game), entry.pre_download?.model(game: entry.game))
     }
 
     public func config(biz: String) async throws -> GameConfig {
@@ -33,7 +33,8 @@ public struct DeliveryAPI: Sendable {
             throw LauncherError.io("delivery config unavailable")
         }
         do {
-            return try GameConfig(installationDir: SafeRelativePath(entry.installation_dir), executable: SafeRelativePath(entry.exe_file_name))
+            return try GameConfig(installationDir: SafeRelativePath(entry.installation_dir), executable: SafeRelativePath(entry.exe_file_name),
+                enableLdiff: entry.enable_ldiff ?? false)
         } catch { throw LauncherError.unsafePath("delivery path") }
     }
 
@@ -41,7 +42,7 @@ public struct DeliveryAPI: Sendable {
         var components = URLComponents(url: region.sophonBuildURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "branch", value: branch.branch),
             URLQueryItem(name: "package_id", value: branch.packageID), URLQueryItem(name: "password", value: branch.password)]
-        if let tag { components.queryItems?.append(URLQueryItem(name: "tag", value: tag)) }
+        if let tag, branch.branch != "predownload" { components.queryItems?.append(URLQueryItem(name: "tag", value: tag)) }
         // Form-query decoders treat '+' as space, although URLComponents leaves it literal.
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let url = components.url else { throw LauncherError.io("invalid delivery request") }
@@ -155,10 +156,19 @@ private struct Envelope<T: Decodable & Sendable>: Decodable, Sendable {
 }
 private struct GameWire: Decodable, Sendable { let id: String; let biz: String }
 private struct BranchesWire: Decodable, Sendable {
-    struct Entry: Decodable, Sendable { let game: GameWire; let main: Main? }
+    struct Entry: Decodable, Sendable { let game: GameWire; let main: Main?; let pre_download: Main? }
     struct Main: Decodable, Sendable {
         let package_id: String; let password: String; let branch: String; let tag: String
         let categories: [Category]
+        let diff_tags: [String]?
+        let required_client_version: String?
+        func model(game: GameWire) -> GameBranch {
+            GameBranch(gameID: game.id, biz: game.biz, packageID: package_id, password: password,
+                branch: branch, tag: tag, categories: categories.map {
+                    BranchCategory(id: $0.category_id, matchingField: $0.matching_field, isAudio: $0.type == "CATEGORY_TYPE_AUDIO",
+                        inFullScenario: $0.scenarios.contains("CATEGORY_SCENARIO_FULL"))
+                }, diffTags: diff_tags ?? [], requiredClientVersion: required_client_version ?? "")
+        }
     }
     struct Category: Decodable, Sendable {
         let category_id: String; let matching_field: String; let type: String; let scenarios: [String]
@@ -166,7 +176,7 @@ private struct BranchesWire: Decodable, Sendable {
     let game_branches: [Entry]
 }
 private struct ConfigsWire: Decodable, Sendable {
-    struct Entry: Decodable, Sendable { let game: GameWire; let installation_dir: String; let exe_file_name: String }
+    struct Entry: Decodable, Sendable { let game: GameWire; let installation_dir: String; let exe_file_name: String; let enable_ldiff: Bool? }
     let launch_configs: [Entry]
 }
 private struct BuildWire: Decodable, Sendable {
