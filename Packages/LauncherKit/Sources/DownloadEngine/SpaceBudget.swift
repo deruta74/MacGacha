@@ -96,6 +96,7 @@ public enum SpaceBudget {
 
     package static func references(_ file: FileTask) -> Set<String> {
         var ids = Set<String>()
+        if let recipe = file.recipe { ids.insert(recipe.containerID) }
         for extent in file.extents {
             if case .chunk(let id) = extent.source { ids.insert(id) }
             if let fallback = extent.fallbackChunkID { ids.insert(fallback) }

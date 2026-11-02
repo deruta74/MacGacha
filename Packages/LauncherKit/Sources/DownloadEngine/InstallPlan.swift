@@ -95,15 +95,17 @@ public struct FileTask: Codable, Sendable, Hashable {
     public let size: Int64
     public let digest: Digest
     public let extents: [Extent]
+    public let recipe: FileRecipe?
 
-    public init(path: SafeRelativePath, size: Int64, digest: Digest, extents: [Extent]) {
+    public init(path: SafeRelativePath, size: Int64, digest: Digest, extents: [Extent], recipe: FileRecipe? = nil) {
         self.path = path
         self.size = size
         self.digest = digest
         self.extents = extents
+        self.recipe = recipe
     }
 
-    private enum CodingKeys: String, CodingKey { case path, size, digest, extents }
+    private enum CodingKeys: String, CodingKey { case path, size, digest, extents, recipe }
     public init(from decoder: any Decoder) throws {
         try self.init(from: decoder, maximumExtents: InstallPlan.maximumExtents)
     }
@@ -112,7 +114,8 @@ public struct FileTask: Codable, Sendable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(path: try c.decode(SafeRelativePath.self, forKey: .path), size: try c.decode(Int64.self, forKey: .size),
             digest: try c.decode(Digest.self, forKey: .digest),
-            extents: try decodeBoundedArray(Extent.self, from: c.superDecoder(forKey: .extents), maximum: maximumExtents, kind: "extents"))
+            extents: try decodeBoundedArray(Extent.self, from: c.superDecoder(forKey: .extents), maximum: maximumExtents, kind: "extents"),
+            recipe: try c.decodeIfPresent(FileRecipe.self, forKey: .recipe))
     }
 }
 
@@ -203,6 +206,28 @@ public struct InstallPlan: Codable, Sendable {
             guard destinations.insert(pathKey(file.path)).inserted else { throw invalidPlan("duplicate file path") }
             guard file.size >= 0 else { throw invalidPlan("negative file size") }
             guard file.size != 0 || file.extents.isEmpty else { throw invalidPlan("empty files must have no extents") }
+            if let recipe = file.recipe {
+                guard let container = objects[recipe.containerID] else { throw invalidPlan("missing recipe container") }
+                guard container.codec == .identity, container.decodedDigest.algorithm == .md5,
+                      container.transferDigest == container.decodedDigest, file.digest.algorithm == .md5 else {
+                    throw invalidPlan("recipe requires a raw MD5 container and target")
+                }
+                let slice = recipe.slice
+                let (end, overflow) = slice.offset.addingReportingOverflow(slice.length)
+                guard slice.offset >= 0, slice.length >= 0, !overflow, end <= container.decodedSize else {
+                    throw invalidPlan("invalid recipe slice")
+                }
+                switch recipe {
+                case .patch(let source, let sourceSize, let sourceDigest, _, _, _):
+                    try validateManifestPath(source)
+                    guard sourceSize >= 0, sourceDigest.algorithm == .md5, slice.length > 0 else {
+                        throw invalidPlan("invalid patch source")
+                    }
+                case .copy:
+                    guard slice.length == file.size else { throw invalidPlan("copy length differs from target") }
+                }
+                referenced.insert(recipe.containerID)
+            }
             var covered: Int64 = 0
             for extent in file.extents {
                 guard extent.fileOffset >= 0, extent.fileOffset == covered, extent.length > 0 else {
@@ -268,7 +293,7 @@ public struct InstallPlan: Codable, Sendable {
 
 private func validateManifestPath(_ path: SafeRelativePath) throws {
     let first = caseFold(path.components[0])
-    guard first != ".macgacha-staging", first != ".macgacha-state.json", first != ".macgacha-receipts" else {
+    guard first != ".macgacha-staging", first != ".macgacha-state.json", first != ".macgacha-receipts", first != ".macgacha-predownload" else {
         throw LauncherError.unsafePath(path.description)
     }
 }
