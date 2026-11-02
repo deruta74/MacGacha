@@ -23,12 +23,16 @@ public actor OperationRunner {
     private let crashHooks: CrashHooks
     private let identityProvider: any FileSystemIdentityProvider
     private let fileOps: any FileOps
+    private let maxConcurrentObjects: Int
+    private let pipeline: PipelineConfiguration
 
     public init(store: GameRecordStore, fetcher: ChunkFetcher, disk: any DiskSpaceProbe, log: EventLog?,
         crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(),
-        identityProvider: any FileSystemIdentityProvider = SystemFileSystemIdentityProvider()) {
+        identityProvider: any FileSystemIdentityProvider = SystemFileSystemIdentityProvider(),
+        maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, pipeline: PipelineConfiguration = .default) {
         self.store = store; self.fetcher = fetcher; self.disk = disk; self.log = log
         self.crashHooks = crashHooks; self.fileOps = fileOps; self.identityProvider = identityProvider
+        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline
     }
 
     /// managedPaths is the complete target build's path set, including files
@@ -59,7 +63,9 @@ public actor OperationRunner {
         stream(game, request: .start(.fresh(root, executable), plan, .install, target, managedPaths, reservedLocations), approved: approved, lease: lease)
     }
 
-    func preDownloadFetcher() -> ChunkFetcher { fetcher }
+    func preDownloadSettings() -> (fetcher: ChunkFetcher, maxConcurrentObjects: Int, pipeline: PipelineConfiguration) {
+        (fetcher, maxConcurrentObjects, pipeline)
+    }
 
     public func reconcile(_ game: String) async throws -> GameRecord? {
         let lease = try await store.acquireOperationLease(waitForPipelineDrain: true)
@@ -95,7 +101,8 @@ public actor OperationRunner {
 
     private func stream(_ game: String, request: RunnerRequest, approved: Bool, lease: GameOperationLease? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = RunnerSession(game: game, request: request, approved: approved, store: store, fetcher: fetcher,
-            disk: disk, log: log, hooks: crashHooks, fileOps: fileOps, lease: lease, identityProvider: identityProvider)
+            disk: disk, log: log, hooks: crashHooks, fileOps: fileOps, lease: lease, identityProvider: identityProvider,
+            maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
 }
@@ -128,6 +135,8 @@ private actor RunnerSession {
     private let hooks: CrashHooks
     private let identityProvider: any FileSystemIdentityProvider
     private let fileOps: any FileOps
+    private let maxConcurrentObjects: Int
+    private let pipeline: PipelineConfiguration
     private var lease: GameOperationLease?
     private var iterator: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
     private var record: GameRecord?
@@ -138,10 +147,11 @@ private actor RunnerSession {
 
     init(game: String, request: RunnerRequest, approved: Bool, store: GameRecordStore, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe, log: EventLog?, hooks: CrashHooks, fileOps: any FileOps, lease: GameOperationLease?,
-        identityProvider: any FileSystemIdentityProvider) {
+        identityProvider: any FileSystemIdentityProvider, maxConcurrentObjects: Int, pipeline: PipelineConfiguration) {
         self.game = game; self.request = request; self.approved = approved; self.store = store
         self.fetcher = fetcher; self.disk = disk; self.log = log; self.hooks = hooks; self.fileOps = fileOps
         self.lease = lease; self.identityProvider = identityProvider
+        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline
     }
 
     func next() async throws -> OperationEvent? {
@@ -194,6 +204,8 @@ private actor RunnerSession {
 
     /// Returns true only when a previous completed run was reconciled offline.
     private func prepare() async throws -> Bool {
+        try pipeline.validate()
+        guard maxConcurrentObjects > 0 else { throw LauncherError.io("Invalid object concurrency limit") }
         let plan: InstallPlan
         var current: GameRecord
         switch request {
@@ -254,7 +266,7 @@ private actor RunnerSession {
         let engine = try InstallOperation(plan: plan, installRoot: current.installPath, fetcher: fetcher, disk: disk,
             mode: .batched(approved: approved), fileOps: fileOps, crashHooks: hooks, writesCompletionReceipt: true,
             requireRequestedPlan: true, expectedRootIdentity: current.installIdentity, identityProvider: identityProvider,
-            patchApplier: HDiff13PatchApplier(), log: log, objectCache: cache)
+            maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, patchApplier: HDiff13PatchApplier(), log: log, objectCache: cache)
         iterator = engine.run(retaining: lease).makeAsyncIterator()
         return false
     }

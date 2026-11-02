@@ -13,6 +13,8 @@ struct PreparedPreDownload: Sendable {
     let fetcher: ChunkFetcher
     let disk: any DiskSpaceProbe
     let hooks: CrashHooks
+    let maxConcurrentObjects: Int
+    let pipeline: PipelineConfiguration
 }
 
 /// Owns only cache transfer work. There is no normal completion receipt or
@@ -89,23 +91,62 @@ actor PreDownloadSession {
             let downloaded = try state.verified.reduce(Int64(0)) { try SpaceBudget.adding($0, plan.containers[$1]!.object.transferSize) }
             progress.initialize(downloaded: downloaded, total: try plan.bytes, credited: state.verified, predicted: Set(plan.containers.keys))
             channel.send(.phase(.checkingSpace)); channel.send(progress.snapshot())
-            for object in objects where !state.verified.contains(object.id) {
+            let pending = objects.filter { !state.verified.contains($0.id) }
+            var cursor = 0
+            while cursor < pending.count {
                 try Task.checkCancellation()
-                let remaining = try objects.filter { !state.verified.contains($0.id) }.reduce(Int64(0)) { total, object in
+                // No worker is writing between windows: this live capacity
+                // snapshot cannot race truncation or count bytes twice. Reserve
+                // all remaining cache growth, since completed parts stay resident.
+                let remaining = try pending[cursor...].reduce(Int64(0)) { total, object in
                     let size = min(object.transferSize, try cache.fs.size(at: cache.part(object)) ?? 0)
                     return try SpaceBudget.adding(total, object.transferSize - size)
                 }
                 let required = try SpaceBudget.adding(SpaceBudget.margin, remaining), available = try cache.fs.availableBytes(using: prepared.disk)
                 guard available >= required else { throw LauncherError.insufficientSpace(required: required, available: available) }
-                channel.send(.phase(.staging))
-                let part = try cache.part(object)
-                try await prepared.fetcher.fetch(object, fs: cache.fs, part: part) { bytes in
-                    if let snapshot = progress.update(object.id, bytes) { channel.send(snapshot) }
+                if cursor == 0 { channel.send(.phase(.staging)) }
+                // Match normal prefetch bounds, including one oversized object
+                // running alone. Only the concurrency limit's tasks are submitted;
+                // a campaign never creates a task/waiter for every container.
+                let start = cursor
+                var bytes: Int64 = 0
+                while cursor < pending.count, cursor - start < prepared.pipeline.prefetchObjects {
+                    let size = pending[cursor].transferSize
+                    if cursor > start, size > prepared.pipeline.prefetchBytes - min(bytes, prepared.pipeline.prefetchBytes) { break }
+                    bytes = try SpaceBudget.adding(bytes, size); cursor += 1
+                    if bytes >= prepared.pipeline.prefetchBytes { break }
                 }
-                try cache.fs.fullSync(at: part)
-                state.verified.insert(object.id); try cache.save(state)
-                prepared.hooks.reach(.afterPreDownloadObjectStored)
-                _ = progress.update(object.id, object.transferSize); channel.send(progress.snapshot())
+                try await withThrowingTaskGroup(of: ChunkObject.self) { group in
+                    var iterator = pending[start..<cursor].makeIterator()
+                    func submit(_ object: ChunkObject) {
+                        OperationWork.record(.fetchTaskSubmitted)
+                        group.addTask {
+                            defer { OperationWork.record(.fetchTaskFinished) }
+                            return try await BlockingIO.run {
+                                let part = try cache.part(object)
+                                try await prepared.fetcher.fetch(object, fs: cache.fs, part: part) { bytes in
+                                    if let snapshot = progress.update(object.id, bytes) { channel.send(snapshot) }
+                                }
+                                try cache.fs.fullSync(at: part)
+                                return object
+                            }
+                        }
+                    }
+                    for _ in 0..<min(prepared.maxConcurrentObjects, cursor - start) {
+                        if let object = iterator.next() { submit(object) }
+                    }
+                    do {
+                        while let object = try await group.next() {
+                            try Task.checkCancellation()
+                            // Only this coordinator publishes receipts. Each
+                            // worker verified and synced payload before returning.
+                            state.verified.insert(object.id); try cache.save(state)
+                            prepared.hooks.reach(.afterPreDownloadObjectStored)
+                            _ = progress.update(object.id, object.transferSize); channel.send(progress.snapshot())
+                            if let object = iterator.next() { submit(object) }
+                        }
+                    } catch { group.cancelAll(); throw error } // The scope joins every sibling before releasing exclusion.
+                }
             }
             try Task.checkCancellation()
             state.completed = true; try cache.save(state)

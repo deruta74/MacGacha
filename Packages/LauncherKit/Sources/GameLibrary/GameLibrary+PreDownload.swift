@@ -89,6 +89,9 @@ extension GameLibrary {
     }
 
     func preparePreDownload(_ game: GameDefinition, resume: Bool, expected: SafeIdentifier?) async throws -> PreparedPreDownload {
+        let settings = await runner.preDownloadSettings()
+        try settings.pipeline.validate()
+        guard settings.maxConcurrentObjects > 0 else { throw LauncherError.io("Invalid object concurrency limit") }
         let scope = try await preDownloadScope(game)
         defer { withExtendedLifetime(scope) {} }
         var state: PreDownloadState
@@ -109,7 +112,7 @@ extension GameLibrary {
         }
         state.completed = false
         return PreparedPreDownload(state: state, cache: scope.cache, lease: scope.lease, lock: scope.lock,
-            fetcher: await runner.preDownloadFetcher(), disk: disk, hooks: hooks)
+            fetcher: settings.fetcher, disk: disk, hooks: hooks, maxConcurrentObjects: settings.maxConcurrentObjects, pipeline: settings.pipeline)
     }
 
     private func preDownloadScope(_ game: GameDefinition) async throws -> PreDownloadScope {

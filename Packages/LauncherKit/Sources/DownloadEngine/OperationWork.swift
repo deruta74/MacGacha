@@ -14,7 +14,7 @@ package enum OperationWork: Hashable, Sendable {
 
     @TaskLocal package static var progressClock: (@Sendable () -> ContinuousClock.Instant)? = nil
 
-    @inline(__always) static func record(_ work: OperationWork) { observer?(work) }
+    @inline(__always) package static func record(_ work: OperationWork) { observer?(work) }
 
     package enum Phase: String, Sendable { case hashing, assembly }
     @TaskLocal package static var timingObserver: (@Sendable (Phase, Duration) -> Void)? = nil

@@ -1287,10 +1287,20 @@ extension GameLibraryTests {
         #expect(try await f.store.load(game.id) == before)
         let interrupted = try #require(try PreDownloadStore(fs: f.fs).load())
         #expect(!interrupted.verified.isEmpty)
+        // A sibling may have synced its payload before the process exits at
+        // another worker's receipt. Resume must adopt those complete parts too.
+        let cache = try PreDownloadStore(fs: f.fs)
+        let resident = try interrupted.plan.containers.values.filter {
+            try f.fs.size(at: cache.part($0.object)) == $0.object.transferSize
+        }.count
         disk.bytes.withLock { $0 = Int64.max }
-        let start = f.cdn.requestLog.count
-        #expect(try await libraryCollect(await f.library.resumePreDownload(game, expectedPlanID: state.plan.id)).last == .phase(.completed))
-        #expect(f.cdn.requestLog.count - start == state.plan.containers.count - interrupted.verified.count)
+        let start = f.cdn.requestLog.count, hashes = Mutex([String: Int]())
+        let resumed = try await OperationWork.$objectHashObserver.withValue({ id in hashes.withLock { $0[id, default: 0] += 1 } }) {
+            try await libraryCollect(await f.library.resumePreDownload(game, expectedPlanID: state.plan.id))
+        }
+        #expect(resumed.last == .phase(.completed))
+        #expect(f.cdn.requestLog.count - start == state.plan.containers.count - resident)
+        #expect(hashes.withLock { $0.count == state.plan.containers.count && $0.values.allSatisfy { $0 == 1 } })
         #expect(try await f.store.load(game.id) == before)
         try f.assertFiles(1)
     }
