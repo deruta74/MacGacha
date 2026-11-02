@@ -9,7 +9,7 @@ extension LauncherError {
         switch self {
         case .unsafePath: String(localized: "The selected files contain an unsafe path or link. Choose another source.")
         case .invalidDigest: String(localized: "The download information is invalid. Try again after updating MacGacha.")
-        case .sizeMismatch, .digestMismatch: String(localized: "The downloaded files failed verification. Please try again.")
+        case .sizeMismatch, .digestMismatch, .malformedPatch, .unsupportedCompressor: String(localized: "The downloaded files failed verification. Please try again.")
         case .insufficientSpace: String(localized: "There is not enough free disk space. Free some space and try again.")
         case .http: String(localized: "The download server could not complete the request. Please try again later.")
         case .transport: String(localized: "The download could not finish. Check your connection and try again.")

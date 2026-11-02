@@ -7,6 +7,8 @@ public extension LauncherError {
     /// Stable, path-free case names shared by operational logs.
     var logCase: String {
         switch self {
+        case .malformedPatch: "malformedPatch"
+        case .unsupportedCompressor: "unsupportedCompressor"
         case .unsafePath: "unsafePath"
         case .invalidDigest: "invalidDigest"
         case .sizeMismatch: "sizeMismatch"

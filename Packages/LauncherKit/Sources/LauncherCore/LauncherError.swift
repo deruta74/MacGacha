@@ -3,6 +3,8 @@
 import Foundation
 
 public enum LauncherError: Error, Sendable, Equatable {
+    case malformedPatch
+    case unsupportedCompressor
     case unsafePath(String)
     case invalidDigest(String)
     case sizeMismatch(path: String, expected: Int64, actual: Int64)

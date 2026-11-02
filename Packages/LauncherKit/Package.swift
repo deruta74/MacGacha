@@ -40,7 +40,7 @@ let package = Package(
             resources: [.process("Localizable.xcstrings")]),
         .target(name: "Diagnostics", dependencies: ["LauncherCore"]),
         .target(name: "HoYoPlayAPI", dependencies: ["LauncherCore", "DownloadEngine"]),
-        .target(name: "Sophon", dependencies: ["LauncherCore", "DownloadEngine"]),
+        .target(name: "Sophon", dependencies: ["LauncherCore", "DownloadEngine", "CHDiffPatch"]),
         .target(name: "GameLibrary", dependencies: ["LauncherCore", "DownloadEngine", "Sophon"]),
         .target(name: "Launch", dependencies: ["LauncherCore", "DownloadEngine", "RuntimeManager", "GameLibrary"]),
         .target(name: "TestSupport", dependencies: ["LauncherCore", "DownloadEngine", "RuntimeManager", "Launch"]),
