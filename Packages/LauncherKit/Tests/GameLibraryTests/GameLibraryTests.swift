@@ -11,6 +11,103 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
+    @Test func normalUpdateUsesGameAndInstalledVoicePatchRecipes() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        try f.advertise(2, enableLdiff: true, diffTags: ["1.0"], changedVoices: true)
+        try f.advertisePatches(changedVoices: true)
+        let start = f.cdn.requestLog.count
+        #expect(try await libraryCollect(await f.library.update(game, approved: true)).last == .phase(.completed))
+        let requests = f.cdn.requestLog.dropFirst(start).map(\.path)
+        #expect(requests.contains("downloader/sophon_chunk/api/getPatchBuild"))
+        #expect(Set(requests.filter { $0.hasPrefix("patch-manifests/") }) == ["patch-manifests/base", "patch-manifests/extra", "patch-manifests/voice"])
+        #expect(Set(requests.filter { $0.hasPrefix("diffs/") }) == ["diffs/base", "diffs/voice"])
+        #expect(!requests.contains { $0.hasPrefix("chunks/") })
+        for (path, body) in syntheticFiles(2, changedVoices: true) {
+            #expect(try f.fs.readFile(at: SafeRelativePath(path), maxBytes: 100) == Data(body.utf8))
+        }
+        #expect(try await f.store.load(game.id)?.installed?.tag == "2.0")
+    }
+
+    @Test(arguments: [false, true]) func normalUpdateRequiresBothLdiffGates(enableLdiff: Bool) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        try f.advertise(2, enableLdiff: enableLdiff, diffTags: enableLdiff ? ["0.9"] : ["1.0"])
+        let start = f.cdn.requestLog.count
+        #expect(try await libraryCollect(await f.library.update(game, approved: true)).last == .phase(.completed))
+        #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path.hasSuffix("getPatchBuild") })
+        try f.assertFiles(2)
+    }
+
+    @Test(arguments: ["build", "voice", "tag", "build-id", "missing-voice"])
+    func unavailablePatchMetadataUsesChunkUpdate(failure: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        try f.advertise(2, enableLdiff: true, diffTags: ["1.0"])
+        try f.advertisePatches(tag: failure == "tag" ? "other" : "2.0", buildID: failure == "build-id" ? "other" : "build-2",
+            omitVoice: failure == "missing-voice")
+        if failure == "build" { f.cdn.enqueueFault("downloader/sophon_chunk/api/getPatchBuild", .status(503)) }
+        if failure == "voice" { f.cdn.enqueueFault("patch-manifests/voice", .status(503)) }
+        let start = f.cdn.requestLog.count
+        #expect(try await libraryCollect(await f.library.update(game, approved: true)).last == .phase(.completed))
+        let requests = f.cdn.requestLog.dropFirst(start).map(\.path)
+        #expect(requests.contains { $0.hasSuffix("getPatchBuild") })
+        #expect(requests.contains { $0.hasPrefix("chunks/") })
+        #expect(!requests.contains { $0.hasPrefix("diffs/") })
+        try f.assertFiles(2)
+    }
+
+    @Test func patchUpdateResumeUsesSavedRecipesWithoutMetadata() async throws {
+        let disk = LibraryDisk(), f = try LibraryFixture(disk: disk)
+        try f.advertise(1); try await f.installGame()
+        try f.advertise(2, enableLdiff: true, diffTags: ["1.0"]); try f.advertisePatches()
+        disk.bytes.withLock { $0 = 0 }
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.update(game, approved: true)) }
+        let plan = try #require(try await f.store.loadPlan(for: game.id))
+        #expect(plan.files.filter { $0.recipe != nil }.count == 2)
+        // A failed source on resume must select the immutable chunk recipe.
+        try f.fs.writeAtomically(Data("modified".utf8), to: SafeRelativePath("GenshinImpact.exe"))
+        disk.bytes.withLock { $0 = Int64.max }
+        let start = f.cdn.requestLog.count
+        let restarted = f.restarted()
+        #expect(try await libraryCollect(await restarted.resume(game, approved: true)).last == .phase(.completed))
+        let requests = f.cdn.requestLog.dropFirst(start).map(\.path)
+        #expect(!requests.contains { $0.contains("api/") || $0.hasPrefix("patch-manifests/") || $0.hasPrefix("manifests/") })
+        #expect(requests.contains { $0.hasPrefix("chunks/") })
+        try f.assertFiles(2)
+    }
+
+    @Test func cancellationDuringPatchDiscoveryDoesNotPublishOrFallBack() async throws {
+        let gate = LibraryRequestGate(pathSuffix: "getPatchBuild"), f = try LibraryFixture(requestGate: gate)
+        try f.advertise(1); try await f.installGame()
+        try f.advertise(2, enableLdiff: true, diffTags: ["1.0"]); try f.advertisePatches()
+        let start = f.cdn.requestLog.count
+        let update = Task { try await libraryCollect(await f.library.update(game, approved: true)) }
+        defer { update.cancel(); gate.release() }
+        try await gate.waitUntilEntered()
+        update.cancel(); gate.release()
+        await #expect(throws: LauncherError.cancelled) { try await update.value }
+        let record = try #require(try await f.store.load(game.id))
+        #expect(record.pending == nil && record.installed?.tag == "1.0")
+        #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path.hasPrefix("chunks/") || $0.path.hasPrefix("diffs/") })
+    }
+
+    @Test func unavailableLdiffConfigUsesChunkUpdate() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        try f.advertise(2, enableLdiff: true, diffTags: ["1.0"])
+        f.cdn.enqueueFault("hyp/hyp-connect/api/getGameConfigs", .status(503))
+        let start = f.cdn.requestLog.count
+        #expect(try await libraryCollect(await f.library.update(game, approved: true)).last == .phase(.completed))
+        #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path.hasSuffix("getPatchBuild") })
+        try f.assertFiles(2)
+    }
+
+    @Test func voiceChangesUseChunkRouteEvenWhenLdiffIsEligible() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        try f.advertise(1, enableLdiff: true, diffTags: ["1.0"])
+        let start = f.cdn.requestLog.count
+        #expect(try await libraryCollect(await f.library.setVoices(game, [])).last == .phase(.completed))
+        #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path.hasSuffix("getPatchBuild") })
+        #expect(try await f.store.load(game.id)?.installed?.voices.isEmpty == true)
+    }
+
     @Test func fullVerifyEmitsMonotonicByteProgressInsideVerifyingPhase() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         try f.fs.writeAtomically(Data("not part of the manifest".utf8), to: SafeRelativePath("unmanaged.bin"))
@@ -875,17 +972,17 @@ private struct LibraryFixture: ~Copyable {
     func assertFiles(_ version: Int, changedFiles: Int = 1) throws {
         for (path, body) in syntheticFiles(version, changedFiles: changedFiles) { #expect(try fs.readFile(at: SafeRelativePath(path), maxBytes: 100) == Data(body.utf8)) }
     }
-    func advertise(_ version: Int, opaqueIDs: Bool = false, collidingID: Bool = false, buildID: String? = nil, sharedAcrossFiles: Bool = false, changedFiles: Int = 1, games: [GameDefinition] = [game]) throws {
+    func advertise(_ version: Int, opaqueIDs: Bool = false, collidingID: Bool = false, buildID: String? = nil, sharedAcrossFiles: Bool = false, changedFiles: Int = 1, games: [GameDefinition] = [game], enableLdiff: Bool = false, diffTags: [String] = [], changedVoices: Bool = false) throws {
         let groups = [("base", "game"), ("extra", "extra"), ("voice", "en-us")]
         let categories: [[String: Any]] = groups.map { id, matching in ["category_id": id, "matching_field": matching,
             "type": id == "voice" ? "CATEGORY_TYPE_AUDIO" : "CATEGORY_TYPE_RESOURCE", "scenarios": ["CATEGORY_SCENARIO_FULL"]] }
         cdn.serve("hyp/hyp-connect/api/getGameBranches", data: try jsonData(["game_branches": games.map { game in ["game": ["id": "test", "biz": game.biz],
-            "main": ["package_id": "public-package", "password": "public-selector", "branch": "main", "tag": "\(version).0", "categories": categories]] }]))
-        cdn.serve("hyp/hyp-connect/api/getGameConfigs", data: try jsonData(["launch_configs": games.map { game in ["game": ["id": "test", "biz": game.biz], "installation_dir": "TestGame", "exe_file_name": "GenshinImpact.exe"] }]))
+            "main": ["package_id": "public-package", "password": "public-selector", "branch": "main", "tag": "\(version).0", "diff_tags": diffTags, "categories": categories]] }]))
+        cdn.serve("hyp/hyp-connect/api/getGameConfigs", data: try jsonData(["launch_configs": games.map { game in ["game": ["id": "test", "biz": game.biz], "installation_dir": "TestGame", "exe_file_name": "GenshinImpact.exe", "enable_ldiff": enableLdiff] }]))
         var descriptors: [[String: Any]] = []
         for (id, matching) in groups {
             var manifest = ProtobufWriter()
-            for (path, body) in syntheticFiles(version, sharedAcrossFiles: sharedAcrossFiles, changedFiles: changedFiles).sorted(by: { $0.key < $1.key }) {
+            for (path, body) in syntheticFiles(version, sharedAcrossFiles: sharedAcrossFiles, changedFiles: changedFiles, changedVoices: changedVoices).sorted(by: { $0.key < $1.key }) {
                 let belongs = id == "base" ? (path == "GenshinImpact.exe" || (path.hasPrefix("data/") && Int(path.suffix(2))! < 10)) :
                     id == "extra" ? (path == "shared.bin" || (path.hasPrefix("data/") && Int(path.suffix(2))! >= 10)) : (path.hasPrefix("audio/") || path == "shared.bin")
                 if !belongs { continue }
@@ -917,10 +1014,53 @@ private struct LibraryFixture: ~Copyable {
         }
         cdn.serve("downloader/sophon_chunk/api/getBuild", data: try jsonData(["build_id": buildID ?? "build-\(version)", "tag": "\(version).0", "manifests": descriptors]))
     }
+
+    func advertisePatches(tag: String = "2.0", buildID: String = "build-2", omitVoice: Bool = false, changedVoices: Bool = false) throws {
+        let old = syntheticFiles(1), target = syntheticFiles(2, changedVoices: changedVoices)
+        var descriptors: [[String: Any]] = []
+        for (id, matching, paths) in [("base", "game", ["GenshinImpact.exe", "data/01"]), ("extra", "extra", []), ("voice", "en-us", ["audio/en1"])] {
+            if omitVoice && id == "voice" { continue }
+            var manifest = ProtobufWriter(), container = Data("pad".utf8)
+            var patchEntries: [(ProtobufWriter, ProtobufWriter)] = []
+            for path in paths {
+                // A patch exercises the production decoder wiring; copies cover
+                // the separate raw-slice route and installed voice selection.
+                let patched = path == "GenshinImpact.exe", bytes = Data(target[path]!.utf8)
+                let source = Data(old[path]!.utf8)
+                let payload = patched ? Data("HDIFF13&\0".utf8)
+                    + Data([UInt8(bytes.count), UInt8(source.count), 0, 0, 0, 1, 0, 0, 0, UInt8(bytes.count), 0, UInt8(bytes.count - 1)]) + bytes : bytes
+                let offset = container.count; container.append(payload)
+                var instruction = ProtobufWriter()
+                instruction.string(1, id); instruction.string(2, "1.0"); instruction.string(3, "build-1")
+                // Each category has one shared container. Fill geometry after
+                // collecting its slices so every instruction binds the same MD5.
+                var file = ProtobufWriter(); file.string(1, path); file.varint(2, UInt64(bytes.count)); file.string(3, md5Library(bytes).hex)
+                instruction.varint(6, UInt64(offset)); instruction.varint(7, UInt64(payload.count))
+                if patched { instruction.string(8, path); instruction.varint(9, UInt64(source.count)); instruction.string(10, md5Library(source).hex) }
+                // Keep intermediate messages until the container is complete.
+                patchEntries.append((file, instruction))
+            }
+            for (var file, var instruction) in patchEntries {
+                instruction.varint(4, UInt64(container.count)); instruction.string(5, md5Library(container).hex)
+                var info = ProtobufWriter(); info.string(1, "1.0"); info.bytes(2, instruction.data)
+                file.bytes(4, info.data); manifest.bytes(1, file.data)
+            }
+            patchEntries.removeAll()
+            let frame = rawZstd(manifest.data)
+            cdn.serve("patch-manifests/\(id)", data: frame); cdn.serve("diffs/\(id)", data: container)
+            let descriptor: [String: Any] = ["url_prefix": "https://cdn.hoyoverse.com/patch-manifests", "url_suffix": "", "compression": 1, "encryption": 0, "password": ""]
+            var diff = descriptor; diff["url_prefix"] = "https://cdn.hoyoverse.com/diffs"; diff["compression"] = 0
+            descriptors.append(["category_id": id, "matching_field": matching, "manifest": ["id": id, "checksum": md5Library(manifest.data).hex,
+                "compressed_size": String(frame.count), "uncompressed_size": String(manifest.data.count)],
+                "manifest_download": descriptor, "diff_download": diff, "stats": [:]])
+        }
+        cdn.serve("downloader/sophon_chunk/api/getPatchBuild", data: try jsonData(["build_id": buildID, "patch_id": "patch-2", "tag": tag, "manifests": descriptors]))
+    }
 }
-private func syntheticFiles(_ version: Int, sharedAcrossFiles: Bool = false, changedFiles: Int = 1) -> [String: String] {
+private func syntheticFiles(_ version: Int, sharedAcrossFiles: Bool = false, changedFiles: Int = 1, changedVoices: Bool = false) -> [String: String] {
     var files = ["GenshinImpact.exe": "commonv\(version)!!!", "shared.bin": "shared-resource", "audio/en1": "voice-1", "audio/en2": "voice-2"]
     for i in 1...17 { files[String(format: "data/%02d", i)] = i == 1 ? "edit-\(version)" : (i <= changedFiles ? "edit-\(version)-\(i)" : "file-\(i)") }
+    if changedVoices { files["audio/en1"] = "voice-1-v\(version)" }
     if sharedAcrossFiles {
         files["data/01"] = "common" + String(repeating: "A", count: 100)
         files["data/02"] = "common" + String(repeating: "B", count: 100)
@@ -984,7 +1124,9 @@ private final class LibraryRequestGate: Sendable {
 }
 private struct LibraryGatedHTTP: HTTPClient {
     func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
-        throw LauncherError.io("Unexpected POST")
+        let response = try await cdn.post(url)
+        await gate.pause(url)
+        return response
     }
 
     let cdn: MockCDN

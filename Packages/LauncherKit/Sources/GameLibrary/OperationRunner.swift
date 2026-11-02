@@ -5,6 +5,7 @@ import Dispatch
 import Foundation
 import LauncherCore
 import DownloadEngine
+import Sophon
 
 public enum RunOutcome: Sendable, Equatable { case completed, paused }
 
@@ -245,7 +246,8 @@ private actor RunnerSession {
         record = current
         let engine = try InstallOperation(plan: plan, installRoot: current.installPath, fetcher: fetcher, disk: disk,
             mode: .batched(approved: approved), fileOps: fileOps, crashHooks: hooks, writesCompletionReceipt: true,
-            requireRequestedPlan: true, expectedRootIdentity: current.installIdentity, identityProvider: identityProvider)
+            requireRequestedPlan: true, expectedRootIdentity: current.installIdentity, identityProvider: identityProvider,
+            patchApplier: HDiff13PatchApplier(), log: log)
         iterator = engine.run(retaining: lease).makeAsyncIterator()
         return false
     }
