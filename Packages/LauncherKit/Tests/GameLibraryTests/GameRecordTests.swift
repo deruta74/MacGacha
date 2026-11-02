@@ -48,11 +48,11 @@ import TestSupport
         }
     }
 
-    @Test func pendingAllowsOnlyResumeAndUninstall() throws {
+    @Test func pendingAllowsResumeUninstallAndCacheDeletion() throws {
         var record = sampleRecord(); record.pending = samplePending()
         for action in actions {
             switch action {
-            case .resume, .uninstall: try GameRecordRules.check(action, record: record, others: [])
+            case .resume, .uninstall, .deletePreDownload: try GameRecordRules.check(action, record: record, others: [])
             default:
                 #expect(throws: LauncherError.busy("finish or uninstall the paused operation first")) {
                     try GameRecordRules.check(action, record: record, others: [])
@@ -74,7 +74,7 @@ import TestSupport
     }
 
     @Test func updateRequiresInstalledAndNoPending() throws {
-        for action in [GameAction.update, .repair, .voices] {
+        for action in [GameAction.update, .repair, .voices, .preDownload] {
             #expect(throws: LauncherError.io("game is not installed")) { try GameRecordRules.check(action, record: nil, others: []) }
             var record = sampleRecord(); record.installed = nil
             #expect(throws: LauncherError.io("game is not installed")) { try GameRecordRules.check(action, record: record, others: []) }
@@ -82,6 +82,19 @@ import TestSupport
             try GameRecordRules.check(action, record: record, others: [])
             record.pending = samplePending()
             #expect(throws: LauncherError.busy("finish or uninstall the paused operation first")) { try GameRecordRules.check(action, record: record, others: []) }
+        }
+    }
+
+    @Test func cacheDeletionRequiresInstalledRecordEvenWithPendingOperation() throws {
+        #expect(throws: LauncherError.io("game is not installed")) {
+            try GameRecordRules.check(.deletePreDownload, record: nil, others: [])
+        }
+        var record = sampleRecord(); record.installed = nil
+        for pending in [false, true] {
+            record.pending = pending ? samplePending() : nil
+            #expect(throws: LauncherError.io("game is not installed")) {
+                try GameRecordRules.check(.deletePreDownload, record: record, others: [])
+            }
         }
     }
 
@@ -483,7 +496,7 @@ import TestSupport
     }
 }
 
-private let actions: [GameAction] = [.install, .adopt, .update, .repair, .voices, .resume, .uninstall]
+private let actions: [GameAction] = [.install, .adopt, .update, .repair, .voices, .resume, .uninstall, .preDownload, .deletePreDownload]
 private func recordDigest(_ text: String, algorithm: DigestAlgorithm = .sha256) -> Digest {
     var h = StreamingHasher(algorithm); h.update(Data(text.utf8)); return h.finalize()
 }

@@ -5,7 +5,7 @@ import Foundation
 import Synchronization
 import Testing
 import LauncherCore
-import DownloadEngine
+@testable import DownloadEngine
 import Sophon
 import TestSupport
 @testable import GameLibrary
@@ -1335,11 +1335,63 @@ extension GameLibraryTests {
         await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.update(game, approved: true)) }
         #expect(try cache.load() == before)
         #expect(try before.plan.containers.values.map { try f.fs.readFile(at: cache.part($0.object), maxBytes: 1 << 20) } == parts)
-        disk.bytes.withLock { $0 = Int64.max }
+        let pending = try #require(try await f.store.load(game.id)?.pending)
+        let plan = try #require(try await f.store.loadPlan(for: game.id))
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.preDownload(game)) }
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.resumePreDownload(game)) }
+        #expect(try await f.library.preDownloadInfo(game).canDelete)
+        try await f.library.deletePreDownload(game)
+        #expect(try f.fs.itemType(at: PreDownloadStore.directory) == nil)
+        #expect(try await f.store.load(game.id)?.pending == pending)
+        #expect(try await f.store.loadPlan(for: game.id)?.planDigest == plan.planDigest)
+        try f.assertFiles(1)
+        // Deletion supplies no predicted APFS credit. A live probe still at
+        // zero must refuse resume; a later observed capacity permits it.
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.resume(game, approved: true)) }
+        disk.bytes.withLock { $0 = SpaceBudget.margin + 4_096 }
         let start = f.cdn.requestLog.count
         #expect(try await libraryCollect(await f.library.resume(game, approved: true)).last == .phase(.completed))
         #expect(f.cdn.requestLog.dropFirst(start).contains { $0.path.hasPrefix("chunks/") })
         #expect(try cache.load() == nil)
+    }
+
+    @Test func deletingCacheDuringPausedPatchUpdateRefetchesUnmovedContainersFromSavedURLs() async throws {
+        let disk = LibraryDisk(), f = try LibraryFixture(disk: disk)
+        try f.advertise(1); try await f.installGame(); try f.advertisePreDownload()
+        _ = try await libraryCollect(await f.library.preDownload(game))
+        let cache = try PreDownloadStore(fs: f.fs)
+        var saved = try #require(try cache.load())
+        saved.completed = false; saved.verified = []; try cache.save(saved)
+        for entry in saved.plan.containers.values {
+            let bytes = try f.fs.readFile(at: cache.part(entry.object), maxBytes: 1 << 20)
+            try f.fs.writeAtomically(Data(bytes.prefix(1)), to: cache.part(entry.object))
+        }
+        try f.advertise(2, enableLdiff: true, diffTags: ["1.0"]); try f.advertisePatches()
+        disk.bytes.withLock { $0 = 0 }
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.update(game, approved: true)) }
+        let pending = try #require(try await f.store.load(game.id)?.pending)
+        let plan = try #require(try await f.store.loadPlan(for: game.id))
+        #expect(plan.files.contains { if case .patch = $0.recipe { true } else { false } })
+        let ids = Set(plan.files.compactMap { $0.recipe?.containerID })
+        try #require(!ids.isEmpty)
+        for id in ids {
+            let object = try #require(plan.objects[id])
+            #expect(try f.fs.size(at: cache.part(object)) == 1)
+            #expect(try f.fs.size(at: StagingLayout(id: plan.id).object(object)) == nil)
+            #expect(object.urls.first?.path == "/diffs/base")
+        }
+        try await f.library.deletePreDownload(game)
+        #expect(try f.fs.itemType(at: PreDownloadStore.directory) == nil)
+        #expect(try await f.store.load(game.id)?.pending == pending)
+        #expect(try await f.store.loadPlan(for: game.id)?.planDigest == plan.planDigest)
+        try f.assertFiles(1)
+        try plan.validate(supportedCodecs: ChunkCodec.supportedCodecs)
+        let offline = MockCDN(), restart = f.restarted(http: offline), start = f.cdn.requestLog.count
+        disk.bytes.withLock { $0 = SpaceBudget.margin + 4_096 }
+        #expect(try await libraryCollect(await restart.resume(game, approved: true)).last == .phase(.completed))
+        #expect(offline.requestLog.isEmpty)
+        #expect(f.cdn.requestLog.dropFirst(start).map(\.path) == ["diffs/base"])
+        try f.assertFiles(2)
     }
 
     @Test(arguments: [false, true])

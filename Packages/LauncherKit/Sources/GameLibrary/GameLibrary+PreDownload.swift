@@ -13,7 +13,7 @@ extension GameLibrary {
         preDownloadStream(game, resume: true, expected: expectedPlanID)
     }
     public func deletePreDownload(_ game: GameDefinition) async throws {
-        let scope = try await preDownloadScope(game)
+        let scope = try await preDownloadScope(game, action: .deletePreDownload)
         defer { withExtendedLifetime(scope) {} }
         try scope.cache.remove()
     }
@@ -116,13 +116,13 @@ extension GameLibrary {
             fetcher: settings.fetcher, disk: disk, hooks: hooks, maxConcurrentObjects: settings.maxConcurrentObjects, pipeline: settings.pipeline)
     }
 
-    private func preDownloadScope(_ game: GameDefinition) async throws -> PreDownloadScope {
+    private func preDownloadScope(_ game: GameDefinition, action: GameAction = .preDownload) async throws -> PreDownloadScope {
         try await operationGuard?.willOperate(on: game.id)
         try await store.waitForPipelineDrain()
         let lock = try acquireGameLock(game.id)
         let lease = try await store.acquireOperationLease(retainedGameLock: lock)
         guard let record = try await store.load(game.id) else { throw LauncherError.io("game is not installed") }
-        try GameRecordRules.check(.preDownload, record: record, others: [])
+        try GameRecordRules.check(action, record: record, others: [])
         try requireGameLocationAvailable(record.installPath)
         let fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity)
         let cache = try PreDownloadStore(fs: fs)
