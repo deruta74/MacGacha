@@ -11,6 +11,10 @@ struct PreDownloadBar: View {
     let gameIsLive: Bool
 
     private var overlay: PreDownloadOverlay { model.preDownloadState(for: game.id) }
+    /// A paused install or update owns the game until it finishes, so a transfer can't start or resume.
+    private var blocked: Bool {
+        model.isGameOperationRunning || gameIsLive || model.gameRecord(game.id)?.pending != nil
+    }
 
     var body: some View {
         Group {
@@ -29,7 +33,7 @@ struct PreDownloadBar: View {
                         .padding(.horizontal, 4)
                 }
                 .buttonStyle(.glass)
-                .disabled(model.isGameOperationRunning || gameIsLive)
+                .disabled(blocked)
             case .downloading(let progress):
                 transfer(label: String(localized: "Pre-downloading \(version)…",
                         comment: "Footer pre-download progress; the argument is the next game version"),
@@ -66,10 +70,17 @@ struct PreDownloadBar: View {
             : nil
         return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(label).fontWeight(.medium)
-                    Spacer(minLength: 12)
-                    if let amount { Text(amount).foregroundStyle(.white.opacity(0.75)) }
+                // Long translations move the amount under the label instead of truncating either.
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        Text(label).fontWeight(.medium)
+                        Spacer(minLength: 12)
+                        if let amount { Text(amount).foregroundStyle(.white.opacity(0.75)) }
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(label).fontWeight(.medium)
+                        if let amount { Text(amount).foregroundStyle(.white.opacity(0.75)) }
+                    }
                 }
                 .font(.caption)
                 .monospacedDigit()
@@ -95,13 +106,14 @@ struct PreDownloadBar: View {
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
             // Resuming needs the same free session and lease as starting.
-            .disabled(paused && (model.isGameOperationRunning || gameIsLive))
+            .disabled(paused && blocked)
             .help(paused ? Text("Resume Pre-download") : Text("Pause Pre-download"))
             .accessibilityLabel(paused ? Text("Resume Pre-download") : Text("Pause Pre-download"))
         }
         .padding(.leading, 14)
         .padding(.trailing, 5)
-        .frame(height: 40)
+        .padding(.vertical, 6)
+        .frame(minHeight: 40)
         .glassEffect(.regular, in: .capsule)
     }
 }

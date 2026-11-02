@@ -1090,7 +1090,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ vorab geladen"
+            "value" : "%@ vorzeitig heruntergeladen"
           }
         },
         "es" : {
@@ -1102,7 +1102,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ prétéléchargée"
+            "value" : "%@ pré-téléchargée"
           }
         },
         "id" : {
@@ -1162,7 +1162,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 已預下載"
+            "value" : "%@ 已預先下載"
           }
         }
       }
@@ -6608,7 +6608,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vorab-Download löschen"
+            "value" : "Vorzeitig geladene Dateien löschen"
           }
         },
         "es" : {
@@ -6620,7 +6620,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Supprimer le prétéléchargement"
+            "value" : "Supprimer le pré-téléchargement"
           }
         },
         "id" : {
@@ -6680,7 +6680,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "刪除預下載"
+            "value" : "刪除預先下載"
           }
         }
       }
@@ -6690,7 +6690,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vorab-Download löschen …"
+            "value" : "Vorzeitig geladene Dateien löschen …"
           }
         },
         "es" : {
@@ -6702,7 +6702,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Supprimer le prétéléchargement…"
+            "value" : "Supprimer le pré-téléchargement…"
           }
         },
         "id" : {
@@ -6762,7 +6762,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "刪除預下載…"
+            "value" : "刪除預先下載…"
           }
         }
       }
@@ -6772,7 +6772,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vorab-Download löschen?"
+            "value" : "Vorzeitig geladene Dateien löschen?"
           }
         },
         "es" : {
@@ -6784,7 +6784,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Supprimer le prétéléchargement ?"
+            "value" : "Supprimer le pré-téléchargement ?"
           }
         },
         "id" : {
@@ -6844,7 +6844,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "要刪除預下載嗎？"
+            "value" : "要刪除預先下載嗎？"
           }
         }
       }
@@ -14418,7 +14418,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vorab-Download pausieren"
+            "value" : "Vorzeitiges Herunterladen pausieren"
           }
         },
         "es" : {
@@ -14430,7 +14430,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mettre le prétéléchargement en pause"
+            "value" : "Mettre le pré-téléchargement en pause"
           }
         },
         "id" : {
@@ -14490,7 +14490,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "暫停預下載"
+            "value" : "暫停預先下載"
           }
         }
       }
@@ -14911,7 +14911,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ vorab herunterladen · %2$@"
+            "value" : "%1$@ vorzeitig herunterladen · %2$@"
           }
         },
         "en" : {
@@ -14929,7 +14929,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prétélécharger la %1$@ · %2$@"
+            "value" : "Pré-télécharger la %1$@ · %2$@"
           }
         },
         "id" : {
@@ -14989,7 +14989,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "預下載 %1$@ · %2$@"
+            "value" : "預先下載 %1$@ · %2$@"
           }
         }
       }
@@ -14999,7 +14999,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vorab-Download pausiert"
+            "value" : "Vorzeitiges Herunterladen pausiert"
           }
         },
         "es" : {
@@ -15011,7 +15011,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prétéléchargement en pause"
+            "value" : "Pré-téléchargement en pause"
           }
         },
         "id" : {
@@ -15071,7 +15071,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "預下載已暫停"
+            "value" : "預先下載已暫停"
           }
         }
       }
@@ -15082,7 +15082,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ wird vorab geladen …"
+            "value" : "%@ wird vorzeitig heruntergeladen …"
           }
         },
         "es" : {
@@ -15094,7 +15094,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prétéléchargement de la %@…"
+            "value" : "Pré-téléchargement de la %@…"
           }
         },
         "id" : {
@@ -15154,7 +15154,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在預下載 %@…"
+            "value" : "正在預先下載 %@…"
           }
         }
       }
@@ -16482,7 +16482,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vorab-Download fortsetzen"
+            "value" : "Vorzeitiges Herunterladen fortsetzen"
           }
         },
         "es" : {
@@ -16494,7 +16494,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Reprendre le prétéléchargement"
+            "value" : "Reprendre le pré-téléchargement"
           }
         },
         "id" : {
@@ -16554,7 +16554,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "繼續預下載"
+            "value" : "繼續預先下載"
           }
         }
       }
