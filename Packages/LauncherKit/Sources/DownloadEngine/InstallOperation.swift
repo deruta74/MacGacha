@@ -100,6 +100,7 @@ private actor CommitSession {
     private var batchingPrepared = false
     private var recoveringCommit = false
     private var operationStager: OperationStager?
+    private let verifiedContainers = VerifiedContainers()
     private var batchIndex = 0
     private var staging: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
     private var step = Step.start
@@ -358,7 +359,7 @@ private actor CommitSession {
                 }
             }
             operationStager = try Stager(plan: plan, fs: fs, fetcher: fetcher,
-                journal: context().journal, disk: disk, maxConcurrentObjects: maxConcurrentObjects, crashHooks: crashHooks, pipeline: pipeline, patchApplier: patchApplier, log: log).forOperation()
+                journal: context().journal, disk: disk, maxConcurrentObjects: maxConcurrentObjects, crashHooks: crashHooks, pipeline: pipeline, patchApplier: patchApplier, log: log).sharingVerifiedContainers(verifiedContainers).forOperation()
             let previous = max(state.currentBatch ?? -1, state.commitStartedBatches.max() ?? -1)
             guard previous < Int.max else { throw LauncherError.journalCorrupt("Batch index overflow") }
             nextCommitIndex = previous + 1
@@ -435,7 +436,7 @@ private actor CommitSession {
                 try fs.fullSync(at: file.path)
             } else {
                 try await record(.fileUnstaged(path: file.path))
-                let stager = try Stager(plan: plan, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, maxConcurrentObjects: maxConcurrentObjects, crashHooks: crashHooks, pipeline: pipeline, patchApplier: patchApplier, log: log).forRecovery()
+                let stager = try Stager(plan: plan, fs: fs, fetcher: fetcher, journal: context().journal, disk: disk, maxConcurrentObjects: maxConcurrentObjects, crashHooks: crashHooks, pipeline: pipeline, patchApplier: patchApplier, log: log).sharingVerifiedContainers(verifiedContainers).forRecovery()
                 let recovery = try stager.forOperation()
                 for try await _ in recovery.stage(files: [file], holding: lock, retaining: retainedOwner) {}
                 try await refresh()

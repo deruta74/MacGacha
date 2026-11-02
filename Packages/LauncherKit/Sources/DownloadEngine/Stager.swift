@@ -21,6 +21,7 @@ public struct Stager: Sendable {
     private let log: EventLog?
     private let gate = StagingGate()
     private var durableFiles = false
+    private var verifiedContainers = VerifiedContainers()
 
     public init(plan: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher, journal: OperationJournal,
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, crashHooks: CrashHooks = .none, pipeline: PipelineConfiguration = .default, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil) throws {
@@ -32,20 +33,30 @@ public struct Stager: Sendable {
     }
 
     package func forRecovery() -> Self { var copy = self; copy.durableFiles = true; return copy }
+    package func sharingVerifiedContainers(_ verified: VerifiedContainers) -> Self { var copy = self; copy.verifiedContainers = verified; return copy }
 
     /// One bounded window may run ahead. Byte progress is coalesced, while every
     /// fileVerified event is retained. Discarding the iterator cancels workers.
     public func stage(files: [FileTask]) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = StagingSession(plan: plan, files: files, fs: fs, fetcher: fetcher, journal: journal,
-            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, durableFiles: durableFiles, patchApplier: patchApplier, log: log)
+            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, durableFiles: durableFiles, patchApplier: patchApplier, log: log, verifiedContainers: VerifiedContainers())
         return pipelineStream(abandon: { Task { await session.abandon(nil) } }) { try await session.next(register: $0) }
     }
     package func forOperation() throws -> OperationStager {
         let retention = PipelineRootRetention(key: fs.caseFoldedPathKey(for: try SafeRelativePath(".macgacha-staging/.lock")))
         return OperationStager(retention: retention, session: StagingSession(plan: plan, files: [], fs: fs, fetcher: fetcher, journal: journal,
-            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, retention: retention, durableFiles: durableFiles, patchApplier: patchApplier, log: log))
+            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, retention: retention, durableFiles: durableFiles, patchApplier: patchApplier, log: log, verifiedContainers: verifiedContainers))
     }
 
+}
+
+/// Shared by normal and commit-recovery stagers for one pinned operation run.
+/// Journal receipts survive crashes; this digest-bound adoption cache does not.
+package final class VerifiedContainers: Sendable {
+    private let parts = Mutex([SafeRelativePath: Digest]())
+    func contains(_ path: SafeRelativePath, digest: Digest) -> Bool { parts.withLock { $0[path] == digest } }
+    func insert(_ path: SafeRelativePath, digest: Digest) { parts.withLock { $0[path] = digest } }
+    func remove(_ path: SafeRelativePath) { parts.withLock { _ = $0.removeValue(forKey: path) } }
 }
 
 /// One validated plan, referrer index and progress history for the locked operation.
@@ -117,6 +128,7 @@ private actor StagingSession {
     private let crashHooks: CrashHooks
     private let patchApplier: (any WholeFilePatchApplier)?
     private let log: EventLog?
+    private let verifiedContainers: VerifiedContainers
     private let layout: StagingLayout
     private let referrers: [String: Set<SafeRelativePath>]
     private let known: [SafeRelativePath: FileTask]
@@ -141,12 +153,13 @@ private actor StagingSession {
     private var lastProgress: OperationEvent?
 
     init(plan: InstallPlan, files: [FileTask], fs: ContainedFileSystem, fetcher: ChunkFetcher,
-        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks, pipeline: PipelineConfiguration, retention: PipelineRootRetention = PipelineRootRetention(key: ""), durableFiles: Bool = false, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil) {
+        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks, pipeline: PipelineConfiguration, retention: PipelineRootRetention = PipelineRootRetention(key: ""), durableFiles: Bool = false, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil, verifiedContainers: VerifiedContainers) {
         let ioGate = PipelineIOGate(); self.ioGate = ioGate
         self.plan = plan; self.files = files; self.fs = fs.replacingFileOps(PipelineFileOps(base: fs.fileOps, gate: ioGate)); self.fetcher = fetcher; self.journal = journal
         self.disk = disk; self.limit = limit; self.lease = lease; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log; layout = StagingLayout(id: plan.id)
         OperationWork.record(.referrerIndexBuild)
         self.retention = retention; self.durableFiles = durableFiles
+        self.verifiedContainers = verifiedContainers
         self.pipeline = pipeline; transferLimiter = PipelineLimiter(limit); assemblyLimiter = PipelineLimiter(pipeline.assemblies)
         progressTracker = PipelineProgress(plan)
         var refs: [String: Set<SafeRelativePath>] = [:]
@@ -233,10 +246,17 @@ private actor StagingSession {
             for id in state.verifiedObjects {
                 guard let object = plan.objects[id], referrers[id]?.isSubset(of: donePaths) != true else { continue }
                 let part = try layout.object(object)
-                if try fs.size(at: part) != nil, try await !ChunkFetcher.verifiedPart(object, fs: fs, part: part) {
-                    try fs.removeFile(at: part)
-                    objectFailures[id] = 1
-                    objectMirrors[id] = 1 % object.urls.count
+                if containerIDs.contains(id), try fs.size(at: part) == object.transferSize,
+                    verifiedContainers.contains(part, digest: object.decodedDigest) { continue }
+                verifiedContainers.remove(part)
+                if try fs.size(at: part) != nil {
+                    if try await ChunkFetcher.verifiedPart(object, fs: fs, part: part) {
+                        if containerIDs.contains(id) { verifiedContainers.insert(part, digest: object.decodedDigest) }
+                    } else {
+                        try fs.removeFile(at: part)
+                        objectFailures[id] = 1
+                        objectMirrors[id] = 1 % object.urls.count
+                    }
                 }
             }
             downloadedObjects = state.verifiedObjects.intersection(plan.objects.keys)
@@ -362,6 +382,7 @@ private actor StagingSession {
         let task: Task<Int, any Error>
         if let existing = transfers[id] { task = existing }
         else {
+            verifiedContainers.remove(try layout.object(object))
             let fs = fs, fetcher = fetcher, journal = journal, layout = layout, crashHooks = crashHooks
             let limiter = transferLimiter, tracker = progressTracker, mirror = objectMirrors[id] ?? 0
             inFlightObjects.insert(id)
@@ -400,6 +421,7 @@ private actor StagingSession {
 
     private func completedFetch(_ object: ChunkObject, mirror: Int) throws {
         let id = object.id
+        if containerIDs.contains(id) { verifiedContainers.insert(try layout.object(object), digest: object.decodedDigest) }
         objectMirrors[id] = mirror
         try state.apply(.objectVerified(id: id)); try allocation?.setCost(id, to: 0)
         if networkObjects.insert(id).inserted { totalNetwork = progressAdding(totalNetwork, object.transferSize) }
@@ -452,6 +474,7 @@ private actor StagingSession {
                     transfers.removeAll(); inFlightObjects.removeAll()
                     try cleanupObjects(ids: Set(selected.flatMap { SpaceBudget.references($0) }))
                     try fs.removeFile(at: layout.object(object)); ioGate.removePart(bad.id)
+                    verifiedContainers.remove(try layout.object(object))
                     for file in selected where !donePaths.contains(file.path) {
                         try fs.removeFile(at: layout.file(file.path))
                         ioGate.removeOutput(file.path); runningOutputs.remove(file.path)
@@ -621,6 +644,7 @@ private actor StagingSession {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             if let refs = referrers[id], refs.isSubset(of: containerIDs.contains(id) ? state.committedFiles : donePaths), let object = plan.objects[id] {
                 try fs.removeFile(at: layout.object(object))
+                verifiedContainers.remove(try layout.object(object))
                 transfers.removeValue(forKey: id); ioGate.removePart(id)
             }
         }

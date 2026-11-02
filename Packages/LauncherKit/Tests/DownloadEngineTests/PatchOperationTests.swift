@@ -9,6 +9,20 @@ import TestSupport
 @testable import DownloadEngine
 
 @Suite(.timeLimit(.minutes(1))) struct PatchOperationTests {
+    @Test(arguments: [false, true]) func sharedContainerIsHashedOnceAcrossReferrers(copy: Bool) async throws {
+        let fixture = try PatchOperationFixture(copy: copy, referrers: 12, containerCount: 2), hashes = Mutex([String: Int]())
+        let events = try await OperationWork.$objectHashObserver.withValue({ id in hashes.withLock { $0[id, default: 0] += 1 } }) {
+            try await fixture.run(mode: .batched(approved: true))
+        }
+        #expect(events.last == .phase(.completed))
+        #expect(hashes.withLock { $0 } == ["container": 1, "container-1": 1])
+        #expect(Set(fixture.cdn.requestLog.map(\.path)) == ["container", "container-1"])
+        #expect(fixture.cdn.requestLog.count == 2)
+        for file in fixture.plan.files {
+            #expect(try fixture.fs.readFile(at: file.path, maxBytes: 3) == Data("ol!".utf8))
+        }
+    }
+
     @Test func positionalWritesPreserveCursorAndAccountForOutputAllocation() async throws {
         let temp = try TempDir(), gate = PipelineIOGate()
         let path = try SafeRelativePath("scratch")
@@ -76,6 +90,22 @@ import TestSupport
         #expect(fixture.cdn.requestLog.last?.path == "chunk")
     }
 
+    @Test func sliceOutputMismatchRefetchesContainerWithoutExtraHashPasses() async throws {
+        let fixture = try PatchOperationFixture(copy: true), hashes = Mutex([String: Int]()), changed = Mutex(false)
+        let fs = fixture.fs, part = try StagingLayout(id: fixture.plan.id).object(try #require(fixture.plan.objects["container"]))
+        let hooks = CrashHooks(at: .afterObjectVerified, action: {
+            let first = changed.withLock { value in let first = !value; value = true; return first }
+            if first { try? fs.writeAtomically(Data("padbadend".utf8), to: part) }
+        })
+        let events = try await OperationWork.$objectHashObserver.withValue({ id in hashes.withLock { $0[id, default: 0] += 1 } }) {
+            try await fixture.run(hooks: hooks)
+        }
+        #expect(events.last == .phase(.completed))
+        #expect(try fixture.output() == Data("ol!".utf8))
+        #expect(fixture.cdn.requestLog.map(\.path) == ["container", "container"])
+        #expect(hashes.withLock { $0 } == ["container": 2])
+    }
+
     @Test func missingPrimarySpaceRefusesBeforeAnyTransfer() async throws {
         let fixture = try PatchOperationFixture()
         await #expect(throws: LauncherError.insufficientSpace(required: SpaceBudget.margin + Int64(fixture.container.count) + 3,
@@ -114,7 +144,7 @@ import TestSupport
     }
 
     @Test func crashAfterContainerFetchResumesTheSavedDualRecipe() async throws {
-        let fixture = try PatchOperationFixture(), archive = try TempDir()
+        let fixture = try PatchOperationFixture(referrers: 12), archive = try TempDir(), hashes = Mutex([String: Int]())
         let stored = try ContainedFileSystem(root: archive.url)
         try stored.writeAtomically(JSONEncoder().encode(fixture.plan), to: SafeRelativePath("plan.json"))
         try stored.writeAtomically(fixture.container, to: SafeRelativePath("container"))
@@ -124,9 +154,34 @@ import TestSupport
             arguments: [archive.url.path, fixture.temp.url.path, CrashPoint.afterObjectVerified.rawValue], environment: [:], currentDirectory: nil)
         #expect(result.exitCode == 137)
         #expect(try fixture.output() == Data("old".utf8))
-        #expect(try await fixture.run().last == .phase(.completed))
+        let events = try await OperationWork.$objectHashObserver.withValue({ id in hashes.withLock { $0[id, default: 0] += 1 } }) {
+            try await fixture.run()
+        }
+        #expect(events.last == .phase(.completed))
+        #expect(hashes.withLock { $0 } == ["container": 1])
         #expect(try fixture.output() == Data("ol!".utf8))
         #expect(fixture.cdn.requestLog.isEmpty)
+    }
+
+    @Test func recoveringMultipleDamagedOutputsAdoptsContainerOnce() async throws {
+        let fixture = try PatchOperationFixture(referrers: 12), archive = try TempDir(), hashes = Mutex([String: Int]())
+        let stored = try ContainedFileSystem(root: archive.url)
+        try stored.writeAtomically(JSONEncoder().encode(fixture.plan), to: SafeRelativePath("plan.json"))
+        try stored.writeAtomically(fixture.container, to: SafeRelativePath("container"))
+        try stored.writeAtomically(Data("ol!".utf8), to: SafeRelativePath("chunk"))
+        let executable = try crashHarnessURL(in: Bundle(for: PatchCrashBundle.self).bundleURL)
+        let result = try await SystemProcessRunner().run(executable,
+            arguments: [archive.url.path, fixture.temp.url.path, CrashPoint.afterCommitStartedBeforeFirstRename.rawValue], environment: [:], currentDirectory: nil)
+        #expect(result.exitCode == 137)
+        let layout = StagingLayout(id: fixture.plan.id)
+        for file in fixture.plan.files { try fixture.fs.writeAtomically(Data("bad".utf8), to: layout.file(file.path)) }
+        let events = try await OperationWork.$objectHashObserver.withValue({ id in hashes.withLock { $0[id, default: 0] += 1 } }) {
+            try await fixture.run()
+        }
+        #expect(events.last == .phase(.completed))
+        #expect(hashes.withLock { $0["container"] } == 1)
+        #expect(!fixture.cdn.requestLog.contains { $0.path == "container" })
+        for file in fixture.plan.files { #expect(try fixture.fs.readFile(at: file.path, maxBytes: 3) == Data("ol!".utf8)) }
     }
 
     @Test func retentionReservesAllBatchContainersBeyondThePrefetchWindow() throws {
@@ -153,7 +208,7 @@ private final class PatchOperationFixture {
     let plan: InstallPlan
     let container: Data
     let cdn = MockCDN()
-    init(copy: Bool = false, malformed: Bool = false) throws {
+    init(copy: Bool = false, malformed: Bool = false, referrers: Int = 1, containerCount: Int = 1) throws {
         temp = try TempDir(); fs = try ContainedFileSystem(root: temp.url)
         let old = Data("old".utf8), target = Data("ol!".utf8)
         let patch = malformed ? Data("malformed".utf8) : Data("HDIFF13&\0".utf8)
@@ -164,18 +219,29 @@ private final class PatchOperationFixture {
             decodedSize: 3, decodedDigest: patchDigest(target))
         let object = ChunkObject(id: "container", urls: [URL(string: "https://cdn.test/container")!], transferSize: Int64(container.count),
             transferDigest: patchDigest(container), decodedSize: Int64(container.count), decodedDigest: patchDigest(container))
-        let recipe: FileRecipe = copy ? .copy(container: object.id, offset: 3, length: 3)
-            : .patch(source: try SafeRelativePath("game.bin"), sourceSize: 3, sourceDigest: patchDigest(old), container: object.id, offset: 3, length: Int64(body.count))
+        var objects = [object.id: object, chunk.id: chunk], recipes: [FileRecipe] = []
+        for index in 0..<containerCount {
+            let id = index == 0 ? object.id : "container-\(index)"
+            objects[id] = ChunkObject(id: id, urls: [URL(string: "https://cdn.test/\(id)")!], transferSize: object.transferSize,
+                transferDigest: object.transferDigest, decodedSize: object.decodedSize, decodedDigest: object.decodedDigest)
+            recipes.append(copy ? .copy(container: id, offset: 3, length: 3)
+                : .patch(source: try SafeRelativePath("game.bin"), sourceSize: 3, sourceDigest: patchDigest(old), container: id, offset: 3, length: Int64(body.count)))
+            cdn.serve(id, data: container)
+        }
         let file = FileTask(path: try SafeRelativePath("game.bin"), size: 3, digest: patchDigest(target),
-            extents: [Extent(source: .chunk(id: chunk.id), fileOffset: 0, length: 3, digest: patchDigest(target))], recipe: recipe)
-        plan = InstallPlan(id: try SafeIdentifier("patch-operation"), objects: [object.id: object, chunk.id: chunk], files: [file])
+            extents: [Extent(source: .chunk(id: chunk.id), fileOffset: 0, length: 3, digest: patchDigest(target))], recipe: recipes[0])
+        let files = try (0..<referrers).map { index in
+            FileTask(path: index == 0 ? file.path : try SafeRelativePath("output-\(index)"), size: file.size, digest: file.digest,
+                extents: file.extents, recipe: recipes[index % containerCount])
+        }
+        plan = InstallPlan(id: try SafeIdentifier("patch-operation"), objects: objects, files: files)
         try fs.writeAtomically(old, to: file.path)
-        cdn.serve(object.id, data: container); cdn.serve(chunk.id, data: target)
+        cdn.serve(chunk.id, data: target)
     }
     func output() throws -> Data { try fs.readFile(at: plan.files[0].path, maxBytes: 100) }
-    func run(disk: any DiskSpaceProbe = FixedDiskSpace(bytes: Int64.max), hooks: CrashHooks = .none, applier: any WholeFilePatchApplier = HDiff13PatchApplier()) async throws -> [OperationEvent] {
+    func run(disk: any DiskSpaceProbe = FixedDiskSpace(bytes: Int64.max), hooks: CrashHooks = .none, applier: any WholeFilePatchApplier = HDiff13PatchApplier(), mode: InstallOperation.Mode = .automatic) async throws -> [OperationEvent] {
         let operation = try InstallOperation(plan: plan, installRoot: temp.url, fetcher: stagingFetcher(cdn), disk: disk,
-            crashHooks: hooks, patchApplier: applier)
+            mode: mode, crashHooks: hooks, patchApplier: applier)
         var events: [OperationEvent] = []
         for try await event in operation.run() { events.append(event) }
         return events

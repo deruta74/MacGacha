@@ -26,8 +26,11 @@ package enum FileRecipeAssembler {
         try await BlockingIO.run {
             guard let recipe = file.recipe, let object = plan.objects[recipe.containerID] else { throw LauncherError.io("Missing recipe") }
             let layout = StagingLayout(id: plan.id), part = try layout.object(object), path = try layout.file(file.path)
-            guard try await ChunkFetcher.verifiedPart(object, fs: fs, part: part) else {
-                throw AssemblyBadObject(id: object.id, cause: LauncherError.digestMismatch(path: "patch container", expected: object.decodedDigest.hex, actual: "invalid"))
+            // Fetch/adoption verified this container for the current run. Shared
+            // slices need only a size check; target MD5 protects their output.
+            let size = try fs.size(at: part) ?? 0
+            guard size == object.transferSize else {
+                throw AssemblyBadObject(id: object.id, cause: LauncherError.sizeMismatch(path: "patch container", expected: object.transferSize, actual: size))
             }
             let output = try fs.openForWriting(at: path, truncate: true)
             defer { try? output.close() }
@@ -51,7 +54,7 @@ package enum FileRecipeAssembler {
                     }
                 }
                 guard try await FileAssembler.matches(file, plan: plan, fs: fs) else {
-                    throw LauncherError.digestMismatch(path: "patch output", expected: file.digest.hex, actual: "invalid")
+                    throw AssemblyBadObject(id: object.id, cause: LauncherError.digestMismatch(path: "patch output", expected: file.digest.hex, actual: "invalid"))
                 }
                 try fs.synchronizeFile(at: path, durable: durable)
             } catch let error as LauncherError {

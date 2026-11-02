@@ -11,10 +11,11 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
-    @Test func normalUpdateUsesGameAndInstalledVoicePatchRecipes() async throws {
+    @Test(arguments: ["patch-2", "release-day-patch"])
+    func normalUpdateUsesGameAndInstalledVoicePatchRecipes(patchID: String) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         try f.advertise(2, enableLdiff: true, diffTags: ["1.0"], changedVoices: true)
-        try f.advertisePatches(changedVoices: true)
+        try f.advertisePatches(changedVoices: true, patchID: patchID)
         let start = f.cdn.requestLog.count
         #expect(try await libraryCollect(await f.library.update(game, approved: true)).last == .phase(.completed))
         let requests = f.cdn.requestLog.dropFirst(start).map(\.path)
@@ -1015,7 +1016,7 @@ private struct LibraryFixture: ~Copyable {
         cdn.serve("downloader/sophon_chunk/api/getBuild", data: try jsonData(["build_id": buildID ?? "build-\(version)", "tag": "\(version).0", "manifests": descriptors]))
     }
 
-    func advertisePatches(tag: String = "2.0", buildID: String = "build-2", omitVoice: Bool = false, changedVoices: Bool = false) throws {
+    func advertisePatches(tag: String = "2.0", buildID: String = "build-2", omitVoice: Bool = false, changedVoices: Bool = false, patchID: String = "patch-2") throws {
         let old = syntheticFiles(1), target = syntheticFiles(2, changedVoices: changedVoices)
         var descriptors: [[String: Any]] = []
         for (id, matching, paths) in [("base", "game", ["GenshinImpact.exe", "data/01"]), ("extra", "extra", []), ("voice", "en-us", ["audio/en1"])] {
@@ -1054,7 +1055,7 @@ private struct LibraryFixture: ~Copyable {
                 "compressed_size": String(frame.count), "uncompressed_size": String(manifest.data.count)],
                 "manifest_download": descriptor, "diff_download": diff, "stats": [:]])
         }
-        cdn.serve("downloader/sophon_chunk/api/getPatchBuild", data: try jsonData(["build_id": buildID, "patch_id": "patch-2", "tag": tag, "manifests": descriptors]))
+        cdn.serve("downloader/sophon_chunk/api/getPatchBuild", data: try jsonData(["build_id": buildID, "patch_id": patchID, "tag": tag, "manifests": descriptors]))
     }
 }
 private func syntheticFiles(_ version: Int, sharedAcrossFiles: Bool = false, changedFiles: Int = 1, changedVoices: Bool = false) -> [String: String] {
