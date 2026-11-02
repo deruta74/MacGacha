@@ -40,6 +40,27 @@ import TestSupport
         #expect(restored.categories == build.categories)
     }
 
+    @Test func patchManifestFetchChecksRegionAndDecodedContent() async throws {
+        let protobuf = patchManifest(files: [patchFile()]); let frame = rawZstd(protobuf)
+        var object = try #require(JSONSerialization.jsonObject(with: patchJSON()) as? [String: Any])
+        var data = object["data"] as! [String: Any]; var manifests = data["manifests"] as! [[String: Any]]
+        manifests[0]["manifest"] = ["id": "manifest-test", "checksum": md5(protobuf).hex,
+            "compressed_size": String(frame.count), "uncompressed_size": String(protobuf.count)]
+        data["manifests"] = manifests; object["data"] = data
+        let http = patchHTTP(data: json(object)), api = DeliveryAPI(http: http)
+        let category = try #require(try await api.patchBuild(testBranch()).categories.first)
+        http.cdn.serve("manifests/manifest-test", data: frame)
+        let result = try await api.patchManifest(category)
+        #expect(result.compressed == frame)
+        #expect(result.manifest.files.first?.path.description == "target/file")
+        #expect(http.requests.last?.query == "manifest=1")
+        let foreignHTTP = patchHTTP(region: .mainlandChina)
+        let foreign = try #require(try await DeliveryAPI(http: foreignHTTP, region: .mainlandChina).patchBuild(testBranch()).categories.first)
+        let requests = http.requests.count
+        await #expect(throws: LauncherError.io("untrusted delivery host")) { try await api.patchManifest(foreign) }
+        #expect(http.requests.count == requests)
+    }
+
     @Test(arguments: ["manifest_download", "diff_download"], [0, 1, 2])
     func compressionIsScopedToDescriptor(key: String, compression: Int) async throws {
         let data = patchJSON(descriptor: key, changes: ["compression": compression])

@@ -70,6 +70,22 @@ public struct DeliveryAPI: Sendable {
     }
 
     public static func decodeManifest(_ compressed: Data, ref: ManifestRef) throws -> SophonManifest {
+        try SophonManifest.decode(decodeManifestBytes(compressed, ref: ref))
+    }
+
+    public func patchManifest(_ category: PatchBuildCategory) async throws -> (compressed: Data, manifest: SophonPatchManifest) {
+        guard category.region == region else { throw LauncherError.io("untrusted delivery host") }
+        try category.validate()
+        let url = try category.manifestURL
+        let data = try await deadline { try await bytes(url, limit: Int(category.manifest.compressedSize), expected: category.manifest.compressedSize) }
+        return try (data, Self.decodePatchManifest(data, ref: category.manifest))
+    }
+
+    public static func decodePatchManifest(_ compressed: Data, ref: ManifestRef) throws -> SophonPatchManifest {
+        try SophonPatchManifest.decode(decodeManifestBytes(compressed, ref: ref))
+    }
+
+    private static func decodeManifestBytes(_ compressed: Data, ref: ManifestRef) throws -> Data {
         try ref.validate()
         guard !Task.isCancelled else { throw LauncherError.cancelled }
         guard compressed.count == ref.compressedSize else {
@@ -81,7 +97,7 @@ public struct DeliveryAPI: Sendable {
         guard actual == ref.decodedMD5 else {
             throw LauncherError.digestMismatch(path: "manifest", expected: ref.decodedMD5.hex, actual: actual.hex)
         }
-        return try SophonManifest.decode(decoded)
+        return decoded
     }
 
     private func endpoint(_ name: String) -> URL {
