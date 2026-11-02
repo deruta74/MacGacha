@@ -198,6 +198,7 @@ package final class PipelineIOGate: @unchecked Sendable {
         guard position >= 0 else { throw LauncherError.io("Cannot inspect allocation") }
         record(position, replacing: false)
     }
+    func wrotePositionally(through end: Int64) { record(end, replacing: false) }
     private func record(_ bytes: Int64, replacing: Bool) {
         allocation.withLock { s in
             if let id = Self.objectID { s.parts[id] = replacing ? bytes : max(s.parts[id] ?? 0, bytes) }
@@ -220,6 +221,14 @@ package struct PipelineFileOps: AllocationFileOps {
         gate.enter(); defer { gate.leave() }
         let count = try base.write(descriptor, bytes: bytes)
         try gate.wrote(descriptor)
+        return count
+    }
+    package func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer, at offset: Int64) throws -> Int {
+        gate.enter(); defer { gate.leave() }
+        let count = try base.write(descriptor, bytes: bytes, at: offset)
+        let (end, overflow) = offset.addingReportingOverflow(Int64(count))
+        guard count >= 0, count <= bytes.count, !overflow else { throw LauncherError.io("Invalid positional write progress") }
+        gate.wrotePositionally(through: end)
         return count
     }
     package func synchronize(_ descriptor: Int32, durable: Bool) throws { try base.synchronize(descriptor, durable: durable) }

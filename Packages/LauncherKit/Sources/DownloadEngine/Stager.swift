@@ -17,16 +17,18 @@ public struct Stager: Sendable {
     private let maxConcurrentObjects: Int
     private let pipeline: PipelineConfiguration
     private let crashHooks: CrashHooks
+    private let patchApplier: (any WholeFilePatchApplier)?
+    private let log: EventLog?
     private let gate = StagingGate()
     private var durableFiles = false
 
     public init(plan: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher, journal: OperationJournal,
-        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, crashHooks: CrashHooks = .none, pipeline: PipelineConfiguration = .default) throws {
+        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, crashHooks: CrashHooks = .none, pipeline: PipelineConfiguration = .default, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil) throws {
         try plan.validate()
         try pipeline.validate()
         guard maxConcurrentObjects > 0 else { throw LauncherError.io("Invalid object concurrency limit") }
         self.plan = plan; self.fs = fs; self.fetcher = fetcher; self.journal = journal
-        self.disk = disk; self.maxConcurrentObjects = maxConcurrentObjects; self.crashHooks = crashHooks; self.pipeline = pipeline
+        self.disk = disk; self.maxConcurrentObjects = maxConcurrentObjects; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log; self.pipeline = pipeline
     }
 
     package func forRecovery() -> Self { var copy = self; copy.durableFiles = true; return copy }
@@ -35,13 +37,13 @@ public struct Stager: Sendable {
     /// fileVerified event is retained. Discarding the iterator cancels workers.
     public func stage(files: [FileTask]) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = StagingSession(plan: plan, files: files, fs: fs, fetcher: fetcher, journal: journal,
-            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, durableFiles: durableFiles)
+            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, durableFiles: durableFiles, patchApplier: patchApplier, log: log)
         return pipelineStream(abandon: { Task { await session.abandon(nil) } }) { try await session.next(register: $0) }
     }
     package func forOperation() throws -> OperationStager {
         let retention = PipelineRootRetention(key: fs.caseFoldedPathKey(for: try SafeRelativePath(".macgacha-staging/.lock")))
         return OperationStager(retention: retention, session: StagingSession(plan: plan, files: [], fs: fs, fetcher: fetcher, journal: journal,
-            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, retention: retention, durableFiles: durableFiles))
+            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, retention: retention, durableFiles: durableFiles, patchApplier: patchApplier, log: log))
     }
 
 }
@@ -113,6 +115,8 @@ private actor StagingSession {
     private let retention: PipelineRootRetention
     private let lease: StagingLease
     private let crashHooks: CrashHooks
+    private let patchApplier: (any WholeFilePatchApplier)?
+    private let log: EventLog?
     private let layout: StagingLayout
     private let referrers: [String: Set<SafeRelativePath>]
     private let known: [SafeRelativePath: FileTask]
@@ -128,16 +132,19 @@ private actor StagingSession {
     private var downloadedObjects = Set<String>()
     private var objectMirrors: [String: Int] = [:]
     private var objectFailures: [String: Int] = [:]
+    private var failedContainers = Set<String>()
+    private var chunkFallbackFiles = Set<SafeRelativePath>()
+    private let containerIDs: Set<String>
     private var staged: Int64 = 0
     private var totalStaged: Int64 = 0
     private var allocation: RemainingAllocation?
     private var lastProgress: OperationEvent?
 
     init(plan: InstallPlan, files: [FileTask], fs: ContainedFileSystem, fetcher: ChunkFetcher,
-        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks, pipeline: PipelineConfiguration, retention: PipelineRootRetention = PipelineRootRetention(key: ""), durableFiles: Bool = false) {
+        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks, pipeline: PipelineConfiguration, retention: PipelineRootRetention = PipelineRootRetention(key: ""), durableFiles: Bool = false, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil) {
         let ioGate = PipelineIOGate(); self.ioGate = ioGate
         self.plan = plan; self.files = files; self.fs = fs.replacingFileOps(PipelineFileOps(base: fs.fileOps, gate: ioGate)); self.fetcher = fetcher; self.journal = journal
-        self.disk = disk; self.limit = limit; self.lease = lease; self.crashHooks = crashHooks; layout = StagingLayout(id: plan.id)
+        self.disk = disk; self.limit = limit; self.lease = lease; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log; layout = StagingLayout(id: plan.id)
         OperationWork.record(.referrerIndexBuild)
         self.retention = retention; self.durableFiles = durableFiles
         self.pipeline = pipeline; transferLimiter = PipelineLimiter(limit); assemblyLimiter = PipelineLimiter(pipeline.assemblies)
@@ -145,6 +152,7 @@ private actor StagingSession {
         var refs: [String: Set<SafeRelativePath>] = [:]
         for file in plan.files { for id in SpaceBudget.references(file) { refs[id, default: []].insert(file.path) } }
         referrers = refs
+        containerIDs = Set(plan.files.compactMap { $0.recipe?.containerID })
         known = Dictionary(uniqueKeysWithValues: plan.files.map { ($0.path, $0) })
     }
 
@@ -159,6 +167,7 @@ private actor StagingSession {
 
     func committed(_ batch: [FileTask]) throws {
         for file in batch { try state.apply(.fileCommitted(path: file.path)); donePaths.insert(file.path) }
+        try cleanupObjects(ids: Set(batch.flatMap { SpaceBudget.references($0) }))
     }
 
     func next(register: @escaping @Sendable (Task<Void, Never>) -> Void) async throws -> OperationEvent? {
@@ -231,7 +240,7 @@ private actor StagingSession {
                 }
             }
             downloadedObjects = state.verifiedObjects.intersection(plan.objects.keys)
-            for file in plan.files where donePaths.contains(file.path) {
+            for file in plan.files where donePaths.contains(file.path) && file.recipe == nil {
                 for extent in file.extents { if case .chunk(let id) = extent.source { downloadedObjects.insert(id) } }
             }
             downloaded = progressBytes(downloadedObjects)
@@ -248,7 +257,7 @@ private actor StagingSession {
             if try fs.size(at: path) != nil { try fs.removeFile(at: path) }
         }
         let objects = try SpaceBudget.networkObjectIDs(files: remaining, plan: plan, state: state, fs: fs)
-        var external = Set<String>()
+        var external = containerIDs
         for file in remaining {
             for id in SpaceBudget.references(file) {
                 if referrers[id]?.contains(where: { !selected.contains($0) && !donePaths.contains($0) }) == true { external.insert(id) }
@@ -280,6 +289,7 @@ private actor StagingSession {
         let done = state.stagedFiles.union(state.committedFiles)
         for file in plan.files where !done.contains(file.path) {
             OperationWork.record(.predictionFile)
+            if let recipe = file.recipe { predicted.insert(recipe.containerID); continue }
             for extent in file.extents {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 switch extent.source {
@@ -377,10 +387,10 @@ private actor StagingSession {
             transfers.removeValue(forKey: id)
             try Task.checkCancellation()
         } catch {
-            if error is CorruptObjectError { throw AssemblyBadObject(id: id, cause: error) }
+            if error is CorruptObjectError { throw AssemblyBadObject(id: id, cause: error, transferExhausted: true) }
             if let value = error as? LauncherError {
                 switch value {
-                case .digestMismatch, .sizeMismatch: throw AssemblyBadObject(id: id, cause: value)
+                case .digestMismatch, .sizeMismatch: throw AssemblyBadObject(id: id, cause: value, transferExhausted: true)
                 default: break
                 }
             }
@@ -403,7 +413,9 @@ private actor StagingSession {
         while cursor < files.count {
             let file = files[cursor]
             if donePaths.contains(file.path) { cursor += 1; continue }
-            let direct = Set(file.extents.compactMap { if case .chunk(let id) = $0.source { id } else { nil as String? } })
+            let direct: Set<String>
+            if let recipe = file.recipe, !chunkFallbackFiles.contains(file.path), !failedContainers.contains(recipe.containerID) { direct = [recipe.containerID] }
+            else { direct = Set(file.extents.compactMap { if case .chunk(let id) = $0.source { id } else { nil as String? } }) }
             let referenced = SpaceBudget.references(file).filter { networkObjects.contains($0) || direct.contains($0) }
             let added = referenced.filter { !ids.contains($0) }
             let size = try added.reduce(Int64(0)) { try SpaceBudget.adding($0, plan.objects[$1]!.transferSize) }
@@ -446,7 +458,14 @@ private actor StagingSession {
                         try await record(.fileUnstaged(path: file.path))
                     }
                     objectFailures[bad.id, default: 0] += 1
-                    guard objectFailures[bad.id, default: 0] < object.urls.count + 1 else { throw bad.cause }
+                    if containerIDs.contains(bad.id), bad.transferExhausted || objectFailures[bad.id, default: 0] >= object.urls.count + 1 {
+                        failedContainers.insert(bad.id)
+                        for file in selected where file.recipe?.containerID == bad.id && !donePaths.contains(file.path) {
+                            try fallbackFile(file, reason: "digestMismatch")
+                        }
+                    } else {
+                        guard objectFailures[bad.id, default: 0] < object.urls.count + 1 else { throw bad.cause }
+                    }
                     objectMirrors[bad.id] = ((objectMirrors[bad.id] ?? 0) + 1) % object.urls.count
                 }
             }
@@ -474,6 +493,7 @@ private actor StagingSession {
         let wholeFileAttemptLimit = 2
         while true {
             do {
+                if try await !stageRecipe(file, channel: channel) {
                 let direct = Set(file.extents.compactMap { extent -> String? in
                     if case .chunk(let id) = extent.source { return id }; return nil
                 })
@@ -492,6 +512,7 @@ private actor StagingSession {
                     }
                     await assemblyLimiter.release()
                 } catch { await assemblyLimiter.release(); throw error }
+                }
                 crashHooks.reach(.afterFileStagedBeforeJournal)
                 try await record(.fileStaged(path: file.path))
                 try allocation?.finish(file)
@@ -522,6 +543,41 @@ private actor StagingSession {
                 } else { throw failure }
             }
         }
+    }
+
+    private func fallbackFile(_ file: FileTask, reason: String) throws {
+        guard chunkFallbackFiles.insert(file.path).inserted else { return }
+        log?.post(.notice, "download", "Patch fallback", metadata: ["count": "1", "reason": reason])
+        if let id = file.recipe?.containerID,
+            referrers[id]?.contains(where: { !donePaths.contains($0) && !chunkFallbackFiles.contains($0) }) != true {
+            try allocation?.setCost(id, to: 0)
+        }
+    }
+
+    private func stageRecipe(_ file: FileTask, channel: PipelineChannel) async throws -> Bool {
+        guard let recipe = file.recipe else { return false }
+        if failedContainers.contains(recipe.containerID) { try fallbackFile(file, reason: "digestMismatch"); return false }
+        guard !chunkFallbackFiles.contains(file.path) else { return false }
+        if try await !FileRecipeAssembler.sourceMatches(recipe, fs: fs) {
+            try fallbackFile(file, reason: "digestMismatch"); return false
+        }
+        try admitMissingPart(recipe.containerID)
+        try checkCapacity()
+        try await fetchObjects([recipe.containerID], channel: channel)
+        try await assemblyLimiter.acquire()
+        runningOutputs.insert(file.path)
+        do {
+            try await PipelineIOGate.$output.withValue(file.path) {
+                try await FileRecipeAssembler.assemble(file, plan: plan, fs: fs, applier: patchApplier, durable: durableFiles)
+            }
+            await assemblyLimiter.release()
+            return true
+        } catch let fallback as RecipeFallback {
+            await assemblyLimiter.release()
+            try fs.removeFile(at: layout.file(file.path)); ioGate.removeOutput(file.path); runningOutputs.remove(file.path)
+            try fallbackFile(file, reason: fallback.reason)
+            return false
+        } catch { await assemblyLimiter.release(); throw error }
     }
 
     private func fetchFallback(_ id: String, channel: PipelineChannel) async throws {
@@ -563,7 +619,7 @@ private actor StagingSession {
     private func cleanupObjects(ids: Set<String>) throws {
         for id in ids {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
-            if let refs = referrers[id], refs.isSubset(of: donePaths), let object = plan.objects[id] {
+            if let refs = referrers[id], refs.isSubset(of: containerIDs.contains(id) ? state.committedFiles : donePaths), let object = plan.objects[id] {
                 try fs.removeFile(at: layout.object(object))
                 transfers.removeValue(forKey: id); ioGate.removePart(id)
             }

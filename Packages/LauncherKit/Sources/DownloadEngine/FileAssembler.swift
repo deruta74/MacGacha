@@ -4,7 +4,14 @@ import Foundation
 import Synchronization
 import LauncherCore
 
-package struct AssemblyBadObject: Error { let id: String; let cause: any Error }
+package struct AssemblyBadObject: Error {
+    let id: String
+    let cause: any Error
+    let transferExhausted: Bool
+    init(id: String, cause: any Error, transferExhausted: Bool = false) {
+        self.id = id; self.cause = cause; self.transferExhausted = transferExhausted
+    }
+}
 
 package enum FileAssembler {
     /// One independent output descriptor and digest state per worker. All

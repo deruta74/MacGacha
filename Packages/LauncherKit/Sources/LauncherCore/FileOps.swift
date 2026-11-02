@@ -14,6 +14,7 @@ package protocol AllocationFileOps: FileOps {
 /// Implementations must preserve syscall semantics, including advancing the offset on short writes.
 public protocol FileOps: Sendable {
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer, at offset: Int64) throws -> Int
     func synchronize(_ descriptor: Int32, durable: Bool) throws
     func rename(from source: String, in sourceDirectory: Int32, to destination: String,
         in destinationDirectory: Int32, exclusive: Bool) throws
@@ -54,6 +55,17 @@ public struct SystemFileOps: FileOps {
 }
 
 extension FileOps {
+    /// Positional output preserves a borrowed handle's cursor. Fault/allocation
+    /// wrappers override this requirement just as they override sequential writes.
+    public func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer, at offset: Int64) throws -> Int {
+        guard offset >= 0 else { throw LauncherError.io("Invalid positional write offset") }
+        while true {
+            let result = Darwin.pwrite(descriptor, bytes.baseAddress, bytes.count, offset)
+            if result >= 0 { return result }
+            guard errno == EINTR else { throw LauncherError.fileSystemFailure("Cannot write file positionally") }
+        }
+    }
+
     /// Atomic directory exchange on macOS. A default preserves existing fault doubles;
     /// override this requirement to inject a failure at the swap syscall boundary.
     public func swap(from source: String, in sourceDirectory: Int32, to destination: String,
@@ -123,6 +135,9 @@ package struct SpaceAwareFileOps: AllocationFileOps {
     }
     package func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
         try mapped { try base.write(descriptor, bytes: bytes) }
+    }
+    package func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer, at offset: Int64) throws -> Int {
+        try mapped { try base.write(descriptor, bytes: bytes, at: offset) }
     }
     package func synchronize(_ descriptor: Int32, durable: Bool) throws {
         try mapped { try base.synchronize(descriptor, durable: durable) }

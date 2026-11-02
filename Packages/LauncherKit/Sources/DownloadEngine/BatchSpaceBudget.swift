@@ -19,6 +19,11 @@ extension SpaceBudget {
         let indexes = Dictionary(uniqueKeysWithValues: remaining.enumerated().map { (batchPathKey($0.element.path), $0.offset) })
         var ends = Array(remaining.indices)
         for (index, file) in remaining.enumerated() {
+            // Keep original patch sources until every dependent output has staged.
+            if let source = file.recipe?.sourcePath {
+                if let earlier = indexes[batchPathKey(source)], earlier < index { ends[earlier] = max(ends[earlier], index) }
+                if stagedKeys.contains(batchPathKey(source)) { ends[0] = max(ends[0], index) }
+            }
             for extent in file.extents {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 if case .local(let source, _) = extent.source, extent.fallbackChunkID == nil {
@@ -73,10 +78,11 @@ extension SpaceBudget {
             newParts[first[id]!].append(id)
             expiredParts[last[id]!].append(id)
         }
+        let containers = Set(plan.files.compactMap { $0.recipe?.containerID })
         for (index, batch) in batches.enumerated() {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             let newCosts = Dictionary(uniqueKeysWithValues: newParts[index].map { ($0, costs[$0]!) })
-            let retained = Set(newParts[index].filter { last[$0]! > index })
+            let retained = Set(newParts[index].filter { last[$0]! > index }).union(containers)
             var allocation = PeakAllocation(limit: limit, retainedObjects: retained, pipeline: pipeline)
             for file in batch where !state.stagedFiles.contains(file.path) { try allocation.append(file, costs: newCosts) }
             let batchDecoded = try batch.filter { !state.stagedFiles.contains($0.path) }.reduce(Int64(0)) { try adding($0, $1.size) }
@@ -91,7 +97,7 @@ extension SpaceBudget {
                 // Only the live disk probe may report that capacity as freed.
             }
             for id in newParts[index] { growth = try adding(growth, costs[id]!) }
-            for id in expiredParts[index] { growth -= costs[id]! }
+            for id in expiredParts[index] where !containers.contains(id) { growth -= costs[id]! }
         }
         peak = max(peak, try adding(adding(decoded, largestBatchParts), margin))
         return peak
