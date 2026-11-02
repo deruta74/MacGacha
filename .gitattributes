@@ -1,0 +1,3 @@
+# Preserve pinned upstream bytes, including line endings and existing whitespace.
+Packages/LauncherKit/Sources/CHDiffPatch/vendor/** -text -whitespace
+Packages/LauncherKit/Sources/CHDiffPatch/LICENSE -text
