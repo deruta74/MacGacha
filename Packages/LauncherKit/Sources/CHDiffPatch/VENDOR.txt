@@ -1,0 +1,25 @@
+HDiffPatch (patch side only), MIT, Copyright (c) HouSisong.
+Upstream: https://github.com/sisong/HDiffPatch
+Commit: 06961361340085ddb2a551775dc402172b8ca67c
+
+Exactly six unchanged files under vendor/libHDiffPatch/HPatch/, plus the
+unchanged upstream LICENSE. SHA256SUMS records their bytes. Git blob SHA-1s
+were checked against the pinned commit's recorded recursive GitHub tree:
+patch.c                 ebf897816e564b93c2027eb0df4e8d78cd164179
+patch.h                 825d53687ef5742eb86a5760eeb9ef8cea34b489
+patch_types.h           e5ebaae5e0e13f718a0bc2b4dcfb4cf2c42e9ecb
+patch_private.h         31d8a93506b8e343203a57428c7a6712df8d9eda
+checksum_plugin.h       18abb38fd3edd9006c684799d989b71d7ceab4fb
+hpatch_mt/hpatch_mt.h    f03cc9d8808d305b18cd04b83db2aa97ab3943a2
+LICENSE                 3c54019b90279c89bddc1c486fac026afd0423c8
+
+Build: _IS_USED_MULTITHREAD=0, _HPATCH_IS_USED_MULTITHREAD=0,
+_IS_NEED_CACHE_OLD_ALL=0, _IS_NEED_CACHE_OLD_BY_COVERS=0.
+No generator, CLI, directory patcher, C++, multithread implementation or
+upstream codec plugin is included. Local glue lives outside vendor/.
+
+Local HDiffBridge.c uses CZstd's custom allocator API with a 64 MiB total
+session heap budget (including buffers and the 96 KiB patch cache), an 8 MiB
+window per zstd stream, and at most 64 KiB per file I/O step. Clang modules
+are disabled only for this C target so ZSTD_STATIC_LINKING_ONLY selects the
+allocator declarations textually. No upstream bytes are modified.
