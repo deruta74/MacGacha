@@ -45,7 +45,7 @@ public struct Stager: Sendable {
     package func forOperation() throws -> OperationStager {
         let retention = PipelineRootRetention(key: fs.caseFoldedPathKey(for: try SafeRelativePath(".macgacha-staging/.lock")))
         return OperationStager(retention: retention, session: StagingSession(plan: plan, files: [], fs: fs, fetcher: fetcher, journal: journal,
-            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, retention: retention, durableFiles: durableFiles, patchApplier: patchApplier, log: log, verifiedContainers: verifiedContainers))
+            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, retention: retention, durableFiles: durableFiles, patchApplier: patchApplier, log: log, verifiedContainers: verifiedContainers, operationWideProgress: true))
     }
 
 }
@@ -105,6 +105,7 @@ private actor StagingSession {
     nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
 
     private let durableFiles: Bool
+    private let operationWideProgress: Bool
     private enum Step { case start, file, progress, done }
     private let plan: InstallPlan
     private var files: [FileTask]
@@ -153,12 +154,13 @@ private actor StagingSession {
     private var lastProgress: OperationEvent?
 
     init(plan: InstallPlan, files: [FileTask], fs: ContainedFileSystem, fetcher: ChunkFetcher,
-        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks, pipeline: PipelineConfiguration, retention: PipelineRootRetention = PipelineRootRetention(key: ""), durableFiles: Bool = false, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil, verifiedContainers: VerifiedContainers) {
+        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks, pipeline: PipelineConfiguration, retention: PipelineRootRetention = PipelineRootRetention(key: ""), durableFiles: Bool = false, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil, verifiedContainers: VerifiedContainers, operationWideProgress: Bool = false) {
         let ioGate = PipelineIOGate(); self.ioGate = ioGate
         self.plan = plan; self.files = files; self.fs = fs.replacingFileOps(PipelineFileOps(base: fs.fileOps, gate: ioGate)); self.fetcher = fetcher; self.journal = journal
         self.disk = disk; self.limit = limit; self.lease = lease; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log; layout = StagingLayout(id: plan.id)
         OperationWork.record(.referrerIndexBuild)
         self.retention = retention; self.durableFiles = durableFiles
+        self.operationWideProgress = operationWideProgress
         self.verifiedContainers = verifiedContainers
         self.pipeline = pipeline; transferLimiter = PipelineLimiter(limit); assemblyLimiter = PipelineLimiter(pipeline.assemblies)
         progressTracker = PipelineProgress(plan)
@@ -241,6 +243,12 @@ private actor StagingSession {
                 if try await !FileAssembler.matches(file, plan: plan, fs: fs) { try await record(.fileUnstaged(path: file.path)) }
             }
             donePaths = state.stagedFiles.union(state.committedFiles)
+            if operationWideProgress {
+                // A progressive update shares one display counter across all
+                // batches, including verified work recovered after a pause.
+                totalStaged = try plan.files.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
+                staged = try plan.files.filter { donePaths.contains($0.path) }.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
+            }
             // A synced journal line does not make disposable part data durable.
             // Validate resident transfer bytes once per operation before reuse.
             for id in state.verifiedObjects {
@@ -290,9 +298,11 @@ private actor StagingSession {
         // Recheck only this batch's sources. Initial prediction visited future
         // ranges once; commits can invalidate later reuse without a rescan.
         for id in objects where networkObjects.insert(id).inserted { totalNetwork = progressAdding(totalNetwork, plan.objects[id]!.transferSize) }
-        let uncommitted = files.filter { !state.committedFiles.contains($0.path) }
-        totalStaged = try uncommitted.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
-        staged = try uncommitted.filter { state.stagedFiles.contains($0.path) }.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
+        if !operationWideProgress {
+            let uncommitted = files.filter { !state.committedFiles.contains($0.path) }
+            totalStaged = try uncommitted.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
+            staged = try uncommitted.filter { state.stagedFiles.contains($0.path) }.reduce(Int64(0)) { try SpaceBudget.adding($0, $1.size) }
+        }
         progressTracker.stage(staged, total: totalStaged)
     }
 
