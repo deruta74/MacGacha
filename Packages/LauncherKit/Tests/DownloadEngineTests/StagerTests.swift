@@ -8,6 +8,32 @@ import LauncherCore
 import DownloadEngine
 import TestSupport
 
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
+func operationStagingProgressIncludesEarlierBatches(resume: Bool) async throws {
+    let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)
+    let a = try stagingFile("a", "abc", [Extent(source: .local(path: SafeRelativePath("source"), offset: 0), fileOffset: 0, length: 3, digest: stagingDigest("abc"), fallbackChunkID: "fallback")])
+    let b = try stagingFile("b", "abc", a.extents)
+    try fs.writeAtomically(Data("abc".utf8), to: SafeRelativePath("source"))
+    let plan = try stagingPlan([stagingObject("fallback", "abc")], [a, b])
+    let journal = try stagingJournal(fs, plan)
+    let engine = try stagingEngine(plan, fs, MockCDN(), journal)
+    var operation = try engine.forOperation()
+    let first = try await collectStaging(operation.stage(files: [a]))
+    #expect(first.first == .progress(downloaded: 0, totalNetwork: 0, staged: 0, totalStaged: 6))
+    try fs.rename(from: stagedPath(plan, a.path), to: a.path)
+    try await journal.append(.fileCommitted(path: a.path))
+    try await operation.committed([a])
+    if resume {
+        // Recovery can retain a committed receipt after dropping disposable
+        // staged-file state; that completed work must still be credited.
+        try await journal.append(.fileUnstaged(path: a.path))
+        operation = try engine.forOperation()
+    }
+    let second = try await collectStaging(operation.stage(files: [b]))
+    #expect(second.first == .progress(downloaded: 0, totalNetwork: 0, staged: 3, totalStaged: 6))
+    #expect(second.last == .progress(downloaded: 0, totalNetwork: 0, staged: 6, totalStaged: 6))
+}
+
 @Test(.timeLimit(.minutes(1)), arguments: [false, true], ["missing", "wrong-size", "no-staged-record"])
 func committedBatchIsDoneForBudgetProgressAndObjectCleanup(includeCommittedInBatch: Bool, stagedState: String) async throws {
     let temp = try TempDir(); let fs = try ContainedFileSystem(root: temp.url)

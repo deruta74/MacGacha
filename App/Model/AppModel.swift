@@ -265,8 +265,10 @@ final class AppModel {
         gameUpdateCheck[id] = nil
         var state = state
         if case .working(let phase, let fraction, _, _, _) = state.activity {
-            if case .working(let previous, _, _, _, _) = games[id]?.activity, previous != phase { state.timing = nil }
-            if state.timing == nil, case .working(let previous, _, _, _, _) = games[id]?.activity, previous == phase {
+            if case .working(let previous, _, _, _, _) = games[id]?.activity,
+                GameProgress.trackingPhase(for: previous) != GameProgress.trackingPhase(for: phase) { state.timing = nil }
+            if state.timing == nil, case .working(let previous, _, _, _, _) = games[id]?.activity,
+                GameProgress.trackingPhase(for: previous) == GameProgress.trackingPhase(for: phase) {
                 state.timing = games[id]?.timing
             }
             let time = now()

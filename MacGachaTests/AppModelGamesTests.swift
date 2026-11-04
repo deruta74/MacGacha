@@ -70,6 +70,34 @@ struct AppModelGamesTests {
         #expect(messages.allSatisfy { !$0.isEmpty && !$0.contains("/Users/") })
     }
 
+    @Test func cachedUpdateKeepsProgressAcrossBatchPhases() async throws {
+        let (model, fake, clock) = try gameFixture(); defer { fake.finish() }
+        model.installGame("genshin", voices: [], at: gameLocation, approved: true)
+        try await gamesEventually { fake.calls.count == 1 }
+        fake.emit(.phase(.staging))
+        fake.emit(.progress(downloaded: 100, totalNetwork: 100, staged: 100, totalStaged: 900))
+        let expected = GameActivity.working(.staging, fraction: 0.2, bytesPerSecond: nil)
+        try await gamesEventually { model.games["genshin"]?.activity == expected }
+        // Exercise each synchronous presentation transition so a later progress
+        // event cannot hide a transient spinner or loss of fraction.
+        let phaseStarted = model.games["genshin"]?.timing?.phaseStarted
+        for phase in [OperationPhase.committing, .checkingSpace, .staging] {
+            clock.advance(.seconds(1))
+            model.setGameOperationPhase("genshin", phase: phase)
+            #expect(model.games["genshin"]?.activity == .working(phase, fraction: 0.2, bytesPerSecond: nil))
+            #expect(model.games["genshin"]?.timing?.phaseStarted == phaseStarted)
+        }
+        fake.emit(.phase(.committing))
+        fake.emit(.phase(.checkingSpace))
+        fake.emit(.phase(.staging))
+        clock.advance(.seconds(1))
+        fake.emit(.progress(downloaded: 100, totalNetwork: 100, staged: 200, totalStaged: 900))
+        try await gamesEventually {
+            model.games["genshin"]?.activity == .working(.staging, fraction: 0.3, bytesPerSecond: nil)
+        }
+        #expect(model.games["genshin"]?.timing?.phaseStarted != clock.time)
+    }
+
     @Test func installEmitsWorkingThenInstalled() async throws {
         let (model, fake, _) = try gameFixture(); defer { fake.finish() }
         model.installGame("genshin", voices: ["en-us"], at: gameLocation, approved: false)
@@ -78,7 +106,7 @@ struct AppModelGamesTests {
         fake.emit(.phase(.staging))
         fake.emit(.progress(downloaded: 25, totalNetwork: 100, staged: 0, totalStaged: 100))
         try await gamesEventually {
-            model.games["genshin"]?.activity == .working(.staging, fraction: 0.25, bytesPerSecond: nil, downloaded: 25, total: 100)
+            model.games["genshin"]?.activity == .working(.staging, fraction: 0.125, bytesPerSecond: nil, downloaded: 25, total: 100)
         }
         fake.setStatus(.installed(tag: "1.0"), for: "genshin")
         fake.emit(.phase(.completed)); fake.emit(.phase(.completed)); fake.finish()
@@ -305,7 +333,7 @@ struct AppModelGamesTests {
         try await gamesEventually { fake.calls.count == 1 }
         fake.emit(.phase(.staging)); fake.progress(250)
         try await gamesEventually {
-            model.games["genshin"]?.activity == .working(.staging, fraction: 0.25, bytesPerSecond: nil, downloaded: 250, total: 1000)
+            model.games["genshin"]?.activity == .working(.staging, fraction: 0.125, bytesPerSecond: nil, downloaded: 250, total: 1000)
         }
         clock.advance(.seconds(1))
         fake.emit(.progress(downloaded: 0, totalNetwork: 0, staged: 500, totalStaged: 1000))

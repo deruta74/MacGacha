@@ -127,23 +127,23 @@ import Synchronization
         }
     }
 
-    @Test func completedNetworkSwitchesEtaToStagingAndKeepsDownloadFraction() throws {
+    @Test func completedNetworkSwitchesEtaToStagingAndIncludesLocalWork() throws {
         var progress = GameProgress()
         _ = progress.update(at: start, downloaded: 0, network: 1000, staged: 0, totalStaged: 4000)
         _ = progress.update(at: start.advanced(by: .seconds(10)), downloaded: 900,
             network: 1000, staged: 900, totalStaged: 4000)
         let switched = try unwrap(progress.update(at: start.advanced(by: .seconds(11)), downloaded: 1000,
             network: 1000, staged: 1000, totalStaged: 4000))
-        #expect(switched.fraction == 1)
+        #expect(switched.fraction == 0.4)
         #expect(switched.timing.remaining == nil)
         let warming = try unwrap(progress.update(at: start.advanced(by: .seconds(20)), downloaded: 1000,
             network: 1000, staged: 1900, totalStaged: 4000))
         #expect(warming.timing.remaining == nil)
         let warmed = try unwrap(progress.update(at: start.advanced(by: .seconds(21)), downloaded: 1000,
             network: 1000, staged: 2000, totalStaged: 4000))
-        #expect(warmed.fraction == 1)
+        #expect(warmed.fraction == 0.6)
         #expect(abs(seconds(try #require(warmed.timing.remaining)) - 20) < 0.01)
-        #expect(warmed.speed == 0)
+        #expect(warmed.speed == nil)
         #expect(warmed.timing.lastAdvance == start.advanced(by: .seconds(21)))
     }
 

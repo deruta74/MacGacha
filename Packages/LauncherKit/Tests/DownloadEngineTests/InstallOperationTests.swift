@@ -276,7 +276,7 @@ func batchedModeUsesFallbackForOverwrittenLocalSource(resume: Bool, batched: Boo
         let resumed = try await opCollect(opEngine(plan, temp.url, cdn, bytes: bytes, mode: .batched(approved: true)).run())
         if batched {
             let initial = resumed.first { if case .progress = $0 { true } else { false } }
-            #expect(initial == .progress(downloaded: 3, totalNetwork: 9, staged: 0, totalStaged: 6))
+            #expect(initial == .progress(downloaded: 3, totalNetwork: 9, staged: 3, totalStaged: 9))
         }
         events.append(contentsOf: resumed)
     }
