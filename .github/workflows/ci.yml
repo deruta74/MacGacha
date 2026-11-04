@@ -34,6 +34,11 @@ jobs:
           python3 -I scripts/make-appcast.py --self-check
           xcrun swift -warnings-as-errors scripts/verify-sparkle-signature.swift --self-check
 
+      - name: Run native surround tests
+        # Exercise the native audio regression without downloading or running Wine.
+        # The separate component workflow still verifies the complete Unix module.
+        run: python3 -I scripts/test-surround-audio.py
+
       - name: Run package tests
         run: |
           mkdir -p test-results

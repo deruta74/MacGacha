@@ -83,7 +83,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
  static NTSTATUS unix_create_stream(void *args)
  {
      struct create_stream_params *params = args;
-@@ -834,44 +852,48 @@
+@@ -834,44 +852,54 @@
      if(params->share == AUDCLNT_SHAREMODE_EXCLUSIVE)
          stream->bufsize_frames -= stream->bufsize_frames % stream->period_frames;
  
@@ -125,7 +125,13 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 -        WARN("Unit failed to start: %x\n", (int)sc);
 -        params->result = osstatus_to_hresult(sc);
 -        goto end;
-+    if (!macgacha_spatial_start(stream))
++    sc = macgacha_spatial_start(stream);
++    if (sc < 0)
++    {
++        params->result = osstatus_to_hresult(sc);
++        goto end;
++    }
++    if (!sc)
 +    {
 +        if(!(stream->unit = get_audiounit(stream->flow, stream->dev_id))){
 +            params->result = AUDCLNT_E_DEVICE_INVALIDATED;
@@ -170,24 +176,24 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
      }
  
      size = stream->bufsize_frames * stream->fmt->nBlockAlign;
-@@ -890,6 +912,7 @@
+@@ -890,6 +918,7 @@
  
  end:
      if(FAILED(params->result)){
-+        if (stream->spatial_mixer) macgacha_spatial_dispose(stream);
++        if (stream->spatial_buffer || stream->spatial_mixer) macgacha_spatial_dispose(stream);
          if(stream->converter) AudioConverterDispose(stream->converter);
          if(stream->unit) AudioComponentInstanceDispose(stream->unit);
          free(stream->fmt);
-@@ -913,6 +936,8 @@
+@@ -913,6 +942,8 @@
          NtWaitForSingleObject(stream->timer_thread, FALSE, NULL);
          NtClose(stream->timer_thread);
      }
 +
-+    if (stream->spatial_mixer) macgacha_spatial_dispose(stream);
++    if (stream->spatial_buffer || stream->spatial_mixer) macgacha_spatial_dispose(stream);
  
      if(stream->unit){
          AudioOutputUnitStop(stream->unit);
-@@ -1174,6 +1199,12 @@
+@@ -1174,6 +1205,12 @@
  
      params->fmt->Samples.wValidBitsPerSample = params->fmt->Format.wBitsPerSample;
      params->fmt->Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
@@ -200,7 +206,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
      params->result = S_OK;
      return STATUS_SUCCESS;
  }
-@@ -1853,6 +1884,20 @@
+@@ -1853,6 +1890,20 @@
  {
      struct get_prop_value_params *params = args;
      const PROPERTYKEY *prop = params->prop;
@@ -317,7 +323,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +#endif
 --- /dev/null
 +++ b/dlls/winecoreaudio.drv/macgacha-spatial.h
-@@ -0,0 +1,299 @@
+@@ -0,0 +1,387 @@
 +/* SPDX-License-Identifier: LGPL-2.1-or-later */
 +/* MacGacha surround audio — https://github.com/deruta74/MacGacha */
 +/* Unix-only. Included after Wine's stream, format and render helpers. */
@@ -413,6 +419,79 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    return noErr;
 +}
 +
++/* Float 7.1 order follows mask 0x63f: FL FR FC LFE BL BR SL SR.
++ * A fixed quarter gain reserves headroom even for correlated full-scale inputs:
++ * each output is bounded by .25 * (1 + 3*.707107 + .5) < 1.
++ * This is a compatibility downmix, not binaural spatialization. */
++static OSStatus macgacha_stereo_pull(void *user, AudioUnitRenderActionFlags *flags,
++        const AudioTimeStamp *ts, UInt32 bus, UInt32 nframes, AudioBufferList *data)
++{
++    struct coreaudio_stream *stream = user;
++    AudioBufferList input;
++    float *left, *right, *p;
++    UInt32 frame, channel;
++    OSStatus status;
++    if (nframes > stream->spatial_frames) return kAudioUnitErr_TooManyFramesToProcess;
++    if (!data || data->mNumberBuffers != 2) return kAudioUnitErr_FormatNotSupported;
++    for (channel = 0; channel < 2; ++channel)
++        if (data->mBuffers[channel].mNumberChannels != 1 || !data->mBuffers[channel].mData ||
++            data->mBuffers[channel].mDataByteSize < nframes * sizeof(float))
++            return kAudioUnitErr_FormatNotSupported;
++    input.mNumberBuffers = 1;
++    input.mBuffers[0].mNumberChannels = 8;
++    input.mBuffers[0].mDataByteSize = nframes * 8 * sizeof(float);
++    input.mBuffers[0].mData = stream->spatial_buffer;
++    status = ca_render_cb(stream, flags, ts, bus, nframes, &input);
++    if (status) return status;
++    left = data->mBuffers[0].mData; right = data->mBuffers[1].mData;
++    for (frame = 0; frame < nframes; ++frame)
++    {
++        p = stream->spatial_buffer + frame * 8;
++        left[frame] = .25f * (p[0] + .70710678f * (p[2] + p[4] + p[6]) + .5f * p[3]);
++        right[frame] = .25f * (p[1] + .70710678f * (p[2] + p[5] + p[7]) + .5f * p[3]);
++    }
++    return noErr;
++}
++
++static BOOL macgacha_stereo_start(struct coreaudio_stream *stream, AudioStreamBasicDescription input)
++{
++    AudioComponentDescription desc = {0};
++    AudioStreamBasicDescription ring = input;
++    AudioComponent component;
++    AudioChannelLayout layout = {0};
++    AURenderCallbackStruct callback = {macgacha_stereo_pull, stream};
++    UInt32 size;
++    desc.componentType = kAudioUnitType_Output;
++    desc.componentSubType = kAudioUnitSubType_HALOutput;
++    desc.componentManufacturer = kAudioUnitManufacturer_Apple;
++    if (!(component = AudioComponentFindNext(NULL, &desc))) goto failed;
++    if (AudioComponentInstanceNew(component, &stream->unit)) goto failed;
++    if (AudioUnitSetProperty(stream->unit, kAudioOutputUnitProperty_CurrentDevice,
++            kAudioUnitScope_Global, 0, &stream->dev_id, sizeof(stream->dev_id))) goto failed;
++    input.mFormatFlags |= kAudioFormatFlagIsNonInterleaved;
++    input.mChannelsPerFrame = 2;
++    input.mBytesPerFrame = input.mBytesPerPacket = sizeof(float);
++    if (AudioUnitSetProperty(stream->unit, kAudioUnitProperty_StreamFormat,
++            kAudioUnitScope_Input, 0, &input, sizeof(input))) goto failed;
++    layout.mChannelLayoutTag = kAudioChannelLayoutTag_Stereo;
++    if (AudioUnitSetProperty(stream->unit, kAudioUnitProperty_AudioChannelLayout,
++            kAudioUnitScope_Input, 0, &layout, sizeof(layout))) goto failed;
++    size = sizeof(stream->spatial_frames);
++    if (AudioUnitGetProperty(stream->unit, kAudioUnitProperty_MaximumFramesPerSlice,
++            kAudioUnitScope_Global, 0, &stream->spatial_frames, &size)) goto failed;
++    if (size != sizeof(stream->spatial_frames) || !stream->spatial_frames || stream->spatial_frames > 65536) goto failed;
++    if (!(stream->spatial_buffer = malloc(stream->spatial_frames * 8 * sizeof(float)))) goto failed;
++    if (AudioUnitSetProperty(stream->unit, kAudioUnitProperty_SetRenderCallback,
++            kAudioUnitScope_Input, 0, &callback, sizeof(callback))) goto failed;
++    stream->dev_desc = ring; /* Wine accounting remains interleaved 8ch. */
++    if (AudioUnitInitialize(stream->unit)) goto failed;
++    if (AudioOutputUnitStart(stream->unit)) goto failed;
++    return TRUE;
++failed:
++    macgacha_spatial_dispose(stream);
++    return FALSE;
++}
++
 +static OSStatus macgacha_spatial_output_type(AudioDeviceID device, UInt32 *type)
 +{
 +    AudioObjectPropertyAddress addr = {kAudioHardwarePropertyDefaultOutputDevice,
@@ -436,15 +515,16 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    {
 +        size = sizeof(source);
 +        status = AudioObjectGetPropertyData(device, &addr, 0, NULL, &size, &source);
-+        if (status) return status;
++        if (status || size != sizeof(source)) source = 0;
 +        kind = source;
 +        addr.mSelector = kAudioDevicePropertyDataSourceKindForID;
-+        if (AudioObjectHasProperty(device, &addr))
++        if (source && AudioObjectHasProperty(device, &addr))
 +        {
 +            AudioValueTranslation translation = {&source, sizeof(source), &kind, sizeof(kind)};
 +            size = sizeof(translation);
 +            status = AudioObjectGetPropertyData(device, &addr, 0, NULL, &size, &translation);
-+            if (status) return status;
++            if (status || size != sizeof(translation) || translation.mOutputDataSize != sizeof(kind))
++                kind = source; /* Optional refinement must not erase a known port. */
 +        }
 +    }
 +
@@ -488,6 +568,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    AURenderCallbackStruct callback = {macgacha_spatial_pull, stream};
 +    UInt32 type = 0, device_channels = 0, value, size;
 +    HRESULT format_result;
++    BOOL eligible = FALSE, must_handle = FALSE;
 +    OSStatus status = noErr;
 +    const char *stage = "eligibility";
 +
@@ -496,6 +577,7 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    {
 +        stage = "capture"; status = kAudioUnitErr_FormatNotSupported; goto failed;
 +    }
++    must_handle = stream->fmt->nChannels > 2;
 +    stage = "device-channels";
 +    status = macgacha_surround_device_channels(stream->dev_id, &device_channels);
 +    if (status) goto failed;
@@ -508,7 +590,8 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    }
 +    stage = "eligibility";
 +    format_result = ca_get_audiodesc(&input, stream->fmt);
-+    /* Keep cutscene PCM/stereo and unknown masks on Wine's original path. */
++    /* Native/stereo streams already bypassed this bridge. Reject unsupported
++     * virtual multichannel formats rather than silently dropping channels. */
 +    if (stream->fmt->wFormatTag != WAVE_FORMAT_EXTENSIBLE || stream->fmt->cbSize < 22 || stream->fmt->nChannels != 8 ||
 +        ((WAVEFORMATEXTENSIBLE *)stream->fmt)->dwChannelMask != 0x63f ||
 +        FAILED(format_result) || input.mFormatID != kAudioFormatLinearPCM ||
@@ -518,6 +601,8 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +    {
 +        status = kAudioUnitErr_FormatNotSupported; goto failed;
 +    }
++
++    eligible = TRUE;
 +
 +#define MACGACHA_AU_STEP(label, expression) do { stage = label; status = (expression); \
 +    if (status) goto failed; } while (0)
@@ -611,9 +696,18 @@ Wine 11.20 Unix side only; no Unix-call ABI changes.
 +
 +failed:
 +    macgacha_spatial_dispose(stream);
++    if (eligible && strcmp(stage, "output-type"))
++    {
++        BOOL downmixed = macgacha_stereo_start(stream, input);
++        fprintf(stderr, "macgacha-surround: stream output=%s device-channels=%u channels=%u rate=%u spatial=fallback:%s:%d\n",
++            downmixed ? "stereo-downmix" : "failed", (unsigned)device_channels, (unsigned)stream->fmt->nChannels,
++            (unsigned)stream->fmt->nSamplesPerSec, stage, (int)status);
++        /* A negative result is terminal: a virtual 8ch stream must never reach stock stereo. */
++        return downmixed ? TRUE : kAudioUnitErr_FailedInitialization;
++    }
 +    fprintf(stderr, "macgacha-surround: stream output=%s device-channels=%u channels=%u rate=%u spatial=fallback:%s:%d\n",
 +        macgacha_spatial_type_name(type), (unsigned)device_channels, (unsigned)stream->fmt->nChannels,
 +        (unsigned)stream->fmt->nSamplesPerSec, stage, (int)status);
-+    return FALSE;
++    return must_handle ? (status < 0 ? status : kAudioUnitErr_FailedInitialization) : FALSE;
 +}
 +#endif

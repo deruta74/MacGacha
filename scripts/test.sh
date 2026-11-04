@@ -7,6 +7,7 @@ scripts/check-headers.sh
 python3 -I scripts/check-strings.py --self-check
 python3 -I scripts/make-appcast.py --self-check
 python3 -I scripts/check-genshin-fps.py --self-check
+python3 -I scripts/test-surround-audio.py
 xcrun swift -warnings-as-errors scripts/verify-sparkle-signature.swift --self-check
 swift test --package-path Packages/LauncherKit
 scripts/bootstrap.sh
