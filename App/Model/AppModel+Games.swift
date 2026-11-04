@@ -238,8 +238,7 @@ private struct GameSnapshot: Sendable {
                         if let record = try? await services.record(id), self?.gameOperation == token {
                             self?.setGameRecord(id, record)
                         }
-                        self?.setGameState(id, GameState(status: self?.games[id]?.status ?? .unknown,
-                            activity: .working(phase, fraction: nil, bytesPerSecond: nil)))
+                        self?.setGameOperationPhase(id, phase: phase)
                     case .progress(let downloaded, let network, let staged, let totalStaged):
                         self?.updateGameProgress(id, downloaded: downloaded, network: network, staged: staged, totalStaged: totalStaged)
                     case .fileVerified: break
@@ -330,13 +329,27 @@ private struct GameSnapshot: Sendable {
         setGameState(token.id, state)
         gameOperation = nil; gameTask = nil; gameProgress = GameProgress()
     }
+    func setGameOperationPhase(_ id: String, phase: OperationPhase) {
+        // Batch transitions retain the operation bar, while the actual phase
+        // still governs whether pausing is safe during a commit.
+        if let state = games[id], case .working(let previous, let fraction, let speed, let downloaded, let total) = state.activity,
+            [.staging, .checkingSpace, .committing].contains(previous),
+            [.staging, .checkingSpace, .committing].contains(phase) {
+            setGameState(id, GameState(status: state.status,
+                activity: .working(phase, fraction: fraction, bytesPerSecond: speed, downloaded: downloaded, total: total),
+                timing: state.timing))
+            return
+        }
+        setGameState(id, GameState(status: games[id]?.status ?? .unknown,
+            activity: .working(phase, fraction: nil, bytesPerSecond: nil)))
+    }
     private func updateGameProgress(_ id: String, downloaded: Int64, network: Int64, staged: Int64, totalStaged: Int64) {
         if case .needsApproval = games[id]?.activity { return }
         let phase: OperationPhase
         if case .working(let current, _, _, _, _) = games[id]?.activity { phase = current } else { phase = .staging }
         guard let value = gameProgress.update(at: now(), downloaded: downloaded, network: network, staged: staged,
-            totalStaged: totalStaged, phase: phase) else { return }
-        let downloading = phase == .staging && network > 0
+            totalStaged: totalStaged, phase: GameProgress.trackingPhase(for: phase)) else { return }
+        let downloading = phase == .staging && network > 0 && downloaded < network
         setGameState(id, GameState(status: games[id]?.status ?? .unknown,
             activity: .working(phase, fraction: value.fraction, bytesPerSecond: value.speed,
                 downloaded: downloading ? downloaded : nil, total: downloading ? network : nil), timing: value.timing))

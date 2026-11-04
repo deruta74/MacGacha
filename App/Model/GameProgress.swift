@@ -26,7 +26,12 @@ struct GameProgress {
     private var speedSamples: [Sample] = []
     private(set) var timing: GameTiming?
 
+    static func trackingPhase(for phase: OperationPhase) -> OperationPhase {
+        [.checkingSpace, .committing].contains(phase) ? .staging : phase
+    }
+
     mutating func beginPhase(_ phase: OperationPhase, at time: ContinuousClock.Instant) {
+        let phase = Self.trackingPhase(for: phase)
         guard self.phase != phase else { return }
         self.phase = phase; counter = nil; lastObservedBytes = nil
         lastObservedDownloaded = nil; lastObservedStaged = nil
@@ -69,11 +74,17 @@ struct GameProgress {
         guard let timing else { return nil }
         if let previous = lastUpdate, previous.duration(to: time) < Self.uiUpdateInterval { return nil }
         lastUpdate = time
-        // The bar keeps following downloads to the end: switching it to the staged
-        // counter would step back from 100% while the last objects assemble.
-        let shown = network > 0 ? (network, downloaded) : (totalStaged, staged)
-        let fraction = shown.0 > 0 ? min(1, Double(shown.1) / Double(shown.0)) : nil
-        return Value(fraction: fraction, speed: speed(at: time, bytes: max(0, downloaded), network: network), timing: timing)
+        // Count both delivery and local assembly across the whole operation.
+        // Adopted cache bytes are delivered, but still need local installation.
+        let combinesWork = phase == .staging
+        let shownTotal = combinesWork ? Double(max(0, network)) + Double(max(0, totalStaged))
+            : Double(max(0, network > 0 ? network : totalStaged))
+        let shownCount = combinesWork
+            ? Double(min(max(0, network), downloaded)) + Double(min(max(0, totalStaged), staged))
+            : Double(network > 0 ? downloaded : staged)
+        let fraction = shownTotal > 0 ? min(1, shownCount / shownTotal) : nil
+        return Value(fraction: fraction, speed: usesNetwork
+            ? speed(at: time, bytes: downloaded, network: network) : nil, timing: timing)
     }
 
     private func remaining(at time: ContinuousClock.Instant, count: Int64, total: Int64) -> Duration? {
