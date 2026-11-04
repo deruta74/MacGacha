@@ -64,7 +64,7 @@ private final class SurroundHelper: GameModeProviding, Sendable {
         }
         let bundle = InstalledRuntimeBundle(id: try SafeIdentifier(SurroundAudio.bundleID), root: f.bundle.root,
             wineBinary: f.bundle.wineBinary, digest: f.bundle.digest, source: .download)
-        let component = f.paths.runtimes.appendingPathComponent("surroundAudio/wine-11.20-1")
+        let component = f.paths.runtimes.appendingPathComponent("surroundAudio/wine-11.20-2")
         let runtime = ManagerRuntimeProvider(selected: LaunchRuntimeSelection(bundle: bundle, componentIDs: ["wine-a"],
             componentRoots: failure == "missingComponent" ? [:] : [.surroundAudio: component],
             compatibilityComponentIDs: failure == "missingComponent" ? [:] : [.surroundAudio: SurroundAudio.componentID]))

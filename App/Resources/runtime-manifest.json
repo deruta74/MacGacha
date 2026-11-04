@@ -165,23 +165,23 @@
       }
     },
     {
-      "id": "surround-audio-wine-11.20-1",
+      "id": "surround-audio-wine-11.20-2",
       "kind": "surroundAudio",
-      "version": "wine-11.20-1",
+      "version": "wine-11.20-2",
       "sourceMode": "download",
-      "url": "https://github.com/deruta74/MacGacha/releases/download/surround-audio-wine-11.20-1/surround-audio-wine-11.20-1.zip",
-      "size": 91325,
-      "installedSize": 254000,
+      "url": "https://github.com/deruta74/MacGacha/releases/download/surround-audio-wine-11.20-2/surround-audio-wine-11.20-2.zip",
+      "size": 94056,
+      "installedSize": 264437,
       "sha256": {
         "algorithm": "sha256",
-        "hex": "bbcedafd33e57949daabd861f67aeaabe3c1df1d166be299b161cc8cf28f5cf5"
+        "hex": "52cb41924c0dce3eee818fa88d2ac00f97192881020e601bee1c816605278a26"
       },
       "archive": "zip",
       "license": {
         "name": "LGPL-2.1-or-later",
         "url": "https://github.com/deruta74/MacGacha/blob/main/compat/surround-audio/NOTICE.md",
         "redistributable": true,
-        "termsRevision": "surround-audio-wine-11.20-1"
+        "termsRevision": "surround-audio-wine-11.20-2"
       }
     },
     {

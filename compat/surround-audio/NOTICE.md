@@ -15,5 +15,8 @@ plus the patch, build scripts and locked toolchain inputs in build-inputs/.
 Source: https://dl.winehq.org/wine/source/11.x/wine-11.20.tar.xz
 SHA-256: eac8ca448f9c0087f963026b4dc276d1e2b7fbb64056edc093e59bbb7e56fe28
 
-Only d3dmetal-wine11.20-gptk4.0b3 is supported. This component is not yet wired
-into launch recipes. Its presence alone never enables surround audio.
+Only d3dmetal-wine11.20-gptk4.0b3 is supported. Surround audio is opt-in through
+the per-game setting. Shared runtimes and game files remain unchanged.
+
+Revision 2 tolerates unavailable optional CoreAudio source-kind metadata and
+preserves all channels with an explicit stereo downmix if spatial setup fails.

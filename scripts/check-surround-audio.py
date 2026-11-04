@@ -39,7 +39,7 @@ def main():
     imported = re.findall(r'external _(\w+) \(from @rpath/ntdll.so\)', undefined)
     assert sorted(imported) == sorted(NTDLL_SYMBOLS), imported
     data = module.read_bytes()
-    with zipfile.ZipFile(root / 'surround-audio-wine-11.20-1.zip') as archive:
+    with zipfile.ZipFile(root / 'surround-audio-wine-11.20-2.zip') as archive:
         assert archive.read('x86_64-unix/winecoreaudio.so') == data
         assert not any(p.endswith(('.dll', '.exe')) for p in archive.namelist())
         digest = hashlib.sha256(data).hexdigest()

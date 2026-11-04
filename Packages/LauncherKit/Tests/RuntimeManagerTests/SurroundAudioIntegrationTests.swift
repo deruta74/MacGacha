@@ -16,7 +16,7 @@ struct SurroundAudioIntegrationTests {
         let manifest = try RuntimeManifest.load(from: repository.appendingPathComponent("App/Resources/runtime-manifest.json"))
         let component = try #require(manifest.components.first { $0.id.rawValue == SurroundAudio.componentID })
         let buildFS = try ContainedFileSystem(root: built)
-        let bytes = try buildFS.readFile(at: SafeRelativePath("surround-audio-wine-11.20-1.zip"),
+        let bytes = try buildFS.readFile(at: SafeRelativePath("surround-audio-wine-11.20-2.zip"),
             maxBytes: Int(try #require(component.size)))
         var hash = StreamingHasher(.sha256); hash.update(bytes)
         #expect(Int64(bytes.count) == component.size && hash.finalize() == component.sha256)

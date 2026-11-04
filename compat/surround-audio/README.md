@@ -2,11 +2,11 @@
 <!-- MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)). -->
 # Wine 11.20 surround audio
 
-ABI-scoped component `surround-audio-wine-11.20-1` for
+ABI-scoped component `surround-audio-wine-11.20-2` for
 `d3dmetal-wine11.20-gptk4.0b3`. The only binary is
-`x86_64-unix/winecoreaudio.so`. No mmdevapi changes, game modifications, launch
-requirements or per-game switch ship here. A later change will replace the
-module in a verified per-game Game Mode helper; never replace shared runtimes.
+`x86_64-unix/winecoreaudio.so`. No mmdevapi or game modifications ship here.
+The per-game Surround Sound switch selects this module in a verified Game Mode
+helper. Shared runtimes remain unchanged.
 
 Only the exact environment value `MACGACHA_SURROUND=1` activates the patch.
 Unset, empty and other values use Wine's original format, endpoint IDs and
@@ -25,11 +25,18 @@ side; turning off the gate restores the original IDs and cached settings.
 This can reset a game's saved Windows endpoint selection when opting in.
 
 An 8-channel float 0x63f stream feeds Apple's AUSpatialMixer Ambience Bed through
-a bounded planar bridge. Output routing follows the tested spike: headphones,
-built-in speakers, or external speakers, with processed stereo output. This
-version preserves Wine's native multichannel path and does not promise Control
-Center spatial status. Other formats (including six-channel mixer inputs) and
-any setup failure use stock Wine for that stream.
+a bounded planar bridge. Output routing selects headphones, built-in speakers
+or external speakers, with processed stereo output. Optional data-source kind
+queries retain the known source and transport when CoreAudio cannot read the
+property. This version preserves Wine's native multichannel path and does not
+promise Control Center spatial status.
+
+If spatial setup fails for a supported virtual 7.1 stream, an explicit stereo
+downmix preserves every input channel, including dialogue in the center channel.
+Unsupported virtual multichannel formats and failure of the stereo fallback
+return an initialization error instead of sending eight channels through a
+stereo output unchanged. Mono/stereo streams and native multichannel devices
+retain Wine's original path.
 Failure to query, enable or confirm optional head tracking keeps spatial audio
 running; external listener-orientation tracking is deferred. The render callback
 allocates nothing, queries no properties and logs nothing. Opted-in stream setup
@@ -50,7 +57,7 @@ probe. No Wine executable, prefix, game or audio device is opened by the checks.
 ```sh
 SURROUND_AUDIO_CACHE_DIR=/path/to/cached/source scripts/build-surround-audio.sh /tmp/surround-a --offline --verify
 SURROUND_AUDIO_CACHE_DIR=/path/to/cached/source scripts/build-surround-audio.sh /tmp/surround-b --offline --verify
-cmp /tmp/surround-a/surround-audio-wine-11.20-1.zip /tmp/surround-b/surround-audio-wine-11.20-1.zip
+cmp /tmp/surround-a/surround-audio-wine-11.20-2.zip /tmp/surround-b/surround-audio-wine-11.20-2.zip
 MACGACHA_SURROUND_AUDIO_BUILD=/tmp/surround-a swift test --package-path Packages/LauncherKit --filter SurroundAudioIntegrationTests
 ```
 

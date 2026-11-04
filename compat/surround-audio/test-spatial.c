@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <math.h>
 
 typedef unsigned int UINT32;
 typedef int BOOL;
@@ -39,11 +40,14 @@ struct coreaudio_stream {
     int flow;
 };
 static int calls, fail_at, live, running, head_supported = 1, head_value;
+static int force_mixer_failure, fallback_calls, fallback_fail_at, fallback_active;
+static int impulse = -1;
 static UInt32 transport = kAudioDeviceTransportTypeBluetooth, source_kind;
 static UInt32 observed_bitmap, observed_algorithm, observed_mode, observed_output;
 static int pulls;
 static int allocations;
 static OSStatus head_info_error, head_set_error, head_get_error;
+static OSStatus kind_error, source_error, render_error;
 static UInt32 head_size = sizeof(UInt32);
 static UInt32 head_get_size = sizeof(UInt32);
 static Boolean head_writable = 1;
@@ -52,7 +56,7 @@ static int optional_calls[256];
 static int record_optional = 1;
 static AudioDeviceID default_device = 42;
 static UInt32 device_channels = 2;
-static OSStatus step(void) { return ++calls == fail_at ? -777 : noErr; }
+static OSStatus step(void) { ++calls; if (fallback_active && ++fallback_calls == fallback_fail_at) return -778; return calls == fail_at ? -777 : noErr; }
 static int ca_get_audiodesc(AudioStreamBasicDescription *d, const WAVEFORMATEX *f) {
     memset(d, 0, sizeof(*d));
     d->mSampleRate = f->nSamplesPerSec; d->mFormatID = kAudioFormatLinearPCM;
@@ -65,9 +69,12 @@ static OSStatus ca_render_cb(void *s, AudioUnitRenderActionFlags *fl,
         const AudioTimeStamp *ts, UInt32 bus, UInt32 n, AudioBufferList *data) {
     float *p = data->mBuffers[0].mData;
     (void)s; (void)fl; (void)ts; (void)bus;
+    assert(((struct coreaudio_stream *)s)->dev_desc.mChannelsPerFrame == 8);
+    assert(((struct coreaudio_stream *)s)->dev_desc.mBytesPerFrame == 32);
+    if (render_error) return render_error;
     ++pulls;
     for (UInt32 i = 0; i < n; ++i)
-        for (UInt32 c = 0; c < 8; ++c) p[i * 8 + c] = 100 * c + i;
+        for (UInt32 c = 0; c < 8; ++c) p[i * 8 + c] = impulse < 0 ? 100 * c + i : impulse == 8 || (int)c == impulse ? 1.f : 0.f;
     return noErr;
 }
 static OSStatus fake_new(AudioComponent c, AudioComponentInstance *u) {
@@ -77,6 +84,9 @@ static OSStatus fake_new(AudioComponent c, AudioComponentInstance *u) {
 }
 static AudioComponent fake_find(AudioComponent c, const AudioComponentDescription *d) {
     (void)c; assert(d->componentSubType == kAudioUnitSubType_SpatialMixer || d->componentSubType == kAudioUnitSubType_HALOutput);
+    if (force_mixer_failure && d->componentSubType == kAudioUnitSubType_SpatialMixer) {
+        fallback_active = 1; fallback_calls = 0; return NULL;
+    }
     return step() ? NULL : (AudioComponent)1;
 }
 static OSStatus fake_dispose(AudioComponentInstance u) { assert(u); --live; return 0; }
@@ -155,8 +165,13 @@ static OSStatus fake_object(AudioObjectID o, const AudioObjectPropertyAddress *a
         buffers->mBuffers[0].mNumberChannels = device_channels / 2;
         buffers->mBuffers[1].mNumberChannels = device_channels - device_channels / 2;
     }
-    else if (a->mSelector == kAudioDevicePropertyDataSourceKindForID)
+    else if (a->mSelector == kAudioDevicePropertyDataSource && source_error) {
+        *(UInt32 *)d = 0; return source_error;
+    }
+    else if (a->mSelector == kAudioDevicePropertyDataSourceKindForID) {
+        if (kind_error) { *(UInt32 *)((AudioValueTranslation *)d)->mOutputData = 0; return kind_error; }
         *(UInt32 *)((AudioValueTranslation *)d)->mOutputData = source_kind;
+    }
     else *(UInt32 *)d = a->mSelector == kAudioHardwarePropertyDefaultOutputDevice ? default_device :
         a->mSelector == kAudioDevicePropertyTransportType ? transport : source_kind;
     return 0;
@@ -248,8 +263,8 @@ int main(void) {
             calls = 0;
             BOOL started = macgacha_spatial_start(&s);
             /* The bridge still supports only 8ch float 0x63f; 6ch falls back. */
-            assert(started == (d < 2 && c == 3));
-            if (started) macgacha_spatial_dispose(&s);
+            assert(started == (d < 2 && c == 3 ? TRUE : d < 2 && c == 2 ? kAudioUnitErr_FormatNotSupported : FALSE));
+            if (started == TRUE) macgacha_spatial_dispose(&s);
             else assert(calls == 3); /* Only channel discovery, no AudioUnit setup. */
             assert(!live && !running && !allocations);
         }
@@ -262,6 +277,15 @@ int main(void) {
     assert(!macgacha_surround_endpoint_prefix(eCapture, device_channels));
     assert(!strcmp(macgacha_surround_device(MACGACHA_SURROUND_ENDPOINT "device"), "device"));
     assert(!strcmp(macgacha_surround_device("device"), "device"));
+    transport = kAudioDeviceTransportTypeBuiltIn; source_kind = 'ispk'; kind_error = 'who?';
+    assert(macgacha_spatial_start(&s) == TRUE);
+    assert(observed_output == kSpatialMixerOutputType_BuiltInSpeakers);
+    macgacha_spatial_dispose(&s);
+    source_error = 'who?';
+    assert(macgacha_spatial_start(&s) == TRUE);
+    assert(observed_output == kSpatialMixerOutputType_BuiltInSpeakers);
+    macgacha_spatial_dispose(&s); source_error = 0;
+    kind_error = 0; source_kind = 0; transport = kAudioDeviceTransportTypeBluetooth;
     head_info_error = -10851; head_value = 0;
     assert(macgacha_spatial_start(&s)); assert(!head_value);
     macgacha_spatial_dispose(&s); head_info_error = 0; calls = 0;
@@ -289,10 +313,9 @@ int main(void) {
     for (int i = 1; i <= total_calls; ++i) {
         calls = 0; fail_at = i;
         BOOL started = macgacha_spatial_start(&s);
-        assert(started == optional_calls[i]);
-        if (started) {
-            /* Optional tracking errors preserve the spatial chain. */
-            assert(live == 2 && running == 1);
+        assert(i <= 3 ? started < 0 : started == TRUE || started < 0);
+        if (started == TRUE) {
+            assert((live == 1 || live == 2) && running == 1);
             macgacha_spatial_dispose(&s);
         }
         assert(!live && !running && !s.unit && !s.spatial_mixer && !s.spatial_buffer && !allocations);
@@ -332,19 +355,54 @@ int main(void) {
     transport = kAudioDeviceTransportTypeBluetooth; source_kind = kAudioStreamTerminalTypeSpeaker;
     assert(macgacha_spatial_start(&s)); assert(observed_output == kSpatialMixerOutputType_ExternalSpeakers);
     macgacha_spatial_dispose(&s);
-    default_device = 99; assert(!macgacha_spatial_start(&s)); assert(!live && !allocations);
+    default_device = 99; assert(macgacha_spatial_start(&s) < 0); assert(!live && !allocations);
     default_device = 42;
+    force_mixer_failure = 1; calls = 0;
+    assert(macgacha_spatial_start(&s) == TRUE);
+    assert(live == 1 && !s.spatial_mixer && s.dev_desc.mChannelsPerFrame == 8 && s.dev_desc.mBytesPerFrame == 32);
+    const int fallback_total = fallback_calls;
+    struct { UInt32 n; AudioBuffer b[2]; } stereo = {.n = 2};
+    float left[4], right[4];
+    stereo.b[0] = (AudioBuffer){1, sizeof(left), left}; stereo.b[1] = (AudioBuffer){1, sizeof(right), right};
+    const float expected_left[] = {.25f, 0, .176776695f, .125f, .176776695f, 0, .176776695f, 0};
+    const float expected_right[] = {0, .25f, .176776695f, .125f, 0, .176776695f, 0, .176776695f};
+    int before_calls = calls, before_pulls = pulls, before_allocations = allocations;
+    for (impulse = 0; impulse <= 8; ++impulse) {
+        assert(!macgacha_stereo_pull(&s, NULL, NULL, 0, 4, (AudioBufferList *)&stereo));
+        for (int frame = 0; frame < 4; ++frame) {
+            if (impulse < 8) { assert(fabsf(left[frame] - expected_left[impulse]) < .000001f); assert(fabsf(right[frame] - expected_right[impulse]) < .000001f); }
+            else assert(left[frame] > .9f && left[frame] < 1.f && right[frame] == left[frame]);
+        }
+    }
+    assert(calls == before_calls && allocations == before_allocations && pulls == before_pulls + 9);
+    before_pulls = pulls;
+    render_error = -779;
+    assert(macgacha_stereo_pull(&s, NULL, NULL, 0, 4, (AudioBufferList *)&stereo) == render_error);
+    render_error = 0;
+    assert(macgacha_stereo_pull(&s, NULL, NULL, 0, 65, (AudioBufferList *)&stereo));
+    stereo.n = 1; assert(macgacha_stereo_pull(&s, NULL, NULL, 0, 4, (AudioBufferList *)&stereo)); stereo.n = 2;
+    stereo.b[1].mDataByteSize = 1; assert(macgacha_stereo_pull(&s, NULL, NULL, 0, 4, (AudioBufferList *)&stereo));
+    stereo.b[1].mDataByteSize = sizeof(right); stereo.b[0].mData = NULL;
+    assert(macgacha_stereo_pull(&s, NULL, NULL, 0, 4, (AudioBufferList *)&stereo));
+    assert(pulls == before_pulls && calls == before_calls && allocations == before_allocations);
+    macgacha_spatial_dispose(&s); assert(!live && !running && !allocations);
+    for (int failure = 1; failure <= fallback_total; ++failure) {
+        fallback_active = 0; fallback_fail_at = failure; calls = 0;
+        assert(macgacha_spatial_start(&s) < 0);
+        assert(!live && !running && !allocations && !s.unit && !s.spatial_buffer);
+    }
+    force_mixer_failure = fallback_active = fallback_fail_at = 0; impulse = -1;
     fmt.dwChannelMask = 0xff;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
+    calls = 0; assert(macgacha_spatial_start(&s) == (fmt.Format.nChannels > 2 ? kAudioUnitErr_FormatNotSupported : FALSE)); assert(calls == 3 && !live);
     fmt.dwChannelMask = 0x63f;
     fmt.Format.nChannels = 2;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
+    calls = 0; assert(macgacha_spatial_start(&s) == (fmt.Format.nChannels > 2 ? kAudioUnitErr_FormatNotSupported : FALSE)); assert(calls == 3 && !live);
     fmt.Format.nChannels = 8; format_bits = 16;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
+    calls = 0; assert(macgacha_spatial_start(&s) == (fmt.Format.nChannels > 2 ? kAudioUnitErr_FormatNotSupported : FALSE)); assert(calls == 3 && !live);
     format_bits = 32; fmt.Format.cbSize = 0;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
+    calls = 0; assert(macgacha_spatial_start(&s) == (fmt.Format.nChannels > 2 ? kAudioUnitErr_FormatNotSupported : FALSE)); assert(calls == 3 && !live);
     fmt.Format.cbSize = 22; fmt.Format.nBlockAlign = 16;
-    calls = 0; assert(!macgacha_spatial_start(&s)); assert(calls == 3 && !live);
+    calls = 0; assert(macgacha_spatial_start(&s) == (fmt.Format.nChannels > 2 ? kAudioUnitErr_FormatNotSupported : FALSE)); assert(calls == 3 && !live);
     printf("PASS: 16 device/stream decisions, native layouts, opt-in, planar pull bounds, output routing, optional tracking; %d setup fault points covered\n", total_calls);
     return 0;
 }

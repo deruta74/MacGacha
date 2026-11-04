@@ -35,18 +35,18 @@ jobs:
           SURROUND_AUDIO_CACHE_DIR="$RUNNER_TEMP/cache-a" sandbox-exec -p "$profile" scripts/build-surround-audio.sh out-a --offline --verify
           SURROUND_AUDIO_CACHE_DIR="$RUNNER_TEMP/cache-b" sandbox-exec -p "$profile" scripts/build-surround-audio.sh out-b --offline --verify
           cmp out-a/x86_64-unix/winecoreaudio.so out-b/x86_64-unix/winecoreaudio.so
-          cmp out-a/surround-audio-wine-11.20-1.zip out-b/surround-audio-wine-11.20-1.zip
+          cmp out-a/surround-audio-wine-11.20-2.zip out-b/surround-audio-wine-11.20-2.zip
           python3 -I - <<'PY'
           import hashlib, json, pathlib
           manifest = json.loads(pathlib.Path('App/Resources/runtime-manifest.json').read_text())
-          component = next(c for c in manifest['components'] if c['id'] == 'surround-audio-wine-11.20-1')
-          data = pathlib.Path('out-a/surround-audio-wine-11.20-1.zip').read_bytes()
+          component = next(c for c in manifest['components'] if c['id'] == 'surround-audio-wine-11.20-2')
+          data = pathlib.Path('out-a/surround-audio-wine-11.20-2.zip').read_bytes()
           assert len(data) == component['size']
           assert hashlib.sha256(data).hexdigest() == component['sha256']['hex']
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: surround-audio-wine-11.20-1
+          name: surround-audio-wine-11.20-2
           path: |
             out-a/
             out-b/
@@ -57,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag=surround-audio-wine-11.20-1
+          tag=surround-audio-wine-11.20-2
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --draft --title "$tag" --target "$GITHUB_SHA" --notes-file compat/surround-audio/NOTICE.md
           fi
@@ -65,4 +65,4 @@ jobs:
             echo 'Refusing to change a published release' >&2
             exit 1
           }
-          gh release upload "$tag" out-a/surround-audio-wine-11.20-1.zip "$RUNNER_TEMP/cache-a/wine-11.20.tar.xz" --clobber
+          gh release upload "$tag" out-a/surround-audio-wine-11.20-2.zip "$RUNNER_TEMP/cache-a/wine-11.20.tar.xz" --clobber
