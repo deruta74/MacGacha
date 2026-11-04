@@ -11,7 +11,7 @@ import RuntimeManager
     func environmentOnlyOptsInWithTheRequestedModule(gameMode: Bool, audio: Bool) throws {
         let game = GameDefinition.find("genshin")!, recipe = try #require(Recipes.recipe(for: game.id))
         var settings = LaunchSettings.defaults(for: game.id); settings.compatibilityPatches = false; settings.surroundSound = audio
-        let root = URL(fileURLWithPath: "/Runtimes/GameMode/helper/Contents"), component = URL(fileURLWithPath: "/Runtimes/surroundAudio/wine-11.20-1")
+        let root = URL(fileURLWithPath: "/Runtimes/GameMode/helper/Contents"), component = URL(fileURLWithPath: "/Runtimes/surroundAudio/wine-11.20-2")
         let module = SurroundAudio.modulePath.resolved(against: component)
         for actual in [Optional<URL>.none, module, URL(fileURLWithPath: "/foreign/module.so")] {
             let helper = GameModeRuntime(game: game, root: root, wineBinary: root.appendingPathComponent("MacOS/wine-wrapper"),

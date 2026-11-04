@@ -31,7 +31,7 @@ import TestSupport
         let installer = surroundInstaller(store: store, cdn: cdn)
         for try await _ in installer.install(component) { }
         let installed = try #require(store.installed().first)
-        #expect(installed.kind == .surroundAudio && installed.version == "wine-11.20-1")
+        #expect(installed.kind == .surroundAudio && installed.version == "wine-11.20-2")
         #expect(installed.archiveDigest == component.sha256)
         let fs = try ContainedFileSystem(root: store.installURL(for: component))
         #expect(try fs.readFile(at: SurroundAudio.modulePath, maxBytes: 1024) == Data("module".utf8))
@@ -61,7 +61,7 @@ import TestSupport
         try fs.removeItem(at: SafeRelativePath("Games/genshin/launch-session.json"))
         try store.remove(installed)
         #expect(try store.installed().isEmpty)
-        #expect(try fs.itemType(at: SafeRelativePath("Runtimes/surroundAudio/wine-11.20-1")) == nil)
+        #expect(try fs.itemType(at: SafeRelativePath("Runtimes/surroundAudio/wine-11.20-2")) == nil)
     }
 
     @Test func rejectsUnverifiedArchiveBeforePublication() async throws {
@@ -79,7 +79,7 @@ import TestSupport
 private func surroundComponent(_ bytes: Data) throws -> RuntimeComponent {
     var hash = StreamingHasher(.sha256); hash.update(bytes)
     return try RuntimeComponent(id: SafeIdentifier(SurroundAudio.componentID), kind: .surroundAudio,
-        version: SafeIdentifier("wine-11.20-1"), sourceMode: .download,
+        version: SafeIdentifier("wine-11.20-2"), sourceMode: .download,
         url: URL(string: "https://fixtures.invalid/archive"), size: Int64(bytes.count), installedSize: 1024,
         sha256: hash.finalize(), archive: .zip,
         license: ComponentLicense(name: "LGPL-2.1-or-later", url: URL(string: "https://fixtures.invalid/license")!,

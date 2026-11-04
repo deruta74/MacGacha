@@ -76,7 +76,7 @@ tar -xf "$archive" -C "$work"
     # Rosetta requires LC_UUID even for configure/build-tool executables.
     # Apple's default content-derived UUID is retained, then checked by rebuild.
     export LDFLAGS='-arch x86_64 -mmacosx-version-min=26.0'
-    export CROSSCFLAGS="-O2 -fno-ident -frandom-seed=surround-audio-1 -ffile-prefix-map=$work=. -fdebug-prefix-map=$work=."
+    export CROSSCFLAGS="-O2 -fno-ident -frandom-seed=surround-audio-2 -ffile-prefix-map=$work=. -fdebug-prefix-map=$work=."
     export CROSSLDFLAGS='-Wl,--no-insert-timestamp,--build-id=none'
     ../wine-11.20/configure --build=x86_64-apple-darwin --host=x86_64-apple-darwin \
         --enable-archs=x86_64 --disable-build-id --disable-tests --with-coreaudio \
@@ -120,7 +120,7 @@ cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$output/build-inputs/"
 python3 -I - "$output" <<'ZIP'
 import pathlib, sys, zipfile
 root = pathlib.Path(sys.argv[1])
-with zipfile.ZipFile(root / 'surround-audio-wine-11.20-1.zip', 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+with zipfile.ZipFile(root / 'surround-audio-wine-11.20-2.zip', 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
     for path in sorted(root.rglob('*')):
         relative = path.relative_to(root)
         if not path.is_file() or relative.parts[0] == 'audit' or path.suffix == '.zip':
@@ -135,4 +135,4 @@ python3 -I "$repo_root/scripts/check-surround-audio.py" "$output"
 if [[ "$verify" == 1 ]]; then
     (cd "$output" && shasum -a 256 -c "$inputs/SHA256SUMS")
 fi
-shasum -a 256 "$output/surround-audio-wine-11.20-1.zip"
+shasum -a 256 "$output/surround-audio-wine-11.20-2.zip"
