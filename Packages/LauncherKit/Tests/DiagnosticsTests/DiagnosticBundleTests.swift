@@ -765,7 +765,11 @@ func optionalLogsCanVanishOrBecomeUnsafeAfterSelection(kind: String) async throw
                 if kind.hasPrefix("unsafe") { try! fs.createSymbolicLink(at: path, target: "../outside.log") }
             })
         if kind.hasPrefix("cancel") {
-            await #expect(throws: LauncherError.cancelled) { try await bundle.export(to: root.appendingPathComponent("out.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil) }
+            let cancelled = Task {
+                try await bundle.export(to: root.appendingPathComponent("out.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
+            }
+            await #expect(throws: LauncherError.cancelled) { try await cancelled.value }
+            #expect(!Task.isCancelled)
         } else {
             try await bundle.export(to: root.appendingPathComponent("out.zip"), systemInfo: diagnosticFixtureInfo(), runtimes: [:], failureStage: nil)
         }
