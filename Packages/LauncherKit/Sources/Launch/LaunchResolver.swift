@@ -75,6 +75,9 @@ public enum LaunchResolver {
         let surroundActive = surroundRequested && module != nil && gameModeRuntime?.gameID == recipe.game && gameModeRuntime?.surroundModule == module
         let helper = (gameModeEnabled || surroundActive) ? gameModeRuntime : nil
         if let helper {
+            guard helper.gameID == recipe.game, helper.runtimeProfileID == nil || helper.runtimeProfileID == runtimeBundleID else {
+                throw LauncherError.io("Game Mode compatibility profile does not match the selected runtime")
+            }
             try validateLocalURL(helper.wineBinary)
             try validateLocalURL(helper.wineserver)
         }

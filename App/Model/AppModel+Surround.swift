@@ -14,6 +14,6 @@ import Launch
     func offersSurround(for gameID: String) -> Bool {
         let settings = launchSettings(for: gameID)
         return LaunchResolver.offersSurroundSound(gameID, backend: settings.backend,
-            runtimeBundleID: manifest?.defaultBundle(for: settings.backend)?.id.rawValue)
+            runtimeBundleID: runtimeProfile(for: settings.backend))
     }
 }

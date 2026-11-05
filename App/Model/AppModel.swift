@@ -95,6 +95,16 @@ final class AppModel {
     @ObservationIgnored let paths: AppPaths
     // Observed: the setup sheet can open before startup loads it and must refresh when it arrives.
     var manifest: RuntimeManifest?
+    var runtimeCatalog: RuntimeCatalogSnapshot?
+    var runtimeCatalogUnavailable = false
+    var runtimeCatalogRefreshing = false
+    var runtimeCatalogMutationID: String?
+    @ObservationIgnored let catalogAccess: (any RuntimeCatalogAccess)?
+    @ObservationIgnored var catalogRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var catalogMutationTask: Task<Void, Never>?
+    @ObservationIgnored var catalogSelectionGeneration = UUID()
+    @ObservationIgnored var catalogActivationTargets: [String: RuntimeCatalogSnapshot] = [:]
+    @ObservationIgnored var runtimeInstallContexts: [String: RuntimeInstallContext] = [:]
     @ObservationIgnored private let services: any RuntimeServices
     @ObservationIgnored let artServices: [Region: any GameArtProviding]
     @ObservationIgnored var artHydrationTasks: [Region: Task<Void, Never>] = [:]
@@ -196,7 +206,7 @@ final class AppModel {
 
 
     init(paths: AppPaths = .standard(), manifest: RuntimeManifest? = nil,
-        services: (any RuntimeServices)? = nil, defaults: UserDefaults? = .standard,
+        services: (any RuntimeServices)? = nil, catalogAccess: (any RuntimeCatalogAccess)? = nil, defaults: UserDefaults? = .standard,
         artService: any GameArtProviding = EmptyGameArtProvider(),
         artServices: [Region: any GameArtProviding] = [:],
         eventsServices: [Region: any GameEventsProviding] = [:],
@@ -236,6 +246,7 @@ final class AppModel {
         self.rosettaPollInterval = rosettaPollInterval; self.rosettaPollTimeout = rosettaPollTimeout; self.rosettaPrompt = rosettaPrompt
         self.recoverySleep = recoverySleep
         self.launchServices = launchServices; self.launchWindows = launchWindows; self.launchSleep = launchSleep
+        self.catalogAccess = catalogAccess
         self.paths = paths; self.manifest = manifest; self.gameServices = gameServices; self.purgeableSpace = purgeable
         self.services = services ?? LiveRuntimeServices(paths: paths)
         self.defaults = defaults; self.now = now
@@ -325,8 +336,10 @@ final class AppModel {
         let log = EventLog(directory: paths.logs)
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
+        let runtimeServices = LiveRuntimeServices(paths: paths, log: log)
+        let catalog = LiveRuntimeCatalogAccess(paths: paths, services: runtimeServices)
         let launch = LiveLaunchServices(paths: paths, log: log, icons: CachedGameModeIcons(
-            cacheDirectory: gameArtCacheDirectory(in: caches, bundleIdentifier: Bundle.main.bundleIdentifier)))
+            cacheDirectory: gameArtCacheDirectory(in: caches, bundleIdentifier: Bundle.main.bundleIdentifier)), catalog: catalog)
         let art: [Region: any GameArtProviding] = Dictionary(uniqueKeysWithValues: Region.allCases.map {
             ($0, GameArtService(cacheDirectory: gameArtCacheDirectory(in: caches,
                 bundleIdentifier: Bundle.main.bundleIdentifier), region: $0,
@@ -338,7 +351,7 @@ final class AppModel {
                 .appendingPathComponent("GameEvents", isDirectory: true), region: $0,
                 language: HoYoPlayLanguage.content(forInterface: InterfaceLanguageSettings.runningLocalization)))
         })
-        return AppModel(paths: paths, services: LiveRuntimeServices(paths: paths, log: log),
+        return AppModel(paths: paths, services: runtimeServices, catalogAccess: catalog,
             artServices: art, eventsServices: events, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
             rosettaProbe: SystemRosettaProbe(), displayProbe: SystemDisplayProbe(),
             displayNames: { ScreenDisplayNames.current() }, launchServices: launch, updater: SparkleUpdaterService(), relaunch: { arguments in
@@ -375,6 +388,7 @@ final class AppModel {
     }
 
     deinit {
+        catalogRefreshTask?.cancel(); catalogMutationTask?.cancel()
         rosettaRefreshTask?.cancel(); rosettaPollTask?.cancel(); rosettaInstallTask?.cancel()
         for check in runtimeSetupRosettaChecks.values { check.task.cancel() }
         for task in tasks.values { task.cancel() }
@@ -404,7 +418,8 @@ final class AppModel {
         await continueLanguageRestart(arguments: launchArguments)
         await refreshRosetta()
         do {
-            if manifest == nil { manifest = try await BundledRuntimeManifest.load() }
+            if let catalogAccess { applyRuntimeCatalog(try await catalogAccess.snapshot()) }
+            else if manifest == nil { manifest = try await BundledRuntimeManifest.load() }
             do { try await services.sweepStaging() }
             catch LauncherError.busy {
                 // Recovery defers mutation, but installed runtimes remain
@@ -415,15 +430,17 @@ final class AppModel {
         } catch { show(error) }
         await refreshGames()
         await eventsHydration.value
+        scheduleRuntimeCatalogRefresh()
         updater.start { [weak self] in self?.isBusyForUpdates ?? true }
     }
 
     func refreshRuntimes() async {
+        if catalogAccess != nil { await refreshRuntimeCatalog(force: true) }
         do { try await scanAndApply() }
         catch { show(error) }
     }
 
-    private func scanAndApply() async throws {
+    func scanAndApply() async throws {
         let generation = UUID(); scanGeneration = generation
         let consentRevision = runtimeConsentRevision
         let scan = try await services.scan()
@@ -443,8 +460,9 @@ final class AppModel {
     func install(_ id: String) { request(id, mode: .download) }
     func importGPTK(_ id: String) { request(id, mode: .importGPTK) }
 
-    private func bundle(_ id: String) -> RuntimeBundle? { manifest?.bundles.first { $0.id.rawValue == id } }
+    private func bundle(_ id: String) -> RuntimeBundle? { runtimeInstallContexts[id]?.bundle ?? manifest?.bundles.first { $0.id.rawValue == id } }
     private func requestedComponent(_ id: String) -> RuntimeComponent? {
+        if let context = runtimeInstallContexts[id] { return context.component }
         if let bundle = bundle(id) {
             return manifest?.components.first { bundle.components.contains($0.id) && $0.wineBinary != nil }
         }
@@ -452,10 +470,11 @@ final class AppModel {
     }
 
     private func request(_ id: String, mode: ConsentMode) {
-        guard canBeginGameOrRuntimeOperation() else { return }
+        guard canBeginGameOrRuntimeOperation(allowingCatalogID: id) else { return }
         guard tasks[id] == nil, consentRequest == nil,
             let component = requestedComponent(id),
             mode != .importGPTK || component.kind == .d3dmetal else { return }
+        captureRuntimeInstallContext(id)
         let generation = UUID(); generations[id] = generation; requestModes[id] = mode
         let services = services
         errors[id] = nil; working[id] = .working(phase: .checkingSpace, fraction: nil); rebuildRows()
@@ -569,12 +588,13 @@ final class AppModel {
     }
 
     private func beginOperation(_ component: RuntimeComponent, from candidate: GPTKCandidate?, bundle: RuntimeBundle? = nil) {
-        guard canBeginGameOrRuntimeOperation() else { return }
-        let id = bundle?.id.rawValue ?? component.id.rawValue; let generation = UUID(); generations[id] = generation
+        let id = bundle?.id.rawValue ?? component.id.rawValue
+        guard canBeginGameOrRuntimeOperation(allowingCatalogID: id) else { return }
+        let generation = UUID(); generations[id] = generation
         let services = services
         errors[id] = nil; progressTimes[id] = nil
         working[id] = .working(phase: .staging, fraction: nil); rebuildRows()
-        let manifest = manifest
+        let manifest = runtimeInstallContexts[id]?.manifest ?? manifest
         tasks[id] = Task { [weak self] in
             let stream: RuntimeInstallStream
             if let bundle, let manifest { stream = services.install(bundle, manifest: manifest, from: candidate) }
@@ -649,7 +669,7 @@ final class AppModel {
 
     func remove(_ id: String) async {
         guard canBeginGameOrRuntimeOperation() else { return }
-        guard tasks[id] == nil, working[id] == nil else { return }
+        guard tasks[id] == nil, working[id] == nil, canRemoveRuntime(id) else { return }
         if let bundle = bundle(id), let manifest {
             working[id] = .working(phase: .deleting, fraction: nil); rebuildRows()
             defer { working[id] = nil; rebuildRows() }
@@ -722,7 +742,7 @@ final class AppModel {
         rebuildRows()
     }
 
-    private func rebuildRows() {
+    func rebuildRows() {
         isRuntimeOperationRunning = !tasks.isEmpty || !working.isEmpty
         var result: [RuntimeRow] = []
         let covered = Set((manifest?.bundles ?? []).flatMap(\.components))

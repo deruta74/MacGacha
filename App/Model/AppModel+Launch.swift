@@ -111,7 +111,7 @@ import RuntimeManager
 
     func play(_ id: String) {
         guard canBeginGameOrRuntimeOperation() else { return }
-        guard launchSlotOwner == nil, launchTasks.isEmpty,
+        guard !runtimeCatalogUnavailable, runtimeCatalogMutationID == nil, launchSlotOwner == nil, launchTasks.isEmpty,
             (gameOperation?.id != id || (gameOperation?.isPreDownload == true && gameOperation?.isUninstall == false)),
             let game = GameDefinition.all.first(where: { $0.id == id }) else { return }
         if case .recoveryNeeded = launchStates[id] { return }

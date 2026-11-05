@@ -37,7 +37,7 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
         if let id = liveLaunchGames.sorted().first(where: { !knownEndedLaunchGames.contains($0) }) { return .game(id) }
         if isStarting || launchStartupError != nil { return .startup }
         if updater.isInstallingUpdate { return .updating }
-        if isRuntimeOperationRunning || consentRequest != nil || importState != nil ||
+        if runtimeCatalogMutationID != nil || isRuntimeOperationRunning || consentRequest != nil || importState != nil ||
             runtimeSetupProgress.values.contains(where: { if case .installing = $0 { true } else { false } }) ||
             !runtimeSetupRosettaChecks.isEmpty { return .runtimeWork }
         if let operation = gameOperation {

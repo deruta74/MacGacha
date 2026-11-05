@@ -24,6 +24,26 @@ struct LaunchTerminationTests {
     }
     #endif
 
+    @Test func quitWaitsForShortCatalogPublicationThenKeepsExistingDecision() async {
+        let delegate = LauncherAppDelegate()
+        var release: CheckedContinuation<Void, Never>?
+        let publication = Task { await withCheckedContinuation { release = $0 } }
+        while release == nil { await Task.yield() }
+        var pending: Task<Void, Never>? = publication
+        delegate.catalogPublication = { pending }
+        var replied = false
+        let reply = Task { @MainActor in
+            await withCheckedContinuation { continuation in
+                delegate.replyToTermination = { replied = true; continuation.resume(returning: $0) }
+                #expect(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateLater)
+            }
+        }
+        await Task.yield()
+        #expect(!replied)
+        pending = nil; release?.resume()
+        #expect(await reply.value)
+    }
+
     @Test func noLiveGameTerminatesImmediately() {
         let delegate = LauncherAppDelegate()
         delegate.requestConfirmation = { _, _ in Issue.record("No confirmation is needed without a live game") }

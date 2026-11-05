@@ -231,7 +231,7 @@ public actor LaunchManager {
             let selection = try await runtimes.selection(for: settings)
             let bundle = selection.bundle
             let prefix = try await prefixes.prefixURL(game: game.id, bundle: bundle)
-            let requiredComponents = LaunchResolver.requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: bundle.id.rawValue)
+            let requiredComponents = LaunchResolver.requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: selection.runtimeProfileID)
             guard !selection.componentIDs.isEmpty else { throw LauncherError.io("The runtime bundle has no pinnable components") }
             let compatibilityIDs = try requiredComponents.map { kind in
                 guard let id = selection.compatibilityComponentIDs[kind] else { throw LauncherError.io("Required compatibility component has no pin identity") }
@@ -244,7 +244,7 @@ public actor LaunchManager {
             var helper: GameModeRuntime?
             if globalSettings.gameModeEnabled || surroundRequested, let gameMode {
                 do { helper = try await gameMode.prepare(bundle: bundle, game: game, componentIDs: ids,
-                    options: GameModeOptions(gameModeEnabled: globalSettings.gameModeEnabled, surroundModule: surroundModule)) }
+                    options: GameModeOptions(gameModeEnabled: globalSettings.gameModeEnabled, surroundModule: surroundModule, runtimeProfileID: selection.runtimeProfileID)) }
                 catch {
                     event("Game Mode unavailable; using normal Wine", game: game.id, metadata: ["reason": "helperPreparationFailed"])
                 }
@@ -254,7 +254,7 @@ public actor LaunchManager {
             }
             var previewChoice = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
                 wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment,
-                runtimeBundleID: bundle.id.rawValue, displays: displayProbe.connectedDisplays().map(\.id), gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled,
+                runtimeBundleID: selection.runtimeProfileID, displays: displayProbe.connectedDisplays().map(\.id), gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled,
                 genshinFpsRiskAcknowledged: globalSettings.genshinFpsRiskAcknowledged)
             stage = .lock; events.yield(.stage(stage))
             let (lock, pin) = try await BlockingIO.run {
@@ -263,7 +263,7 @@ public actor LaunchManager {
                 return (lock, pin)
             }
             let validated = try await runtimes.selection(for: settings)
-            guard validated.bundle == bundle,
+            guard validated.bundle == bundle, validated.runtimeProfileID == selection.runtimeProfileID,
                 Set(validated.componentIDs) == Set(selection.componentIDs),
                 requiredComponents.allSatisfy({ validated.componentRoots[$0] == selection.componentRoots[$0]
                     && validated.compatibilityComponentIDs[$0] == selection.compatibilityComponentIDs[$0] }) else {
@@ -277,7 +277,7 @@ public actor LaunchManager {
                     helper = nil
                     previewChoice = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
                         wineBinary: bundle.wineBinary, proxyPort: 0, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment,
-                        runtimeBundleID: bundle.id.rawValue, genshinFpsRiskAcknowledged: globalSettings.genshinFpsRiskAcknowledged)
+                        runtimeBundleID: selection.runtimeProfileID, genshinFpsRiskAcknowledged: globalSettings.genshinFpsRiskAcknowledged)
                     event("Game Mode unavailable; using normal Wine", game: game.id, metadata: ["reason": "helperValidationFailed"])
                 }
             }
@@ -352,7 +352,7 @@ public actor LaunchManager {
             context.session.proxyPort = context.proxy?.port
             let displays = displayProbe.connectedDisplays().map(\.id)
             let resolved = try LaunchResolver.resolve(recipe: recipe, settings: settings, installRoot: installRoot, prefix: prefix,
-                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: bundle.id.rawValue, displays: displays, gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled,
+                wineBinary: bundle.wineBinary, proxyPort: context.proxy!.port, componentRoots: selection.componentRoots, baseEnvironment: baseEnvironment, runtimeBundleID: selection.runtimeProfileID, displays: displays, gameModeRuntime: helper, gameModeEnabled: globalSettings.gameModeEnabled,
                 genshinFpsRiskAcknowledged: globalSettings.genshinFpsRiskAcknowledged)
             context.fpsInjector = resolved.fpsInjector // Fresh launches only; reattachment never resolves a command.
             if !displays.isEmpty {
