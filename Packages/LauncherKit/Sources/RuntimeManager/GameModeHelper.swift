@@ -93,7 +93,14 @@ public struct GameModeHelper: GameModeProviding {
     }
 
     public func prepare(bundle: InstalledRuntimeBundle, game: GameDefinition, componentIDs: [String], options: GameModeOptions) async throws -> GameModeRuntime {
-        guard options.surroundModule == nil || componentIDs.contains(SurroundAudio.componentID) else { throw LauncherError.io("Missing surround component exclusion") }
+        if let module = options.surroundModule {
+            guard module.isFileURL else { throw LauncherError.io("Invalid surround component location") }
+            let version = try SurroundAudio.moduleVersion(RuntimeJSONFile.relativePath(module, root: paths.root),
+                runtimes: RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))
+            guard componentIDs.contains("\(ComponentKind.surroundAudio.idPrefix)-\(version.rawValue)") else {
+                throw LauncherError.io("Missing surround component exclusion")
+            }
+        }
         let icon = try await icons.icon(for: game)
         return try await BlockingIO.run {
             let lease = try RuntimeStoreLease(store: RuntimeStore(paths: paths))
@@ -151,11 +158,14 @@ public struct GameModeHelper: GameModeProviding {
     private func surroundSource(_ options: GameModeOptions, bundle: InstalledRuntimeBundle, game: GameDefinition, fs: ContainedFileSystem) throws -> SafeRelativePath? {
         guard let url = options.surroundModule else { return nil }
         guard SurroundAudio.applies(game: game.id, backend: .d3dmetal, bundleID: bundle.id.rawValue) else { throw LauncherError.io("Incompatible surround helper") }
-        let root = try SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/surroundAudio/\(SurroundAudio.version)")
+        guard url.isFileURL else { throw LauncherError.io("Invalid surround component location") }
+        let runtimes = try RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root)
+        let version = try SurroundAudio.moduleVersion(RuntimeJSONFile.relativePath(url, root: paths.root), runtimes: runtimes)
+        let root = try SafeRelativePath("\(runtimes)/surroundAudio/\(version.rawValue)")
         let module = try SafeRelativePath("\(root)/\(SurroundAudio.modulePath)")
         guard url.isFileURL, url.path == module.resolved(against: paths.root).path else { throw LauncherError.io("Invalid surround component location") }
         let record = try JSONDecoder().decode(InstalledComponent.self, from: fs.readFile(at: SafeRelativePath("\(root)/.macgacha-component.json"), maxBytes: 16384))
-        guard record.kind == .surroundAudio, record.version == SurroundAudio.version else { throw LauncherError.io("Invalid surround component identity") }
+        guard record.kind == .surroundAudio, record.version == version.rawValue else { throw LauncherError.io("Invalid surround component identity") }
         return module
     }
 

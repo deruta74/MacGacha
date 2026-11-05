@@ -65,8 +65,7 @@ enum GameModeSweep {
             !source.components.contains("GameMode") else { throw LauncherError.io("Invalid Game Mode source location") }
         var audioMissing = false
         if let audio = metadata.surroundSource {
-            let expected = try SafeRelativePath("\(runtimes)/surroundAudio/\(SurroundAudio.version)/\(SurroundAudio.modulePath)")
-            guard audio == expected else { throw LauncherError.io("Invalid helper audio source") }
+            _ = try SurroundAudio.moduleVersion(audio, runtimes: runtimes)
             audioMissing = try fs.itemType(at: audio) != .regularFile
         }
         if try fs.itemType(at: source) != .directory || audioMissing { try deleting(fs, container) }

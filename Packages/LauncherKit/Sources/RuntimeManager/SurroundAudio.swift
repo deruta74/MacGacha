@@ -12,5 +12,16 @@ public enum SurroundAudio {
         return family == .genshin || family == .zzz
     }
     public static let version = String(componentID.dropFirst(ComponentKind.surroundAudio.idPrefix.count + 1))
+    /// Accept historical revisions only at the exact contained module location.
+    package static func moduleVersion(_ module: SafeRelativePath, runtimes: SafeRelativePath) throws -> SafeIdentifier {
+        let prefix = runtimes.components + [ComponentKind.surroundAudio.rawValue]
+        guard module.components.starts(with: prefix),
+            module.components.count == prefix.count + 1 + modulePath.components.count,
+            Array(module.components.suffix(modulePath.components.count)) == modulePath.components else {
+            throw LauncherError.io("Invalid surround component location")
+        }
+        return try SafeIdentifier(module.components[prefix.count])
+    }
+
     public static let modulePath = try! SafeRelativePath("x86_64-unix/winecoreaudio.so")
 }
