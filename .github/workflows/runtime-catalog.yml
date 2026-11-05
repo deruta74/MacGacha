@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+name: Runtime catalog
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [RuntimeCatalog/runtime-catalog.json]
+permissions:
+  contents: read
+concurrency:
+  group: runtime-catalog-v1
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Require main and green CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          for attempt in $(seq 1 90); do
+            conclusion=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --event push --limit 1 --json conclusion --jq '.[0].conclusion // ""')
+            [[ "$conclusion" == success ]] && break
+            [[ -z "$conclusion" ]] || { echo "CI did not pass" >&2; exit 1; }
+            sleep 10
+          done
+          [[ "$conclusion" == success ]]
+          [[ $(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha) == "$GITHUB_SHA" ]]
+      - name: Validate monotonic catalog and new assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I scripts/test-runtime-catalog.py
+          args=()
+          if gh release view runtime-catalog-v1 >/dev/null 2>&1; then
+            mkdir previous
+            gh release download runtime-catalog-v1 --pattern runtime-catalog.json --dir previous
+            args+=(--previous previous/runtime-catalog.json)
+          fi
+          python3 -I scripts/check-runtime-catalog.py RuntimeCatalog/runtime-catalog.json "${args[@]}" --verify-assets
+          echo "CATALOG_REVISION=$(python3 -c 'import json; print(json.load(open("RuntimeCatalog/runtime-catalog.json"))["revision"])')" >> "$GITHUB_ENV"
+      - name: Publish immutable revision and promote channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          snapshot="runtime-catalog-v1-r$CATALOG_REVISION"
+          # Never overwrite a historical revision. A retry can reuse only identical bytes.
+          if gh release view "$snapshot" >/dev/null 2>&1; then
+            mkdir existing
+            gh release download "$snapshot" --pattern runtime-catalog.json --dir existing
+            cmp RuntimeCatalog/runtime-catalog.json existing/runtime-catalog.json
+          else
+            gh release create "$snapshot" --target "$GITHUB_SHA" --latest=false --title "Runtime catalog revision $CATALOG_REVISION" --notes "Compatible runtime component catalog. This is not an application update." RuntimeCatalog/runtime-catalog.json
+          fi
+          if ! gh release view runtime-catalog-v1 >/dev/null 2>&1; then
+            gh release create runtime-catalog-v1 --target "$GITHUB_SHA" --latest=false --title "Runtime catalog" --notes "Current compatible runtime component catalog. Previous installed versions remain available for rollback." RuntimeCatalog/runtime-catalog.json
+          else
+            gh release upload runtime-catalog-v1 RuntimeCatalog/runtime-catalog.json --clobber
+          fi

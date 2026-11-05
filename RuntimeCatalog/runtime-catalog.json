@@ -1,0 +1,337 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "clientContract": "macgacha-runtime-v1",
+  "manifest": {
+    "schemaVersion": 3,
+    "components": [
+      {
+        "id": "wine-11.0-yaagl",
+        "kind": "wine",
+        "version": "11.0-yaagl",
+        "sourceMode": "download",
+        "url": "https://github.com/yaagl/anime-game-wine/releases/download/wine-11.0-signed/wine-devel-11.0-osx64-signed.tar.xz",
+        "size": 446585720,
+        "installedSize": 2112922718,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "4ebba536115e937c3826fa5808dbed50cd5e91c8454999b54cbe0cd2a43d8b4c"
+        },
+        "archive": "tar.xz",
+        "rootPath": "wine",
+        "license": {
+          "name": "LGPL-2.1",
+          "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
+          "redistributable": true,
+          "termsRevision": "LGPL-2.1"
+        },
+        "wineBinary": "bin/wine"
+      },
+      {
+        "id": "dxmt-0.80",
+        "kind": "dxmt",
+        "version": "0.80",
+        "sourceMode": "download",
+        "url": "https://github.com/3Shain/dxmt/releases/download/v0.80/dxmt-v0.80-builtin.tar.gz",
+        "size": 18681669,
+        "installedSize": 53303976,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "8f260e36b5739e68f3bad613381441385c4dc7b85b78ba8de653d5a6a264529d"
+        },
+        "archive": "tar.gz",
+        "rootPath": "v0.80",
+        "license": {
+          "name": "MIT",
+          "url": "https://github.com/3Shain/dxmt/blob/v0.80/LICENSE",
+          "redistributable": true,
+          "termsRevision": "dxmt-0.80"
+        },
+        "overlay": [
+          {
+            "source": "x86_64-windows",
+            "destination": "lib/wine/x86_64-windows"
+          },
+          {
+            "source": "i386-windows",
+            "destination": "lib/wine/i386-windows"
+          },
+          {
+            "source": "x86_64-unix",
+            "destination": "lib/wine/x86_64-unix"
+          }
+        ]
+      },
+      {
+        "id": "d3dmetal-4.0b3",
+        "kind": "d3dmetal",
+        "version": "4.0b3",
+        "sourceMode": "download",
+        "url": "https://github.com/dbc-hbin/wine-yaagl-d3dmetal/releases/download/wine-11.20-gptk4.0b3-1/wine-11.20-d3dmetal-gptk4.0b3-macos26.tar.xz",
+        "size": 307352548,
+        "installedSize": 1530455780,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "a1a6f1dab9bb373091f4b7756505b706e29c9c72e805c011d8107192574920aa"
+        },
+        "archive": "tar.xz",
+        "rootPath": "wine",
+        "license": {
+          "name": "Apple Game Porting Toolkit",
+          "url": "https://github.com/dbc-hbin/wine-yaagl-d3dmetal/releases/download/wine-11.20-gptk4.0b3-1/License.rtf",
+          "redistributable": false,
+          "termsRevision": "5abb2d059be217663b00e8fd37e14411d374e11d17e3b744eebd49b8d17118c8"
+        },
+        "wineBinary": "bin/wine",
+        "consent": "appleGPTK"
+      },
+      {
+        "id": "wine-11.0-1-crossover",
+        "kind": "wine",
+        "version": "11.0-1-crossover",
+        "sourceMode": "download",
+        "url": "https://github.com/yaagl/anime-game-wine/releases/download/wine-crossover-11.0-1-signed/wine-crossover-11.0-1-osx64-signed.tar.xz",
+        "size": 456021524,
+        "installedSize": 2148383548,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "89fa7e90fb626523a90d5867a03c6be785d017176739c6320a3b86c7838c3a35"
+        },
+        "archive": "tar.xz",
+        "rootPath": "wine",
+        "license": {
+          "name": "LGPL-2.1",
+          "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
+          "redistributable": true,
+          "termsRevision": "LGPL-2.1"
+        },
+        "wineBinary": "bin/wine"
+      },
+      {
+        "id": "jadeite-4.1.0",
+        "kind": "jadeite",
+        "version": "4.1.0",
+        "sourceMode": "download",
+        "url": "https://codeberg.org/mkrsym1/jadeite/releases/download/v4.1.0/v4.1.0.zip",
+        "size": 48115,
+        "installedSize": 100434,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "12d4c37b09d3e81640536fd68c2c62913fc4b4a90c0183e4dec845e4934a9858"
+        },
+        "archive": "zip",
+        "license": {
+          "name": "MIT",
+          "url": "https://codeberg.org/mkrsym1/jadeite/src/tag/v4.1.0/LICENSE.txt",
+          "redistributable": true,
+          "termsRevision": "jadeite-4.1.0"
+        }
+      },
+      {
+        "id": "steam-shim-proton-10.0-4",
+        "kind": "steamShim",
+        "version": "proton-10.0-4",
+        "sourceMode": "download",
+        "url": "https://github.com/deruta74/MacGacha/releases/download/steam-shim-proton-10.0-4/steam-shim-proton-10.0-4.zip",
+        "size": 44476,
+        "installedSize": 111116,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "eddf914ec42e5386edac2ec6bd84fcb46c3dd2fb03e8b3008d5586bfacb3e8f4"
+        },
+        "archive": "zip",
+        "license": {
+          "name": "BSD-3-Clause",
+          "url": "https://github.com/deruta74/MacGacha/blob/main/compat/steam-shim/NOTICE.md",
+          "redistributable": true,
+          "termsRevision": "steam-shim-proton-10.0-4"
+        },
+        "rootPath": "steam-shim-proton-10.0-4"
+      },
+      {
+        "id": "crypt32-fix-wine-11.20-1",
+        "kind": "crypt32Fix",
+        "version": "wine-11.20-1",
+        "sourceMode": "download",
+        "url": "https://github.com/deruta74/MacGacha/releases/download/crypt32-fix-wine-11.20-1/crypt32-fix-wine-11.20-1.zip",
+        "size": 365755,
+        "installedSize": 1104123,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "42b5998cb54409d5329f3e23281c0de765147e7bb20708ae877b8c5fef330b0a"
+        },
+        "archive": "zip",
+        "license": {
+          "name": "LGPL-2.1-or-later",
+          "url": "https://github.com/deruta74/MacGacha/blob/main/compat/crypt32-fix/NOTICE.md",
+          "redistributable": true,
+          "termsRevision": "crypt32-fix-wine-11.20-1"
+        }
+      },
+      {
+        "id": "surround-audio-wine-11.20-2",
+        "kind": "surroundAudio",
+        "version": "wine-11.20-2",
+        "sourceMode": "download",
+        "url": "https://github.com/deruta74/MacGacha/releases/download/surround-audio-wine-11.20-2/surround-audio-wine-11.20-2.zip",
+        "size": 94056,
+        "installedSize": 264437,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "52cb41924c0dce3eee818fa88d2ac00f97192881020e601bee1c816605278a26"
+        },
+        "archive": "zip",
+        "license": {
+          "name": "LGPL-2.1-or-later",
+          "url": "https://github.com/deruta74/MacGacha/blob/main/compat/surround-audio/NOTICE.md",
+          "redistributable": true,
+          "termsRevision": "surround-audio-wine-11.20-2"
+        }
+      },
+      {
+        "id": "genshin-fps-unlock-2",
+        "kind": "genshinFps",
+        "version": "2",
+        "sourceMode": "download",
+        "url": "https://github.com/deruta74/MacGacha/releases/download/genshin-fps-unlock-2/genshin-fps-unlock-2.zip",
+        "size": 223498,
+        "installedSize": 220658,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "f2fa38aef5ffdcf15aa3480f7acc608cb9266bdcae0af05c4e9802e611671abb"
+        },
+        "archive": "zip",
+        "license": {
+          "name": "GPL-3.0-only",
+          "url": "https://github.com/deruta74/MacGacha/blob/main/compat/genshin-fps/NOTICE.md",
+          "redistributable": true,
+          "termsRevision": "genshin-fps-unlock-2"
+        },
+        "rootPath": "x86_64-windows"
+      },
+      {
+        "id": "surround-audio-wine-11.20-1",
+        "kind": "surroundAudio",
+        "version": "wine-11.20-1",
+        "sourceMode": "download",
+        "url": "https://github.com/deruta74/MacGacha/releases/download/surround-audio-wine-11.20-1/surround-audio-wine-11.20-1.zip",
+        "size": 91325,
+        "installedSize": 254000,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "bbcedafd33e57949daabd861f67aeaabe3c1df1d166be299b161cc8cf28f5cf5"
+        },
+        "archive": "zip",
+        "license": {
+          "name": "LGPL-2.1-or-later",
+          "url": "https://github.com/deruta74/MacGacha/blob/main/compat/surround-audio/NOTICE.md",
+          "redistributable": true,
+          "termsRevision": "surround-audio-wine-11.20-1"
+        }
+      }
+    ],
+    "bundles": [
+      {
+        "id": "dxmt-wine11.0cx-dxmt0.80",
+        "displayName": "DXMT",
+        "summary": "CrossOver Wine 11.0 · DXMT 0.80",
+        "backend": "dxmt",
+        "components": [
+          "wine-11.0-1-crossover",
+          "dxmt-0.80"
+        ],
+        "environment": {}
+      },
+      {
+        "id": "dxmt-wine11.0-dxmt0.80",
+        "displayName": "DXMT",
+        "summary": "Wine 11.0 with game patches · DXMT 0.80",
+        "backend": "dxmt",
+        "components": [
+          "wine-11.0-yaagl",
+          "dxmt-0.80"
+        ],
+        "environment": {}
+      },
+      {
+        "id": "d3dmetal-wine11.20-gptk4.0b3",
+        "displayName": "D3DMetal",
+        "summary": "Wine 11.20 · Apple D3DMetal 4.0 beta 3",
+        "backend": "d3dmetal",
+        "components": [
+          "d3dmetal-4.0b3"
+        ],
+        "environment": {}
+      }
+    ]
+  },
+  "bundleBindings": [
+    {
+      "bundleID": "dxmt-wine11.0cx-dxmt0.80",
+      "profileID": "dxmt-wine11.0cx-dxmt0.80"
+    },
+    {
+      "bundleID": "dxmt-wine11.0-dxmt0.80",
+      "profileID": "dxmt-wine11.0-dxmt0.80"
+    },
+    {
+      "bundleID": "d3dmetal-wine11.20-gptk4.0b3",
+      "profileID": "d3dmetal-wine11.20-gptk4.0b3"
+    }
+  ],
+  "helperBindings": [
+    {
+      "componentID": "jadeite-4.1.0",
+      "profileIDs": [
+        "dxmt-wine11.0cx-dxmt0.80",
+        "dxmt-wine11.0-dxmt0.80",
+        "d3dmetal-wine11.20-gptk4.0b3"
+      ]
+    },
+    {
+      "componentID": "steam-shim-proton-10.0-4",
+      "profileIDs": [
+        "dxmt-wine11.0cx-dxmt0.80",
+        "dxmt-wine11.0-dxmt0.80",
+        "d3dmetal-wine11.20-gptk4.0b3"
+      ]
+    },
+    {
+      "componentID": "crypt32-fix-wine-11.20-1",
+      "profileIDs": [
+        "d3dmetal-wine11.20-gptk4.0b3"
+      ]
+    },
+    {
+      "componentID": "surround-audio-wine-11.20-2",
+      "profileIDs": [
+        "d3dmetal-wine11.20-gptk4.0b3"
+      ]
+    },
+    {
+      "componentID": "genshin-fps-unlock-2",
+      "profileIDs": [
+        "dxmt-wine11.0cx-dxmt0.80",
+        "dxmt-wine11.0-dxmt0.80",
+        "d3dmetal-wine11.20-gptk4.0b3"
+      ]
+    },
+    {
+      "componentID": "surround-audio-wine-11.20-1",
+      "profileIDs": [
+        "d3dmetal-wine11.20-gptk4.0b3"
+      ]
+    }
+  ],
+  "recommendedBundles": {
+    "dxmt": "dxmt-wine11.0cx-dxmt0.80",
+    "d3dmetal": "d3dmetal-wine11.20-gptk4.0b3"
+  },
+  "recommendedHelpers": {
+    "jadeite": "jadeite-4.1.0",
+    "steamShim": "steam-shim-proton-10.0-4",
+    "crypt32Fix": "crypt32-fix-wine-11.20-1",
+    "surroundAudio": "surround-audio-wine-11.20-2",
+    "genshinFps": "genshin-fps-unlock-2"
+  }
+}
