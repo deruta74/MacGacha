@@ -18,6 +18,6 @@ The HTTPS channel asset is `https://github.com/deruta74/MacGacha/releases/downlo
 
 Checking metadata does not install or activate anything. Set Up installs the selected target beside existing versions. Only verified successful installation permits activation. A failed download, declined consent or cancelled setup leaves the prior version selected. Previous versions remain until explicitly removed.
 
-Runtimes allows selecting an installed earlier bundle/helper and keeping that selection pinned. The selected version and versions held by running or recoverable sessions cannot be removed. Returning to the recommended version is explicit; refreshing the catalog never cancels a rollback. Existing Apple consent, FPS acknowledgment and opt-in Surround settings remain in force.
+Runtimes allows selecting an installed earlier bundle/helper and keeping that selection pinned. Removing an idle selected version requires confirmation and keeps its selection and pin, so Set Up can reinstall that exact version. Versions held by running or recoverable sessions cannot be removed. Returning to the recommended version is explicit; refreshing the catalog never cancels a rollback. Existing Apple consent, FPS acknowledgment and opt-in Surround settings remain in force.
 
 To withdraw a bad recommendation, publish a higher catalog revision recommending an earlier retained version. Do not overwrite historical component identities, erase the bad revision's history or reduce the catalog revision. Existing users retain their current choice until they explicitly change it.
