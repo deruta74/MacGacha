@@ -80,7 +80,9 @@ struct RuntimeCatalogContract: Sendable {
                     baseline.manifest.component(id: known.componentID)?.kind == kind && known.profileIDs.contains(profile)
                 }
                 if applicable {
-                    guard catalog.helperBindings.first(where: { $0.componentID == helper.id })?.profileIDs.contains(profile) == true else {
+                    guard (catalog.helperBindings + baseline.helperBindings).contains(where: {
+                        $0.componentID == helper.id && $0.profileIDs.contains(profile)
+                    }) else {
                         throw catalogError("Selected helper is incompatible with bundle")
                     }
                 }
@@ -91,6 +93,30 @@ struct RuntimeCatalogContract: Sendable {
                 throw catalogError("Unknown selected helper")
             }
         }
+    }
+
+    /// A newer app can add trusted compiled profiles without rewriting the
+    /// immutable remote binding history. App-owned helper/profile extensions
+    /// remain separate and are consulted by snapshot compatibility lookups.
+    func restoring(_ state: RuntimeCatalogStoredState) throws -> RuntimeCatalogSnapshot {
+        try validate(state.catalog)
+        let components = try merge(state.catalog.manifest.components, baseline.manifest.components, id: { $0.id })
+        let bundles = try merge(state.catalog.manifest.bundles, baseline.manifest.bundles, id: { $0.id })
+        let bindings = try merge(state.catalog.bundleBindings, baseline.bundleBindings, id: { $0.bundleID })
+        var helpers = state.catalog.helperBindings
+        for compiled in baseline.helperBindings {
+            if let old = helpers.first(where: { $0.componentID == compiled.componentID }) {
+                guard Set(old.profileIDs).isSubset(of: Set(compiled.profileIDs)) else {
+                    throw catalogError("Compiled helper compatibility regressed")
+                }
+            } else { helpers.append(compiled) }
+        }
+        let catalog = RuntimeCatalog(revision: state.catalog.revision,
+            manifest: try RuntimeManifest(components: components, bundles: bundles), bundleBindings: bindings,
+            helperBindings: helpers, recommendedBundles: state.catalog.recommendedBundles,
+            recommendedHelpers: state.catalog.recommendedHelpers)
+        try validate(catalog)
+        return try RuntimeCatalogSnapshot(catalog: catalog, selections: state.selections, contract: self)
     }
 
     func merging(_ update: RuntimeCatalog, into history: RuntimeCatalog) throws -> RuntimeCatalog {

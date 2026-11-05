@@ -118,6 +118,7 @@ public struct RuntimeCatalogSnapshot: Sendable {
     public let selections: RuntimeCatalogSelections
     /// Only active versions, shared by setup and launch. Refresh never changes it.
     public let manifest: RuntimeManifest
+    private let compiledHelperBindings: [RuntimeCatalogHelperBinding]
     public var recommendedSelections: RuntimeCatalogSelections {
         RuntimeCatalogSelections(bundles: catalog.recommendedBundles.mapValues { RuntimeCatalogSelection(id: $0) },
             helpers: catalog.recommendedHelpers.mapValues { RuntimeCatalogSelection(id: $0) })
@@ -139,7 +140,9 @@ public struct RuntimeCatalogSnapshot: Sendable {
     }
     public func helper(kind: ComponentKind, for bundleID: SafeIdentifier) -> RuntimeComponent? {
         guard let profile = profile(for: bundleID), let component = selectedHelper(for: kind),
-            catalog.helperBindings.first(where: { $0.componentID == component.id })?.profileIDs.contains(profile) == true else { return nil }
+            (catalog.helperBindings + compiledHelperBindings).contains(where: {
+                $0.componentID == component.id && $0.profileIDs.contains(profile)
+            }) else { return nil }
         return component
     }
 
@@ -150,6 +153,7 @@ public struct RuntimeCatalogSnapshot: Sendable {
         }
         let ids = Set(bundles.flatMap(\.components) + selections.helpers.values.map(\.id))
         self.catalog = catalog; self.selections = selections
+        compiledHelperBindings = contract.baseline.helperBindings
         manifest = try RuntimeManifest(components: catalog.manifest.components.filter { ids.contains($0.id) }, bundles: bundles)
     }
 }

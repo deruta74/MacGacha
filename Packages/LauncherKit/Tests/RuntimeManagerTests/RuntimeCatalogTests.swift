@@ -8,6 +8,168 @@ import LauncherCore
 import TestSupport
 
 @Suite struct RuntimeCatalogTests {
+    @Test(arguments: ["swift", "launcher", "task"])
+    func cancelledInitialLoadDoesNotCacheFallback(cancellation: String) async throws {
+        let fixture = try CatalogFixture()
+        let bytes = Mutex<Data?>(nil)
+        let savedStore = RuntimeCatalogStore(read: { bytes.withLock { $0 } }, write: { data in bytes.withLock { $0 = data } })
+        let original = RuntimeCatalogService(baseline: fixture.baseline, store: savedStore)
+        _ = try await original.accept(metadata: JSONEncoder().encode(fixture.update(revision: 1)))
+        let next = try SafeIdentifier("dxmt-next")
+        _ = try await original.selectBundle(id: next, pinned: true, installedBundleIDs: [next])
+        let firstRead = Mutex(true)
+        let store = RuntimeCatalogStore(read: {
+            if firstRead.withLock({ first in let result = first; first = false; return result }) {
+                if cancellation == "swift" { throw CancellationError() }
+                if cancellation == "launcher" { throw LauncherError.cancelled }
+            }
+            return bytes.withLock { $0 }
+        }, write: { data in bytes.withLock { $0 = data } })
+        let service = RuntimeCatalogService(baseline: fixture.baseline, store: store)
+        let cancelled = Task {
+            if cancellation == "task" { withUnsafeCurrentTask { $0?.cancel() } }
+            return try await service.snapshot()
+        }
+        await #expect(throws: (any Error).self) { try await cancelled.value }
+        let restored = try await service.snapshot()
+        #expect(restored.selectedBundle(for: .dxmt)?.id == next)
+        #expect(restored.selections.bundles[.dxmt]?.pinned == true)
+        #expect(restored.catalog.revision == 1)
+    }
+
+    @Test func trustedBaselineExpansionRetainsRemoteActivePinAndHistory() async throws {
+        let fixture = try CatalogFixture()
+        let store = RuntimeCatalogStore(root: fixture.temp.url)
+        let original = RuntimeCatalogService(baseline: fixture.baseline, store: store)
+        _ = try await original.accept(metadata: JSONEncoder().encode(fixture.update(revision: 1)))
+        let next = try SafeIdentifier("dxmt-next")
+        _ = try await original.selectBundle(id: next, pinned: true, installedBundleIDs: [next])
+        let added = try RuntimeBundle(id: SafeIdentifier("dxmt-new-compiled-profile"), displayName: "New compiled profile",
+            backend: .dxmt, components: fixture.baseline.bundles[0].components)
+        let evolved = try RuntimeManifest(components: fixture.baseline.components, bundles: fixture.baseline.bundles + [added])
+        let reopened = RuntimeCatalogService(baseline: evolved, store: store)
+        let restored = try await reopened.snapshot()
+        #expect(restored.selectedBundle(for: .dxmt)?.id == next)
+        #expect(restored.selections.bundles[.dxmt]?.pinned == true)
+        #expect(restored.catalog.revision == 1)
+        #expect(restored.catalog.manifest.bundles.contains { $0.id == added.id })
+        #expect(restored.helper(kind: .genshinFps, for: added.id)?.id == restored.selectedHelper(for: .genshinFps)?.id)
+        let before = RuntimeCatalog.bundled(fixture.baseline).helperBindings.first { $0.componentID.rawValue == GenshinFps.componentID }
+        let after = restored.catalog.helperBindings.first { $0.componentID.rawValue == GenshinFps.componentID }
+        #expect(before?.profileIDs == after?.profileIDs)
+        let refreshed = try await reopened.accept(metadata: JSONEncoder().encode(fixture.update(revision: 2)))
+        #expect(refreshed.selections.bundles[.dxmt]?.pinned == true)
+        #expect(refreshed.selectedBundle(for: .dxmt)?.id == next)
+        let changedBindings = RuntimeCatalog(revision: 3, manifest: refreshed.catalog.manifest,
+            bundleBindings: refreshed.catalog.bundleBindings, helperBindings: RuntimeCatalog.bundled(evolved).helperBindings,
+            recommendedBundles: refreshed.catalog.recommendedBundles, recommendedHelpers: refreshed.catalog.recommendedHelpers)
+        await #expect(throws: (any Error).self) { try await reopened.accept(metadata: JSONEncoder().encode(changedBindings)) }
+        #expect(try await reopened.snapshot().catalog.revision == 2)
+    }
+
+    @Test func cancelledPublisherStillReconcilesReplacedBytes() async throws {
+        let fixture = try CatalogFixture()
+        let bytes = Mutex<Data?>(nil)
+        let operation = Mutex<Task<RuntimeCatalogSnapshot, any Error>?>(nil)
+        let store = RuntimeCatalogStore(read: {
+            try Task.checkCancellation()
+            return bytes.withLock { $0 }
+        }, write: { data in
+            bytes.withLock { $0 = data }
+            if let task = operation.withLock({ $0 }) {
+                task.cancel()
+                throw LauncherError.cancelled
+            }
+        })
+        let service = RuntimeCatalogService(baseline: fixture.baseline, store: store)
+        _ = try await service.accept(metadata: JSONEncoder().encode(fixture.update(revision: 1)))
+        let next = try SafeIdentifier("dxmt-next")
+        let (start, continuation) = AsyncStream<Void>.makeStream()
+        let task = Task {
+            for await _ in start {
+                return try await service.selectBundle(id: next, pinned: true, installedBundleIDs: [next])
+            }
+            throw CancellationError()
+        }
+        operation.withLock { $0 = task }
+        continuation.yield(()); continuation.finish()
+        do {
+            _ = try await task.value
+            Issue.record("Cancelled publication must report its failure")
+        } catch let error as RuntimeCatalogPublicationFailure {
+            #expect(error.persistedSnapshot?.selectedBundle(for: .dxmt)?.id == next)
+        }
+        #expect(try await service.snapshot().selectedBundle(for: .dxmt)?.id == next)
+        operation.withLock { $0 = nil }
+    }
+
+    @Test func postRenameWriteFailureReconcilesActualSnapshotBeforeNextMutation() async throws {
+        let fixture = try CatalogFixture()
+        let bytes = Mutex<Data?>(nil)
+        let fail = Mutex(false)
+        let store = RuntimeCatalogStore(read: { bytes.withLock { $0 } }, write: { data in
+            bytes.withLock { $0 = data }
+            if fail.withLock({ $0 }) { throw LauncherError.io("directory fsync failed after rename") }
+        })
+        let service = RuntimeCatalogService(baseline: fixture.baseline, store: store)
+        _ = try await service.accept(metadata: JSONEncoder().encode(fixture.update(revision: 1)))
+        let next = try SafeIdentifier("dxmt-next")
+        fail.withLock { $0 = true }
+        do {
+            _ = try await service.selectBundle(id: next, pinned: true, installedBundleIDs: [next])
+            Issue.record("Post-rename publication must report its write failure")
+        } catch let error as RuntimeCatalogPublicationFailure {
+            #expect(error.persistedSnapshot?.selectedBundle(for: .dxmt)?.id == next)
+            #expect(error.persistedSnapshot?.selections.bundles[.dxmt]?.pinned == true)
+        }
+        #expect(try await service.snapshot().selectedBundle(for: .dxmt)?.id == next)
+        fail.withLock { $0 = false }
+        let helper = try SafeIdentifier(SurroundAudio.componentID)
+        _ = try await service.selectHelper(id: helper, pinned: true, installedComponentIDs: [helper])
+        let reopened = RuntimeCatalogService(baseline: fixture.baseline, store: store)
+        let restored = try await reopened.snapshot()
+        #expect(restored.selectedBundle(for: .dxmt)?.id == next)
+        #expect(restored.selections.bundles[.dxmt]?.pinned == true)
+        #expect(restored.selections.helpers[.surroundAudio]?.pinned == true)
+    }
+
+    @Test func failedPostRenameReadBlocksSnapshotsAndMutationsUntilRecovery() async throws {
+        let fixture = try CatalogFixture()
+        let bytes = Mutex<Data?>(nil)
+        let failWrite = Mutex(false)
+        let failRead = Mutex(false)
+        let store = RuntimeCatalogStore(read: {
+            if failRead.withLock({ $0 }) { throw LauncherError.io("unavailable recovery read") }
+            return bytes.withLock { $0 }
+        }, write: { data in
+            bytes.withLock { $0 = data }
+            if failWrite.withLock({ $0 }) {
+                failRead.withLock { $0 = true }
+                throw LauncherError.io("directory fsync failed after rename")
+            }
+        })
+        let service = RuntimeCatalogService(baseline: fixture.baseline, store: store)
+        _ = try await service.accept(metadata: JSONEncoder().encode(fixture.update(revision: 1)))
+        failWrite.withLock { $0 = true }
+        let next = try SafeIdentifier("dxmt-next")
+        do {
+            _ = try await service.selectBundle(id: next, pinned: true, installedBundleIDs: [next])
+            Issue.record("Post-rename write must fail")
+        } catch let error as RuntimeCatalogPublicationFailure {
+            #expect(error.persistedSnapshot == nil)
+        }
+        let afterFailure = bytes.withLock { $0 }
+        await #expect(throws: (any Error).self) { try await service.snapshot() }
+        await #expect(throws: (any Error).self) {
+            try await service.selectBundle(id: fixture.baseline.bundles[0].id, pinned: false,
+                installedBundleIDs: [fixture.baseline.bundles[0].id])
+        }
+        #expect(bytes.withLock { $0 } == afterFailure)
+        failRead.withLock { $0 = false }
+        #expect(try await service.snapshot().selectedBundle(for: .dxmt)?.id == next)
+        #expect(try await service.snapshot().selections.bundles[.dxmt]?.pinned == true)
+    }
+
     @Test func repositoryCatalogAcceptsPublishedShape() async throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }

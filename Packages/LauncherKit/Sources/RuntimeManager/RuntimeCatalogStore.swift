@@ -3,8 +3,15 @@
 import Foundation
 import LauncherCore
 
+/// A failed atomic write may already have replaced the file. This value exposes
+/// the reconciled visible state; nil means reads must recover before further use.
+public struct RuntimeCatalogPublicationFailure: Error, Sendable {
+    public let persistedSnapshot: RuntimeCatalogSnapshot?
+}
+
 /// Synchronous persistence, invoked only through BlockingIO by the service.
-/// The injectable writer has the same atomic contract: throwing preserves old bytes.
+/// Writers may throw after replacement (e.g. parent-directory fsync failure).
+/// The service always rereads after a failed write before exposing more state.
 public struct RuntimeCatalogStore: Sendable {
     public static let stateLimit = 4 << 20
     private let reader: @Sendable () throws -> Data?
@@ -55,6 +62,9 @@ public actor RuntimeCatalogService {
     private let installedBundleIDs: Set<SafeIdentifier>
     private let installedComponentIDs: Set<SafeIdentifier>
     private var current: RuntimeCatalogSnapshot?
+    private var hasPersistedState = false
+    private var recoveryRequired = false
+    private var recoveryFallback: RuntimeCatalogSnapshot?
     private var mutating = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
@@ -65,8 +75,8 @@ public actor RuntimeCatalogService {
     }
 
     public func snapshot() async throws -> RuntimeCatalogSnapshot {
-        if let current { return current }
         await acquire(); defer { release() }
+        try Task.checkCancellation()
         return try await loaded()
     }
 
@@ -129,13 +139,27 @@ public actor RuntimeCatalogService {
     }
 
     private func loaded() async throws -> RuntimeCatalogSnapshot {
+        if recoveryRequired { return try await reconcilePersistedState() }
         if let current { return current }
+        try Task.checkCancellation()
         try contract.validate(contract.baseline)
-        if let store, let state = try? await BlockingIO.run({ try store.load() }),
-            let catalog = try? contract.merging(state.catalog, into: contract.baseline),
-            let restored = try? RuntimeCatalogSnapshot(catalog: catalog, selections: state.selections, contract: contract) {
-            current = restored; return restored
+        if let store {
+            do {
+                let state = try await BlockingIO.run { try store.load() }
+                try Task.checkCancellation()
+                if let state {
+                    let restored = try contract.restoring(state)
+                    try Task.checkCancellation()
+                    hasPersistedState = true
+                    current = restored; return restored
+                }
+            } catch {
+                if error is CancellationError || (error as? LauncherError) == .cancelled || Task.isCancelled { throw error }
+                // Startup corruption/unavailability can use bundled defaults.
+                // Publication recovery below must instead block until readable.
+            }
         }
+        try Task.checkCancellation()
         var selections = RuntimeCatalogSelections(
             bundles: contract.baseline.recommendedBundles.mapValues { RuntimeCatalogSelection(id: $0) },
             helpers: contract.baseline.recommendedHelpers.mapValues { RuntimeCatalogSelection(id: $0) })
@@ -152,16 +176,55 @@ public actor RuntimeCatalogService {
             }
         }
         let initial = try RuntimeCatalogSnapshot(catalog: contract.baseline, selections: selections, contract: contract)
+        try Task.checkCancellation()
         current = initial; return initial
     }
 
     private func publish(_ snapshot: RuntimeCatalogSnapshot) async throws -> RuntimeCatalogSnapshot {
         try Task.checkCancellation()
-        if let store { try await BlockingIO.run { try store.save(RuntimeCatalogStoredState(snapshot)) } }
+        if let store {
+            do {
+                try await BlockingIO.run { try store.save(RuntimeCatalogStoredState(snapshot)) }
+                hasPersistedState = true
+            } catch {
+                recoveryFallback = hasPersistedState ? nil : current
+                recoveryRequired = true
+                current = nil
+                // A failed write can already be visible. Reconcile even when
+                // the caller was cancelled, retaining the mutation gate.
+                let recovered = try? await reconcilePersistedState()
+                throw RuntimeCatalogPublicationFailure(persistedSnapshot: recovered)
+            }
+        }
         // A cancellation after durable publication cannot roll the disk back:
         // memory must reflect the same completed atomic transaction.
         current = snapshot
         return snapshot
+    }
+
+    private func reconcilePersistedState() async throws -> RuntimeCatalogSnapshot {
+        guard let store else { throw RuntimeCatalogPublicationFailure(persistedSnapshot: nil) }
+        let contract = self.contract
+        let fallback = recoveryFallback
+        let worker = Task.detached {
+            try await BlockingIO.run {
+                if let state = try store.load() { return (try contract.restoring(state), true) }
+                // A first write that failed before publication may still have
+                // no state file; only that previously observed absence permits
+                // keeping its bundled initial snapshot.
+                if let fallback { return (fallback, false) }
+                throw catalogError("Published state is unavailable")
+            }
+        }
+        do {
+            let (restored, persisted) = try await worker.value
+            current = restored; hasPersistedState = persisted
+            recoveryRequired = false; recoveryFallback = nil
+            return restored
+        } catch {
+            current = nil
+            throw RuntimeCatalogPublicationFailure(persistedSnapshot: nil)
+        }
     }
 
     private func acquire() async {
