@@ -69,6 +69,43 @@ private struct AudioRegistration: GameModeRegistering { func register(_ app: URL
         try await manager.validate(normal, bundle: bundle)
     }
 
+    @Test func catalogRevisionUsesItsOwnPinAndRetainsHistoricalHelper() async throws {
+        let f = try BundleFixture(), installed = try await gameModeTestBundle(f)
+        let bundle = InstalledRuntimeBundle(id: try SafeIdentifier("d3dmetal-catalog-revision3"), root: installed.root,
+            wineBinary: installed.wineBinary, digest: installed.digest, source: .download)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        let source = try RuntimeJSONFile.relativePath(bundle.root, root: f.store.paths.root)
+        try fs.writeAtomically(gameModeMachO(), to: SafeRelativePath("\(source)/lib/wine/x86_64-unix/winecoreaudio.so"))
+        let version = "wine-11.20-3"
+        let component = try SafeRelativePath("Runtimes/surroundAudio/\(version)")
+        let module = try SafeRelativePath("\(component)/\(SurroundAudio.modulePath)")
+        try fs.writeAtomically(gameModeMachO() + Data("revision3".utf8), to: module)
+        let record = try InstalledComponent(kind: .surroundAudio, version: version,
+            installedAt: Date(timeIntervalSince1970: 1), source: .download)
+        try fs.writeAtomically(JSONEncoder().encode(record), to: SafeRelativePath("\(component)/.macgacha-component.json"))
+        let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: AudioRegistration())
+        let game = GameDefinition.find("genshin")!
+        let options = GameModeOptions(surroundModule: module.resolved(against: f.store.paths.root), runtimeProfileID: SurroundAudio.bundleID)
+        let wrongIDs = f.bundle.components.map(\.rawValue) + [SurroundAudio.componentID]
+        await #expect(throws: (any Error).self) {
+            try await manager.prepare(bundle: bundle, game: game, componentIDs: wrongIDs, options: options)
+        }
+        let ids = f.bundle.components.map(\.rawValue) + ["surround-audio-\(version)"]
+        await #expect(throws: (any Error).self) {
+            try await manager.prepare(bundle: bundle, game: game, componentIDs: ids,
+                options: GameModeOptions(surroundModule: options.surroundModule, runtimeProfileID: "dxmt-test"))
+        }
+        let helper = try await manager.prepare(bundle: bundle, game: game, componentIDs: ids, options: options)
+        #expect(helper.runtimeProfileID == SurroundAudio.bundleID)
+        try await manager.validate(helper, bundle: bundle)
+        let store = f.store
+        try await BlockingIO.run { try store.sweepStaging() }
+        try await manager.validate(helper, bundle: bundle)
+        try store.remove(record)
+        try await BlockingIO.run { try store.sweepStaging() }
+        #expect(try fs.itemType(at: RuntimeJSONFile.relativePath(helper.root.deletingLastPathComponent(), root: f.store.paths.root)) == nil)
+    }
+
     @Test func missingStockAudioSlotCannotClaimAnActiveOverlay() async throws {
         let f = try BundleFixture(), installed = try await gameModeTestBundle(f)
         let bundle = InstalledRuntimeBundle(id: try SafeIdentifier(SurroundAudio.bundleID), root: installed.root,

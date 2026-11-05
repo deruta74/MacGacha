@@ -50,6 +50,7 @@ struct MacGachaApp: App {
 @MainActor final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
     var retryRecoveries: () -> Void = {}
     var liveGameName: () -> String? = { nil }
+    var catalogPublication: () -> Task<Void, Never>? = { nil }
     var requestConfirmation: (String, @escaping @MainActor (NSApplication.TerminateReply) -> Void) -> Void = {
         _, completion in completion(.terminateNow)
     }
@@ -58,6 +59,7 @@ struct MacGachaApp: App {
     func bind(_ model: AppModel) {
         retryRecoveries = { [weak model] in model?.retryRecoveriesOnActivation() }
         liveGameName = { [weak model] in model?.liveSessionGameName }
+        catalogPublication = { [weak model] in model?.catalogMutationTask }
         requestConfirmation = { [weak model] game, completion in
             guard let model else { completion(.terminateNow); return }
             model.confirmQuit(gameName: game, completion: completion)
@@ -67,6 +69,15 @@ struct MacGachaApp: App {
     func applicationDidBecomeActive(_ notification: Notification) { retryRecoveries() }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if let publication = catalogPublication() {
+            Task { @MainActor [weak self] in
+                await publication.value
+                guard let self else { return }
+                let reply = self.applicationShouldTerminate(sender)
+                if reply != .terminateLater { self.replyToTermination(reply == .terminateNow) }
+            }
+            return .terminateLater
+        }
         guard let game = liveGameName() else { return .terminateNow }
         Task { @MainActor [weak self] in
             self?.requestConfirmation(game) { [weak self] reply in

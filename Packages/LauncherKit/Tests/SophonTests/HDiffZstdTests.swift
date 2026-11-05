@@ -57,10 +57,13 @@ import LauncherCore
         try fixture.store(old: Data(), patch: patch)
         let output = try fixture.output(); defer { try? output.close() }
         let source = try fixture.range("old", length: 0), slice = try fixture.range("patch", length: Int64(patch.count))
-        await #expect(throws: LauncherError.cancelled) {
+        let cancelled = Task {
             try await HDiff13.apply(old: source, patch: slice, expectedSize: Int64(expected.count), output: output,
                 onStep: { step in if step == .writeOutput { withUnsafeCurrentTask { $0?.cancel() } } })
         }
+        await #expect(throws: LauncherError.cancelled) { try await cancelled.value }
+        #expect(!Task.isCancelled)
+        #expect(try fixture.readOutput().isEmpty)
         try await HDiff13.apply(old: source, patch: slice, expectedSize: Int64(expected.count), output: output)
         #expect(try fixture.readOutput() == expected)
     }

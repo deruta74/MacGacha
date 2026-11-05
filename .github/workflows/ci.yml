@@ -39,6 +39,11 @@ jobs:
         # The separate component workflow still verifies the complete Unix module.
         run: python3 -I scripts/test-surround-audio.py
 
+      - name: Validate runtime catalog publication
+        run: |
+          python3 -I scripts/test-runtime-catalog.py
+          python3 -I scripts/check-runtime-catalog.py RuntimeCatalog/runtime-catalog.json
+
       - name: Run package tests
         run: |
           mkdir -p test-results

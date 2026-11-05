@@ -32,23 +32,27 @@ extension LaunchServices {
 /// Construction performs no I/O; callers join startup before any game operation.
 actor LiveLaunchServices: LaunchServices, GameOperationGuard {
     private let paths: AppPaths
+    private let catalog: (any RuntimeCatalogAccess)?
     private let icons: any GameModeIconProviding
     private let log: EventLog?
     private var construction: Task<LaunchManager, any Error>?
     private var startup: Task<LaunchStartupResult, Never>?
-    init(paths: AppPaths, log: EventLog? = nil, icons: any GameModeIconProviding = BundleGameModeIcons()) {
-        self.paths = paths; self.log = log; self.icons = icons
+    init(paths: AppPaths, log: EventLog? = nil, icons: any GameModeIconProviding = BundleGameModeIcons(), catalog: (any RuntimeCatalogAccess)? = nil) {
+        self.paths = paths; self.log = log; self.icons = icons; self.catalog = catalog
     }
     private func manager() async throws -> LaunchManager {
         if let construction { return try await construction.value }
-        let paths = paths, log = log, icons = icons
+        let paths = paths, log = log, icons = icons, catalog = catalog
         let task = Task {
             let manifest = try await BundledRuntimeManifest.load()
             let runner = SystemProcessRunner(), store = RuntimeStore(paths: paths)
             let consent = ConsentStore(url: paths.root.appendingPathComponent("consent.json"), root: paths.root)
             let bundles = RuntimeBundleManager(manifest: manifest, store: store, consent: consent,
                 installer: ComponentInstaller(store: store, consent: consent))
-            return LaunchManager(paths: paths, runtimes: LiveLaunchRuntimes(manifest: manifest, manager: bundles, store: store),
+            let runtimes: LiveLaunchRuntimes
+            if let catalog { runtimes = LiveLaunchRuntimes(paths: paths, manager: bundles, store: store, snapshot: { try await catalog.snapshot() }) }
+            else { runtimes = LiveLaunchRuntimes(manifest: manifest, manager: bundles, store: store) }
+            return LaunchManager(paths: paths, runtimes: runtimes,
                 prefixes: PrefixManager(paths: paths, runner: runner), preparation: LaunchPreparation(paths: paths, runner: runner),
                 spawner: SystemProcessSpawner(), inspector: SystemProcessInspector(), runner: runner, clock: ContinuousClock(), log: log, gameMode: GameModeHelper(paths: paths, icons: icons))
         }

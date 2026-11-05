@@ -179,6 +179,7 @@ private struct GameSnapshot: Sendable {
             for await _ in events {
                 guard !Task.isCancelled else { return }
                 self?.revalidateGameEvents()
+                self?.scheduleRuntimeCatalogRefresh()
                 await self?.refreshRosetta()
                 if self?.gameStartupTask != nil { await self?.refreshGames() }
             }

@@ -345,7 +345,7 @@ struct AppModelTests {
         let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: url))
         #expect(manifest.schemaVersion == 3)
-        #expect(manifest.components.count == 9)
+        #expect(manifest.components.count == 10)
         let fps = try #require(manifest.components.first { $0.id.rawValue == GenshinFps.componentID })
         #expect(fps.kind == .genshinFps && fps.archive == .zip)
         #expect(fps.license.name == "GPL-3.0-only" && fps.license.redistributable && fps.consent == nil)
@@ -354,6 +354,8 @@ struct AppModelTests {
         #expect(fps.sha256?.hex == "f2fa38aef5ffdcf15aa3480f7acc608cb9266bdcae0af05c4e9802e611671abb")
         #expect(fps.url?.absoluteString == "https://github.com/deruta74/MacGacha/releases/download/genshin-fps-unlock-2/genshin-fps-unlock-2.zip")
         #expect(manifest.bundles.allSatisfy { !$0.components.contains(fps.id) })
+        let surroundHistory = manifest.components.filter { $0.kind == .surroundAudio }
+        #expect(surroundHistory.map(\.id.rawValue) == [SurroundAudio.componentID, "surround-audio-wine-11.20-1"])
         let surround = try #require(manifest.components.first { $0.id.rawValue == SurroundAudio.componentID })
         #expect(surround.kind == .surroundAudio && surround.archive == .zip)
         #expect(surround.license.name == "LGPL-2.1-or-later" && surround.license.redistributable)
@@ -376,7 +378,7 @@ struct AppModelTests {
         let manifest = try RuntimeManifest.load(from: url)
         let model = AppModel(paths: testPaths(), manifest: manifest, services: PreviewRuntimeServices(), defaults: nil)
         await model.start()
-        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + ["jadeite-4.1.0", "steam-shim-proton-10.0-4", Crypt32Fix.componentID, SurroundAudio.componentID, GenshinFps.componentID])
+        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + ["jadeite-4.1.0", "steam-shim-proton-10.0-4", Crypt32Fix.componentID, SurroundAudio.componentID, GenshinFps.componentID, "surround-audio-wine-11.20-1"])
         #expect(manifest.bundles.first?.id.rawValue == "dxmt-wine11.0cx-dxmt0.80")
         #expect(model.rows.contains { $0.id == "dxmt-wine11.0-dxmt0.80" })
         let dxmt = manifest.bundles[0].id.rawValue

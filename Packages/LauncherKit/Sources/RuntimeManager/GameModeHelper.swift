@@ -18,21 +18,23 @@ public struct SystemGameModeRegistration: GameModeRegistering {
 public struct GameModeOptions: Sendable, Equatable {
     public let gameModeEnabled: Bool
     public let surroundModule: URL?
-    public init(gameModeEnabled: Bool = true, surroundModule: URL? = nil) {
-        self.gameModeEnabled = gameModeEnabled; self.surroundModule = surroundModule
+    public let runtimeProfileID: String?
+    public init(gameModeEnabled: Bool = true, surroundModule: URL? = nil, runtimeProfileID: String? = nil) {
+        self.gameModeEnabled = gameModeEnabled; self.surroundModule = surroundModule; self.runtimeProfileID = runtimeProfileID
     }
 }
 
 public struct GameModeRuntime: Sendable, Equatable {
     public let gameModeEnabled: Bool
     public let surroundModule: URL?
+    public let runtimeProfileID: String?
     public let gameID: String
     public let root: URL
     public let wineBinary: URL
     public let wineserver: URL
     public var loader: URL { root.appendingPathComponent("MacOS/wine", isDirectory: false) }
-    public init(game: GameDefinition, root: URL, wineBinary: URL, wineserver: URL, gameModeEnabled: Bool = true, surroundModule: URL? = nil) {
-        self.gameModeEnabled = gameModeEnabled; self.surroundModule = surroundModule
+    public init(game: GameDefinition, root: URL, wineBinary: URL, wineserver: URL, gameModeEnabled: Bool = true, surroundModule: URL? = nil, runtimeProfileID: String? = nil) {
+        self.gameModeEnabled = gameModeEnabled; self.surroundModule = surroundModule; self.runtimeProfileID = runtimeProfileID
         gameID = game.id
         self.root = URL(fileURLWithPath: root.path, isDirectory: true)
         self.wineBinary = URL(fileURLWithPath: wineBinary.path, isDirectory: false)
@@ -93,7 +95,14 @@ public struct GameModeHelper: GameModeProviding {
     }
 
     public func prepare(bundle: InstalledRuntimeBundle, game: GameDefinition, componentIDs: [String], options: GameModeOptions) async throws -> GameModeRuntime {
-        guard options.surroundModule == nil || componentIDs.contains(SurroundAudio.componentID) else { throw LauncherError.io("Missing surround component exclusion") }
+        if let module = options.surroundModule {
+            guard module.isFileURL else { throw LauncherError.io("Invalid surround component location") }
+            let version = try SurroundAudio.moduleVersion(RuntimeJSONFile.relativePath(module, root: paths.root),
+                runtimes: RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))
+            guard componentIDs.contains("\(ComponentKind.surroundAudio.idPrefix)-\(version.rawValue)") else {
+                throw LauncherError.io("Missing surround component exclusion")
+            }
+        }
         let icon = try await icons.icon(for: game)
         return try await BlockingIO.run {
             let lease = try RuntimeStoreLease(store: RuntimeStore(paths: paths))
@@ -144,18 +153,21 @@ public struct GameModeHelper: GameModeProviding {
         let icon = try await icons.icon(for: game)
         try await BlockingIO.run {
             let fs = try ContainedFileSystem(root: paths.root).pinRoot()
-            try verify(helper, destination: appPath(bundle.id, game: game), plan: plan(bundle: bundle, game: game, icon: icon, fs: fs, options: GameModeOptions(gameModeEnabled: helper.gameModeEnabled, surroundModule: helper.surroundModule)), fs: fs)
+            try verify(helper, destination: appPath(bundle.id, game: game), plan: plan(bundle: bundle, game: game, icon: icon, fs: fs, options: GameModeOptions(gameModeEnabled: helper.gameModeEnabled, surroundModule: helper.surroundModule, runtimeProfileID: helper.runtimeProfileID)), fs: fs)
         }
     }
 
     private func surroundSource(_ options: GameModeOptions, bundle: InstalledRuntimeBundle, game: GameDefinition, fs: ContainedFileSystem) throws -> SafeRelativePath? {
         guard let url = options.surroundModule else { return nil }
-        guard SurroundAudio.applies(game: game.id, backend: .d3dmetal, bundleID: bundle.id.rawValue) else { throw LauncherError.io("Incompatible surround helper") }
-        let root = try SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/surroundAudio/\(SurroundAudio.version)")
+        guard SurroundAudio.applies(game: game.id, backend: .d3dmetal, bundleID: options.runtimeProfileID ?? bundle.id.rawValue) else { throw LauncherError.io("Incompatible surround helper") }
+        guard url.isFileURL else { throw LauncherError.io("Invalid surround component location") }
+        let runtimes = try RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root)
+        let version = try SurroundAudio.moduleVersion(RuntimeJSONFile.relativePath(url, root: paths.root), runtimes: runtimes)
+        let root = try SafeRelativePath("\(runtimes)/surroundAudio/\(version.rawValue)")
         let module = try SafeRelativePath("\(root)/\(SurroundAudio.modulePath)")
         guard url.isFileURL, url.path == module.resolved(against: paths.root).path else { throw LauncherError.io("Invalid surround component location") }
         let record = try JSONDecoder().decode(InstalledComponent.self, from: fs.readFile(at: SafeRelativePath("\(root)/.macgacha-component.json"), maxBytes: 16384))
-        guard record.kind == .surroundAudio, record.version == SurroundAudio.version else { throw LauncherError.io("Invalid surround component identity") }
+        guard record.kind == .surroundAudio, record.version == version.rawValue else { throw LauncherError.io("Invalid surround component identity") }
         return module
     }
 
@@ -293,7 +305,7 @@ public struct GameModeHelper: GameModeProviding {
     }
     private func result(destination: SafeRelativePath, game: GameDefinition, command: String, options: GameModeOptions) throws -> GameModeRuntime {
         let root = try SafeRelativePath("\(destination)/Contents").resolved(against: paths.root)
-        return GameModeRuntime(game: game, root: root, wineBinary: root.appendingPathComponent("MacOS/\(command)"), wineserver: root.appendingPathComponent("bin/wineserver"), gameModeEnabled: options.gameModeEnabled, surroundModule: options.surroundModule)
+        return GameModeRuntime(game: game, root: root, wineBinary: root.appendingPathComponent("MacOS/\(command)"), wineserver: root.appendingPathComponent("bin/wineserver"), gameModeEnabled: options.gameModeEnabled, surroundModule: options.surroundModule, runtimeProfileID: options.runtimeProfileID)
     }
     static func remove(bundleID: SafeIdentifier, paths: AppPaths, fs: ContainedFileSystem) throws {
         try fs.removeItem(at: SafeRelativePath("\(RuntimeJSONFile.relativePath(paths.runtimes, root: paths.root))/GameMode/\(bundleID)"))

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Dispatch
+import Foundation
+import Synchronization
 import Testing
 import LauncherCore
 
@@ -30,4 +32,30 @@ func blockedIOPreservesTaskLocalsAndCancellationWithoutStarvingTheCaller() async
     worker.cancel()
     release.signal()
     await #expect(throws: CancellationError.self) { try await worker.value }
+}
+
+@Test(.timeLimit(.minutes(1))) @MainActor
+func firstBlockingBoundarySharesCallerIdentityAndCancellation() async throws {
+    let start = AsyncStream<Void>.makeStream()
+    let holder = Mutex<Task<Void, any Error>?>(nil)
+    let reachedSideEffect = Mutex(false)
+    let task = Task { @MainActor in
+        var iterator = start.stream.makeAsyncIterator()
+        _ = await iterator.next()
+        let callerIdentity = withUnsafeCurrentTask { $0!.hashValue }
+        @Sendable func firstBoundary() throws {
+            #expect(!Thread.isMainThread)
+            #expect(withUnsafeCurrentTask { $0!.hashValue } == callerIdentity)
+            // Cancel the caller synchronously at the first I/O boundary. The
+            // same task must observe it before performing any side effect.
+            holder.withLock { $0?.cancel() }
+            try Task.checkCancellation()
+            reachedSideEffect.withLock { $0 = true }
+        }
+        try await BlockingIO.run { try firstBoundary() }
+    }
+    defer { task.cancel(); holder.withLock { $0 = nil } }
+    holder.withLock { $0 = task }; start.continuation.yield(())
+    await #expect(throws: CancellationError.self) { try await task.value }
+    #expect(!reachedSideEffect.withLock { $0 })
 }

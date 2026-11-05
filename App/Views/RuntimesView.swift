@@ -34,7 +34,7 @@ struct RuntimesView: View {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     Task { await model.refreshRuntimes() }
                 }
-                .disabled(model.isStarting)
+                .disabled(model.isStarting || model.runtimeCatalogRefreshing)
                 .help("Check installed runtimes again")
             }
         }
@@ -63,6 +63,16 @@ struct RuntimeRowView: View {
                 }
                 if let summary = row.summary {
                     Text(summary).font(.callout).foregroundStyle(.secondary)
+                }
+                if model.runtimeIsSelected(row.id) {
+                    Text(model.runtimeIsPinned(row.id) ? String(localized: "Selected · Pinned") : String(localized: "Selected"))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if model.runtimeIsRecommended(row.id) {
+                    Text("Recommended").font(.caption).foregroundStyle(.secondary)
+                }
+                if model.runtimeIsSelected(row.id) && !model.runtimeIsRecommended(row.id) && model.runtimeCatalog != nil {
+                    Text("Update available").font(.caption).foregroundStyle(.secondary)
                 }
                 detail
             }
@@ -133,17 +143,33 @@ struct RuntimeRowView: View {
                     Button("Import…") { model.importGPTK(row.id) }
                         .help("Import D3DMetal from Apple's Game Porting Toolkit")
                 }
-                Button(row.state == .notInstalled ? String(localized: "Install") : String(localized: "Try Again")) { model.install(row.id) }
+                if model.runtimeCatalog != nil {
+                    Button("Set Up…") { model.useRuntimeVersion(row.id) }
+                        .disabled(!model.canUseRuntimeVersion(row.id))
+                } else {
+                    Button(row.state == .notInstalled ? String(localized: "Install") : String(localized: "Try Again")) { model.install(row.id) }
+                }
             case .working(let phase, _):
                 // Removing files and final cleanup always run to the end.
                 if phase != .deleting && phase != .cleaningUp {
                     Button("Cancel") { model.cancel(row.id) }
                 }
             case .installed:
+                if model.runtimeCatalog != nil {
+                    if model.runtimeIsSelected(row.id) && !model.runtimeIsPinned(row.id) {
+                        Button("Keep This Version") { model.useRuntimeVersion(row.id, pinned: true) }
+                            .disabled(!model.canUseRuntimeVersion(row.id))
+                    } else if !model.runtimeIsSelected(row.id) || model.runtimeIsRecommended(row.id) {
+                        Button(model.runtimeIsRecommended(row.id) ? String(localized: "Use Recommended Version") : String(localized: "Use This Version")) { model.useRuntimeVersion(row.id) }
+                            .disabled(!model.canUseRuntimeVersion(row.id))
+                    }
+                }
                 Button("Remove") { confirmingRemoval = true }
+                    .disabled(!model.canRemoveRuntime(row.id))
             case .invalid(_, let removable):
                 if removable {
                     Button("Remove") { confirmingRemoval = true }
+                        .disabled(!model.canRemoveRuntime(row.id))
                 }
             }
         }
