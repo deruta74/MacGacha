@@ -144,19 +144,22 @@ public actor RuntimeCatalogService {
         try Task.checkCancellation()
         try contract.validate(contract.baseline)
         if let store {
+            let state: RuntimeCatalogStoredState?
             do {
-                let state = try await BlockingIO.run { try store.load() }
-                try Task.checkCancellation()
-                if let state {
-                    let restored = try contract.restoring(state)
-                    try Task.checkCancellation()
-                    hasPersistedState = true
-                    current = restored; return restored
-                }
+                state = try await BlockingIO.run { try store.load() }
             } catch {
                 if error is CancellationError || (error as? LauncherError) == .cancelled || Task.isCancelled { throw error }
-                // Startup corruption/unavailability can use bundled defaults.
-                // Publication recovery below must instead block until readable.
+                // Only unreadable/malformed startup bytes can use defaults.
+                state = nil
+            }
+            try Task.checkCancellation()
+            if let state {
+                // A decoded state that cannot migrate is not corrupt JSON.
+                // Fail closed rather than replacing its valid history/pins.
+                let restored = try contract.restoring(state)
+                try Task.checkCancellation()
+                hasPersistedState = true
+                current = restored; return restored
             }
         }
         try Task.checkCancellation()

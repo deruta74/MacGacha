@@ -8,6 +8,50 @@ import LauncherCore
 import TestSupport
 
 @Suite struct RuntimeCatalogTests {
+    @Test func trustedBaselinePromotingRemoteBundlePreservesOriginalProfileAndPin() async throws {
+        let fixture = try CatalogFixture()
+        let bytes = Mutex<Data?>(nil)
+        let store = RuntimeCatalogStore(read: { bytes.withLock { $0 } }, write: { data in bytes.withLock { $0 = data } })
+        let original = RuntimeCatalogService(baseline: fixture.baseline, store: store)
+        let update = try fixture.update(revision: 7)
+        _ = try await original.accept(metadata: JSONEncoder().encode(update))
+        let promoted = try #require(update.manifest.bundles.first { $0.id.rawValue == "dxmt-next" })
+        _ = try await original.selectBundle(id: promoted.id, pinned: true, installedBundleIDs: [promoted.id])
+        let saved = bytes.withLock { $0 }
+        let evolved = try RuntimeManifest(components: fixture.baseline.components, bundles: [promoted] + fixture.baseline.bundles)
+        let reopened = RuntimeCatalogService(baseline: evolved, store: store)
+        let restored = try await reopened.snapshot()
+        #expect(restored.selectedBundle(for: .dxmt)?.id == promoted.id)
+        #expect(restored.selections.bundles[.dxmt]?.pinned == true)
+        #expect(restored.catalog.revision == 7)
+        #expect(try restored.profile(for: SafeIdentifier("dxmt-next"))?.rawValue == "dxmt-test")
+        #expect(restored.catalog.manifest.bundles.count == 3)
+        #expect(bytes.withLock { $0 } == saved)
+        let rewritten = RuntimeCatalog(revision: 8, manifest: restored.catalog.manifest,
+            bundleBindings: RuntimeCatalog.bundled(evolved).bundleBindings, helperBindings: restored.catalog.helperBindings,
+            recommendedBundles: restored.catalog.recommendedBundles, recommendedHelpers: restored.catalog.recommendedHelpers)
+        await #expect(throws: (any Error).self) { try await reopened.accept(metadata: JSONEncoder().encode(rewritten)) }
+        #expect(try await reopened.snapshot().catalog.revision == 7)
+    }
+
+    @Test func decodedCacheMigrationFailureDoesNotSilentlyResetOrOverwriteState() async throws {
+        let fixture = try CatalogFixture()
+        let bytes = Mutex<Data?>(nil)
+        let store = RuntimeCatalogStore(read: { bytes.withLock { $0 } }, write: { data in bytes.withLock { $0 = data } })
+        let original = RuntimeCatalogService(baseline: fixture.baseline, store: store)
+        _ = try await original.accept(metadata: JSONEncoder().encode(fixture.update(revision: 1)))
+        let next = try SafeIdentifier("dxmt-next")
+        _ = try await original.selectBundle(id: next, pinned: true, installedBundleIDs: [next])
+        let saved = bytes.withLock { $0 }
+        let old = fixture.baseline.bundles[0]
+        let changed = try RuntimeBundle(id: old.id, displayName: "Changed immutable descriptor", backend: old.backend, components: old.components)
+        let incompatible = try RuntimeManifest(components: fixture.baseline.components, bundles: [changed, fixture.baseline.bundles[1]])
+        let reopened = RuntimeCatalogService(baseline: incompatible, store: store)
+        await #expect(throws: (any Error).self) { try await reopened.snapshot() }
+        await #expect(throws: (any Error).self) { try await reopened.accept(metadata: JSONEncoder().encode(fixture.update(revision: 2))) }
+        #expect(bytes.withLock { $0 } == saved)
+    }
+
     @Test func selectionPreviewDoesNotActivateOrRequireInstalledEvidence() async throws {
         let fixture = try CatalogFixture()
         let service = RuntimeCatalogService(baseline: fixture.baseline)

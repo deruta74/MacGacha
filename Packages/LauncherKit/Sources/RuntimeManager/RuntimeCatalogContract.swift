@@ -102,7 +102,12 @@ struct RuntimeCatalogContract: Sendable {
         try validate(state.catalog)
         let components = try merge(state.catalog.manifest.components, baseline.manifest.components, id: { $0.id })
         let bundles = try merge(state.catalog.manifest.bundles, baseline.manifest.bundles, id: { $0.id })
-        let bindings = try merge(state.catalog.bundleBindings, baseline.bundleBindings, id: { $0.bundleID })
+        // A later app can bundle an already-known remote release. bundled()
+        // generates a self-profile for it, but the persisted release retains
+        // its original supported compiled profile. Strict descriptor merging
+        // above proves that this is the identical bundle, not identity reuse.
+        let existingBundleIDs = Set(state.catalog.bundleBindings.map(\.bundleID))
+        let bindings = state.catalog.bundleBindings + baseline.bundleBindings.filter { !existingBundleIDs.contains($0.bundleID) }
         var helpers = state.catalog.helperBindings
         for compiled in baseline.helperBindings {
             if let old = helpers.first(where: { $0.componentID == compiled.componentID }) {
