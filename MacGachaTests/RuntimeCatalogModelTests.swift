@@ -59,6 +59,103 @@ import RuntimeManager
         #expect(f.model.runtimeCatalog?.selectedHelper(for: .surroundAudio)?.id == old)
     }
 
+    @Test(arguments: [false, true]) func lateRowCancellationKeepsPreviousSelectionAfterReceiptAndRestart(firstOfflineMigration: Bool) async throws {
+        let paths: AppPaths, baseline: RuntimeManifest, services: FakeRuntimeServices, model: AppModel, target: RuntimeComponent
+        if firstOfflineMigration {
+            let f = try await OfflineCatalogFixture.make()
+            paths = f.paths; baseline = f.baseline; services = f.services; model = f.model
+            target = try #require(baseline.components.first { $0.id.rawValue == SurroundAudio.componentID })
+        } else {
+            let f = try await CatalogModelFixture.make()
+            paths = f.paths; baseline = f.baseline; services = f.services; model = f.model; target = f.revision3
+        }
+        let previous = try #require(model.runtimeCatalog?.selectedHelper(for: .surroundAudio)?.id)
+        var installs = services.installEvents.stream.makeAsyncIterator()
+        model.useRuntimeVersion(target.id.rawValue)
+        #expect(await installs.next() == target.id.rawValue)
+        let receipt = try InstalledComponent(kind: target.kind, version: target.version.rawValue, installedAt: .now, source: .download)
+        services.state.withLock { $0.components.append(receipt); $0.holdNextScan = true }
+        var scans = services.heldScanEvents.stream.makeAsyncIterator()
+        services.emit(.phase(.completed))
+        _ = await scans.next()
+        model.cancel(target.id.rawValue)
+        #expect(model.runtimeCatalogMutationID == target.id.rawValue)
+        #expect(model.isBusyForUpdates && !model.canChangeRuntimeCatalog)
+        #expect(model.runtimeCatalog?.selectedHelper(for: .surroundAudio)?.id == previous)
+        services.releaseScan()
+        try await catalogWait { model.runtimeCatalogMutationID == nil }
+        #expect(model.runtimeCatalog?.selectedHelper(for: .surroundAudio)?.id == previous)
+        #expect(services.snapshot.components.contains { $0.version == target.version.rawValue && $0.kind == target.kind })
+        let reopened = LiveRuntimeCatalogAccess(paths: paths, services: services, baseline: baseline, fetch: { throw LauncherError.transport("offline") })
+        #expect(try await reopened.snapshot().selectedHelper(for: .surroundAudio)?.id == previous)
+    }
+
+    @Test func refreshStartedDuringActivationCannotPublishItsOldSelectionAfterward() async throws {
+        let f = try await CatalogModelFixture.make()
+        let base = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline, fetch: { f.metadata })
+        let access = HeldCatalogRefresh(base)
+        let model = AppModel(paths: f.paths, services: f.services, catalogAccess: access, defaults: nil)
+        await model.start(); await model.catalogRefreshTask?.value
+        await model.refreshRuntimeCatalog(force: true)
+        try f.publish(f.revision3); try await model.scanAndApply()
+        f.services.state.withLock { $0.holdNextScan = true }
+        var scans = f.services.heldScanEvents.stream.makeAsyncIterator()
+        model.useRuntimeVersion(f.revision3.id.rawValue)
+        _ = await scans.next()
+        await access.arm()
+        var started = access.started.stream.makeAsyncIterator()
+        let refresh = Task { await model.refreshRuntimeCatalog(force: false) }
+        _ = await started.next()
+        f.services.releaseScan()
+        try await catalogWait { model.runtimeCatalogMutationID == nil }
+        #expect(try await access.snapshot().selectedHelper(for: .surroundAudio)?.id == f.revision3.id)
+        await access.release(); await refresh.value
+        #expect(model.runtimeCatalog?.selectedHelper(for: .surroundAudio)?.id == f.revision3.id)
+        var settings = model.launchSettings(for: "genshin"); settings.backend = .d3dmetal; settings.surroundSound = true
+        model.launchSettingsCache["genshin"] = settings
+        let expected = try await access.snapshot()
+        #expect(model.effectiveRuntimeManifest?.components.first { $0.kind == .surroundAudio }?.id == expected.selectedHelper(for: .surroundAudio)?.id)
+        #expect(model.runtimeSetupPlan(for: "genshin")?.items.contains { $0.id == SurroundAudio.componentID } != true)
+    }
+
+    @Test(arguments: [false, true]) func offlineMigrationIsDurableBeforeRemovalAndWriteFailurePreventsDeletion(writeFails: Bool) async throws {
+        let f = try await OfflineCatalogFixture.make(writeFails: writeFails)
+        let previous = try #require(f.model.runtimeCatalog?.selectedHelper(for: .surroundAudio))
+        #expect(previous.id.rawValue == "surround-audio-wine-11.20-1")
+        await f.model.remove(previous.id.rawValue)
+        #expect(f.services.snapshot.components.contains { $0.version == previous.version.rawValue } == writeFails)
+        #expect(f.model.runtimeCatalog?.selectedHelper(for: .surroundAudio)?.id == previous.id)
+        if !writeFails {
+            let access = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline, fetch: { throw LauncherError.transport("offline") })
+            #expect(try await access.snapshot().selectedHelper(for: .surroundAudio)?.id == previous.id)
+            let model = AppModel(paths: f.paths, services: f.services, catalogAccess: access, defaults: nil)
+            await model.start(); await model.catalogRefreshTask?.value
+            var settings = model.launchSettings(for: "genshin"); settings.backend = .d3dmetal; settings.surroundSound = true
+            model.launchSettingsCache["genshin"] = settings
+            #expect(model.runtimeSetupPlan(for: "genshin")?.items.contains { $0.id == previous.id.rawValue } == true)
+        } else {
+            #expect(!f.services.snapshot.calls.contains("remove"))
+            #expect(f.model.lastError != nil)
+        }
+    }
+
+    @Test(arguments: ["catalog", "install", "gameSetup", "import"]) func initialPersistenceFailurePreventsEveryRuntimeRequestRoute(route: String) async throws {
+        let f = try await OfflineCatalogFixture.make(writeFails: true)
+        let target = try #require(f.baseline.components.first { $0.id.rawValue == SurroundAudio.componentID })
+        switch route {
+        case "catalog": f.model.useRuntimeVersion(target.id.rawValue)
+        case "install": f.model.install(target.id.rawValue)
+        case "gameSetup": f.model.installRecommended(for: "genshin")
+        default:
+            let bundle = try #require(f.model.runtimeCatalog?.selectedBundle(for: .d3dmetal))
+            f.model.importGPTK(bundle.id.rawValue)
+        }
+        try await catalogWait { f.model.lastError != nil && !f.model.isRuntimeOperationRunning && f.model.runtimeCatalogMutationID == nil }
+        #expect(f.services.snapshot.installs.isEmpty && f.services.snapshot.bundleInstalls.isEmpty)
+        #expect(f.model.importState == nil)
+        #expect(f.model.runtimeCatalog?.selectedHelper(for: .surroundAudio)?.id.rawValue == "surround-audio-wine-11.20-1")
+    }
+
     @Test func automaticChecksAreThrottledAndInvalidFutureDatesCannotSuppressRefresh() async throws {
         let f = try await CatalogModelFixture.make()
         let calls = Mutex(0), date = Mutex(Date(timeIntervalSince1970: 1000))
@@ -296,6 +393,7 @@ private actor HeldCatalogRefresh: RuntimeCatalogAccess {
     func arm() { hold = true }
     func release() { hold = false; waiter?.resume(); waiter = nil }
     func snapshot() async throws -> RuntimeCatalogSnapshot { try await base.snapshot() }
+    func persistSelection() async throws -> RuntimeCatalogSnapshot { try await base.persistSelection() }
     func refresh(force: Bool) async throws -> RuntimeCatalogSnapshot {
         let captured = try await base.refresh(force: force)
         if hold { started.continuation.yield(()); await withCheckedContinuation { waiter = $0 } }
@@ -312,4 +410,23 @@ private actor CatalogFetchGate {
         await withCheckedContinuation { waiter = $0 }
     }
     func release() { waiter?.resume(); waiter = nil }
+}
+
+private struct OfflineCatalogFixture {
+    let paths: AppPaths
+    let baseline: RuntimeManifest
+    let services: FakeRuntimeServices
+    let model: AppModel
+    @MainActor static func make(writeFails: Bool = false) async throws -> Self {
+        let paths = AppPaths(root: FileManager.default.temporaryDirectory.appendingPathComponent("catalog-offline-\(UUID().uuidString)"))
+        let baseline = try await BundledRuntimeManifest.load(), services = FakeRuntimeServices()
+        let previous = try #require(baseline.components.first { $0.id.rawValue == "surround-audio-wine-11.20-1" })
+        let receipt = try InstalledComponent(kind: previous.kind, version: previous.version.rawValue, installedAt: .now, source: .download)
+        services.state.withLock { $0.components = [receipt]; $0.accepted = true }
+        let store: RuntimeCatalogStore? = writeFails ? RuntimeCatalogStore(read: { nil }, write: { _ in throw LauncherError.io("initial write failed") }) : nil
+        let access = LiveRuntimeCatalogAccess(paths: paths, services: services, baseline: baseline, store: store, fetch: { throw LauncherError.transport("offline") })
+        let model = AppModel(paths: paths, services: services, catalogAccess: access, defaults: nil)
+        await model.start(); await model.catalogRefreshTask?.value
+        return Self(paths: paths, baseline: baseline, services: services, model: model)
+    }
 }

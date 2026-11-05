@@ -47,11 +47,31 @@ struct RuntimeInstallContext: Sendable {
     }
     func reconcileRuntimeCatalog() async {
         guard let catalogAccess else { return }
+        let selectionGeneration = catalogSelectionGeneration
         do {
             let snapshot = try await Task.detached { try await catalogAccess.snapshot() }.value
+            guard catalogSelectionGeneration == selectionGeneration else { return }
+            catalogSelectionGeneration = UUID()
             applyRuntimeCatalog(snapshot)
         }
-        catch { runtimeCatalogUnavailable = true; rebuildRows() }
+        catch {
+            guard catalogSelectionGeneration == selectionGeneration else { return }
+            catalogSelectionGeneration = UUID()
+            runtimeCatalogUnavailable = true; rebuildRows()
+        }
+    }
+    func persistRuntimeCatalogSelection() async throws {
+        guard let catalogAccess else { return }
+        do {
+            let actual = try await catalogAccess.persistSelection()
+            applyRuntimeCatalog(actual)
+        } catch {
+            if let publication = error as? RuntimeCatalogPublicationFailure, let actual = publication.persistedSnapshot {
+                catalogSelectionGeneration = UUID()
+                applyRuntimeCatalog(actual)
+            } else { await reconcileRuntimeCatalog() }
+            throw error
+        }
     }
     func runtimeProfile(for backend: RuntimeBackend) -> String? {
         guard let bundle = effectiveRuntimeManifest?.defaultBundle(for: backend) else { return nil }
@@ -134,21 +154,35 @@ struct RuntimeInstallContext: Sendable {
         guard let catalogAccess else { runtimeCatalogMutationID = nil; return }
         catalogMutationTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.runtimeCatalogMutationID = nil; self.catalogMutationTask = nil }
+            defer {
+                self.catalogSelectionGeneration = UUID()
+                self.runtimeCatalogMutationID = nil; self.catalogMutationTask = nil
+            }
             do {
-                self.applyRuntimeCatalog(try await catalogAccess.activate(target.selections))
+                let actual = try await catalogAccess.activate(target.selections)
+                self.catalogSelectionGeneration = UUID()
+                self.applyRuntimeCatalog(actual)
                 try await self.scanAndApply()
             } catch {
                 if let publication = error as? RuntimeCatalogPublicationFailure, let actual = publication.persistedSnapshot {
+                    self.catalogSelectionGeneration = UUID()
                     self.applyRuntimeCatalog(actual)
                 } else { await self.reconcileRuntimeCatalog() }
                 self.show(error)
             }
         }
     }
+    func revokeCatalogSetupActivation(_ id: String) {
+        guard runtimeCatalogMutationID == id else { return }
+        for key in catalogActivationTargets.keys {
+            guard runtimeSetupChains[key]?.plan.items.contains(where: { $0.id == id }) == true else { continue }
+            cancelledCatalogSetups.insert(key)
+        }
+    }
     func finishCatalogSetup(_ key: String, succeeded: Bool) {
         guard let target = catalogActivationTargets.removeValue(forKey: key), let id = runtimeCatalogMutationID else { return }
-        if succeeded { beginRuntimeCatalogActivation(target, id: id) }
+        let cancelled = cancelledCatalogSetups.remove(key) != nil
+        if succeeded && !cancelled { beginRuntimeCatalogActivation(target, id: id) }
         else { runtimeCatalogMutationID = nil }
     }
 }

@@ -103,6 +103,7 @@ final class AppModel {
     @ObservationIgnored var catalogRefreshTask: Task<Void, Never>?
     @ObservationIgnored var catalogMutationTask: Task<Void, Never>?
     @ObservationIgnored var catalogSelectionGeneration = UUID()
+    @ObservationIgnored var cancelledCatalogSetups: Set<String> = []
     @ObservationIgnored var catalogActivationTargets: [String: RuntimeCatalogSnapshot] = [:]
     @ObservationIgnored var runtimeInstallContexts: [String: RuntimeInstallContext] = [:]
     @ObservationIgnored private let services: any RuntimeServices
@@ -479,6 +480,17 @@ final class AppModel {
         let services = services
         errors[id] = nil; working[id] = .working(phase: .checkingSpace, fraction: nil); rebuildRows()
         tasks[id] = Task { [weak self] in
+            do { try await self?.persistRuntimeCatalogSelection() }
+            catch {
+                guard self?.generations[id] == generation else { return }
+                if launcherError(error) != .cancelled { self?.errors[id] = launcherError(error).userMessage }
+                self?.show(error)
+                self?.finish(id, generation: generation)
+                return
+            }
+            guard !Task.isCancelled, self?.generations[id] == generation else {
+                self?.finish(id, generation: generation); return
+            }
             let accepted = await services.isConsentAccepted(component)
             guard !Task.isCancelled, self?.generations[id] == generation else {
                 self?.finish(id, generation: generation); return
@@ -575,6 +587,7 @@ final class AppModel {
     }
 
     func cancel(_ id: String) {
+        revokeCatalogSetupActivation(id)
         defer { scheduleRuntimeSetupUpdate() }
         tasks[id]?.cancel()
         if consentRequest?.id == id { consentRequest = nil }
@@ -673,7 +686,10 @@ final class AppModel {
         if let bundle = bundle(id), let manifest {
             working[id] = .working(phase: .deleting, fraction: nil); rebuildRows()
             defer { working[id] = nil; rebuildRows() }
-            do { try await services.remove(bundle, manifest: manifest); try await scanAndApply(); errors[id] = nil }
+            do {
+                try await persistRuntimeCatalogSelection()
+                try await services.remove(bundle, manifest: manifest); try await scanAndApply(); errors[id] = nil
+            }
             catch {
                 if case LauncherError.busy = error { errors[id] = nil }
                 else { errors[id] = launcherError(error).userMessage }
@@ -687,6 +703,7 @@ final class AppModel {
         working[id] = .working(phase: .deleting, fraction: nil); rebuildRows()
         defer { working[id] = nil; rebuildRows() }
         do {
+            try await persistRuntimeCatalogSelection()
             if let component { try await services.remove(component) }
             else if let bad { try await services.removeInvalid(bad) }
             try await scanAndApply()

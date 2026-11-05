@@ -8,6 +8,7 @@ import DownloadEngine
 /// One instance is shared by the model and launch services. Construction performs no I/O.
 protocol RuntimeCatalogAccess: Sendable {
     func snapshot() async throws -> RuntimeCatalogSnapshot
+    func persistSelection() async throws -> RuntimeCatalogSnapshot
     func refresh(force: Bool) async throws -> RuntimeCatalogSnapshot
     func activate(_ selections: RuntimeCatalogSelections) async throws -> RuntimeCatalogSnapshot
 }
@@ -53,6 +54,8 @@ actor LiveRuntimeCatalogAccess: RuntimeCatalogAccess {
         catch { construction = nil; throw error }
     }
     func snapshot() async throws -> RuntimeCatalogSnapshot { try await service().snapshot() }
+
+    func persistSelection() async throws -> RuntimeCatalogSnapshot { try await service().persistSelection() }
 
     func refresh(force: Bool) async throws -> RuntimeCatalogSnapshot {
         if let refreshing { return try await refreshing.value }

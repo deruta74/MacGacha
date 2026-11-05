@@ -80,6 +80,17 @@ public actor RuntimeCatalogService {
         return try await loaded()
     }
 
+    /// Establishes the current migrated choice before any caller changes the
+    /// installed receipts that future startup migration would otherwise use.
+    /// Read-only snapshot loading remains available when storage is unwritable.
+    @discardableResult public func persistSelection() async throws -> RuntimeCatalogSnapshot {
+        await acquire(); defer { release() }
+        try Task.checkCancellation()
+        let previous = try await loaded()
+        guard store != nil, !hasPersistedState else { return previous }
+        return try await publish(previous)
+    }
+
     /// Validation/refresh only. Existing choices, including unpinned choices,
     /// remain active until an explicit successful installation or rollback.
     @discardableResult public func accept(metadata: Data) async throws -> RuntimeCatalogSnapshot {

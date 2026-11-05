@@ -118,6 +118,12 @@ enum RuntimeSetupItemState {
     }
 
     func cancelRuntimeSetup(for gameID: String) {
+        if catalogActivationTargets[gameID] != nil, let chain = runtimeSetupChains[gameID] {
+            // Revoke intent now; the normal reducer releases the reservation
+            // only after the installer task and its readers have drained.
+            cancel(chain.plan.items[chain.index].id)
+            return
+        }
         if let check = runtimeSetupRosettaChecks.removeValue(forKey: gameID) {
             check.task.cancel(); setRuntimeSetupProgress(nil, for: gameID)
         }

@@ -8,6 +8,39 @@ import LauncherCore
 import TestSupport
 
 @Suite struct RuntimeCatalogTests {
+    @Test func initialMigrationCanBePersistedBeforeInstalledEvidenceChanges() async throws {
+        let f = try CatalogFixture(), bytes = Mutex<Data?>(nil), writes = Mutex(0)
+        let old = try f.component(kind: .surroundAudio, version: "wine-11.20-1")
+        let baseline = try RuntimeManifest(components: f.baseline.components + [old], bundles: f.baseline.bundles)
+        let store = RuntimeCatalogStore(read: { bytes.withLock { $0 } }, write: { data in
+            bytes.withLock { $0 = data }; writes.withLock { $0 += 1 }
+        })
+        let service = RuntimeCatalogService(baseline: baseline, store: store, installedComponentIDs: [old.id])
+        #expect(try await service.snapshot().selectedHelper(for: .surroundAudio)?.id == old.id)
+        #expect(bytes.withLock { $0 } == nil)
+        _ = try await service.persistSelection()
+        _ = try await service.persistSelection()
+        #expect(writes.withLock { $0 } == 1)
+        let reopened = RuntimeCatalogService(baseline: baseline, store: store, installedComponentIDs: [try SafeIdentifier(SurroundAudio.componentID)])
+        #expect(try await reopened.snapshot().selectedHelper(for: .surroundAudio)?.id == old.id)
+    }
+
+    @Test func initialPersistenceFailureDoesNotClaimDurabilityAndCanRetry() async throws {
+        let f = try CatalogFixture(), bytes = Mutex<Data?>(nil), fail = Mutex(true)
+        let store = RuntimeCatalogStore(read: { bytes.withLock { $0 } }, write: { data in
+            if fail.withLock({ $0 }) { throw LauncherError.io("before publication") }
+            bytes.withLock { $0 = data }
+        })
+        let service = RuntimeCatalogService(baseline: f.baseline, store: store)
+        let initial = try await service.snapshot()
+        await #expect(throws: RuntimeCatalogPublicationFailure.self) { try await service.persistSelection() }
+        #expect(bytes.withLock { $0 } == nil)
+        #expect(try await service.snapshot().selections == initial.selections)
+        fail.withLock { $0 = false }
+        _ = try await service.persistSelection()
+        #expect(bytes.withLock { $0 } != nil)
+    }
+
     @Test func trustedBaselinePromotingRemoteBundlePreservesOriginalProfileAndPin() async throws {
         let fixture = try CatalogFixture()
         let bytes = Mutex<Data?>(nil)
