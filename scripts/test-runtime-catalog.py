@@ -96,6 +96,24 @@ class CatalogPublicationTests(unittest.TestCase):
         entries[2]["assets"] = [{"name": "runtime-catalog.json"}]
         self.assertEqual(module.publication_state(entries)["latestCompleteSnapshot"], "runtime-catalog-v1-r2")
 
+    def test_apple_assets_use_release_metadata_without_downloading(self):
+        candidate = copy.deepcopy(self.catalog)
+        component = copy.deepcopy(next(c for c in candidate["manifest"]["components"] if c.get("consent") == "appleGPTK"))
+        component.update(id=component["id"] + "-new", version=component["version"] + "-new")
+        candidate["manifest"]["components"].append(component)
+        asset = {"name": component["url"].rsplit("/", 1)[1], "browser_download_url": component["url"],
+                 "size": component["size"], "state": "uploaded", "digest": "sha256:" + component["sha256"]["hex"]}
+        class Result:
+            stdout = json.dumps({"assets": [asset]})
+        with patch.object(module.urllib.request, "build_opener") as opener:
+            with patch.object(module.subprocess, "run", return_value=Result()):
+                module.verify_assets(candidate, self.baseline, None)
+            opener.return_value.open.assert_not_called()
+        asset["digest"] = "sha256:" + "0" * 64
+        Result.stdout = json.dumps({"assets": [asset]})
+        with patch.object(module.subprocess, "run", return_value=Result()):
+            with self.assertRaises(ValueError): module.verify_assets(candidate, self.baseline, None)
+
     def test_new_asset_requires_matching_bytes_and_size(self):
         candidate = copy.deepcopy(self.catalog)
         component = copy.deepcopy(candidate["manifest"]["components"][0])

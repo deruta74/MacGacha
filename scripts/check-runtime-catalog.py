@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import time
 import urllib.parse
 import urllib.request
@@ -130,11 +131,31 @@ class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
         require(https(newurl), "Unsafe asset redirect")
         return super().redirect_request(request, fp, code, message, headers, newurl)
 
+def verify_consent_asset(component):
+    # Do not download Apple's payload in CI without the user's consent flow.
+    # GitHub's stored-asset digest verifies the pin without fetching the binary.
+    url = urllib.parse.urlsplit(component["url"])
+    parts = url.path.strip("/").split("/")
+    require(url.scheme == "https" and url.netloc == "github.com" and not url.query and not url.fragment
+            and len(parts) == 6 and parts[2:4] == ["releases", "download"], "Consent asset needs a GitHub release descriptor")
+    owner, repository, _, _, tag, name = [urllib.parse.unquote(p) for p in parts]
+    require(re.fullmatch(r"[A-Za-z0-9_.-]+", owner) and re.fullmatch(r"[A-Za-z0-9_.-]+", repository), "Invalid release repository")
+    endpoint = f"repos/{owner}/{repository}/releases/tags/{urllib.parse.quote(tag, safe='')}"
+    result = subprocess.run(["gh", "api", endpoint], check=True, capture_output=True, text=True, timeout=60)
+    assets = json.loads(result.stdout)["assets"]
+    asset = next((a for a in assets if a.get("name") == name and a.get("browser_download_url") == component["url"]), None)
+    require(asset is not None and asset.get("state") == "uploaded" and asset.get("size") == component["size"]
+            and asset.get("digest") == "sha256:" + component["sha256"]["hex"], "Consent asset digest or size unavailable/mismatched")
+
 def verify_assets(catalog, baseline, previous):
     known = {c["id"]: c for c in (previous["manifest"] if previous else baseline)["components"]}
     opener = urllib.request.build_opener(HTTPSRedirect())
     for component in catalog["manifest"]["components"]:
         if component["sourceMode"] != "download" or known.get(component["id"]) == component: continue
+        if component.get("consent"):
+            verify_consent_asset(component)
+            print("Verified release descriptor", component["id"])
+            continue
         digest, count, deadline = hashlib.sha256(), 0, time.monotonic() + 1200
         request = urllib.request.Request(component["url"], headers={"User-Agent": "MacGacha-Catalog-Validator", "Accept-Encoding": "identity"})
         with opener.open(request, timeout=30) as response:
