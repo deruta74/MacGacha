@@ -42,11 +42,18 @@ jobs:
         run: |
           set -euo pipefail
           python3 -I scripts/test-runtime-catalog.py
-          args=()
-          if gh release view runtime-catalog-v1 >/dev/null 2>&1; then
-            mkdir previous
-            gh release download runtime-catalog-v1 --pattern runtime-catalog.json --dir previous
-            args+=(--previous previous/runtime-catalog.json)
+          mkdir -p previous/channel previous/snapshot
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" > previous/releases.json
+          python3 -I scripts/check-runtime-catalog.py RuntimeCatalog/runtime-catalog.json --publication-index previous/releases.json > previous/state.json
+          args=(--resume-identical)
+          if [[ $(python3 -c 'import json; print(json.load(open("previous/state.json"))["channelHasAsset"])') == True ]]; then
+            gh release download runtime-catalog-v1 --pattern runtime-catalog.json --dir previous/channel
+            args+=(--previous previous/channel/runtime-catalog.json)
+          fi
+          latest=$(python3 -c 'import json; print(json.load(open("previous/state.json"))["latestCompleteSnapshot"] or "")')
+          if [[ -n "$latest" ]]; then
+            gh release download "$latest" --pattern runtime-catalog.json --dir previous/snapshot
+            args+=(--previous previous/snapshot/runtime-catalog.json)
           fi
           python3 -I scripts/check-runtime-catalog.py RuntimeCatalog/runtime-catalog.json "${args[@]}" --verify-assets
           echo "CATALOG_REVISION=$(python3 -c 'import json; print(json.load(open("RuntimeCatalog/runtime-catalog.json"))["revision"])')" >> "$GITHUB_ENV"
@@ -54,17 +61,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ $(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha) == "$GITHUB_SHA" ]]
           snapshot="runtime-catalog-v1-r$CATALOG_REVISION"
           # Never overwrite a historical revision. A retry can reuse only identical bytes.
           if gh release view "$snapshot" >/dev/null 2>&1; then
-            mkdir existing
-            gh release download "$snapshot" --pattern runtime-catalog.json --dir existing
-            cmp RuntimeCatalog/runtime-catalog.json existing/runtime-catalog.json
+            [[ $(gh release view "$snapshot" --json isDraft --jq .isDraft) == false ]]
+            if [[ $(gh release view "$snapshot" --json assets --jq 'any(.assets[]; .name == "runtime-catalog.json")') == true ]]; then
+              mkdir existing
+              gh release download "$snapshot" --pattern runtime-catalog.json --dir existing
+              cmp RuntimeCatalog/runtime-catalog.json existing/runtime-catalog.json
+            else
+              # A prior release-create may have succeeded before its upload failed.
+              gh release upload "$snapshot" RuntimeCatalog/runtime-catalog.json
+            fi
           else
             gh release create "$snapshot" --target "$GITHUB_SHA" --latest=false --title "Runtime catalog revision $CATALOG_REVISION" --notes "Compatible runtime component catalog. This is not an application update." RuntimeCatalog/runtime-catalog.json
           fi
           if ! gh release view runtime-catalog-v1 >/dev/null 2>&1; then
             gh release create runtime-catalog-v1 --target "$GITHUB_SHA" --latest=false --title "Runtime catalog" --notes "Current compatible runtime component catalog. Previous installed versions remain available for rollback." RuntimeCatalog/runtime-catalog.json
           else
+            [[ $(gh release view runtime-catalog-v1 --json isDraft --jq .isDraft) == false ]]
             gh release upload runtime-catalog-v1 RuntimeCatalog/runtime-catalog.json --clobber
           fi
