@@ -118,7 +118,13 @@ public struct RuntimeCatalogSnapshot: Sendable {
     public let selections: RuntimeCatalogSelections
     /// Only active versions, shared by setup and launch. Refresh never changes it.
     public let manifest: RuntimeManifest
+    private let contract: RuntimeCatalogContract
     private let compiledHelperBindings: [RuntimeCatalogHelperBinding]
+    /// Captures and validates a proposed setup/launch selection without I/O or
+    /// activation. Installing and committing this plan remain separate actions.
+    public func replacingSelections(_ selections: RuntimeCatalogSelections) throws -> RuntimeCatalogSnapshot {
+        try RuntimeCatalogSnapshot(catalog: catalog, selections: selections, contract: contract)
+    }
     public var recommendedSelections: RuntimeCatalogSelections {
         RuntimeCatalogSelections(bundles: catalog.recommendedBundles.mapValues { RuntimeCatalogSelection(id: $0) },
             helpers: catalog.recommendedHelpers.mapValues { RuntimeCatalogSelection(id: $0) })
@@ -153,6 +159,7 @@ public struct RuntimeCatalogSnapshot: Sendable {
         }
         let ids = Set(bundles.flatMap(\.components) + selections.helpers.values.map(\.id))
         self.catalog = catalog; self.selections = selections
+        self.contract = contract
         compiledHelperBindings = contract.baseline.helperBindings
         manifest = try RuntimeManifest(components: catalog.manifest.components.filter { ids.contains($0.id) }, bundles: bundles)
     }

@@ -8,6 +8,16 @@ import LauncherCore
 import TestSupport
 
 @Suite struct RuntimeCatalogTests {
+    @Test func selectionPreviewDoesNotActivateOrRequireInstalledEvidence() async throws {
+        let fixture = try CatalogFixture()
+        let service = RuntimeCatalogService(baseline: fixture.baseline)
+        let current = try await service.accept(metadata: JSONEncoder().encode(fixture.update(revision: 1)))
+        let proposed = try current.replacingSelections(current.recommendedSelections)
+        #expect(proposed.selectedBundle(for: .dxmt)?.id.rawValue == "dxmt-next")
+        #expect(current.selectedBundle(for: .dxmt)?.id.rawValue == "dxmt-test")
+        #expect(try await service.snapshot().selectedBundle(for: .dxmt)?.id.rawValue == "dxmt-test")
+    }
+
     @Test(arguments: ["swift", "launcher", "task"])
     func cancelledInitialLoadDoesNotCacheFallback(cancellation: String) async throws {
         let fixture = try CatalogFixture()
@@ -54,6 +64,8 @@ import TestSupport
         #expect(restored.catalog.revision == 1)
         #expect(restored.catalog.manifest.bundles.contains { $0.id == added.id })
         #expect(restored.helper(kind: .genshinFps, for: added.id)?.id == restored.selectedHelper(for: .genshinFps)?.id)
+        let preview = try restored.replacingSelections(restored.selections)
+        #expect(preview.helper(kind: .genshinFps, for: added.id)?.id == restored.selectedHelper(for: .genshinFps)?.id)
         let before = RuntimeCatalog.bundled(fixture.baseline).helperBindings.first { $0.componentID.rawValue == GenshinFps.componentID }
         let after = restored.catalog.helperBindings.first { $0.componentID.rawValue == GenshinFps.componentID }
         #expect(before?.profileIDs == after?.profileIDs)
@@ -200,6 +212,10 @@ import TestSupport
         let service = RuntimeCatalogService(baseline: baseline)
         _ = try await service.accept(metadata: JSONEncoder().encode(update))
         _ = try await service.selectHelper(id: next.id, pinned: true, installedComponentIDs: [next.id])
+        let current = try await service.snapshot()
+        var incompatible = current.selections
+        incompatible.bundles[.dxmt] = RuntimeCatalogSelection(id: alternate.id)
+        #expect(throws: (any Error).self) { try current.replacingSelections(incompatible) }
         await #expect(throws: (any Error).self) {
             try await service.selectBundle(id: alternate.id, pinned: true, installedBundleIDs: [alternate.id])
         }
