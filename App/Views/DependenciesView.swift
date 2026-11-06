@@ -26,10 +26,6 @@ struct DependenciesView: View {
                         ForEach(groups) { group in
                             DependencyCard(group: group)
                         }
-                        Text("Every version is kept on its own, so an update never breaks one that works.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, 4)
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 20)
