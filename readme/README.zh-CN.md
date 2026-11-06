@@ -16,6 +16,8 @@
 
 本仓库的代码和文档可能使用大型语言模型（LLM）和 AI 代理辅助编写或修改。软件依照 [GPL-3.0 许可证](../LICENSE)按“原样”提供，不附带任何担保。
 
+原神和绝区零的国际服与中国大陆服均使用 Wine 的 Windows 11 配置。现有前缀会在启动前自动更新。此启动修复已在国际服原神 7.2（DXMT 和 D3DMetal）及国际服绝区零 3.3（D3DMetal）中验证；中国大陆服的实际游戏运行尚未验证。
+
 ## 安装
 
 1. 从 [Releases](https://github.com/deruta74/MacGacha/releases) 下载 `MacGacha-<version>.dmg`，打开后将 **MacGacha** 拖入**应用程序**。

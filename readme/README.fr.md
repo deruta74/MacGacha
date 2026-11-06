@@ -16,6 +16,8 @@ Un lanceur macOS natif pour **Genshin Impact**, **Honkai: Star Rail** et **Zenle
 
 Le code et la documentation de ce dépôt peuvent être rédigés ou modifiés avec l’aide de grands modèles de langage (LLM) et d’agents d’IA. Le logiciel est fourni sous [licence GPL-3.0](../LICENSE), en l’état, sans garantie.
 
+Genshin Impact et Zenless Zone Zero utilisent un profil Windows 11 dans Wine pour Global et la Chine continentale. Les préfixes existants sont mis à jour automatiquement avant le lancement. Ce correctif a été vérifié avec Global Genshin 7.2 sous DXMT et D3DMetal, et Global ZZZ 3.3 sous D3DMetal ; le fonctionnement en jeu des versions chinoises reste à vérifier.
+
 ## Installation
 
 1. Téléchargez `MacGacha-<version>.dmg` depuis les [versions publiées](https://github.com/deruta74/MacGacha/releases), ouvrez le fichier et faites glisser **MacGacha** dans **Applications**.

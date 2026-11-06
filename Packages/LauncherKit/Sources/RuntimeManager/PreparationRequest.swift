@@ -3,8 +3,14 @@
 import Foundation
 import LauncherCore
 
+/// Windows versions explicitly supported by launch preparation.
+public enum WineWindowsVersion: String, Sendable {
+    case win11
+}
+
 /// Per-launch prefix state. LaunchPreparation (Task 8) applies this request.
 public struct PreparationRequest: Equatable, Sendable {
+    public let windowsVersion: WineWindowsVersion?
     public let retina: Bool
     public let steamShim: URL?
     public let dxmtExtras: [String]
@@ -14,7 +20,8 @@ public struct PreparationRequest: Equatable, Sendable {
     public let starRailRegion: Region
 
     public init(retina: Bool, steamShim: URL?, dxmtExtras: [String], nvidiaKeys: Bool, crypt32Native: Bool = false,
-        starRailFrameRate: StarRailFrameRate? = nil, starRailRegion: Region = .global) {
+        starRailFrameRate: StarRailFrameRate? = nil, starRailRegion: Region = .global, windowsVersion: WineWindowsVersion? = nil) {
+        self.windowsVersion = windowsVersion
         self.retina = retina; self.steamShim = steamShim
         self.dxmtExtras = dxmtExtras; self.nvidiaKeys = nvidiaKeys
         self.crypt32Native = crypt32Native
