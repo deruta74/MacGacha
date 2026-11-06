@@ -7,7 +7,7 @@ struct RuntimeSetupSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let game: LauncherGame
-    /// Opens the Runtimes panel for people who want to pick versions themselves.
+    /// Opens the Dependencies panel for people who want to pick versions themselves.
     let chooseManually: () -> Void
 
     private var plan: RuntimeSetupPlan? { model.runtimeSetupPlan(for: game.id) }

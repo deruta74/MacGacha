@@ -6,7 +6,7 @@ import LauncherCore
 import SwiftUI
 
 enum Panel: String, Identifiable {
-    case runtimes, diagnostics
+    case dependencies, diagnostics
     var id: Self { self }
 }
 
@@ -130,7 +130,7 @@ struct RootView: View {
             case .settings(let id):
                 GameSettingsSheet(game: Self.game(id))
             case .setup(let id):
-                RuntimeSetupSheet(game: Self.game(id)) { panel = .runtimes }
+                RuntimeSetupSheet(game: Self.game(id)) { panel = .dependencies }
             case .rosetta(let id):
                 RosettaSheet(game: Self.game(id))
             }
@@ -159,7 +159,7 @@ struct RootView: View {
     }
 
     #if DEBUG
-    /// Debug builds only: `-MacGachaDebugGame starrail -MacGachaDebugPanel runtimes` (or `-MacGachaDebugSheet install`,
+    /// Debug builds only: `-MacGachaDebugGame starrail -MacGachaDebugPanel dependencies` (or `-MacGachaDebugSheet install`,
     /// or `-MacGachaDebugSettings YES`) opens a state directly, for screenshots without clicking through the UI.
     private func applyDebugLaunchArguments() {
         let defaults = UserDefaults.standard
@@ -170,6 +170,7 @@ struct RootView: View {
             panel = Panel(rawValue: name)
         }
         if defaults.bool(forKey: "MacGachaDebugSettings") { openSettings() }
+        if let path = defaults.string(forKey: "MacGachaDebugSnapshot") { Self.snapshotWindows(to: path) }
         switch defaults.string(forKey: "MacGachaDebugSheet") {
         case "install": gameSheet = .install(selectedID)
         case "voices": gameSheet = .voices(selectedID)
@@ -177,6 +178,20 @@ struct RootView: View {
         case "setup": gameSheet = .setup(selectedID)
         case "rosetta": gameSheet = .rosetta(selectedID)
         default: break
+        }
+    }
+
+    /// `-MacGachaDebugSnapshot /tmp/shot` writes each visible window (sheets included) to
+    /// `/tmp/shot-<n>.png` after the UI settles, without screen-recording permission.
+    private static func snapshotWindows(to path: String) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            for (index, window) in NSApp.windows.filter(\.isVisible).enumerated() {
+                guard let view = window.contentView?.superview ?? window.contentView,
+                    let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(path)-\(index).png"))
+            }
         }
     }
     #endif
@@ -207,7 +222,7 @@ struct RootView: View {
     }
 }
 
-/// Runtimes and Diagnostics open over the art as sheets, so the launcher stays one window.
+/// Dependencies and Diagnostics open over the art as sheets, so the launcher stays one window.
 private struct PanelSheet: View {
     @Environment(\.dismiss) private var dismiss
     let panel: Panel
@@ -216,7 +231,7 @@ private struct PanelSheet: View {
         NavigationStack {
             Group {
                 switch panel {
-                case .runtimes: RuntimesView()
+                case .dependencies: DependenciesView()
                 case .diagnostics: DiagnosticsView()
                 }
             }
@@ -227,7 +242,7 @@ private struct PanelSheet: View {
             }
         }
         .modifier(RuntimeFlowSheets(active: true))
-        .frame(minWidth: 620, idealWidth: 680, minHeight: 320, idealHeight: 380)
+        .frame(minWidth: 620, idealWidth: 680, minHeight: 320, idealHeight: panel == .dependencies ? 560 : 380)
     }
 }
 

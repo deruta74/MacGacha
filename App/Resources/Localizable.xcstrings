@@ -1422,6 +1422,88 @@
         }
       }
     },
+    "A copy on disk is damaged. Remove it, then set it up again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Kopie auf dem Datenträger ist beschädigt. Entferne sie und richte sie dann neu ein."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Una copia en el disco está dañada. Elimínala y vuelve a configurarla."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une copie sur le disque est endommagée. Retirez-la, puis configurez-la à nouveau."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salinan di disk rusak. Hapus, lalu siapkan lagi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ディスク上のコピーが破損しています。削除してから、もう一度セットアップしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "디스크의 사본이 손상되었습니다. 제거한 뒤 다시 설정하세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uma cópia no disco está danificada. Remova-a e configure-a novamente."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Копия на диске повреждена. Удалите её и настройте заново."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "สำเนาบนดิสก์เสียหาย ลบออกแล้วตั้งค่าใหม่"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Копія на диску пошкоджена. Видаліть її та налаштуйте знову."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Một bản sao trên ổ đĩa bị hỏng. Hãy xóa nó rồi thiết lập lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁盘上的副本已损坏。请移除后重新设置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁碟上的副本已損壞。請移除後重新設定。"
+          }
+        }
+      }
+    },
     "A file exceeds the supported size limit. Choose another source." : {
       "localizations" : {
         "de" : {
@@ -3397,6 +3479,88 @@
         }
       }
     },
+    "Category" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kategorie"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Categoría"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Catégorie"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kategori"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カテゴリ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "카테고리"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Categoria"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Категория"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "หมวดหมู่"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Категорія"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Danh mục"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "类别"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "類別"
+          }
+        }
+      }
+    },
     "Change any option in the game's graphics settings once, then play again to use 120 FPS" : {
       "localizations" : {
         "de" : {
@@ -3971,84 +4135,84 @@
         }
       }
     },
-    "Check installed runtimes again" : {
+    "Check installed dependencies and look for updates" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Installierte Laufzeitumgebungen erneut prüfen"
+            "value" : "Installierte Abhängigkeiten prüfen und nach Updates suchen"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Volver a comprobar los entornos de ejecución instalados"
+            "value" : "Comprobar las dependencias instaladas y buscar actualizaciones"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vérifier à nouveau les environnements d'exécution installés"
+            "value" : "Vérifier les dépendances installées et rechercher des mises à jour"
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Periksa lagi runtime yang terpasang"
+            "value" : "Periksa dependensi yang terpasang dan cari pembaruan"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "インストール済みのランタイムを再確認"
+            "value" : "インストール済みの依存関係を確認し、アップデートを探します"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "설치된 런타임 다시 확인"
+            "value" : "설치된 종속 항목을 확인하고 업데이트를 찾습니다"
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Verificar novamente os ambientes de execução instalados"
+            "value" : "Verificar as dependências instaladas e procurar atualizações"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Повторно проверить установленные среды выполнения"
+            "value" : "Проверить установленные зависимости и найти обновления"
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ตรวจสอบรันไทม์ที่ติดตั้งอีกครั้ง"
+            "value" : "ตรวจสอบส่วนประกอบที่ติดตั้งและหาอัปเดต"
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Повторно перевірити встановлені середовища виконання"
+            "value" : "Перевірити встановлені залежності й знайти оновлення"
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kiểm tra lại runtime đã cài"
+            "value" : "Kiểm tra các thành phần đã cài đặt và tìm bản cập nhật"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重新检查已安装的运行环境"
+            "value" : "检查已安装的依赖项并查找更新"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重新檢查已安裝的執行環境"
+            "value" : "檢查已安裝的相依項目並尋找更新"
           }
         }
       }
@@ -4300,84 +4464,84 @@
         }
       }
     },
-    "Checking installed runtimes…" : {
+    "Checking installed dependencies…" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Installierte Laufzeitumgebungen werden geprüft …"
+            "value" : "Installierte Abhängigkeiten werden geprüft …"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Comprobando los entornos de ejecución instalados…"
+            "value" : "Comprobando las dependencias instaladas…"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vérification des environnements d'exécution installés…"
+            "value" : "Vérification des dépendances installées…"
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Memeriksa runtime yang terpasang…"
+            "value" : "Memeriksa dependensi yang terpasang…"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "インストール済みのランタイムを確認中…"
+            "value" : "インストール済みの依存関係を確認中…"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "설치된 런타임 확인 중…"
+            "value" : "설치된 종속 항목 확인 중…"
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Verificando os ambientes de execução instalados…"
+            "value" : "Verificando as dependências instaladas…"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Проверка установленных сред выполнения…"
+            "value" : "Проверка установленных зависимостей…"
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "กำลังตรวจสอบรันไทม์ที่ติดตั้ง…"
+            "value" : "กำลังตรวจสอบส่วนประกอบที่ติดตั้ง…"
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Перевірка встановлених середовищ виконання…"
+            "value" : "Перевірка встановлених залежностей…"
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Đang kiểm tra runtime đã cài…"
+            "value" : "Đang kiểm tra các thành phần đã cài đặt…"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在检查已安装的运行环境…"
+            "value" : "正在检查已安装的依赖项…"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在檢查已安裝的執行環境…"
+            "value" : "正在檢查已安裝的相依項目…"
           }
         }
       }
@@ -5199,6 +5363,89 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "關閉"
+          }
+        }
+      }
+    },
+    "Compatibility" : {
+      "comment" : "Dependencies category",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kompatibilität"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compatibilidad"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compatibilité"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kompatibilitas"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "互換性"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호환성"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compatibilidade"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Совместимость"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ความเข้ากันได้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сумісність"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tương thích"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "兼容性"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "相容性"
           }
         }
       }
@@ -6439,6 +6686,88 @@
         }
       }
     },
+    "Damaged" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beschädigt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dañado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endommagé"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rusak"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "破損"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "손상됨"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Danificado"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повреждено"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เสียหาย"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Пошкоджено"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bị hỏng"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已损坏"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已損壞"
+          }
+        }
+      }
+    },
     "Damaged: %@" : {
       "localizations" : {
         "de" : {
@@ -6845,6 +7174,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要刪除預先下載嗎？"
+          }
+        }
+      }
+    },
+    "Dependencies" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abhängigkeiten"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dependencias"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dépendances"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dependensi"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "依存関係"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "종속 항목"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dependências"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Зависимости"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ส่วนประกอบที่จำเป็น"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Залежності"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thành phần phụ thuộc"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "依赖项"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "相依項目"
           }
         }
       }
@@ -7755,6 +8166,88 @@
         }
       }
     },
+    "Every version is kept on its own, so an update never breaks one that works." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jede Version wird separat aufbewahrt, sodass ein Update nie eine funktionierende beschädigt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cada versión se guarda por separado, así que una actualización nunca rompe una que funciona."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chaque version est conservée séparément, une mise à jour ne casse donc jamais celle qui fonctionne."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setiap versi disimpan terpisah, jadi pembaruan tidak pernah merusak versi yang berfungsi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "各バージョンは個別に保持されるため、アップデートで動作中のものが壊れることはありません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "각 버전은 따로 보관되므로 업데이트가 잘 작동하는 버전을 망가뜨리지 않습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cada versão é mantida separadamente, então uma atualização nunca quebra uma que funciona."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Каждая версия хранится отдельно, поэтому обновление никогда не сломает рабочую."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "แต่ละเวอร์ชันเก็บแยกกัน การอัปเดตจึงไม่ทำให้เวอร์ชันที่ใช้งานได้เสีย"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Кожна версія зберігається окремо, тож оновлення ніколи не зламає робочу."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mỗi phiên bản được giữ riêng, nên bản cập nhật không bao giờ làm hỏng phiên bản đang chạy tốt."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每个版本单独保存，因此更新绝不会破坏可用的版本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每個版本單獨保存，因此更新絕不會破壞可用的版本。"
+          }
+        }
+      }
+    },
     "Everything %@ needs is installed." : {
       "localizations" : {
         "de" : {
@@ -7915,6 +8408,89 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯出診斷包…"
+          }
+        }
+      }
+    },
+    "Extras" : {
+      "comment" : "Dependencies category",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extras"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extras"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extras"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tambahan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "追加機能"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추가 기능"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extras"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Дополнительно"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ส่วนเสริม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Додатково"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tiện ích bổ sung"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "附加功能"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "附加功能"
           }
         }
       }
@@ -8243,6 +8819,89 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在完成…"
+          }
+        }
+      }
+    },
+    "Fixes a Wine signature check that the Mainland China editions of Genshin Impact and Zenless Zone Zero need." : {
+      "comment" : "Dependency description",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Korrigiert eine Signaturprüfung in Wine, die die Festlandchina-Versionen von Genshin Impact und Zenless Zone Zero brauchen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Corrige una comprobación de firmas de Wine que necesitan las ediciones de China continental de Genshin Impact y Zenless Zone Zero."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Corrige une vérification de signature de Wine dont les éditions de Chine continentale de Genshin Impact et Zenless Zone Zero ont besoin."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Memperbaiki pemeriksaan tanda tangan Wine yang dibutuhkan edisi Tiongkok Daratan Genshin Impact dan Zenless Zone Zero."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中国本土版『原神』と『ゼンレスゾーンゼロ』に必要な、Wine の署名チェックを修正します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "중국 본토판 《원신》과 《젠레스 존 제로》에 필요한 Wine 서명 검사를 수정합니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Corrige uma verificação de assinatura do Wine de que as edições da China continental de Genshin Impact e Zenless Zone Zero precisam."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Исправляет проверку подписей в Wine, нужную китайским версиям Genshin Impact и Zenless Zone Zero."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "แก้การตรวจสอบลายเซ็นของ Wine ที่ Genshin Impact และ Zenless Zone Zero รุ่นจีนแผ่นดินใหญ่ต้องใช้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Виправляє перевірку підписів у Wine, потрібну китайським версіям Genshin Impact і Zenless Zone Zero."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sửa bước kiểm tra chữ ký của Wine mà bản Trung Quốc đại lục của Genshin Impact và Zenless Zone Zero cần."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修复 Wine 的签名校验，国服《原神》和《绝区零》需要它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修正 Wine 的簽章檢查，中國大陸版《原神》和《絕區零》需要它。"
           }
         }
       }
@@ -10131,6 +10790,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯入…"
+          }
+        }
+      }
+    },
+    "In use" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In Verwendung"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En uso"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utilisée"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Digunakan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用中"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용 중"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Em uso"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Используется"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "กำลังใช้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Використовується"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đang dùng"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用中"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用中"
           }
         }
       }
@@ -12116,6 +12857,172 @@
         }
       }
     },
+    "Lets Genshin Impact and Zenless Zone Zero start under Wine. You can turn it off in the game's settings." : {
+      "comment" : "Dependency description",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lässt Genshin Impact und Zenless Zone Zero unter Wine starten. Du kannst es in den Einstellungen des Spiels ausschalten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permite que Genshin Impact y Zenless Zone Zero se inicien en Wine. Puedes desactivarlo en los ajustes del juego."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permet à Genshin Impact et Zenless Zone Zero de démarrer sous Wine. Vous pouvez le désactiver dans les réglages du jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Membuat Genshin Impact dan Zenless Zone Zero bisa dimulai di Wine. Anda dapat mematikannya di pengaturan game."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "『原神』と『ゼンレスゾーンゼロ』を Wine で起動できるようにします。ゲームの設定でオフにできます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "《원신》과 《젠레스 존 제로》를 Wine에서 시작할 수 있게 합니다. 게임 설정에서 끌 수 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permite que Genshin Impact e Zenless Zone Zero iniciem no Wine. Você pode desativá-lo nos ajustes do jogo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Позволяет Genshin Impact и Zenless Zone Zero запускаться в Wine. Можно отключить в настройках игры."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ทำให้ Genshin Impact และ Zenless Zone Zero เริ่มเกมบน Wine ได้ ปิดได้ในการตั้งค่าของเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Дає Genshin Impact і Zenless Zone Zero запускатися у Wine. Можна вимкнути в налаштуваннях гри."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giúp Genshin Impact và Zenless Zone Zero khởi động trong Wine. Bạn có thể tắt trong cài đặt của trò chơi."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让《原神》和《绝区零》能在 Wine 下启动。可以在游戏设置中关闭。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓《原神》和《絕區零》能在 Wine 下啟動。可以在遊戲設定中關閉。"
+          }
+        }
+      }
+    },
+    "Lets Honkai: Star Rail start under Wine. You can turn it off in the game's settings." : {
+      "comment" : "Dependency description",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lässt Honkai: Star Rail unter Wine starten. Du kannst es in den Einstellungen des Spiels ausschalten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permite que Honkai: Star Rail se inicie en Wine. Puedes desactivarlo en los ajustes del juego."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permet à Honkai: Star Rail de démarrer sous Wine. Vous pouvez le désactiver dans les réglages du jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Membuat Honkai: Star Rail bisa dimulai di Wine. Anda dapat mematikannya di pengaturan game."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "『崩壊：スターレイル』を Wine で起動できるようにします。ゲームの設定でオフにできます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "《붕괴: 스타레일》을 Wine에서 시작할 수 있게 합니다. 게임 설정에서 끌 수 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permite que Honkai: Star Rail inicie no Wine. Você pode desativá-lo nos ajustes do jogo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Позволяет Honkai: Star Rail запускаться в Wine. Можно отключить в настройках игры."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ทำให้ Honkai: Star Rail เริ่มเกมบน Wine ได้ ปิดได้ในการตั้งค่าของเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Дає Honkai: Star Rail запускатися у Wine. Можна вимкнути в налаштуваннях гри."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giúp Honkai: Star Rail khởi động trong Wine. Bạn có thể tắt trong cài đặt của trò chơi."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让《崩坏：星穹铁道》能在 Wine 下启动。可以在游戏设置中关闭。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓《崩壞：星穹鐵道》能在 Wine 下啟動。可以在遊戲設定中關閉。"
+          }
+        }
+      }
+    },
     "Loading" : {
       "localizations" : {
         "de" : {
@@ -13593,6 +14500,170 @@
         }
       }
     },
+    "More" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mehr"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Más"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plus"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lainnya"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "その他"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "더 보기"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mais"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ещё"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เพิ่มเติม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ще"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thêm"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多"
+          }
+        }
+      }
+    },
+    "More actions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weitere Aktionen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Más acciones"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autres actions"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tindakan lainnya"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "その他の操作"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추가 작업"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mais ações"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Другие действия"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "การทำงานเพิ่มเติม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Інші дії"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thao tác khác"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多操作"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多動作"
+          }
+        }
+      }
+    },
     "More for %@" : {
       "localizations" : {
         "de" : {
@@ -14413,6 +15484,89 @@
         }
       }
     },
+    "Optional features. Each is set up only when you turn it on for a game." : {
+      "comment" : "Dependencies category",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optionale Funktionen. Jede wird erst eingerichtet, wenn du sie für ein Spiel aktivierst."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Funciones opcionales. Cada una se configura solo cuando la activas para un juego."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fonctions facultatives. Chacune n’est configurée que lorsque vous l’activez pour un jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fitur opsional. Masing-masing disiapkan hanya saat Anda menyalakannya untuk game."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オプション機能です。ゲームでオンにしたときだけセットアップされます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택 기능입니다. 게임에서 켤 때만 설정됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recursos opcionais. Cada um só é configurado quando você o ativa para um jogo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Необязательные функции. Каждая настраивается, только когда вы включаете её для игры."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ฟีเจอร์เสริม แต่ละรายการจะตั้งค่าเมื่อคุณเปิดใช้สำหรับเกมเท่านั้น"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Необов’язкові функції. Кожна налаштовується, лише коли ви вмикаєте її для гри."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tính năng tùy chọn. Mỗi tính năng chỉ được thiết lập khi bạn bật nó cho một trò chơi."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选功能。只有在为游戏开启时才会设置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選用功能。只有在為遊戲開啟時才會設定。"
+          }
+        }
+      }
+    },
     "Pause" : {
       "localizations" : {
         "de" : {
@@ -14737,6 +15891,170 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已暫停 — 磁碟空間不足"
+          }
+        }
+      }
+    },
+    "Pinned" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fixiert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fijada"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Épinglée"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disematkan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定済み"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고정됨"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fixada"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Закреплена"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ปักหมุดไว้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Закріплена"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã ghim"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已固定"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已釘選"
+          }
+        }
+      }
+    },
+    "Pinned. MacGacha keeps this version even when a newer one is recommended." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fixiert. MacGacha behält diese Version, auch wenn eine neuere empfohlen wird."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fijada. MacGacha mantiene esta versión aunque se recomiende una más nueva."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Épinglée. MacGacha conserve cette version même lorsqu’une plus récente est recommandée."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disematkan. MacGacha mempertahankan versi ini meski ada versi lebih baru yang direkomendasikan."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定済みです。新しいバージョンが推奨されても、MacGacha はこのバージョンを使い続けます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고정됨. 더 새로운 버전이 권장되어도 MacGacha는 이 버전을 유지합니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fixada. O MacGacha mantém esta versão mesmo quando uma mais nova é recomendada."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Закреплена. MacGacha оставит эту версию, даже когда рекомендуется более новая."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ปักหมุดไว้ MacGacha จะเก็บเวอร์ชันนี้ไว้แม้จะมีเวอร์ชันใหม่กว่าที่แนะนำ"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Закріплена. MacGacha залишить цю версію, навіть коли рекомендовано новішу."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã ghim. MacGacha giữ phiên bản này ngay cả khi có phiên bản mới hơn được đề xuất."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已固定。即使推荐了更新的版本，MacGacha 也会保留此版本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已釘選。即使建議了更新的版本，MacGacha 也會保留此版本。"
           }
         }
       }
@@ -15487,6 +16805,89 @@
         }
       }
     },
+    "Raises Genshin Impact's frame-rate limit, used only when you turn it on in the game's settings." : {
+      "comment" : "Dependency description",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hebt die Bildratenbegrenzung von Genshin Impact an, nur genutzt, wenn du es in den Einstellungen des Spiels aktivierst."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aumenta el límite de fotogramas de Genshin Impact, usado solo cuando lo activas en los ajustes del juego."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Relève la limite de fréquence d’images de Genshin Impact, utilisé uniquement lorsque vous l’activez dans les réglages du jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Menaikkan batas frame rate Genshin Impact, dipakai hanya saat Anda menyalakannya di pengaturan game."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "『原神』のフレームレート上限を引き上げます。ゲームの設定でオンにしたときだけ使います。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "《원신》의 프레임 레이트 제한을 높입니다. 게임 설정에서 켤 때만 사용됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aumenta o limite de taxa de quadros de Genshin Impact, usado só quando você o ativa nos ajustes do jogo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поднимает ограничение частоты кадров в Genshin Impact. Используется, только когда вы включаете его в настройках игры."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เพิ่มขีดจำกัดอัตราเฟรมของ Genshin Impact ใช้เมื่อคุณเปิดในการตั้งค่าของเกมเท่านั้น"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Піднімає обмеження частоти кадрів у Genshin Impact. Використовується, лише коли ви вмикаєте його в налаштуваннях гри."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nâng giới hạn tốc độ khung hình của Genshin Impact, chỉ dùng khi bạn bật trong cài đặt của trò chơi."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提高《原神》的帧率上限，仅在游戏设置中开启时使用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提高《原神》的幀率上限，僅在遊戲設定中開啟時使用。"
+          }
+        }
+      }
+    },
     "Read Apple's license terms" : {
       "localizations" : {
         "de" : {
@@ -16145,6 +17546,170 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要移除 %1$@ %2$@ 嗎？"
+          }
+        }
+      }
+    },
+    "Remove this version" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Version entfernen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminar esta versión"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retirer cette version"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hapus versi ini"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このバージョンを削除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 버전 제거"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remover esta versão"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить эту версию"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ลบเวอร์ชันนี้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Видалити цю версію"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xóa phiên bản này"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除此版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除此版本"
+          }
+        }
+      }
+    },
+    "Remove…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entfernen …"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminar…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retirer…"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hapus…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제거…"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remover…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить…"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ลบ…"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Видалити…"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xóa…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除…"
           }
         }
       }
@@ -17051,88 +18616,6 @@
         }
       }
     },
-    "Runtime bundles combine Wine with a graphics layer. Jadeite and the Steam shim are separate compatibility components. Each version is kept on its own, so an update never breaks a working one." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Laufzeitpakete kombinieren Wine mit einer Grafikschicht. Jadeite und der Steam-Shim sind separate Kompatibilitätskomponenten. Jede Version wird einzeln aufbewahrt, sodass eine Aktualisierung nie eine funktionierende beschädigt."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Los paquetes de entorno de ejecución combinan Wine con una capa gráfica. Jadeite y el shim de Steam son componentes de compatibilidad independientes. Cada versión se guarda por separado, así que una actualización nunca estropea una versión que funciona."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Les paquets d'environnement d'exécution associent Wine à une couche graphique. Jadeite et le shim Steam sont des composants de compatibilité distincts. Chaque version est conservée séparément : une mise à jour ne casse jamais une version qui fonctionne."
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Paket runtime menggabungkan Wine dengan lapisan grafis. Jadeite dan Steam shim adalah komponen kompatibilitas terpisah. Setiap versi disimpan sendiri-sendiri, jadi update tidak akan merusak versi yang sudah berfungsi."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ランタイムバンドルはWineとグラフィックスレイヤーを組み合わせたものです。JadeiteとSteam shimは個別の互換性コンポーネントです。各バージョンは個別に保持されるため、アップデートで動作中のバージョンが壊れることはありません。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "런타임 번들은 Wine과 그래픽 레이어를 결합한 것입니다. Jadeite와 Steam shim은 별도의 호환성 구성 요소입니다. 각 버전은 따로 보관되므로 업데이트로 인해 작동 중인 버전이 손상되지 않습니다."
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Os pacotes de ambiente de execução combinam o Wine com uma camada gráfica. O Jadeite e o shim do Steam são componentes de compatibilidade separados. Cada versão é mantida separadamente, então uma atualização nunca quebra uma versão que funciona."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Пакеты сред выполнения объединяют Wine с графическим слоем. Jadeite и Steam-shim — отдельные компоненты совместимости. Каждая версия хранится отдельно, поэтому обновление никогда не сломает рабочую."
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ชุดรันไทม์ประกอบด้วย Wine และเลเยอร์กราฟิก ส่วน Jadeite และ Steam shim เป็นคอมโพเนนต์ความเข้ากันได้แยกต่างหาก แต่ละเวอร์ชันถูกเก็บแยกกัน การอัปเดตจึงไม่ทำให้เวอร์ชันที่ใช้งานได้เสียหาย"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Пакети середовищ виконання поєднують Wine із графічним шаром. Jadeite і Steam-shim — окремі компоненти сумісності. Кожна версія зберігається окремо, тож оновлення ніколи не зламає робочу."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Gói runtime kết hợp Wine với một lớp đồ họa. Jadeite và Steam shim là các thành phần tương thích riêng. Mỗi phiên bản được giữ riêng, nên bản cập nhật không bao giờ làm hỏng phiên bản đang hoạt động."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "运行环境包将 Wine 与图形层组合在一起。Jadeite 和 Steam 兼容层是独立的兼容性组件。每个版本单独保存，更新不会破坏可用的旧版本。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "執行環境包將 Wine 與圖形層組合在一起。Jadeite 和 Steam 相容層是獨立的相容性元件。每個版本單獨保存，更新不會破壞可用的舊版本。"
-          }
-        }
-      }
-    },
     "Runtimes" : {
       "localizations" : {
         "de" : {
@@ -17213,7 +18696,8 @@
             "value" : "執行環境"
           }
         }
-      }
+      },
+      "comment" : "Dependencies category"
     },
     "Save a zip with system details and redacted logs to share in a bug report" : {
       "localizations" : {
@@ -17457,88 +18941,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已選取"
-          }
-        }
-      }
-    },
-    "Selected · Pinned" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ausgewählt · Angeheftet"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Seleccionada · Fijada"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sélectionnée · Épinglée"
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dipilih · Disematkan"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選択中 · 固定"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "선택됨 · 고정됨"
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Selecionada · Fixada"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Выбрана · Закреплена"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Вибрана · Закріплена"
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "เลือกอยู่ · ปักหมุด"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Đã chọn · Đã ghim"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已选择 · 已固定"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已選取 · 已固定"
           }
         }
       }
@@ -18447,6 +19849,89 @@
         }
       }
     },
+    "Small helpers some games need to start." : {
+      "comment" : "Dependencies category",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kleine Helfer, die manche Spiele zum Starten brauchen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pequeñas ayudas que algunos juegos necesitan para iniciarse."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Petits outils dont certains jeux ont besoin pour démarrer."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alat bantu kecil yang dibutuhkan beberapa game untuk dimulai."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一部のゲームの起動に必要な小さな補助ツールです。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "일부 게임을 시작하는 데 필요한 작은 도우미입니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pequenos auxiliares de que alguns jogos precisam para iniciar."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Небольшие помощники, без которых некоторые игры не запускаются."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ตัวช่วยเล็ก ๆ ที่บางเกมต้องใช้เพื่อเริ่มเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Невеликі помічники, без яких деякі ігри не запускаються."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Công cụ hỗ trợ nhỏ mà một số trò chơi cần để khởi động."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "部分游戏启动所需的小工具。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "部分遊戲啟動所需的小工具。"
+          }
+        }
+      }
+    },
     "Some game files aren't back yet. MacGacha keeps trying — or choose Try Restoring Again in the … menu." : {
       "localizations" : {
         "de" : {
@@ -19101,6 +20586,171 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本次啟動無法使用環繞聲，遊戲使用了立體聲"
+          }
+        }
+      }
+    },
+    "Surround sound with Spatial Audio for Genshin Impact and Zenless Zone Zero, used when you turn it on in a game's settings." : {
+      "comment" : "Dependency description",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surround-Sound mit 3D-Audio für Genshin Impact und Zenless Zone Zero, genutzt, wenn du ihn in den Einstellungen eines Spiels aktivierst."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sonido envolvente con Audio espacial para Genshin Impact y Zenless Zone Zero, usado cuando lo activas en los ajustes de un juego."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Son surround avec Audio spatial pour Genshin Impact et Zenless Zone Zero, utilisé lorsque vous l’activez dans les réglages d’un jeu."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suara surround dengan Audio Spasial untuk Genshin Impact dan Zenless Zone Zero, dipakai saat Anda menyalakannya di pengaturan game."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "『原神』と『ゼンレスゾーンゼロ』向けの空間オーディオ対応サラウンド。ゲームの設定でオンにしたときに使います。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "《원신》과 《젠레스 존 제로》용 공간 음향 서라운드 사운드. 게임 설정에서 켤 때 사용됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Som surround com Áudio Espacial para Genshin Impact e Zenless Zone Zero, usado quando você o ativa nos ajustes de um jogo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Объёмный звук с пространственным аудио для Genshin Impact и Zenless Zone Zero. Используется, когда вы включаете его в настройках игры."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เสียงรอบทิศทางพร้อมเสียงตามตำแหน่งสำหรับ Genshin Impact และ Zenless Zone Zero ใช้เมื่อคุณเปิดในการตั้งค่าของเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Об’ємний звук із просторовим аудіо для Genshin Impact і Zenless Zone Zero. Використовується, коли ви вмикаєте його в налаштуваннях гри."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Âm thanh vòm với Âm thanh không gian cho Genshin Impact và Zenless Zone Zero, dùng khi bạn bật trong cài đặt của trò chơi."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为《原神》和《绝区零》提供支持空间音频的环绕声，在游戏设置中开启时使用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為《原神》和《絕區零》提供支援空間音訊的環繞音效，在遊戲設定中開啟時使用。"
+          }
+        }
+      }
+    },
+    "Switch to %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zu %@ wechseln"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cambiar a %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passer à %@"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beralih ke %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ に切り替え"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@(으)로 전환"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mudar para %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перейти на %@"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เปลี่ยนเป็น %@"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перейти на %@"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chuyển sang %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換到 %@"
           }
         }
       }
@@ -23138,6 +24788,170 @@
         }
       }
     },
+    "Unpin" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht mehr fixieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dejar de fijar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Désépingler"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lepas sematan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定を解除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고정 해제"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desafixar"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открепить"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เลิกปักหมุด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Відкріпити"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bỏ ghim"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消固定"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消釘選"
+          }
+        }
+      }
+    },
+    "Update" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktualisieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actualizar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mettre à jour"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perbarui"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップデート"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "업데이트"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Atualizar"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обновить"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "อัปเดต"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Оновити"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cập nhật"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新"
+          }
+        }
+      }
+    },
     "Update available" : {
       "localizations" : {
         "de" : {
@@ -23302,166 +25116,166 @@
         }
       }
     },
-    "Use Recommended Version" : {
+    "Use" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Empfohlene Version verwenden"
+            "value" : "Verwenden"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Usar la versión recomendada"
+            "value" : "Usar"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Utiliser la version recommandée"
+            "value" : "Utiliser"
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Gunakan Versi yang Direkomendasikan"
+            "value" : "Gunakan"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "推奨バージョンを使用"
+            "value" : "使用"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "권장 버전 사용"
+            "value" : "사용"
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Usar a versão recomendada"
+            "value" : "Usar"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Использовать рекомендуемую версию"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Використовувати рекомендовану версію"
+            "value" : "Использовать"
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ใช้เวอร์ชันที่แนะนำ"
+            "value" : "ใช้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Використовувати"
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Dùng phiên bản được đề xuất"
+            "value" : "Dùng"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用推荐版本"
+            "value" : "使用"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用建議版本"
+            "value" : "使用"
           }
         }
       }
     },
-    "Use This Version" : {
+    "Use %@ for every game" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Diese Version verwenden"
+            "value" : "%@ für alle Spiele verwenden"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Usar esta versión"
+            "value" : "Usar %@ en todos los juegos"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Utiliser cette version"
+            "value" : "Utiliser %@ pour tous les jeux"
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Gunakan Versi Ini"
+            "value" : "Gunakan %@ untuk semua game"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このバージョンを使用"
+            "value" : "すべてのゲームで %@ を使用"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 버전 사용"
+            "value" : "모든 게임에 %@ 사용"
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Usar esta versão"
+            "value" : "Usar %@ em todos os jogos"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Использовать эту версию"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Використовувати цю версію"
+            "value" : "Использовать %@ для всех игр"
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ใช้เวอร์ชันนี้"
+            "value" : "ใช้ %@ กับทุกเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Використовувати %@ для всіх ігор"
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Dùng phiên bản này"
+            "value" : "Dùng %@ cho mọi trò chơi"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用此版本"
+            "value" : "所有游戏都使用 %@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用此版本"
+            "value" : "所有遊戲都使用 %@"
           }
         }
       }
@@ -23544,6 +25358,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用現有的安裝…"
+          }
+        }
+      }
+    },
+    "Using %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verwendet %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usando %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utilise %@"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Memakai %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ を使用中"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 사용 중"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usando %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Используется %@"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "กำลังใช้ %@"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Використовується %@"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đang dùng %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在使用 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在使用 %@"
           }
         }
       }
@@ -25036,6 +26932,255 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wine 環繞音效"
+          }
+        }
+      }
+    },
+    "Wine with Apple's D3DMetal, which runs DirectX 11 and 12 games on Metal." : {
+      "comment" : "Dependency description",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine mit Apples D3DMetal, das DirectX-11- und -12-Spiele über Metal ausführt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine con D3DMetal de Apple, que ejecuta juegos DirectX 11 y 12 sobre Metal."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine avec D3DMetal d’Apple, qui fait tourner les jeux DirectX 11 et 12 sur Metal."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine dengan D3DMetal dari Apple, yang menjalankan game DirectX 11 dan 12 di Metal."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine と Apple の D3DMetal のセット。DirectX 11 と 12 のゲームを Metal で動かします。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine와 Apple의 D3DMetal. DirectX 11 및 12 게임을 Metal에서 실행합니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine com o D3DMetal da Apple, que executa jogos DirectX 11 e 12 sobre o Metal."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine с D3DMetal от Apple, который запускает игры на DirectX 11 и 12 через Metal."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine พร้อม D3DMetal ของ Apple ซึ่งรันเกม DirectX 11 และ 12 บน Metal"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine із D3DMetal від Apple, що запускає ігри на DirectX 11 і 12 через Metal."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine kèm D3DMetal của Apple, chạy trò chơi DirectX 11 và 12 trên Metal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 与 Apple 的 D3DMetal，让 DirectX 11 和 12 游戏在 Metal 上运行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 與 Apple 的 D3DMetal，讓 DirectX 11 和 12 遊戲在 Metal 上執行。"
+          }
+        }
+      }
+    },
+    "Wine with DXMT, which runs DirectX 11 games on Metal." : {
+      "comment" : "Dependency description",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine mit DXMT, das DirectX-11-Spiele über Metal ausführt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine con DXMT, que ejecuta juegos DirectX 11 sobre Metal."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine avec DXMT, qui fait tourner les jeux DirectX 11 sur Metal."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine dengan DXMT, yang menjalankan game DirectX 11 di Metal."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine と DXMT のセット。DirectX 11 のゲームを Metal で動かします。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine와 DXMT. DirectX 11 게임을 Metal에서 실행합니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine com DXMT, que executa jogos DirectX 11 sobre o Metal."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine с DXMT, который запускает игры на DirectX 11 через Metal."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine พร้อม DXMT ซึ่งรันเกม DirectX 11 บน Metal"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine із DXMT, що запускає ігри на DirectX 11 через Metal."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine kèm DXMT, chạy trò chơi DirectX 11 trên Metal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 与 DXMT，让 DirectX 11 游戏在 Metal 上运行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 與 DXMT，讓 DirectX 11 遊戲在 Metal 上執行。"
+          }
+        }
+      }
+    },
+    "Wine with a graphics layer. Each game uses the one chosen in its settings." : {
+      "comment" : "Dependencies category",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine mit einer Grafikschicht. Jedes Spiel nutzt die in seinen Einstellungen gewählte."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine con una capa gráfica. Cada juego usa la elegida en sus ajustes."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine avec une couche graphique. Chaque jeu utilise celle choisie dans ses réglages."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine dengan lapisan grafis. Setiap game memakai yang dipilih di pengaturannya."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine とグラフィックレイヤーのセットです。各ゲームは設定で選んだものを使います。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine와 그래픽 레이어입니다. 각 게임은 설정에서 선택한 것을 사용합니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine com uma camada gráfica. Cada jogo usa a escolhida nos seus ajustes."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine с графическим слоем. Каждая игра использует тот, что выбран в её настройках."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine พร้อมเลเยอร์กราฟิก แต่ละเกมใช้ตัวที่เลือกไว้ในการตั้งค่าของเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine із графічним шаром. Кожна гра використовує той, що вибрано в її налаштуваннях."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine kèm lớp đồ họa. Mỗi trò chơi dùng lớp được chọn trong cài đặt của nó."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 与图形层。每款游戏使用其设置中选择的那一个。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 與圖形層。每款遊戲使用其設定中選擇的那一個。"
           }
         }
       }
