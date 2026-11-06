@@ -10,6 +10,58 @@ import RuntimeManager
 import HoYoPlayAPI
 import GameLibrary
 
+/// Dependencies are grouped by what they do for a game, not by how they ship.
+enum RuntimeCategory: String, CaseIterable, Sendable {
+    case runtimes, compatibility, extras
+}
+
+/// One dependency (a runtime bundle or a helper) with every version the catalog
+/// or the disk knows about, in catalog order, so rollback stays one click away.
+@MainActor struct RuntimeVersionGroup: Identifiable {
+    enum Status: Equatable {
+        case working(RuntimeRow)
+        case failed(RuntimeRow, message: String)
+        case notInstalled(RuntimeRow)
+        case updateAvailable(active: RuntimeRow, recommended: RuntimeRow)
+        case ready(RuntimeRow)
+        case damaged
+    }
+
+    let id: String
+    let category: RuntimeCategory
+    var rows: [RuntimeRow]
+
+    static func group(_ rows: [RuntimeRow]) -> [Self] {
+        var groups: [Self] = []
+        for row in rows {
+            if let index = groups.firstIndex(where: { $0.id == row.familyID }) {
+                groups[index].rows.append(row)
+            } else {
+                groups.append(Self(id: row.familyID, category: row.category, rows: [row]))
+            }
+        }
+        return groups
+    }
+
+    /// The version games use: the catalog selection, or without a catalog the installed one.
+    func active(selected: (String) -> Bool, hasCatalog: Bool) -> RuntimeRow? {
+        rows.first { selected($0.id) } ?? (hasCatalog ? nil : rows.first { if case .installed = $0.state { true } else { false } })
+    }
+
+    func status(selected: (String) -> Bool, recommended: (String) -> Bool, hasCatalog: Bool) -> Status {
+        if let row = rows.first(where: { if case .working = $0.state { true } else { false } }) { return .working(row) }
+        let active = active(selected: selected, hasCatalog: hasCatalog)
+        let target = active ?? rows.first { recommended($0.id) } ?? rows.first { if case .invalid = $0.state { false } else { true } }
+        guard let target else { return .damaged }
+        if case .failed(let message) = target.state { return .failed(target, message: message) }
+        guard let active, case .installed = active.state else { return .notInstalled(target) }
+        if let newer = rows.first(where: { recommended($0.id) }), newer.id != active.id {
+            return .updateAvailable(active: active, recommended: newer)
+        }
+        return .ready(active)
+    }
+}
+
 @MainActor @Observable
 final class AppModel {
     enum ConsentMode: Sendable, Equatable { case download, importGPTK }
@@ -39,6 +91,21 @@ final class AppModel {
         /// Optional bundle summary and download size for bundles or standalone components.
         var summary: String? = nil
         var downloadSize: Int64? = nil
+        var componentKind: ComponentKind? = nil
+        var backend: RuntimeBackend? = nil
+
+        var category: RuntimeCategory {
+            if backend != nil { return .runtimes }
+            switch componentKind {
+            case .wine, .dxmt, .d3dmetal: return .runtimes
+            case .jadeite, .steamShim, .crypt32Fix: return .compatibility
+            default: return .extras
+            }
+        }
+        var familyID: String {
+            if let backend { return "bundle-" + backend.rawValue }
+            return "component-" + (componentKind?.rawValue ?? "unknown")
+        }
     }
 
     var region: Region {
@@ -770,7 +837,7 @@ final class AppModel {
                 licenseName: components.map { $0.license.name }.joined(separator: " / "),
                 state: working[id] ?? errors[id].map { .failed(message: $0) } ?? installedBundles[id].map { .installed(source: $0.source) } ?? .notInstalled,
                 canImportGPTK: bundle.backend == .d3dmetal, needsConsent: components.contains { $0.consent != nil },
-                summary: bundle.summary, downloadSize: components.reduce(Int64(0)) { $0 + ($1.size ?? 0) }))
+                summary: bundle.summary, downloadSize: components.reduce(Int64(0)) { $0 + ($1.size ?? 0) }, backend: bundle.backend))
         }
         for component in manifest?.components ?? [] where !covered.contains(component.id) {
             let id = component.id.rawValue
@@ -778,17 +845,17 @@ final class AppModel {
             result.append(RuntimeRow(id: id, kindName: Self.kindName(component.kind), version: component.version.rawValue,
                 licenseName: component.license.name,
                 state: working[id] ?? errors[id].map { .failed(message: $0) } ?? existing.map { .installed(source: $0.source) } ?? .notInstalled,
-                canImportGPTK: component.kind == .d3dmetal, needsConsent: component.consent != nil, downloadSize: component.size))
+                canImportGPTK: component.kind == .d3dmetal, needsConsent: component.consent != nil, downloadSize: component.size, componentKind: component.kind))
         }
         for component in installed where !covered.contains(where: { $0.rawValue == Self.id(component) }) && !result.contains(where: { $0.id == Self.id(component) }) {
             let id = Self.id(component)
             result.append(RuntimeRow(id: id, kindName: Self.kindName(component.kind), version: component.version,
-                licenseName: String(localized: "Installed runtime"), state: working[id] ?? .installed(source: component.source), canImportGPTK: false, needsConsent: false))
+                licenseName: String(localized: "Installed runtime"), state: working[id] ?? .installed(source: component.source), canImportGPTK: false, needsConsent: false, componentKind: component.kind))
         }
         for (id, entry) in invalid.sorted(by: { $0.key < $1.key }) {
             result.append(RuntimeRow(id: id, kindName: entry.kind.map(Self.kindName) ?? String(localized: "Unknown runtime"), version: entry.rawName,
                 licenseName: String(localized: "Local runtime"), state: working[id] ?? .invalid(reason: entry.reason, removable: entry.removable),
-                canImportGPTK: false, needsConsent: false))
+                canImportGPTK: false, needsConsent: false, componentKind: entry.kind))
         }
         rows = result
         scheduleRuntimeSetupUpdate()
@@ -849,6 +916,16 @@ extension GPTKCandidate: @retroactive Identifiable {
     public var id: String { root.path }
 }
 
+#if DEBUG
+extension AppModel {
+    /// Inert screenshot state: no scan, install or removal runs.
+    func debugRuntimeState(installed: [InstalledComponent], bundles: [String: InstalledRuntimeBundle], working: [String: RowState]) {
+        self.installed = installed; installedBundles = bundles; self.working = working
+        rebuildRows()
+    }
+}
+#endif
+
 struct BundledRuntimeManifest {
     @concurrent static func load() async throws -> RuntimeManifest {
         guard let url = Bundle.main.url(forResource: "runtime-manifest", withExtension: "json") else {
@@ -872,10 +949,10 @@ extension AppModel {
     static var sampleRows: [RuntimeRow] {
         [RuntimeRow(id: "dxmt-wine11.0-dxmt0.80", kindName: "DXMT", version: "11.0-yaagl + 0.80", licenseName: "LGPL-2.1 / MIT",
             state: .working(phase: .staging, fraction: 0.42), canImportGPTK: false, needsConsent: false,
-            summary: "Wine 11.0 with game patches · DXMT 0.80", downloadSize: 465_267_389),
+            summary: "Wine 11.0 with game patches · DXMT 0.80", downloadSize: 465_267_389, backend: .dxmt),
          RuntimeRow(id: "d3dmetal-wine11.20-gptk4.0b3", kindName: "D3DMetal", version: "4.0b3", licenseName: "Apple Game Porting Toolkit",
             state: .notInstalled, canImportGPTK: true, needsConsent: true,
-            summary: "Wine 11.20 · Apple D3DMetal 4.0 beta 3", downloadSize: 307_352_548)]
+            summary: "Wine 11.20 · Apple D3DMetal 4.0 beta 3", downloadSize: 307_352_548, backend: .d3dmetal)]
     }
 
     static func preview(rows: [RuntimeRow] = sampleRows, consent: ConsentRequest? = nil,

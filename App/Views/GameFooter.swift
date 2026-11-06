@@ -559,7 +559,7 @@ struct PrimaryActionButton: View {
     private func progressLabel(at now: ContinuousClock.Instant) -> String {
         guard case .working(let phase, let fraction, _, let downloaded, _) = state.activity else { return "" }
         let localWork = (phase == .staging && downloaded == nil) || (phase == .checkingSpace && fraction != nil)
-        let label = localWork ? String(localized: "Installing…") : RuntimeRowView.label(for: phase, fraction: fraction)
+        let label = localWork ? String(localized: "Installing…") : RuntimePhaseText.label(for: phase, fraction: fraction)
         switch state.timing?.display(at: now) ?? .none {
         case .none:
             return label

@@ -13,6 +13,46 @@ import HoYoPlayAPI
 @Suite(.serialized)
 @MainActor
 struct AppModelTests {
+    @Test func runtimeCategoriesUseTypedPurposeAndKeepHistoricalVersionsTogether() {
+        func row(_ id: String, kind: ComponentKind? = nil, backend: RuntimeBackend? = nil) -> RuntimeRow {
+            RuntimeRow(id: id, kindName: "Localized title", version: id, licenseName: "Test", state: .notInstalled,
+                canImportGPTK: false, needsConsent: false, componentKind: kind, backend: backend)
+        }
+        let rows = [row("dxmt-old", backend: .dxmt), row("surround-old", kind: .surroundAudio),
+            row("metal", backend: .d3dmetal), row("dxmt-new", backend: .dxmt), row("jadeite", kind: .jadeite),
+            row("steam", kind: .steamShim), row("crypt32", kind: .crypt32Fix), row("fps", kind: .genshinFps),
+            row("surround-new", kind: .surroundAudio), row("unknown")]
+        let groups = RuntimeVersionGroup.group(rows)
+        #expect(groups.count == 8)
+        #expect(groups.first?.rows.map(\.id) == ["dxmt-old", "dxmt-new"])
+        #expect(groups.filter { $0.category == .runtimes }.count == 2)
+        #expect(groups.filter { $0.category == .compatibility }.count == 3)
+        #expect(groups.filter { $0.category == .extras }.count == 3)
+        #expect(groups.flatMap(\.rows).count == rows.count)
+    }
+
+    @Test func dependencyStatusFollowsSelectionRecommendationAndWork() {
+        func row(_ id: String, _ state: RowState) -> RuntimeRow {
+            RuntimeRow(id: id, kindName: "Surround", version: id, licenseName: "Test", state: state,
+                canImportGPTK: false, needsConsent: false, componentKind: .surroundAudio)
+        }
+        let installed = RowState.installed(source: .download)
+        func status(_ rows: [RuntimeRow], selected: String?, recommended: String = "new", catalog: Bool = true) -> RuntimeVersionGroup.Status {
+            RuntimeVersionGroup.group(rows)[0].status(selected: { $0 == selected }, recommended: { $0 == recommended }, hasCatalog: catalog)
+        }
+        let old = row("old", installed), new = row("new", .notInstalled)
+        #expect(status([old, new], selected: "old") == .updateAvailable(active: old, recommended: new))
+        #expect(status([old, row("new", installed)], selected: "new") == .ready(row("new", installed)))
+        #expect(status([old, new], selected: "new") == .notInstalled(new))
+        #expect(status([row("old", .notInstalled), new], selected: nil) == .notInstalled(new))
+        #expect(status([old, new], selected: nil, recommended: "", catalog: false) == .ready(old))
+        let failed = row("new", .failed(message: "Network"))
+        #expect(status([old, failed], selected: "new") == .failed(failed, message: "Network"))
+        let working = row("new", .working(phase: .staging, fraction: 0.5))
+        #expect(status([old, working], selected: "old") == .working(working))
+        #expect(status([row("bad", .invalid(reason: "Missing", removable: true))], selected: nil) == .damaged)
+    }
+
     @Test func recoveryDeferredCleanupStillLoadsInstalledRuntimeRows() async throws {
         let (model, fake, component) = try fixture()
         fake.setInstalled(try InstalledComponent(kind: component.kind, version: component.version.rawValue,

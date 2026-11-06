@@ -4,6 +4,7 @@ import Foundation
 import LauncherCore
 import GameLibrary
 import Launch
+import RuntimeManager
 
 #if DEBUG
 extension AppModel {
@@ -41,9 +42,37 @@ extension AppModel {
                 ($0.id, $0.id == busy ? downloading : GameState(status: .notInstalled))
             }), region: region)
             model?.gameOperation = GameOperationToken(id: busy, generation: UUID())
+        } else if let name, name.hasPrefix("dependencies") {
+            let preview = preview(rows: [], logLines: [], region: region)
+            Task { await preview.loadDebugDependencies(installing: name == "dependenciesInstalling") }
+            model = preview
         } else { model = debugLaunchPreview(state: name, recoveryNotice: notice, region: region) }
         if notice, let recovery = debugRecoveryNotice(in: region) { model?.recoveryNotices = [recovery] }
         return model
+    }
+
+    /// The real bundled catalog with a mix of states: an older pinned DXMT build next to
+    /// the recommended one, an installed D3DMetal, a missing helper and an extra.
+    private func loadDebugDependencies(installing: Bool) async {
+        guard let manifest = try? await BundledRuntimeManifest.load(),
+            var snapshot = try? await RuntimeCatalogService(baseline: manifest).snapshot() else { return }
+        let date = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        func component(_ id: String) -> InstalledComponent? {
+            guard let item = manifest.components.first(where: { $0.id.rawValue == id }) else { return nil }
+            return try? InstalledComponent(kind: item.kind, version: item.version.rawValue, installedAt: date, source: .download)
+        }
+        let digest = try! Digest(algorithm: .sha256, hex: String(repeating: "0", count: 64))
+        let root = URL(fileURLWithPath: "/var/empty")
+        let bundles = ["dxmt-wine11.0-dxmt0.80", "dxmt-wine11.0cx-dxmt0.80", "d3dmetal-wine11.20-gptk4.0b3"]
+        var selections = snapshot.selections
+        selections.bundles[.dxmt] = RuntimeCatalogSelection(id: try! SafeIdentifier("dxmt-wine11.0-dxmt0.80"), pinned: true)
+        snapshot = (try? snapshot.replacingSelections(selections)) ?? snapshot
+        applyRuntimeCatalog(snapshot)
+        debugRuntimeState(
+            installed: ["jadeite-4.1.0", "steam-shim-proton-10.0-4", "surround-audio-wine-11.20-1"].compactMap(component),
+            bundles: Dictionary(uniqueKeysWithValues: bundles.map { id in (id, InstalledRuntimeBundle(id: try! SafeIdentifier(id),
+                root: root, wineBinary: root, digest: digest, source: id.hasPrefix("d3dmetal") ? .importFromGPTK : .download)) }),
+            working: installing ? ["genshin-fps-unlock-2": .working(phase: .staging, fraction: 0.42)] : [:])
     }
 
     private static func debugGameState(_ name: String) -> GameState? {
