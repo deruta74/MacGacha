@@ -9,6 +9,55 @@ import TestSupport
 @testable import RuntimeManager
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchPreparationTests {
+    @Test func revisionTwoMigratesToWindowsProfileProvisioning() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            var marker = try fixture.marker()
+            marker["provisioningRevision"] = 2
+            try fixture.fs.writeAtomically(JSONSerialization.data(withJSONObject: marker),
+                to: SafeRelativePath("Prefixes/genshin-dxmt/.macgacha-prefix.json"))
+            let runner = FakeProcessRunner()
+            try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, windowsVersion: .win11))
+            #expect(runner.invocations.contains { $0.arguments == ["reg", "add", "HKCU\\Software\\Wine", "/v", "Version", "/t", "REG_SZ", "/d", "win11", "/f"] })
+            #expect(runner.invocations.last?.arguments == ["-w"])
+            #expect(try fixture.revision() == 3)
+        }
+    }
+
+    @Test(arguments: ["version", "wait", "sync"], [Int?.none, 2])
+    func windowsVersionFailureDoesNotPublishRevision(failure: String, revision: Int?) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            var marker = try fixture.marker()
+            marker["provisioningRevision"] = revision
+            try fixture.fs.writeAtomically(JSONSerialization.data(withJSONObject: marker),
+                to: SafeRelativePath("Prefixes/genshin-dxmt/.macgacha-prefix.json"))
+            let runner = FakeProcessRunner { call in
+                if (failure == "version" && call.arguments.contains("win11")) ||
+                    (failure == "wait" && call.arguments == ["-w"]) {
+                    return ProcessResult(exitCode: 7, stdout: Data(), stderr: Data("failed".utf8))
+                }
+                return preparationSuccess()
+            }
+            let preparer = LaunchPreparation(paths: fixture.paths, runner: runner,
+                fileOps: PreparationPersistenceAudit(failedLeaf: failure == "sync" ? "prefix" : nil), inspector: IdlePrefixInspector())
+            await #expect(throws: LauncherError.self) {
+                try await preparer.ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                    request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, windowsVersion: .win11))
+            }
+            #expect(try fixture.revision() == revision)
+            let retry = FakeProcessRunner()
+            let request = PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, windowsVersion: .win11)
+            try await fixture.preparer(retry).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: request)
+            #expect(try fixture.revision() == 3)
+            #expect(retry.invocations.contains { $0.arguments.contains("win11") })
+            let next = FakeProcessRunner()
+            try await fixture.preparer(next).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: request)
+            #expect(next.invocations.contains { $0.arguments.contains("win11") })
+            #expect(next.invocations.last?.arguments == ["-w"])
+        }
+    }
+
     @Test(arguments: [Region.global, .mainlandChina]) func allMatchingValuesAreRewritten(region: Region) async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
@@ -29,7 +78,7 @@ import TestSupport
             #expect(writes.count == 2)
             #expect(writes.compactMap { frameRateFPS($0.arguments) } == [120, 120])
             #expect(runner.invocations.last?.arguments == ["-w"])
-            #expect(try fixture.revision() == 2)
+            #expect(try fixture.revision() == LaunchPreparation.provisioningRevision)
         }
     }
     @Test func missingValueWritesNothing() async throws {
@@ -94,7 +143,7 @@ import TestSupport
             #expect(frameRateFPS(goodWrite.arguments) == 120)
             #expect(writes.count == (failure == "writeFailure" ? 2 : 1))
             #expect(runner.invocations.last?.arguments == ["-w"])
-            #expect(try fixture.revision() == 2)
+            #expect(try fixture.revision() == LaunchPreparation.provisioningRevision)
         }
     }
     @Test func frameRateRewriteRunsPerLaunchAndIsIdempotent() async throws {
@@ -224,8 +273,8 @@ import TestSupport
             try fixture.fs.createSymbolicLink(at: folder, target: home.url.path)
             let runner = FakeProcessRunner()
             try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: fixture.request())
-            #expect(LaunchPreparation.provisioningRevision == 2)
-            #expect(try fixture.revision() == 2)
+            #expect(LaunchPreparation.provisioningRevision == 3)
+            #expect(try fixture.revision() == LaunchPreparation.provisioningRevision)
             #expect(try fixture.fs.itemType(at: folder) == .directory)
             #expect(runner.invocations.contains { $0.arguments == ["reg", "add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "winemenubuilder.exe", "/t", "REG_SZ", "/d", "", "/f"] })
             for (value, name) in PrefixShellFolders.registryValues {

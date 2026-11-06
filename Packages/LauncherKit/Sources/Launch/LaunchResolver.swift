@@ -169,7 +169,8 @@ public enum LaunchResolver {
                 dxmtExtras: dxmt ? (["winemetal.dll"] + (starRail ? ["nvngx.dll"] : [])) : [], nvidiaKeys: dxmt && starRail,
                 crypt32Native: requiredComponents.contains(.crypt32Fix),
                 starRailFrameRate: offersStarRailUnlock(recipe.game) ? (settings.unlockFPS ? .unlock120 : .restore) : nil,
-                starRailRegion: starRail ? (GameDefinition.find(recipe.game)?.region ?? .global) : .global),
+                starRailRegion: starRail ? (GameDefinition.find(recipe.game)?.region ?? .global) : .global,
+                windowsVersion: [GameFamily.genshin, .zzz].contains(GameDefinition.find(recipe.game)?.family ?? .starrail) ? .win11 : nil),
             requiredComponents: requiredComponents, componentCopies: componentCopies, displayFallback: displayFallback, fpsInjector: fpsInjector)
     }
 

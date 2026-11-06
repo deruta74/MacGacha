@@ -34,7 +34,7 @@ private func resolve(_ game: String, settings: LaunchSettings? = nil, components
     #expect(value.copyIfPresent.first?.source.description == "HoYoKProtect.sys")
     #expect(value.copyIfPresent.first?.toSystem32 == "HoYoKProtect.sys")
     #expect(value.requiredComponents == [.steamShim])
-    #expect(value.preparation == PreparationRequest(retina: false, steamShim: roots[.steamShim], dxmtExtras: [], nvidiaKeys: false))
+    #expect(value.preparation == PreparationRequest(retina: false, steamShim: roots[.steamShim], dxmtExtras: [], nvidiaKeys: false, windowsVersion: .win11))
 }
 
 @Test func starRailDefaults() throws {
@@ -194,4 +194,17 @@ func genshinAndZZZNeverTouchStarRailValue(game: String, unlock: Bool) throws {
     let value = try resolve("starrail", settings: settings)
     if backend == .d3dmetal { #expect(value.environment["D3DM_MAX_FPS"] == "90") }
     else { #expect(value.environment["DXMT_CONFIG"]?.contains("d3d11.preferredMaxFrameRate=90") == true) }
+}
+
+@Test(arguments: ["genshin", "zzz", "starrail", "genshin-cn", "zzz-cn", "starrail-cn"], [RuntimeBackend.d3dmetal, .dxmt])
+func windows11ProfileIsScopedAndIndependentOfPatches(game: String, backend: RuntimeBackend) throws {
+    for patches in [false, true] {
+        var settings = LaunchSettings.defaults(for: game)
+        settings.backend = backend
+        settings.compatibilityPatches = patches
+        var components = roots
+        components[.crypt32Fix] = URL(fileURLWithPath: "/Components/crypt32")
+        let value = try resolve(game, settings: settings, components: components)
+        #expect(value.preparation.windowsVersion == (["genshin", "zzz", "genshin-cn", "zzz-cn"].contains(game) ? .win11 : nil))
+    }
 }
