@@ -61,7 +61,12 @@ The unpatched D3DMetal and DXMT routes, and the route with Game Mode off, showed
 the square Windows icon. These observations are icon/launch checks, not a new
 long-session gameplay qualification.
 
-Before enabling delivery: test ZZZ after installation, qualify the complete
-production Wine build, test the supported Wine 11.0/DXMT build separately, and
+Global ZZZ 3.3 was also tested on D3DMetal with DirectX 12 and Surround enabled:
+one rounded Dock icon, a ready game window, and the loaded module matching the
+reproducible build checksum. Account login, extended gameplay and audio output
+quality were not separately requalified during this icon test.
+
+Before enabling delivery: qualify the complete production Wine build, test the
+supported Wine 11.0/DXMT build separately, and
 publish compatible runtime versions through the normal immutable catalog flow.
 The fallback route without a helper has no bundle icon to preserve.

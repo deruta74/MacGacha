@@ -139,7 +139,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
 
 - Helpers opt into `MacGachaPreserveBundleIcon` while retaining `LSUIElement=true`. A compatible Wine macOS driver skips its Windows-icon replacement during foreground promotion; existing runtimes ignore this custom key. The rounded ICNS remains the fallback/closed-app icon from PR #125.
 - `scripts/build-dock-icon.sh OUTPUT [--fetch-only|--offline]` builds an isolated x86_64 test module from a checksum-pinned Wine 11.20 fork and runs `scripts/test-dock-icon.py SOURCE [--expect-legacy]` against real bundle metadata. It never installs or publishes the result. This reduced-feature build is a D3DMetal probe, not a replacement production runtime or Wine 11.0/DXMT module.
-- Keep production runtime delivery separate: no catalog ID may point at this unpublished probe. Preserve runtime immutability and component/session pins; helper files are hard links and must never be patched in place. Global Genshin D3DMetal has local icon evidence; ZZZ and a production Wine 11.0/DXMT build remain unverified.
+- Keep production runtime delivery separate: no catalog ID may point at this unpublished probe. Preserve runtime immutability and component/session pins; helper files are hard links and must never be patched in place. Global Genshin and ZZZ D3DMetal have local icon evidence (ZZZ with DX12/Surround enabled); a production Wine 11.0/DXMT build remains unverified.
 
 ## Independent runtime updates and rollback
 
