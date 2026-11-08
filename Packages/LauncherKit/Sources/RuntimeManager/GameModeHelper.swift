@@ -297,7 +297,8 @@ public struct GameModeHelper: GameModeProviding {
          "CFBundleDisplayName": game.gameApplicationName, "CFBundleExecutable": "wine", "CFBundlePackageType": "APPL",
          "CFBundleInfoDictionaryVersion": "6.0", "CFBundleShortVersionString": "1.0", "CFBundleVersion": "2",
          "CFBundleIconName": "AppIcon", "CFBundleIconFile": "AppIcon", "LSApplicationCategoryType": gameModeEnabled ? "public.app-category.games" : "public.app-category.utilities",
-         "LSSupportsGameMode": gameModeEnabled, "LSUIElement": true, "CFBundleDevelopmentRegion": "en",
+         "LSSupportsGameMode": gameModeEnabled, "LSUIElement": true, "MacGachaPreserveBundleIcon": true,
+         "CFBundleDevelopmentRegion": "en",
          "CFBundleLocalizations": GameModePrivacy.descriptions.keys.sorted(), GameModePrivacy.key: GameModePrivacy.english]
     }
     private func appPath(_ id: SafeIdentifier, game: GameDefinition) throws -> SafeRelativePath {

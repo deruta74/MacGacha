@@ -172,6 +172,8 @@ func gameModeTestBundle(_ fixture: BundleFixture) async throws -> InstalledRunti
         #expect(try fs.readFile(at: SafeRelativePath("\(mirror)/policy.json"), maxBytes: 1024) == Data("policy".utf8))
         let plist = try #require(PropertyListSerialization.propertyList(from: fs.readFile(at: SafeRelativePath("\(mirror)/Info.plist"), maxBytes: 16384), format: nil) as? [String: Any])
         #expect(plist["CFBundleExecutable"] as? String == "wine")
+        #expect(plist["MacGachaPreserveBundleIcon"] as? Bool == true)
+        #expect(plist["LSUIElement"] as? Bool == true)
         #expect(plist["CFBundleIdentifier"] as? String == "com.lo7ted.macgacha.game.genshin")
         #expect(plist["LSApplicationCategoryType"] as? String == "public.app-category.games")
         #expect(plist["LSSupportsGameMode"] as? Bool == true)
