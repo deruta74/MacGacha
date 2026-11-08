@@ -154,7 +154,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
 ## Current state
 
 - **Done:**
-  - Game Mode: utility launcher, on-by-default switch, per-edition named/icon-bearing apps with Unix loaders and ntdll in MacOS, verified runtime links and resources, local cached-icon/launcher fallback, native or wrapper routing, migration/cleanup and recovery from old or new persisted paths. The owner confirmed the generated per-game helper activates Game Mode on D3DMetal Genshin and full-screen DXMT Star Rail;
+  - Game Mode: utility launcher, on-by-default switch, per-edition named/icon-bearing apps with Unix loaders and ntdll in MacOS, verified runtime links and resources, local cached-icon/launcher fallback (the icon follows the macOS icon grid: 824/1024 body, squircle mask), native or wrapper routing, migration/cleanup and recovery from old or new persisted paths. The owner confirmed the generated per-game helper activates Game Mode on D3DMetal Genshin and full-screen DXMT Star Rail;
   - opt-in surround sound model and runtime routing for eligible Genshin/ZZZ editions, recommended component installation, private verified helper overlays and launch/recovery pins;
   - standalone Genshin FPS helper component: pinned reproducible Windows injector/DLL archive, Global/CN opt-in settings and one-time risk acknowledgment, recommended setup and readiness, matching Wine routes and session-owned injector supervision, the settings switch, one-time 10 s warning sheet and footer notes;
   - download engine, including normal Sophon patch/copy updates with immutable delta-chunk fallbacks, source/output verification, progressive dependency batches with retained-container/live-capacity accounting and exact crash/resume;
