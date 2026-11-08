@@ -44,15 +44,7 @@ public struct GameModeIcon: Sendable, Equatable {
         }
         var representations = Data()
         for (size, type) in [(16, "icp4"), (32, "icp5"), (64, "icp6"), (128, "ic07"), (256, "ic08"), (512, "ic09"), (1024, "ic10")] {
-            guard let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
-                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-                throw LauncherError.io("Cannot render Game Mode icon")
-            }
-            let scale = min(Double(size) / Double(image.width), Double(size) / Double(image.height))
-            let w = Double(image.width) * scale, h = Double(image.height) * scale
-            context.interpolationQuality = .high
-            context.draw(image, in: CGRect(x: (Double(size) - w) / 2, y: (Double(size) - h) / 2, width: w, height: h))
-            guard let rendered = context.makeImage() else { throw LauncherError.io("Cannot render Game Mode icon") }
+            guard let rendered = renderIcon(image, size: size) else { throw LauncherError.io("Cannot render Game Mode icon") }
             let png = NSMutableData()
             guard let destination = CGImageDestinationCreateWithData(png, "public.png" as CFString, 1, nil) else {
                 throw LauncherError.io("Cannot encode Game Mode icon")
@@ -62,6 +54,30 @@ public struct GameModeIcon: Sendable, Equatable {
             representations.append(Data(type.utf8)); representations.append(integer(png.length + 8)); representations.append(png as Data)
         }
         return try Self(icns: Data("icns".utf8) + integer(representations.count + 8) + representations)
+    }
+
+    /// macOS does not mask third-party icons, so draw the macOS icon grid ourselves:
+    /// an 824/1024 body with rounded corners, aspect-filled, over a transparent margin.
+    static func renderIcon(_ image: CGImage, size: Int) -> CGImage? {
+        guard let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let canvas = Double(size), body = canvas * 824 / 1024
+        let rect = CGRect(x: (canvas - body) / 2, y: (canvas - body) / 2, width: body, height: body)
+        let radius = canvas * 185.4 / 1024
+        let scale = max(body / Double(image.width), body / Double(image.height))
+        let w = Double(image.width) * scale, h = Double(image.height) * scale
+        context.interpolationQuality = .high
+        // The shadow is cast by the whole clipped group; tiny sizes stay crisp without it.
+        if size >= 128 {
+            context.setShadow(offset: CGSize(width: 0, height: -canvas * 12 / 1024), blur: canvas * 28 / 1024,
+                color: CGColor(red: 0, green: 0, blue: 0, alpha: 0.3))
+        }
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        context.addPath(CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil))
+        context.clip()
+        context.draw(image, in: CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h))
+        context.endTransparencyLayer()
+        return context.makeImage()
     }
 }
 
