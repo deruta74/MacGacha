@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "version": "11.20-macgacha1-preview3",
+  "upstreamCommit": "a05983676741c558ac46937a29a93e02b38de8c7",
+  "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+  "sdk": "27.0",
+  "bison": "3.8.2",
+  "deploymentTarget": "14.0",
+  "patchSha256": "55028ecf36325bea4d7b8899452542763fba53e942304fd5362c8ef3a2854a70",
+  "inputs": [
+    {
+      "name": "wine-source.tar.gz",
+      "url": "https://api.github.com/repos/dbc-hbin/wine-yaagl-d3dmetal/tarball/a05983676741c558ac46937a29a93e02b38de8c7",
+      "sha256": "fdb4adbbe5d267e20ce55838f6b8457398ee28df688ee323c7fcebbcd3aae4c0"
+    },
+    {
+      "name": "llvm-mingw.tar.xz",
+      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-macos-universal.tar.xz",
+      "sha256": "2cab02a2e964bd4aae981150a45985d07c657cfa8d244959eb9e2dcc5eedd7b1"
+    },
+    {
+      "name": "pkgconf.tar.xz",
+      "url": "https://distfiles.ariadne.space/pkgconf/pkgconf-3.0.10.tar.xz",
+      "sha256": "9371b2f6372da574d4c6dc96fe9b1463037bcf6afcb6671c1555afde7b17e2de"
+    },
+    {
+      "name": "gstreamer-devel.pkg",
+      "url": "https://gstreamer.freedesktop.org/data/pkg/osx/1.28.7/gstreamer-1.0-devel-1.28.7-universal.pkg",
+      "sha256": "72a44870cf02472cbf6e9a84bcc25ee6807dd1c26659a112066373544d365e7a"
+    },
+    {
+      "name": "gnutls.tbz2",
+      "url": "https://packages.macports.org/gnutls/gnutls-3.8.13_1.darwin_25.x86_64.tbz2",
+      "sha256": "f95132ca250360e532fbe1528481ba9d5dabf75885c397d9e0d372c9b2b1b467",
+      "kind": "headers"
+    },
+    {
+      "name": "freetype.tbz2",
+      "url": "https://packages.macports.org/freetype/freetype-2.14.3_0.darwin_25.x86_64.tbz2",
+      "sha256": "42ab537f446e5f249db98c6b1f1fea98223f41ec9c564d39d104ef03fb1813dd",
+      "kind": "headers"
+    },
+    {
+      "name": "nettle-3.10.2_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/nettle/nettle-3.10.2_0.darwin_25.x86_64.tbz2",
+      "sha256": "0b3a5d35f19d2f3d0aa060ea866f54be9473f7115281c4ef407e4ec46b8bcf5d",
+      "kind": "headers"
+    },
+    {
+      "name": "gmp-6.3.0_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/gmp/gmp-6.3.0_0.darwin_25.x86_64.tbz2",
+      "sha256": "51c0b380babc393b98ac07b3fed4c9653c80f99f2b5f46665922ea19417e5a30",
+      "kind": "headers"
+    },
+    {
+      "name": "libtasn1-4.21.0_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/libtasn1/libtasn1-4.21.0_0.darwin_25.x86_64.tbz2",
+      "sha256": "a0f275727a8dbcdf61e66c7a4deca8aa79564ed829652a4339f602b29be87fa5",
+      "kind": "headers"
+    },
+    {
+      "name": "libidn2-2.3.8_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/libidn2/libidn2-2.3.8_0.darwin_25.x86_64.tbz2",
+      "sha256": "0146be973e49709bfcf081bbc03aaedcc59b47ac34f2b192cb04134f7b3c7b4e",
+      "kind": "headers"
+    },
+    {
+      "name": "p11-kit-0.26.5_1.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/p11-kit/p11-kit-0.26.5_1.darwin_25.x86_64.tbz2",
+      "sha256": "f982de3dbba9170147b755e3408b1f466babd27fb10b5391a438d320a8ba9cb2",
+      "kind": "headers"
+    },
+    {
+      "name": "libffi-3.4.8_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/libffi/libffi-3.4.8_0.darwin_25.x86_64.tbz2",
+      "sha256": "fedda8946af01ecbf829c3dec032ca1af9f947970d97e4b4371f70bb0a4db8cc",
+      "kind": "headers"
+    },
+    {
+      "name": "libunistring-1.5_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/libunistring/libunistring-1.5_0.darwin_25.x86_64.tbz2",
+      "sha256": "02d70f3f0613e3adb924952147d432e5541684e3d3c26cd440c2c5e9ce69da97",
+      "kind": "headers"
+    },
+    {
+      "name": "gettext-runtime-1.0_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/gettext-runtime/gettext-runtime-1.0_0.darwin_25.x86_64.tbz2",
+      "sha256": "843c039fbfdedddf3ca3cfcdad0acd28cb90b4924973bc09f9557cd75ac36516",
+      "kind": "headers"
+    },
+    {
+      "name": "zlib-1.3.2_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/zlib/zlib-1.3.2_0.darwin_25.x86_64.tbz2",
+      "sha256": "ea764153d2738b03c6a21e60a10de6f86f04255bb1e0fe55c754ba2093e5c476",
+      "kind": "headers"
+    },
+    {
+      "name": "brotli-1.2.1_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/brotli/brotli-1.2.1_0.darwin_25.x86_64.tbz2",
+      "sha256": "d3238349fe566e591a6da5caab71d6d28f8368e0ee73460274d4eb88d99bda17",
+      "kind": "headers"
+    },
+    {
+      "name": "zstd-1.5.7_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/zstd/zstd-1.5.7_0.darwin_25.x86_64.tbz2",
+      "sha256": "1b9cc064434c0da52614a6891b8f23f2597c04068ce84898fa907c6ed33cba70",
+      "kind": "headers"
+    },
+    {
+      "name": "libpng-1.6.59_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/libpng/libpng-1.6.59_0.darwin_25.x86_64.tbz2",
+      "sha256": "67fac377224b72f5e1b61ffc5ca8616d914185733286b514b8322f24aeb9b99d",
+      "kind": "headers"
+    },
+    {
+      "name": "bzip2-1.0.8_1.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/bzip2/bzip2-1.0.8_1.darwin_25.x86_64.tbz2",
+      "sha256": "a0a420aac4ee979e2d860086e0c86a003519f9cc23f21a8e4be50a36abb40243",
+      "kind": "headers"
+    },
+    {
+      "name": "xz-5.8.4_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/xz/xz-5.8.4_0.darwin_25.x86_64.tbz2",
+      "sha256": "99976467a12ff8fdc28de82af7a5b7af5996f8b7a6cbc7cb33ca752527b0752e",
+      "kind": "headers"
+    },
+    {
+      "name": "libsdl2-2.32.10_2.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/libsdl2/libsdl2-2.32.10_2.darwin_25.x86_64.tbz2",
+      "sha256": "b2cbfe011dcc205e163da3540620849a44bb0409d7165b3ac7b003b0ae85f853",
+      "kind": "headers"
+    },
+    {
+      "name": "libxml2-2.15.4_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/libxml2/libxml2-2.15.4_0.darwin_25.x86_64.tbz2",
+      "sha256": "415e9fd9fc377c2dfcfa2030a9810c64fbd97106b5eea4020faa45597348f307",
+      "kind": "headers"
+    },
+    {
+      "name": "libxslt-1.1.45_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/libxslt/libxslt-1.1.45_0.darwin_25.x86_64.tbz2",
+      "sha256": "0cd0daa990f72c406b1a89a4b49674133878f87cc3a6ba62210fa43e9409953f",
+      "kind": "headers"
+    },
+    {
+      "name": "libiconv-1.19_0.darwin_25.x86_64.tbz2",
+      "url": "https://packages.macports.org/libiconv/libiconv-1.19_0.darwin_25.x86_64.tbz2",
+      "sha256": "d6f7bbee0f3eeddf396b3fd66b82e4af9b7c1564b17c202faa74062220d46f56",
+      "kind": "headers"
+    },
+    {
+      "name": "dependency-donor.tar.xz",
+      "url": "https://github.com/dbc-hbin/wine-yaagl-d3dmetal/releases/download/wine-11.20-gptk4.0b3-1/wine-11.20-d3dmetal-gptk4.0b3-macos26.tar.xz",
+      "sha256": "a1a6f1dab9bb373091f4b7756505b706e29c9c72e805c011d8107192574920aa",
+      "kind": "donor"
+    }
+  ]
+}

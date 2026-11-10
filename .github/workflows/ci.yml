@@ -39,6 +39,9 @@ jobs:
         # The separate component workflow still verifies the complete Unix module.
         run: python3 -I scripts/test-surround-audio.py
 
+      - name: Check Wine packaging contracts
+        run: python3 -I scripts/test-wine-build.py
+
       - name: Validate runtime catalog publication
         run: |
           python3 -I scripts/test-runtime-catalog.py

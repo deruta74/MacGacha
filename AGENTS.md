@@ -27,6 +27,7 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 | `Packages/LauncherKit/` | SwiftPM package with all logic. The app is a thin layer over it. |
 | `compat/crypt32-fix/` | Pinned Wine 11.20 sources, MR 11824 patches, LGPL notices, toolchain lock and DLL checksum. Manual reproducible build/release workflow. |
 | `compat/surround-audio/` | Wine 11.20 Unix-only CoreAudio patch, LGPL notices, native fake-AudioUnit and synthetic dyld probes, and reproducible ZIP checksum; reuses the crypt32 toolchain lock. |
+| `compat/wine/` | Full standalone Wine candidate input lock, wrapper and provenance/qualification notes; `scripts/build-wine.py` builds from pinned archives without installed runtime dependencies. No Apple graphics or automatic publication. |
 | `compat/dock-icon/` | Source-only opt-in Wine macOS-driver patch preserving the helper bundle icon in Dock; exact fork source pin, LGPL notices and isolated build/policy tests. Published runtimes do not yet contain this patch. |
 | `compat/genshin-fps/` | Independently written GPL FPS-only injector/DLL sources, method credit and locked ZIP pin. Pinned component used by the opt-in, session-owned Genshin FPS launch integration. |
 | `compat/steam-shim/` | Reproducible build inputs, notices and `SHA256SUMS` for the Proton `steam.exe` shim. |
@@ -138,6 +139,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
 ### Dock icon preservation (runtime preparation)
 
 - Helpers opt into `MacGachaPreserveBundleIcon` while retaining `LSUIElement=true`. A compatible Wine macOS driver skips its Windows-icon replacement during foreground promotion; existing runtimes ignore this custom key. The rounded ICNS remains the fallback/closed-app icon from PR #125.
+- `python3 -I scripts/build-wine.py OUTPUT --cache CACHE [--fetch-only|--offline] [--bison PATH]` builds the full Wine candidate outside Documents. `scripts/test-wine-build.py` checks input rejection, archive containment/reproducibility and wrapper execution. `.github/workflows/wine.yml` manually builds twice offline and compares packages; it only uploads artifacts, never publishes or selects a runtime. Prebuilt dependency provenance and outstanding source-delivery requirements are in `compat/wine/NOTICE.md`.
 - `scripts/build-dock-icon.sh OUTPUT [--fetch-only|--offline]` builds an isolated x86_64 test module from a checksum-pinned Wine 11.20 fork and runs `scripts/test-dock-icon.py SOURCE [--expect-legacy]` against real bundle metadata. It never installs or publishes the result. This reduced-feature build is a D3DMetal probe, not a replacement production runtime or Wine 11.0/DXMT module.
 - Keep production runtime delivery separate: no catalog ID may point at this unpublished probe. Preserve runtime immutability and component/session pins; helper files are hard links and must never be patched in place. Global Genshin and ZZZ D3DMetal have local icon evidence (ZZZ with DX12/Surround enabled); a production Wine 11.0/DXMT build remains unverified.
 

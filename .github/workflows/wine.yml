@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+name: Wine candidate (manual build)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check packaging contracts and install locked Bison
+        run: |
+          python3 -I scripts/test-wine-build.py
+          python3 -I scripts/install-steam-shim-toolchain.py "$RUNNER_TEMP/wine-toolchain" --lock compat/crypt32-fix/toolchain.lock
+      - name: Fetch checksum-pinned inputs
+        run: python3 -I scripts/build-wine.py "$RUNNER_TEMP/wine-a" --cache "$RUNNER_TEMP/wine-cache" --fetch-only
+      - name: Build twice offline and compare packages
+        run: |
+          set -euo pipefail
+          profile='(version 1) (allow default) (deny network*) (deny file-read* (subpath "/opt/homebrew")) (deny file-write* (subpath "/opt/homebrew"))'
+          for suffix in a b; do
+            sandbox-exec -p "$profile" python3 -I scripts/build-wine.py "$RUNNER_TEMP/wine-$suffix" --cache "$RUNNER_TEMP/wine-cache" --offline --bison "$RUNNER_TEMP/wine-toolchain/opt/bison/bin/bison"
+          done
+          cmp "$RUNNER_TEMP/wine-a/11.20-macgacha1-preview3.tar.xz" "$RUNNER_TEMP/wine-b/11.20-macgacha1-preview3.tar.xz"
+      - name: Probe the unpacked candidate
+        run: python3 -I scripts/check-wine.py "$RUNNER_TEMP/wine-a" "$RUNNER_TEMP/wine-probe"
+      # Evidence is public in this public repository. Do not distribute binaries
+      # until the dependency-source delivery requirement in NOTICE.md is resolved.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wine-build-evidence
+          path: |
+            ${{ runner.temp }}/wine-a/*.json
+            ${{ runner.temp }}/wine-a/*.log
+            ${{ runner.temp }}/wine-a/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
