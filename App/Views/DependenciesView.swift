@@ -76,8 +76,14 @@ private struct DependencyCard: View {
 
     private var hasCatalog: Bool { model.runtimeCatalog != nil }
     private var status: RuntimeVersionGroup.Status {
-        group.status(selected: model.runtimeIsSelected, recommended: model.runtimeIsRecommended, hasCatalog: hasCatalog)
+        let status = group.status(selected: model.runtimeIsSelected, recommended: model.runtimeIsRecommended, hasCatalog: hasCatalog)
+        // A Wine version the user picked by hand is a choice, not an outdated install.
+        if offersWineChoice, case .updateAvailable(let current, _) = status, model.runtimeIsPinned(current.id) { return .ready(current) }
+        return status
     }
+    /// Runtime bundles for one graphics layer differ by Wine. Wine is chosen
+    /// automatically, with tested alternatives behind a disclosure.
+    private var offersWineChoice: Bool { hasCatalog && group.rows.count > 1 && group.rows.allSatisfy { $0.backend != nil } }
     private var active: RuntimeRow? { group.active(selected: model.runtimeIsSelected, hasCatalog: hasCatalog) }
     /// One version needs no list: the header already says everything about it.
     private var showsVersions: Bool { group.rows.count > 1 }
@@ -86,7 +92,10 @@ private struct DependencyCard: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(14)
-            if showsVersions {
+            if offersWineChoice {
+                Divider().padding(.horizontal, 14)
+                WineChoice(group: group, active: active, remove: { removing = $0 })
+            } else if showsVersions {
                 Divider().padding(.horizontal, 14)
                 VStack(spacing: 0) {
                     ForEach(Array(group.rows.enumerated()), id: \.element.id) { index, row in
@@ -158,8 +167,9 @@ private struct DependencyCard: View {
         case .notInstalled(let row):
             Text(DependencyText.download(row)).detailStyle()
         case .ready(let row), .updateAvailable(let row, _):
-            // With a version list the checked row already says this.
-            if !showsVersions { ActiveVersionLine(row: row) }
+            // With a version list the checked row already says this. The Wine
+            // choice stays collapsed, so the header names what games use.
+            if offersWineChoice { ActiveVersionLine(row: row, wineChoice: true) } else if !showsVersions { ActiveVersionLine(row: row) }
         case .damaged:
             Text("A copy on disk is damaged. Remove it, then set it up again.").detailStyle()
         }
@@ -184,9 +194,9 @@ private struct DependencyCard: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.canUseRuntimeVersion(newer.id))
                     .help(String(localized: "Switch to \(DependencyText.name(newer))"))
-                ActiveMenu(row: current, remove: { removing = current })
+                ActiveMenu(row: current, offersPin: !offersWineChoice, remove: { removing = current })
             case .ready(let current):
-                ActiveMenu(row: current, remove: { removing = current })
+                ActiveMenu(row: current, offersPin: !offersWineChoice, remove: { removing = current })
             case .damaged:
                 EmptyView()
             }
@@ -199,11 +209,17 @@ private struct DependencyCard: View {
 private struct ActiveVersionLine: View {
     @Environment(AppModel.self) private var model
     let row: RuntimeRow
+    var wineChoice = false
 
     var body: some View {
         let pinned = model.runtimeIsPinned(row.id)
+        let using = String(localized: "Using \(DependencyText.name(row))")
         Label {
-            Text(StatusText.joined(String(localized: "Using \(DependencyText.name(row))"), DependencyText.source(row)))
+            if wineChoice {
+                Text(StatusText.joined(using, pinned ? String(localized: "Wine chosen by you") : String(localized: "Wine chosen automatically")))
+            } else {
+                Text(StatusText.joined(using, DependencyText.source(row)))
+            }
         } icon: {
             Image(systemName: pinned ? "pin.fill" : "checkmark.circle.fill")
         }
@@ -217,11 +233,12 @@ private struct ActiveVersionLine: View {
 private struct ActiveMenu: View {
     @Environment(AppModel.self) private var model
     let row: RuntimeRow
+    var offersPin = true
     let remove: () -> Void
 
     var body: some View {
         Menu {
-            if model.runtimeCatalog != nil && model.runtimeIsSelected(row.id) {
+            if offersPin && model.runtimeCatalog != nil && model.runtimeIsSelected(row.id) {
                 if !model.runtimeIsPinned(row.id) {
                     Button("Keep This Version", systemImage: "pin") { model.useRuntimeVersion(row.id, pinned: true) }
                         .disabled(!model.canUseRuntimeVersion(row.id))
@@ -248,6 +265,8 @@ private struct VersionRow: View {
     @Environment(AppModel.self) private var model
     let row: RuntimeRow
     let isActive: Bool
+    /// Rows inside the Wine choice name the Wine and pin when used.
+    var pinsChoice = false
     let remove: () -> Void
 
     var body: some View {
@@ -257,7 +276,7 @@ private struct VersionRow: View {
                 .frame(width: 16)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(DependencyText.name(row))
+                Text(pinsChoice ? DependencyText.wine(row) : DependencyText.name(row))
                     .font(.callout)
                     .monospacedDigit()
                 if case .working = row.state {
@@ -269,7 +288,7 @@ private struct VersionRow: View {
             Spacer(minLength: 8)
             if !isActive { trailing }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, pinsChoice ? 0 : 14)
         .padding(.vertical, 7)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isActive ? .isSelected : [])
@@ -277,6 +296,22 @@ private struct VersionRow: View {
 
     private var caption: String {
         var parts: [String] = []
+        if pinsChoice {
+            if isActive {
+                let installed = if case .installed = row.state { true } else { false }
+                parts.append(installed ? String(localized: "In use") : String(localized: "Selected"))
+            }
+            if model.runtimeIsRecommended(row.id) { parts.append(String(localized: "Recommended")) }
+            if let graphics = DependencyText.graphics(row) { parts.append(graphics) }
+            switch row.state {
+            case .installed: parts.append(DependencyText.source(row))
+            case .notInstalled: if let size = row.downloadSize, size > 0 { parts.append(String(localized: "About \(ByteSize.text(size)) to download")) }
+            case .failed(let message): parts.append(message)
+            case .invalid(let reason, _): parts.append(String(localized: "Damaged: \(reason)"))
+            case .working: break
+            }
+            return parts.reduce("") { $0.isEmpty ? $1 : StatusText.joined($0, $1) }
+        }
         if isActive {
             // A selected version that isn't on disk yet is what Set Up installs, not what games use.
             let installed = if case .installed = row.state { true } else { false }
@@ -298,7 +333,7 @@ private struct VersionRow: View {
         switch row.state {
         case .installed:
             if model.runtimeCatalog != nil {
-                Button("Use") { model.useRuntimeVersion(row.id) }
+                Button("Use") { model.useRuntimeVersion(row.id, pinned: pinsChoice ? true : nil) }
                     .disabled(!model.canUseRuntimeVersion(row.id))
                     .help(String(localized: "Use \(DependencyText.name(row)) for every game"))
             }
@@ -311,7 +346,7 @@ private struct VersionRow: View {
             if row.canImportGPTK {
                 Button("Import…") { model.importGPTK(row.id) }
             }
-            SetUpButton(row: row, prominent: false)
+            SetUpButton(row: row, prominent: false, pinned: pinsChoice ? true : nil)
         case .working(let phase, _):
             if phase != .deleting && phase != .cleaningUp {
                 Button("Cancel") { model.cancel(row.id) }
@@ -327,10 +362,94 @@ private struct VersionRow: View {
     }
 }
 
+/// Wine for one graphics layer. Automatic follows the recommended version; picking
+/// one by hand pins it, so a later recommendation doesn't move that game setup.
+private struct WineChoice: View {
+    @Environment(AppModel.self) private var model
+    let group: RuntimeVersionGroup
+    let active: RuntimeRow?
+    let remove: (RuntimeRow) -> Void
+    @State private var expanded = false
+
+    private var recommended: RuntimeRow? { group.rows.first { model.runtimeIsRecommended($0.id) } }
+    private var isAutomatic: Bool { active.map { !model.runtimeIsPinned($0.id) } ?? false }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded.animation(.smooth(duration: 0.2))) {
+            VStack(spacing: 0) {
+                if let recommended {
+                    AutomaticWineRow(recommended: recommended, isActive: isAutomatic)
+                }
+                ForEach(group.rows) { row in
+                    Divider().padding(.leading, 26)
+                    VersionRow(row: row, isActive: !isAutomatic && row.id == active?.id, pinsChoice: true, remove: { remove(row) })
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            HStack {
+                Text("Wine Version").font(.callout)
+                Spacer()
+                Text(summary).font(.callout).foregroundStyle(.secondary)
+            }
+            .contentShape(.rect)
+            .onTapGesture { withAnimation(.smooth(duration: 0.2)) { expanded.toggle() } }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        #if DEBUG
+        .onAppear { if UserDefaults.standard.bool(forKey: "MacGachaDebugExpanded") { expanded = true } }
+        #endif
+    }
+
+    private var summary: String {
+        guard let active else { return String(localized: "Automatic", comment: "Wine version choice") }
+        return isAutomatic ? String(localized: "Automatic", comment: "Wine version choice") : DependencyText.wine(active)
+    }
+}
+
+private struct AutomaticWineRow: View {
+    @Environment(AppModel.self) private var model
+    let recommended: RuntimeRow
+    let isActive: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(isActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Automatic", comment: "Wine version choice").font(.callout)
+                Text(caption).detailStyle()
+            }
+            Spacer(minLength: 8)
+            if !isActive {
+                let installed = if case .installed = recommended.state { true } else { false }
+                Button(installed ? String(localized: "Use") : String(localized: "Set Up…")) {
+                    model.useRuntimeVersion(recommended.id, pinned: false)
+                }
+                .disabled(!model.canUseRuntimeVersion(recommended.id))
+                .help("Let MacGacha choose the Wine version tested best with this graphics layer")
+            }
+        }
+        .padding(.vertical, 7)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+
+    private var caption: String {
+        let now = String(localized: "The recommended version, now \(DependencyText.wine(recommended))")
+        if case .notInstalled = recommended.state { return StatusText.joined(now, DependencyText.download(recommended)) }
+        return now
+    }
+}
+
 private struct SetUpButton: View {
     @Environment(AppModel.self) private var model
     let row: RuntimeRow
     let prominent: Bool
+    var pinned: Bool? = nil
 
     var body: some View {
         let retry = if case .failed = row.state { true } else { false }
@@ -338,7 +457,7 @@ private struct SetUpButton: View {
             ? (retry ? String(localized: "Try Again") : String(localized: "Set Up…"))
             : (retry ? String(localized: "Try Again") : String(localized: "Install"))
         let button = Button(title) {
-            if model.runtimeCatalog != nil { model.useRuntimeVersion(row.id) } else { model.install(row.id) }
+            if model.runtimeCatalog != nil { model.useRuntimeVersion(row.id, pinned: pinned) } else { model.install(row.id) }
         }
         .disabled(model.runtimeCatalog != nil && !model.canUseRuntimeVersion(row.id))
         if prominent { button.buttonStyle(.borderedProminent) } else { button }
@@ -427,6 +546,17 @@ enum DependencyText {
     /// A bundle names its contents in the summary instead of a bare version.
     static func name(_ row: RuntimeRow) -> String { row.summary ?? row.version }
 
+    /// Catalog summaries read "<Wine> · <graphics>"; without that shape the whole summary stands in.
+    static func wine(_ row: RuntimeRow) -> String {
+        guard let summary = row.summary, let split = summary.range(of: " · ") else { return name(row) }
+        return String(summary[..<split.lowerBound])
+    }
+
+    static func graphics(_ row: RuntimeRow) -> String? {
+        guard let summary = row.summary, let split = summary.range(of: " · ") else { return nil }
+        return String(summary[split.upperBound...])
+    }
+
     static func source(_ row: RuntimeRow) -> String {
         if case .installed(.importFromGPTK) = row.state { return String(localized: "Imported from Game Porting Toolkit") }
         return row.licenseName
@@ -470,7 +600,7 @@ private extension RuntimeCategory {
 
     var explanation: String {
         switch self {
-        case .runtimes: String(localized: "Wine with a graphics layer. Each game uses the one chosen in its settings.", comment: "Dependencies category")
+        case .runtimes: String(localized: "Each game uses the graphics layer chosen in its settings. MacGacha picks a tested Wine version for it.", comment: "Dependencies category")
         case .compatibility: String(localized: "Small helpers some games need to start.", comment: "Dependencies category")
         case .extras: String(localized: "Optional features. Each is set up only when you turn it on for a game.", comment: "Dependencies category")
         }

@@ -2734,6 +2734,89 @@
         }
       }
     },
+    "Automatic" : {
+      "comment" : "Wine version choice",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisch"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automático"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatique"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otomatis"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자동"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automático"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Автоматически"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "อัตโนมัติ"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Автоматично"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tự động"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動"
+          }
+        }
+      }
+    },
     "Automatically check for updates" : {
       "localizations" : {
         "de" : {
@@ -7918,6 +8001,89 @@
         }
       }
     },
+    "Each game uses the graphics layer chosen in its settings. MacGacha picks a tested Wine version for it." : {
+      "comment" : "Dependencies category",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jedes Spiel nutzt die in seinen Einstellungen gewählte Grafikschicht. MacGacha wählt dafür eine getestete Wine-Version."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cada juego usa la capa gráfica elegida en sus ajustes. MacGacha elige para ella una versión de Wine probada."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chaque jeu utilise la couche graphique choisie dans ses réglages. MacGacha choisit pour elle une version de Wine testée."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setiap game memakai lapisan grafis yang dipilih di pengaturannya. MacGacha memilih versi Wine yang sudah diuji untuknya."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "各ゲームは設定で選んだグラフィックスレイヤーを使用します。MacGacha がテスト済みの Wine バージョンを選びます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "각 게임은 설정에서 선택한 그래픽 레이어를 사용합니다. MacGacha가 테스트된 Wine 버전을 선택합니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cada jogo usa a camada gráfica escolhida nas configurações. O MacGacha escolhe uma versão testada do Wine para ela."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Каждая игра использует графический слой, выбранный в её настройках. MacGacha подбирает для него проверенную версию Wine."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "แต่ละเกมใช้เลเยอร์กราฟิกที่เลือกไว้ในการตั้งค่า MacGacha จะเลือก Wine เวอร์ชันที่ทดสอบแล้วให้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Кожна гра використовує графічний шар, вибраний у її налаштуваннях. MacGacha підбирає для нього перевірену версію Wine."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mỗi trò chơi dùng lớp đồ họa được chọn trong cài đặt của nó. MacGacha chọn phiên bản Wine đã được kiểm thử cho lớp đó."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每个游戏使用其设置中选择的图形层。MacGacha 会为它选择经过测试的 Wine 版本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每個遊戲使用其設定中選擇的圖形層。MacGacha 會為它選擇經過測試的 Wine 版本。"
+          }
+        }
+      }
+    },
     "English" : {
       "comment" : "Voice pack language",
       "localizations" : {
@@ -12495,16 +12661,16 @@
             "value" : "Оставить эту версию"
           }
         },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Залишити цю версію"
-          }
-        },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "เก็บเวอร์ชันนี้ไว้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Залишити цю версію"
           }
         },
         "vi" : {
@@ -12771,6 +12937,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "剩餘不到 1 分鐘"
+          }
+        }
+      }
+    },
+    "Let MacGacha choose the Wine version tested best with this graphics layer" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha die mit dieser Grafikschicht am besten getestete Wine-Version wählen lassen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dejar que MacGacha elija la versión de Wine mejor probada con esta capa gráfica"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laisser MacGacha choisir la version de Wine la mieux testée avec cette couche graphique"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Biarkan MacGacha memilih versi Wine yang paling teruji dengan lapisan grafis ini"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このグラフィックスレイヤーで最もよくテストされた Wine バージョンを MacGacha に選ばせる"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 그래픽 레이어에서 가장 잘 테스트된 Wine 버전을 MacGacha가 선택하도록 합니다"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deixar o MacGacha escolher a versão do Wine mais bem testada com esta camada gráfica"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Пусть MacGacha выбирает версию Wine, лучше всего проверенную с этим графическим слоем"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ให้ MacGacha เลือก Wine เวอร์ชันที่ทดสอบกับเลเยอร์กราฟิกนี้ได้ดีที่สุด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нехай MacGacha вибирає версію Wine, найкраще перевірену з цим графічним шаром"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Để MacGacha chọn phiên bản Wine được kiểm thử tốt nhất với lớp đồ họa này"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让 MacGacha 选择与此图形层测试效果最好的 Wine 版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓 MacGacha 選擇與此圖形層測試效果最好的 Wine 版本"
           }
         }
       }
@@ -17020,16 +17268,16 @@
             "value" : "Рекомендуемая"
           }
         },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Рекомендована"
-          }
-        },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "แนะนำ"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Рекомендована"
           }
         },
         "vi" : {
@@ -18535,6 +18783,7 @@
       }
     },
     "Runtimes" : {
+      "comment" : "Dependencies category",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -18614,8 +18863,7 @@
             "value" : "執行環境"
           }
         }
-      },
-      "comment" : "Dependencies category"
+      }
     },
     "Save a zip with system details and redacted logs to share in a bug report" : {
       "localizations" : {
@@ -18831,16 +19079,16 @@
             "value" : "Выбрана"
           }
         },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Вибрана"
-          }
-        },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "เลือกอยู่"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вибрана"
           }
         },
         "vi" : {
@@ -22482,6 +22730,88 @@
         }
       }
     },
+    "The recommended version, now %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die empfohlene Version, derzeit %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La versión recomendada, ahora %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La version recommandée, actuellement %@"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Versi yang direkomendasikan, saat ini %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推奨バージョン（現在は %@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "권장 버전, 현재 %@"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A versão recomendada, agora %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Рекомендуемая версия, сейчас %@"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เวอร์ชันที่แนะนำ ตอนนี้คือ %@"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Рекомендована версія, зараз %@"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phiên bản được đề xuất, hiện là %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推荐版本，目前为 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推薦版本，目前為 %@"
+          }
+        }
+      }
+    },
     "The saved operation could not be recovered. Check Diagnostics for details." : {
       "localizations" : {
         "de" : {
@@ -24920,16 +25250,16 @@
             "value" : "Доступно обновление"
           }
         },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Доступне оновлення"
-          }
-        },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "มีอัปเดต"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Доступне оновлення"
           }
         },
         "vi" : {
@@ -26688,6 +27018,252 @@
         }
       }
     },
+    "Wine Version" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine-Version"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Versión de Wine"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version de Wine"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Versi Wine"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine バージョン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 버전"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Versão do Wine"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Версия Wine"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เวอร์ชัน Wine"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Версія Wine"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phiên bản Wine"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 版本"
+          }
+        }
+      }
+    },
+    "Wine chosen automatically" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine automatisch gewählt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine elegido automáticamente"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine choisi automatiquement"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine dipilih otomatis"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine は自動選択"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine 자동 선택"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine escolhido automaticamente"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine выбран автоматически"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เลือก Wine อัตโนมัติ"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine вибрано автоматично"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine được chọn tự động"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动选择的 Wine"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動選擇的 Wine"
+          }
+        }
+      }
+    },
+    "Wine chosen by you" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine von dir gewählt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine elegido por ti"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine choisi par vous"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine dipilih olehmu"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine は手動選択"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "직접 선택한 Wine"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine escolhido por você"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine выбран вами"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine ที่คุณเลือก"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine вибрано вами"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wine do bạn chọn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你选择的 Wine"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你選擇的 Wine"
+          }
+        }
+      }
+    },
     "Wine crypt32 fix" : {
       "comment" : "Runtime component name",
       "localizations" : {
@@ -27016,89 +27592,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wine 與 DXMT，讓 DirectX 11 遊戲在 Metal 上執行。"
-          }
-        }
-      }
-    },
-    "Wine with a graphics layer. Each game uses the one chosen in its settings." : {
-      "comment" : "Dependencies category",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine mit einer Grafikschicht. Jedes Spiel nutzt die in seinen Einstellungen gewählte."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine con una capa gráfica. Cada juego usa la elegida en sus ajustes."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine avec une couche graphique. Chaque jeu utilise celle choisie dans ses réglages."
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine dengan lapisan grafis. Setiap game memakai yang dipilih di pengaturannya."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine とグラフィックレイヤーのセットです。各ゲームは設定で選んだものを使います。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine와 그래픽 레이어입니다. 각 게임은 설정에서 선택한 것을 사용합니다."
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine com uma camada gráfica. Cada jogo usa a escolhida nos seus ajustes."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine с графическим слоем. Каждая игра использует тот, что выбран в её настройках."
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine พร้อมเลเยอร์กราฟิก แต่ละเกมใช้ตัวที่เลือกไว้ในการตั้งค่าของเกม"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine із графічним шаром. Кожна гра використовує той, що вибрано в її налаштуваннях."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine kèm lớp đồ họa. Mỗi trò chơi dùng lớp được chọn trong cài đặt của nó."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine 与图形层。每款游戏使用其设置中选择的那一个。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wine 與圖形層。每款遊戲使用其設定中選擇的那一個。"
           }
         }
       }
