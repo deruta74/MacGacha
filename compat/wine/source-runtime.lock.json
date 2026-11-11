@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "version": "11.20-macgacha1-preview4",
+  "upstreamCommit": "a05983676741c558ac46937a29a93e02b38de8c7",
+  "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+  "sdk": "27.0",
+  "bison": "3.8.2",
+  "deploymentTarget": "14.0",
+  "patchSha256": "55028ecf36325bea4d7b8899452542763fba53e942304fd5362c8ef3a2854a70",
+  "inputs": [
+    {
+      "name": "wine-source.tar.gz",
+      "url": "https://api.github.com/repos/dbc-hbin/wine-yaagl-d3dmetal/tarball/a05983676741c558ac46937a29a93e02b38de8c7",
+      "sha256": "fdb4adbbe5d267e20ce55838f6b8457398ee28df688ee323c7fcebbcd3aae4c0"
+    },
+    {
+      "name": "llvm-mingw.tar.xz",
+      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-macos-universal.tar.xz",
+      "sha256": "2cab02a2e964bd4aae981150a45985d07c657cfa8d244959eb9e2dcc5eedd7b1"
+    },
+    {
+      "name": "pkgconf.tar.xz",
+      "url": "https://distfiles.ariadne.space/pkgconf/pkgconf-3.0.10.tar.xz",
+      "sha256": "9371b2f6372da574d4c6dc96fe9b1463037bcf6afcb6671c1555afde7b17e2de"
+    }
+  ]
+}

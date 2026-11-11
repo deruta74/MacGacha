@@ -1,5 +1,46 @@
 # Full MacGacha Wine candidate
 
+## Source-built preview4
+
+The source-only path uses `source-build.lock.json` (dependency/tool sources)
+and `source-runtime.lock.json` (Wine/toolchain inputs). It does not fetch or
+read the preview3 donor or prebuilt header SDKs. Core libraries and a selected
+GStreamer/FFmpeg decoder stack are built in a private staging root. See
+`SOURCE-NOTICE.md` for deliberate feature differences requiring qualification.
+
+```sh
+python3 -I scripts/build-wine-dependencies.py /tmp/deps-a --cache /tmp/deps-cache --fetch-only
+python3 -I scripts/build-wine-dependencies.py /tmp/deps-a --cache /tmp/deps-cache --offline
+python3 -I scripts/build-wine.py /tmp/wine-source-a --dependencies /tmp/deps-a --cache /tmp/wine-inputs --fetch-only
+python3 -I scripts/build-wine.py /tmp/wine-source-a --dependencies /tmp/deps-a --cache /tmp/wine-inputs --offline --bison /tmp/deps-a/tools/bin/bison
+python3 -I scripts/finalize-source-wine.py /tmp/wine-source-a /tmp/wine-final-a
+python3 -I scripts/check-wine.py /tmp/wine-final-a /tmp/wine-source-probe --deny-read /tmp/deps-a
+```
+
+Both output roots must be absent. Bison, Ninja, Meson and pkgconf are built
+from source; compiler/SDK versions remain locked. No `/opt/macgacha` system
+installation is performed: fixed configure prefixes use DESTDIR. New private
+libraries use rpath identities for later configure probes. Receipt checks
+bind every staged file to a package and retain original source archives,
+commands, build scripts and license texts. Wine verifies this receipt and
+the retained source hashes before copying the SDK into its own private root.
+
+Finalization verifies the base archive/receipt and matching build helper,
+copies into a fresh root, removes native debug tables (`strip -S`) and repeats
+deterministic UUID/signature normalization. This removes Nettle's N_SO/N_OSO
+object paths without losing exported symbols. It only accepts source-built
+candidates and refuses shared inodes; original builds are retained. The final
+receipt records the original archive hash and packaging script. Its local-only
+`work` link supports diagnostic compilation and is excluded from packages.
+
+The manual workflow now builds two independent source SDK/Wine pairs without
+network/Homebrew access and compares the preview4 archives. It uploads build
+evidence only. The probe additionally requires system TLS trust anchors and
+actual decoding of the synthetic two-frame H.264/MP4 fixture. These checks
+do not establish long-session gameplay, every codec or source-license review.
+
+## Retained preview3 donor path
+
 The standalone candidate builds Wine 11.20 from the pinned fork with the
 opt-in Dock icon patch from PR #126. This branch depends on that patch.
 It includes x86_64 Unix modules, i386/x86_64 Windows modules and an arm64
@@ -10,8 +51,9 @@ are not packaged. The launcher wrapper uses the real
 ## Rebuild
 
 Use Apple Silicon with Rosetta, the locked Apple Clang/SDK from
-`inputs.lock.json` and Bison 3.8.2. The manual workflow installs Bison using
-`compat/crypt32-fix/toolchain.lock`; no Homebrew fallback occurs in the build.
+`inputs.lock.json` and Bison 3.8.2. For this retained path the isolated
+toolchain can be installed using `compat/crypt32-fix/toolchain.lock`;
+the current manual workflow uses the source-built path above instead.
 Python 3.9 or later is sufficient. Keep scratch/output outside Documents,
 with no whitespace in its path. The output must not exist.
 
@@ -36,6 +78,27 @@ Only the donor's open-source dylibs/GStreamer payload is selected. The
 builder never reads installed MacGacha runtimes. The donor libraries are
 **reused prebuilt dependencies**, not fresh builds from their source.
 See NOTICE.md for the remaining dependency-source distribution requirement.
+
+## Dependency source preparation
+
+`dependency-sources.lock.json` pins Cerbero 1.28.7 build recipes (including
+their patches) and a **partial** set of source archives: GStreamer, FFmpeg
+and the framework's zlib. Their hashes come from those pinned recipes.
+These sources do not establish the donor's exact build configuration or
+cover the root-level dependency libraries. See [DEPENDENCIES.md](DEPENDENCIES.md).
+
+```sh
+python3 -I scripts/test-wine-dependencies.py
+python3 -I scripts/audit-wine-dependencies.py /path/to/candidate /tmp/dependency-audit.json --cache /tmp/wine-source-cache --fetch
+```
+
+Omit `--fetch` for an offline audit. The output must not exist. The audit
+checks the entire unpacked runtime against its receipt, verifies cached
+source hashes, and records every root library and framework entry plus
+the framework's versions/license metadata. It never executes donor code,
+changes the runtime or certifies complete corresponding-source delivery.
+This audit is for legacy donor candidates; it is not needed for the
+source-built SDK's package/file/source receipts.
 
 Output contains `wine/`, a normalized tar.xz, SHA256SUMS, a complete file/
 symlink receipt, build logs, relocations and corresponding Wine/build inputs.

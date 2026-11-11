@@ -26,6 +26,17 @@ int main(int argc, char **argv)
     int (*tls_init)(void) = symbol(tls, "gnutls_global_init");
     void (*tls_done)(void) = symbol(tls, "gnutls_global_deinit");
     if (tls_init()) return 1;
+    if (getenv("MACGACHA_REQUIRE_TRUST")) {
+        void *credentials = NULL;
+        int (*allocate)(void **) = symbol(tls, "gnutls_certificate_allocate_credentials");
+        int (*trust)(void *) = symbol(tls, "gnutls_certificate_set_x509_system_trust");
+        void (*release)(void *) = symbol(tls, "gnutls_certificate_free_credentials");
+        if (allocate(&credentials)) return 1;
+        int count = trust(credentials);
+        release(credentials);
+        if (count <= 0) { fprintf(stderr, "No system TLS trust anchors: %d\n", count); return 1; }
+        printf("System TLS trust anchors: %d\n", count);
+    }
     tls_done();
     void *ft = library(argv[1], "lib/libfreetype.6.dylib"), *ft_instance = NULL;
     int (*ft_init)(void **) = symbol(ft, "FT_Init_FreeType");

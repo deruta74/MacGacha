@@ -171,7 +171,36 @@ def tool_environment(deployment):
     return env
 
 
-def prepare(lock, cache, work, bison):
+def prepare_source_dependencies(dependencies, work):
+    receipt = json.loads((dependencies / 'receipt.json').read_text())
+    if receipt.get('schemaVersion') != 1 or receipt.get('dependencyOrigin') != 'Built from pinned sources; no donor libraries':
+        raise ValueError('expected source-built dependency receipt')
+    if inventory(dependencies / 'stage') != receipt['entries'] or inventory(dependencies / 'source-inputs') != receipt['sourceInputEntries']:
+        raise ValueError('source dependency receipt mismatch')
+    if set(receipt.get('fileOwners', {})) != set(receipt['entries']): raise ValueError('unattributed source SDK files')
+    source_lock = json.loads((dependencies / 'source-inputs/source-build.lock.json').read_text())
+    if source_lock != receipt['inputs']: raise ValueError('source lock differs from build receipt')
+    if [p['source'] for p in receipt['packages']] != source_lock['inputs']:
+        raise ValueError('incomplete source package build receipt')
+    for item in source_lock['inputs']:
+        name = item['archive']
+        if Path(name).name != name or name in ('.', '..'): raise ValueError('unsafe source archive name')
+        verify(dependencies / 'source-inputs' / name, item['sha256'])
+    core = dependencies / 'stage/opt/macgacha/deps'
+    media = dependencies / 'stage/opt/macgacha/media'
+    libraries = work / 'dependencies/lib'
+    libraries.mkdir(parents=True)
+    shutil.copytree(core, work / 'devel', symlinks=True)
+    for path in (core / 'lib').glob('*.dylib'):
+        if path.is_symlink(): (libraries / path.name).symlink_to(os.readlink(path))
+        else: shutil.copy2(path, libraries / path.name)
+    shutil.copytree(media, libraries / 'GStreamer.framework/Versions/1.0', symlinks=True)
+    (libraries / 'GStreamer.framework/Versions/Current').symlink_to('1.0')
+    (work / 'source-dependency-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    return libraries
+
+
+def prepare(lock, cache, work, bison, dependencies=None):
     extract(cache / 'wine-source.tar.gz', work / 'source-archive')
     source, = (work / 'source-archive').iterdir()
     extract(cache / 'llvm-mingw.tar.xz', work / 'mingw-archive')
@@ -182,28 +211,32 @@ def prepare(lock, cache, work, bison):
     tool_env = tool_environment(lock['deploymentTarget'])
     run([pkgsrc / 'configure', '--prefix=' + str(tools)], cwd=pkgsrc, env=tool_env, log=work / 'pkgconf-configure.log')
     run(['/usr/bin/make', '-j4', 'install'], cwd=pkgsrc, env=tool_env, log=work / 'pkgconf-build.log')
-    # Select open-source dependency files only; no Apple framework/graphics payload.
-    extract(cache / 'dependency-donor.tar.xz', work / 'donor', lambda n: n.startswith('wine/lib/GStreamer.framework/') or (n.startswith('wine/lib/') and '/' not in n[len('wine/lib/'):] and n.endswith('.dylib')))
-    libraries = work / 'donor/wine/lib'
-    deps = work / 'headers'; deps.mkdir()
-    for item in lock['inputs']:
-        if item.get('kind') != 'headers': continue
-        dest = deps / item['name']
-        extract(cache / item['name'], dest, lambda n: n.startswith(('opt/local/include/', 'opt/local/lib/pkgconfig/', 'opt/local/share/pkgconfig/')))
-        shutil.copytree(dest / 'opt/local', work / 'devel', dirs_exist_ok=True, symlinks=True)
+    if dependencies:
+        libraries = prepare_source_dependencies(dependencies, work)
+    else:
+        # Select open-source dependency files only; no Apple framework/graphics payload.
+        extract(cache / 'dependency-donor.tar.xz', work / 'donor', lambda n: n.startswith('wine/lib/GStreamer.framework/') or (n.startswith('wine/lib/') and '/' not in n[len('wine/lib/'):] and n.endswith('.dylib')))
+        libraries = work / 'donor/wine/lib'
+        deps = work / 'headers'; deps.mkdir()
+        for item in lock['inputs']:
+            if item.get('kind') != 'headers': continue
+            dest = deps / item['name']
+            extract(cache / item['name'], dest, lambda n: n.startswith(('opt/local/include/', 'opt/local/lib/pkgconfig/', 'opt/local/share/pkgconfig/')))
+            shutil.copytree(dest / 'opt/local', work / 'devel', dirs_exist_ok=True, symlinks=True)
     framework = libraries / 'GStreamer.framework/Versions/1.0'
     # pkgutil expands signed payloads; it does not run installer scripts.
-    run(['/usr/sbin/pkgutil', '--expand-full', cache / 'gstreamer-devel.pkg', work / 'gst-sdk'], log=work / 'gst-expand.log')
-    for payload in sorted((work / 'gst-sdk').glob('*/Payload')):
-        for rel in ['include', 'lib/pkgconfig', 'share/pkgconfig', 'lib/glib-2.0/include', 'lib/gstreamer-1.0/include']:
-            if (payload / rel).is_dir(): shutil.copytree(payload / rel, framework / rel, dirs_exist_ok=True, symlinks=True)
+    if not dependencies:
+        run(['/usr/sbin/pkgutil', '--expand-full', cache / 'gstreamer-devel.pkg', work / 'gst-sdk'], log=work / 'gst-expand.log')
+        for payload in sorted((work / 'gst-sdk').glob('*/Payload')):
+            for rel in ['include', 'lib/pkgconfig', 'share/pkgconfig', 'lib/glib-2.0/include', 'lib/gstreamer-1.0/include']:
+                if (payload / rel).is_dir(): shutil.copytree(payload / rel, framework / rel, dirs_exist_ok=True, symlinks=True)
     for pc in (work / 'devel').rglob('*.pc'):
-        text = pc.read_text().replace('/opt/local/lib', str(libraries)).replace('/opt/local', str(work / 'devel'))
+        text = pc.read_text().replace('/opt/macgacha/deps', '/opt/local').replace('/opt/local/lib', str(libraries)).replace('/opt/local', str(work / 'devel'))
         # Some files use ${prefix}/lib rather than the literal prefix.
         text = text.replace('libdir=${prefix}/lib', 'libdir=' + str(libraries)).replace('libdir=${exec_prefix}/lib', 'libdir=' + str(libraries))
         pc.write_text(text)
     for pc in framework.rglob('*.pc'):
-        pc.write_text(pc.read_text().replace('/Library/Frameworks/GStreamer.framework/Versions/1.0', str(framework)))
+        pc.write_text(pc.read_text().replace('/opt/macgacha/media', str(framework)).replace('/opt/macgacha/deps', str(work / 'devel')).replace('/Library/Frameworks/GStreamer.framework/Versions/1.0', str(framework)))
     env = tool_environment(lock['deploymentTarget'])
     env.update(CC='/usr/bin/clang -arch x86_64', CXX='/usr/bin/clang++ -arch x86_64', PATH='/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL='C', TZ='UTC', SOURCE_DATE_EPOCH='0', ZERO_AR_DATE='1',
                WINE_MINGW_ROOT=str(mingw), WINE_MINGW_CLANG=str(mingw / 'bin/clang'), WINE_BISON=str(bison),
@@ -221,13 +254,13 @@ def prepare(lock, cache, work, bison):
 
 
 def local_inputs():
-    files = [ROOT / 'scripts' / n for n in ['build-wine.py', 'check-wine.py', 'test-wine-build.py', 'test-dock-icon.py']]
+    files = [ROOT / 'scripts' / n for n in ['build-wine.py', 'check-wine.py', 'test-wine-build.py', 'test-dock-icon.py', 'build-wine-dependencies.py', 'test-wine-dependency-build.py']]
     files += [ROOT / 'LICENSE', ROOT / 'NOTICE']
     files += [p for directory in ['compat/wine', 'compat/dock-icon'] for p in (ROOT / directory).rglob('*') if p.is_file()]
     return {p.relative_to(ROOT).as_posix(): sha(p) for p in sorted(files)}
 
 
-def build(lock, cache, output, bison):
+def build(lock, cache, output, bison, dependencies=None):
     if platform.system() != 'Darwin' or platform.machine() != 'arm64': raise ValueError('Apple Silicon macOS required')
     host_env = tool_environment(lock['deploymentTarget'])
     clang = subprocess.check_output(['/usr/bin/clang', '--version'], env=host_env, text=True).splitlines()[0]
@@ -240,7 +273,7 @@ def build(lock, cache, output, bison):
     input_fingerprint = local_inputs()
     output.mkdir(parents=True)
     work = output / 'work'; work.mkdir()
-    source, libraries, env = prepare(lock, cache, work, bison)
+    source, libraries, env = prepare(lock, cache, work, bison, dependencies)
     patch = ROOT / 'compat/dock-icon/wine-bundle-icon.patch'
     verify(patch, lock['patchSha256'])
     run(['python3', '-I', ROOT / 'scripts/test-dock-icon.py', source, '--expect-legacy'], log=output / 'dock-legacy.log')
@@ -279,12 +312,14 @@ def build(lock, cache, output, bison):
     runtime = output / 'wine'
     shutil.copytree(work / 'build/host', runtime, symlinks=True)
     stage.copy_dependencies(libraries, libraries / 'GStreamer.framework', runtime)
+    if dependencies:
+        shutil.copytree(work / 'devel/share/licenses', runtime / 'share/licenses', dirs_exist_ok=True)
     changes = stage.relocate_runtime(runtime)
     (output / 'relocations.json').write_text(json.dumps(changes, indent=2) + '\n')
     (runtime / 'bin/wine').rename(runtime / 'bin/wine.real')
     shutil.copy2(INPUTS / 'wine-wrapper.sh', runtime / 'bin/wine'); (runtime / 'bin/wine').chmod(0o755)
     for name in ['COPYING.LIB', 'AUTHORS', 'NOTICES.md']: shutil.copy2(source / name, runtime / name)
-    shutil.copy2(INPUTS / 'NOTICE.md', runtime / 'MACGACHA-NOTICE.md')
+    shutil.copy2(INPUTS / ('SOURCE-NOTICE.md' if dependencies else 'NOTICE.md'), runtime / 'MACGACHA-NOTICE.md')
     run(['/usr/bin/lipo', '-verify_arch', 'arm64', runtime / 'bin/wineserver'])
     for name in ['bin/wine.real', 'lib/wine/x86_64-unix/ntdll.so', 'lib/wine/x86_64-unix/winemac.so']:
         run(['/usr/bin/lipo', '-verify_arch', 'x86_64', runtime / name])
@@ -293,7 +328,7 @@ def build(lock, cache, output, bison):
             verify_pe(runtime / f'lib/wine/{arch}-windows' / dll, arch)
     for name in ['winegstreamer.so', 'winedmo.so', 'winemac.so', 'winecoreaudio.so']:
         if not (runtime / 'lib/wine/x86_64-unix' / name).is_file(): raise ValueError('missing required module ' + name)
-    for directory in [runtime / 'bin', runtime / 'lib/wine']:
+    for directory in ([runtime] if dependencies else [runtime / 'bin', runtime / 'lib/wine']):
         for path in sorted(directory.rglob('*')):
             if path.is_symlink() or not path.is_file(): continue
             with path.open('rb') as f: magic = f.read(4)
@@ -303,7 +338,7 @@ def build(lock, cache, output, bison):
     entries = inventory(runtime)
     receipt = dict(schemaVersion=1, version=lock['version'], status='local-candidate-not-published', inputs=lock,
                    wrapperSha256=sha(INPUTS / 'wine-wrapper.sh'), localInputs=input_fingerprint, appleGraphicsIncluded=False,
-                   dependencyOrigin='Pinned donor archive; reused open-source libraries, not fresh dependency builds',
+                   dependencyOrigin='Built from pinned sources; no donor libraries' if dependencies else 'Pinned donor archive; reused open-source libraries, not fresh dependency builds',
                    byteReproducibility='not-yet-proven', entries=entries)
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     archive(runtime, output / (lock['version'] + '.tar.xz'))
@@ -313,10 +348,13 @@ def build(lock, cache, output, bison):
     shutil.copytree(INPUTS, inputs / 'compat/wine')
     shutil.copytree(ROOT / 'compat/dock-icon', inputs / 'compat/dock-icon')
     (inputs / 'scripts').mkdir()
-    for name in ['build-wine.py', 'test-wine-build.py', 'test-dock-icon.py', 'check-wine.py']:
+    for name in ['build-wine.py', 'test-wine-build.py', 'test-dock-icon.py', 'check-wine.py', 'build-wine-dependencies.py', 'test-wine-dependency-build.py']:
         shutil.copy2(ROOT / 'scripts' / name, inputs / 'scripts' / name)
     for name in ['LICENSE', 'NOTICE']:
         shutil.copy2(ROOT / name, inputs / name)
+    if dependencies:
+        shutil.copytree(dependencies / 'source-inputs', inputs / 'dependencies', symlinks=True)
+        shutil.copy2(dependencies / 'receipt.json', inputs / 'dependencies/receipt.json')
     if local_inputs() != input_fingerprint: raise ValueError('local build inputs changed during packaging; discard candidate')
     (output / 'SHA256SUMS').write_text(''.join(f'{sha(p)}  {p.name}\n' for p in sorted(output.glob('*.tar.xz'))))
     print('Candidate built:', output, flush=True)
@@ -329,9 +367,10 @@ def main():
     parser.add_argument('--offline', action='store_true')
     parser.add_argument('--fetch-only', action='store_true')
     parser.add_argument('--bison', type=Path, default=Path('/opt/homebrew/opt/bison/bin/bison'))
+    parser.add_argument('--dependencies', type=Path, help='Verified source-built SDK; selects source-runtime.lock.json')
     args = parser.parse_args()
-    lock = json.loads((INPUTS / 'inputs.lock.json').read_text())
+    lock = json.loads((INPUTS / ('source-runtime.lock.json' if args.dependencies else 'inputs.lock.json')).read_text())
     fetch(lock, args.cache.resolve(), args.offline)
-    if not args.fetch_only: build(lock, args.cache.resolve(), args.output.absolute(), args.bison.resolve())
+    if not args.fetch_only: build(lock, args.cache.resolve(), args.output.absolute(), args.bison.resolve(), args.dependencies.resolve() if args.dependencies else None)
 
 if __name__ == '__main__': main()

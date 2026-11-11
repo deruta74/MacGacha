@@ -16,6 +16,11 @@ source and the MacGacha changes, not a complete source bundle for every
 prebuilt dependency. This is a local qualification artifact, not a public
 release authorization or claim of complete dependency-source delivery.
 
+The separate dependency-sources.lock.json retains upstream Cerbero recipes
+and selected GStreamer/FFmpeg/zlib sources for source-delivery preparation.
+This partial set is not proof of correspondence to every donor binary.
+The receipt-bound audit and remaining work are described in DEPENDENCIES.md.
+
 Apple D3DMetal, Metal shader converter, graphics overlays and sidecars are
 not included. DXMT/D3DMetal are separate compatibility inputs. crypt32 and
 Surround remain separately qualified overlays. No installed runtime,

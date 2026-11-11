@@ -26,6 +26,47 @@ class WineBuildTests(unittest.TestCase):
         cls.build = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.build)
 
+    def test_source_sdk_rejects_changed_payload_before_copy(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); sdk = root / 'sdk'; sdk.mkdir()
+            stage = sdk / 'stage'; stage.mkdir()
+            (stage / 'lib').mkdir(); (stage / 'lib/file').write_bytes(b'original')
+            sources = sdk / 'source-inputs'; sources.mkdir()
+            (sources / 'source.tar').write_bytes(b'source')
+            receipt = dict(schemaVersion=1, dependencyOrigin='Built from pinned sources; no donor libraries',
+                           entries=self.build.inventory(stage), sourceInputEntries=self.build.inventory(sources))
+            (sdk / 'receipt.json').write_text(json.dumps(receipt))
+            (stage / 'lib/file').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'receipt'):
+                self.build.prepare_source_dependencies(sdk, root / 'work')
+            self.assertFalse((root / 'work').exists())
+
+    def test_source_sdk_copies_only_verified_core_and_media(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); sdk = root / 'sdk'; stage = sdk / 'stage'
+            core = stage / 'opt/macgacha/deps'; media = stage / 'opt/macgacha/media'
+            (core / 'lib').mkdir(parents=True); (media / 'lib').mkdir(parents=True)
+            (core / 'lib/libcore.dylib').write_bytes(b'core')
+            (media / 'lib/libmedia.dylib').write_bytes(b'media')
+            sources = sdk / 'source-inputs'; sources.mkdir()
+            archive = sources / 'package.tar'; archive.write_bytes(b'original source')
+            item = {'archive': archive.name, 'sha256': self.build.sha(archive)}
+            lock = {'inputs': [item]}; (sources / 'source-build.lock.json').write_text(json.dumps(lock))
+            entries = self.build.inventory(stage)
+            receipt = dict(schemaVersion=1, dependencyOrigin='Built from pinned sources; no donor libraries',
+                           entries=entries, sourceInputEntries=self.build.inventory(sources),
+                           inputs=lock, packages=[{'source': item}], fileOwners={p: 'package' for p in entries})
+            (sdk / 'receipt.json').write_text(json.dumps(receipt))
+            libs = self.build.prepare_source_dependencies(sdk, root / 'work')
+            self.assertEqual((libs / 'libcore.dylib').read_bytes(), b'core')
+            self.assertEqual((libs / 'GStreamer.framework/Versions/Current/lib/libmedia.dylib').read_bytes(), b'media')
+            archive.write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'receipt'):
+                self.build.prepare_source_dependencies(sdk, root / 'other-work')
+            self.assertFalse((root / 'other-work').exists())
+
     def test_build_tools_ignore_ambient_compiler_and_config(self):
         with patch.dict(os.environ, {'SDKROOT': '/untrusted/sdk', 'DEVELOPER_DIR': '/untrusted/xcode', 'CC': '/untrusted/clang', 'CONFIG_SITE': '/untrusted/site', 'CPATH': '/untrusted/include', 'LDFLAGS': '-L/untrusted', 'PATH': '/untrusted'}):
             env = self.build.tool_environment('14.0')

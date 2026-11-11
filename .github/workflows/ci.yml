@@ -40,7 +40,11 @@ jobs:
         run: python3 -I scripts/test-surround-audio.py
 
       - name: Check Wine packaging contracts
-        run: python3 -I scripts/test-wine-build.py
+        run: |
+          python3 -I scripts/test-wine-build.py
+          python3 -I scripts/test-wine-dependencies.py
+          python3 -I scripts/test-wine-dependency-build.py
+          python3 -I scripts/test-finalize-source-wine.py
 
       - name: Validate runtime catalog publication
         run: |
