@@ -67,7 +67,7 @@ xattr -dr com.apple.quarantine /Applications/MacGacha.app
 - **环绕声。** 《原神》和《绝区零》可通过 D3DMetal 输出环绕声，并混音为空间音频，供 AirPods 及其他受支持的耳机使用。六声道及以上的扬声器保留自身的声道布局。默认关闭，每款游戏可单独开启。
 - **游戏模式。** macOS 为游戏开启游戏模式，启动器本身不启用。每款游戏以拥有独立名称和图标的应用运行，便于 macOS 识别。已在 D3DMetal 和 DXMT 下确认有效。可在设置中关闭。
 - **各游戏独立设置：** 图形后端、帧率限制（关闭、30、60、90 或 120）、显示器、Retina 模式、《绝区零》的 DirectX 12，以及兼容性绕过开关。
-- **运行环境。** Wine、DXMT 和 D3DMetal 下载后并存，因此更新不会破坏可用的旧版本。D3DMetal 仅在接受 Apple 条款后安装，也可从现有 Game Porting Toolkit 导入。默认 DXMT 构建使用 CrossOver 的 Wine，CPU 资源消耗约为上一版的 1/2.5。
+- **运行环境。** DXMT 和 D3DMetal 均推荐使用 MacGacha Wine 11.20（构建版本 1.0）。Wine 和图形组件独立安装。D3DMetal 需要接受 Apple 条款或从 Game Porting Toolkit 导入。旧版本仍可用于回退。切换 Wine 构建会创建新的前缀，星穹铁道保存的帧率等前缀设置也会重新开始。
 - **独立更新运行组件与回退。** MacGacha 会检查独立目录中的兼容组件更新。通过“设置”安装更新；安装成功前，当前版本保持启用。旧版本保留在依赖项页面中，可以选择并固定可用的版本。新的兼容性配置仍需更新应用。依赖项窗口将组件分为运行环境、兼容性和附加功能。每个组件一张卡片，显示正在使用的版本、提供更新，并可一键切回旧版本。
 - **一键配置。** 游戏需要运行环境时，“设置运行环境…”会根据该游戏的设置准确列出所需组件，并一次安装完成。仅当其中包含 D3DMetal 时，才会要求接受 Apple 条款。仍可在依赖项面板中手动选择版本。
 - **兼容性组件。** 可在依赖项窗口中安装和移除 jadeite 及 Steam 启动器兼容替身（shim）。该替身由我们使用 Valve 的 Proton 源代码自行进行可复现构建（[发布页](https://github.com/deruta74/MacGacha/releases/tag/steam-shim-proton-10.0-4)）。
