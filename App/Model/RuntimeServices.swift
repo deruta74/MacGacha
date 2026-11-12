@@ -328,7 +328,7 @@ private final class RuntimeInstallLifetime: Sendable {
 }
 
 private final class OwnedHTTPSession: Sendable {
-    let client = URLSessionHTTPClient()
+    let client = URLSessionHTTPClient(redirectPolicy: RuntimeArchivePolicy.allows)
     deinit { client.invalidate() }
 }
 

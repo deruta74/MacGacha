@@ -63,3 +63,12 @@ public struct RuntimeCatalogFetcher: Sendable {
         return data
     }
 }
+
+/// Initial archive requests and every redirect share this destination policy.
+public enum RuntimeArchivePolicy {
+    public static func allows(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
+            url.port == nil || url.port == 443, url.fragment == nil else { return false }
+        return ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "codeberg.org"].contains(url.host?.lowercased() ?? "")
+    }
+}

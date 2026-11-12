@@ -9,6 +9,15 @@ import LauncherCore
 
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct URLSessionHTTPClientTests {
+    @Test func destinationPolicyRejectsInitialRequestBeforeContact() async throws {
+        let fixture = HTTPFixture(.response(200, [:], []))
+        defer { fixture.close() }
+        let client = URLSessionHTTPClient(session: fixture.session, redirectPolicy: { _ in false })
+        defer { client.invalidate() }
+        await #expect(throws: (any Error).self) { _ = try await client.get(fixture.url, byteRangeFrom: nil) }
+        #expect(fixture.control.request == nil)
+    }
+
     @Test func emptyPostUsesStreamingTransport() async throws {
         let fixture = HTTPFixture(.response(200, ["Content-Length": "6"], [Data("abc".utf8), Data("def".utf8)]))
         defer { fixture.close() }
