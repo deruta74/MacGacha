@@ -62,30 +62,30 @@ import Synchronization
     let metadata: BundleCatalogMetadata
     let old = "d3dmetal-wine11.20-gptk4.0b3"
     let new = "d3dmetal-wine11.20mg1.0-gptk4.0b3"
-    static func make(pinned: Bool = false) async throws -> Self {
+    static func make(pinned: Bool = false, rosettaProbe: any RosettaProbing = UnknownRosettaProbe(), installHelpers: Bool = true, storeFactory: ((AppPaths) -> RuntimeCatalogStore)? = nil) async throws -> Self {
         let resources = Bundle(for: BundleUpgradeResources.self)
         let oldManifest = try RuntimeManifest.load(from: #require(resources.url(forResource: "manifest-0.2.6", withExtension: "json")))
         let baseline = try await BundledRuntimeManifest.load()
         let metadata = try Data(contentsOf: #require(resources.url(forResource: "runtime-catalog", withExtension: "json")))
         let paths = AppPaths(root: FileManager.default.temporaryDirectory.appendingPathComponent("bundle-upgrade-\(UUID().uuidString)"))
-        let store = RuntimeCatalogStore(root: paths.root)
+        let store = storeFactory?(paths) ?? RuntimeCatalogStore(root: paths.root)
         let service = RuntimeCatalogService(baseline: oldManifest, store: store)
         let old = try SafeIdentifier("d3dmetal-wine11.20-gptk4.0b3")
         _ = try await service.selectBundle(id: old, pinned: pinned, installedBundleIDs: [old])
         // Wine-only upgrades require compatible helpers already selected.
         let migrated = RuntimeCatalogService(baseline: baseline, store: store)
         let helperIDs = try [Crypt32Fix.componentID, SurroundAudio.componentID].map(SafeIdentifier.init)
-        for id in helperIDs {
+        for id in helperIDs where installHelpers {
             _ = try await migrated.selectHelper(id: id, pinned: false, installedComponentIDs: Set(helperIDs))
         }
         let services = FakeRuntimeServices()
         let helpers = try baseline.components.filter { helperIDs.contains($0.id) }.map {
             try InstalledComponent(kind: $0.kind, version: $0.version.rawValue, installedAt: .now, source: .download)
         }
-        services.state.withLock { $0.accepted = true; $0.components = helpers }
+        services.state.withLock { $0.accepted = true; $0.components = installHelpers ? helpers : [] }
         let metadataState = BundleCatalogMetadata(metadata)
-        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: paths, services: services, baseline: baseline, fetch: { metadataState.bytes.withLock { $0 } })
-        let model = AppModel(paths: paths, manifest: baseline, services: services, catalogAccess: access, defaults: nil)
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: paths, services: services, baseline: baseline, store: store, fetch: { metadataState.bytes.withLock { $0 } })
+        let model = AppModel(paths: paths, manifest: baseline, services: services, catalogAccess: access, defaults: nil, rosettaProbe: rosettaProbe)
         model.autoUpdateDependencies = false
         try await model.flushLaunchSettings()
         let result = Self(paths: paths, model: model, services: services, metadata: metadataState)
@@ -93,7 +93,7 @@ import Synchronization
         await model.start()
         await model.catalogRefreshTask?.value
         try #require(model.runtimeCatalog?.catalog.revision == 3)
-        _ = try model.runtimeVersionTarget(result.new, pinned: false)
+        if installHelpers { _ = try model.runtimeVersionTarget(result.new, pinned: false) }
         return result
     }
     func publish(_ id: String, source: SourceMode = .download) throws {

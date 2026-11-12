@@ -108,7 +108,12 @@ enum RuntimeSetupItemState {
         let generation = UUID()
         let task = Task { [weak self] in
             guard let self else { return }
-            defer { if self.runtimeSetupRosettaChecks[gameID]?.id == generation { self.runtimeSetupRosettaChecks[gameID] = nil } }
+            defer {
+                if self.runtimeSetupRosettaChecks[gameID]?.id == generation {
+                    self.runtimeSetupRosettaChecks[gameID] = nil
+                    if self.runtimeSetupChains[gameID] == nil { self.finishCatalogSetup(gameID, succeeded: false) }
+                }
+            }
             await self.refreshRosetta()
             guard !Task.isCancelled, self.runtimeSetupRosettaChecks[gameID]?.id == generation else { return }
             if self.rosetta == .missing {
@@ -129,7 +134,7 @@ enum RuntimeSetupItemState {
             cancel(chain.plan.items[chain.index].id)
             return
         }
-        if let check = runtimeSetupRosettaChecks.removeValue(forKey: gameID) {
+        if let check = runtimeSetupRosettaChecks[gameID] {
             check.task.cancel(); setRuntimeSetupProgress(nil, for: gameID)
         }
         guard let chain = runtimeSetupChains.removeValue(forKey: gameID) else { return }

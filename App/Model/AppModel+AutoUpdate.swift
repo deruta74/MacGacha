@@ -120,11 +120,20 @@ import DownloadEngine
                         previousID: update.previousID.rawValue, replacementID: update.targetID.rawValue)
                 }
                 dependencyHasRetainedVersions = true
-                let actual = try await catalogAccess.activate(selections)
+                let actual: RuntimeCatalogSnapshot
+                do { actual = try await catalogAccess.activate(selections) }
+                catch {
+                    guard Task.isCancelled || !autoUpdateDependencies else { throw error }
+                    // Replacement may have succeeded before persistence reported
+                    // failure. Reconcile while retaining the activation reservation.
+                    actual = try await Task.detached { try await catalogAccess.snapshot() }.value
+                }
                 if Task.isCancelled || !autoUpdateDependencies {
                     var previous = actual.selections
                     if let backend = update.backend { previous.bundles[backend] = current.selections.bundles[backend] }
-                    if let kind = update.kind { previous.helpers[kind] = current.selections.helpers[kind] }
+                    for (kind, intended) in selections.helpers where current.selections.helpers[kind] != intended {
+                        if actual.selections.helpers[kind] == intended { previous.helpers[kind] = current.selections.helpers[kind] }
+                    }
                     let restoredSelections = previous
                     let restored = try await Task.detached { try await catalogAccess.activate(restoredSelections) }.value
                     applyRuntimeCatalog(restored)
