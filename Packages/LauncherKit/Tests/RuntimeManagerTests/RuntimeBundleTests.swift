@@ -9,6 +9,35 @@ import DownloadEngine
 import TestSupport
 import Launch
 
+@Test func d3dmetalAcceptsWinePlusGraphics() throws {
+    let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: twoComponentMetalData())
+    #expect(manifest.bundles.first?.components.count == 2)
+}
+
+@Test(arguments: ["twoWines", "noConsent", "wineConsent"])
+func d3dmetalRejectsInvalidTwoComponentLayout(attack: String) throws {
+    let bytes = try twoComponentMetalData { components in
+        switch attack {
+        case "twoWines": components[1]["kind"] = "wine"
+        case "noConsent": components[1].removeValue(forKey: "consent")
+        default: components[0]["consent"] = "appleGPTK"
+        }
+    }
+    #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: bytes) }
+}
+
+func twoComponentMetalData(_ change: (inout [[String: Any]]) -> Void = { _ in }) throws -> Data {
+    try bundleManifestData { object in
+        var components = object["components"] as! [[String: Any]]
+        components[1]["id"] = "d3dmetal-1"; components[1]["kind"] = "d3dmetal"
+        components[1]["rootPath"] = "wine"; components[1]["wineBinary"] = "bin/wine"
+        components[1]["consent"] = "appleGPTK"; components[1].removeValue(forKey: "overlay")
+        change(&components)
+        object["components"] = components
+        object["bundles"] = [["id": "metal-test", "displayName": "D3DMetal", "backend": "d3dmetal", "components": ["wine-1", "d3dmetal-1"]]]
+    }
+}
+
 @Test func schemaTwoBundlesDecodeAndRejectOldSchema() throws {
     let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: bundleManifestData())
     #expect(manifest.schemaVersion == 2)

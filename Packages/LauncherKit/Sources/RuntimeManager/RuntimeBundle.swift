@@ -54,8 +54,12 @@ public struct RuntimeBundle: Codable, Sendable, Identifiable, Equatable {
                 selected.filter({ $0.kind == .dxmt && !$0.overlay.isEmpty }).count == 1,
                 selected.allSatisfy({ $0.consent == nil }) else { throw LauncherError.io("Invalid DXMT bundle") }
         case .d3dmetal:
-            guard selected.count == 1, let c = selected.first, c.kind == .d3dmetal,
-                c.wineBinary != nil, c.consent == .appleGPTK else { throw LauncherError.io("Invalid D3DMetal bundle") }
+            let legacy = selected.count == 1 && selected[0].kind == .d3dmetal
+                && selected[0].wineBinary != nil && selected[0].consent == .appleGPTK
+            let modular = selected.count == 2
+                && selected.filter { $0.kind == .wine && $0.wineBinary != nil && $0.consent == nil }.count == 1
+                && selected.filter { $0.kind == .d3dmetal && $0.consent == .appleGPTK }.count == 1
+            guard legacy || modular else { throw LauncherError.io("Invalid D3DMetal bundle") }
         }
         for component in selected {
             var destinations = Set<String>()
