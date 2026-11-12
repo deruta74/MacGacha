@@ -37,6 +37,7 @@ struct RuntimeInstallContext: Sendable {
             guard catalogSelectionGeneration == selectionGeneration else { return }
             applyRuntimeCatalog(result)
             try await scanAndApply()
+            scheduleDependencyAutoUpdates(retry: true)
         } catch {
             guard catalogSelectionGeneration == selectionGeneration else { return }
             // A rename may have published before an fsync error. Re-read the
@@ -112,7 +113,7 @@ struct RuntimeInstallContext: Sendable {
     func canRemoveRuntime(_ id: String) -> Bool {
         // Keep the preference and pin when an idle user confirms removal. A
         // later Set Up reinstalls that exact version instead of switching it.
-        catalogAccess == nil || canChangeRuntimeCatalog
+        !dependencyAutoUpdateReservation && (catalogAccess == nil || canChangeRuntimeCatalog)
     }
     func runtimeVersionTarget(_ id: String, pinned: Bool? = nil) throws -> RuntimeCatalogSnapshot {
         guard let current = runtimeCatalog else { throw LauncherError.io("Runtime catalog unavailable") }
@@ -130,6 +131,11 @@ struct RuntimeInstallContext: Sendable {
     }
     /// The row owns one captured target. Unrelated backend/helper pins survive.
     func useRuntimeVersion(_ id: String, pinned: Bool? = nil) {
+        if let task = dependencyAutoUpdateTask {
+            task.cancel()
+            Task { [weak self] in await task.value; self?.useRuntimeVersion(id, pinned: pinned) }
+            return
+        }
         guard canChangeRuntimeCatalog, canBeginGameOrRuntimeOperation() else { return }
         do {
             let target = try runtimeVersionTarget(id, pinned: pinned)

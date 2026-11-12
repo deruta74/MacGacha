@@ -391,6 +391,8 @@ private struct CatalogModelFixture: Sendable {
         services.state.withLock { $0.components = [record] }
         let access = LiveRuntimeCatalogAccess(paths: paths, services: services, baseline: baseline, fetch: { metadata })
         let model = AppModel(paths: paths, manifest: baseline, services: services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start()
         await model.catalogRefreshTask?.value
         return Self(paths: paths, baseline: baseline, metadata: metadata, revision3: revision3, services: services, model: model)

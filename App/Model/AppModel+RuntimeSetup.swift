@@ -63,7 +63,7 @@ enum RuntimeSetupItemState {
         #if DEBUG
         if debugLaunchRuntimesReady { return [] }
         #endif
-        guard GameDefinition.find(gameID) != nil, let manifest = effectiveRuntimeManifest,
+        guard GameDefinition.find(gameID) != nil, let manifest = dependencySetupTarget(for: gameID)?.manifest ?? effectiveRuntimeManifest,
             let bundle = manifest.defaultBundle(for: launchSettings(for: gameID).backend) else { return nil }
         var result: [RuntimeSetupRequirement] = []
         if installedBundles[bundle.id.rawValue] == nil {
@@ -98,7 +98,12 @@ enum RuntimeSetupItemState {
         guard canBeginGameOrRuntimeOperation() else { return }
         guard runtimeSetupChains[gameID] == nil, runtimeSetupRosettaChecks[gameID] == nil,
             let plan = runtimeSetupPlan(for: gameID), let first = plan.items.first else { return }
-        for item in plan.items { captureRuntimeInstallContext(item.id, manifest: effectiveRuntimeManifest) }
+        let automaticTarget = dependencySetupTarget(for: gameID)
+        if let automaticTarget {
+            guard canChangeRuntimeCatalog else { return }
+            runtimeCatalogMutationID = first.id; catalogActivationTargets[gameID] = automaticTarget
+        }
+        for item in plan.items { captureRuntimeInstallContext(item.id, manifest: automaticTarget?.catalog.manifest ?? effectiveRuntimeManifest) }
         setRuntimeSetupProgress(.installing(item: first.name, step: 1, of: plan.items.count, fraction: nil), for: gameID)
         let generation = UUID()
         let task = Task { [weak self] in

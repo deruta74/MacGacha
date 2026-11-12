@@ -255,6 +255,8 @@ struct RuntimeInstallStream: AsyncSequence, Sendable {
         await lifetime.worker?.value
     }
 
+    func waitUntilFinished() async { await lifetime.worker?.value }
+
     func makeAsyncIterator() -> Iterator { Iterator(iterator: stream.makeAsyncIterator(), lifetime: lifetime) }
 
     struct Iterator: AsyncIteratorProtocol {

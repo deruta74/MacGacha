@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import RuntimeManager
 
 /// What the Dependencies panel shows for one dependency family (`RuntimeVersionGroup.id`)
 /// while automatic updates work on it. Each case names the row ID it is about.
@@ -22,20 +23,18 @@ enum DependencyAutoUpdateState: Equatable, Sendable {
     case graphicsUpdateDeclined(id: String)
 }
 
-/// The view-facing surface of automatic dependency updates (0.3.0).
-///
-/// TODO(auto-update): this is presentation scaffolding only. Nothing here installs,
-/// activates or removes a version, and nothing is persisted. The coordinator that
-/// lands later owns the stored values behind these accessors (see
-/// `autoUpdateDependenciesPlaceholder`, `dependencyAutoUpdates` and
-/// `runtimeUpdatesAwaitingConsent` in `AppModel`); until then they keep their inert
-/// defaults outside debug screenshots.
+/// The existing view surface backed by durable preferences and the update coordinator.
 @MainActor extension AppModel {
     /// The "Update dependencies automatically" setting, on by default.
-    /// TODO(auto-update): persist with the global launch preferences, like `gameModeEnabled`.
     var autoUpdateDependencies: Bool {
         get { globalLaunchSettings.autoUpdateDependencies }
-        set { setGlobalLaunchPreference(\.autoUpdateDependencies, to: newValue) }
+        set {
+            setGlobalLaunchPreference(\.autoUpdateDependencies, to: newValue)
+            if !globalLaunchSettings.autoUpdateDependencies {
+                dependencyAutoUpdateTask?.cancel()
+                dependencyConsentTargets = [:]; runtimeUpdatesAwaitingConsent = []
+            } else { scheduleDependencyAutoUpdates() }
+        }
     }
 
     func dependencyAutoUpdate(for familyID: String) -> DependencyAutoUpdateState? {
@@ -43,10 +42,9 @@ enum DependencyAutoUpdateState: Equatable, Sendable {
     }
 
     /// Stops a background install. The version games use stays as it is.
-    /// TODO(auto-update): cancel the coordinator's install and join it before clearing the state.
     func cancelDependencyAutoUpdate(for familyID: String) {
-        guard case .installing = dependencyAutoUpdates[familyID] else { return }
-        dependencyAutoUpdates[familyID] = nil
+        dependencyAutoUpdateSuppressed.insert(familyID)
+        dependencyAutoUpdateTask?.cancel()
     }
 
     /// Skips the offered D3DMetal version. A later version offers again.

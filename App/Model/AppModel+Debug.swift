@@ -49,7 +49,7 @@ extension AppModel {
                 ? preview(rows: [], logLines: [], games: Dictionary(uniqueKeysWithValues:
                     games.map { ($0.id, GameState(status: .installed(tag: "7.1.0"))) }), region: region)
                 : preview(rows: [], logLines: [], region: region)
-            if scenario == "off" { preview.autoUpdateDependencies = false }
+            if scenario == "off" { preview.globalLaunchSettings.autoUpdateDependencies = false }
             if scenario == "consent" { preview.runtimeUpdatesAwaitingConsent = Set(games.map(\.id)) }
             Task { await preview.loadDebugDependencies(installing: name == "dependenciesInstalling", autoUpdate: scenario) }
             model = preview
