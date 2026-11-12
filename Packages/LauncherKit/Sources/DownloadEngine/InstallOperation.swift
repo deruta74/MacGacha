@@ -419,6 +419,16 @@ private actor CommitSession {
             selected == (try await context().journal.stagedForCommit()) else {
             throw LauncherError.journalCorrupt("Staged batch membership mismatch")
         }
+        // Staging and all transfers have drained. Flush every verified output
+        // before the existing journal F_FULLFSYNC boundaries and any rename.
+        // Keeping these fsyncs out of concurrent assembly avoids volume-wide
+        // write stalls pinning the journal and the network pipeline together.
+        let fs = fs, plan = try context().plan, files = batch
+        try await BlockingIO.run {
+            for file in files {
+                try fs.synchronizeFile(at: StagingLayout(id: plan.id).file(file.path), durable: false)
+            }
+        }
         try await record(.batchStarted(index: batchIndex))
         try ensureMarker(context().plan.id)
         try await record(.commitStarted(batch: batchIndex))
