@@ -146,5 +146,5 @@ Release asset: `wine-11.20-macgacha-1.0.tar.xz`, 91,726,084 bytes, SHA-256
 and creates that unchanged binary, its checksum, and a complete source/notice
 archive with the original receipt and release mapping. The optional manual
 workflow step attaches these to a draft prerelease, refuses published releases
-and always sets `latest=false`. Publication remains the owner's step.
+and always sets `latest=false`. Publication is a separate step.
 No release has been created or published by this integration task.

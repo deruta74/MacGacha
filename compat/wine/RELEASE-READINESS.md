@@ -7,7 +7,7 @@ Wine `11.20-macgacha1-preview4`, SHA-256:
 
 Two independent source SDK/Wine builds followed by deterministic finalization produced identical archives. All 4147 runtime inventory entries matched. Twenty pinned source packages supply the SDK and build tools. TLS trust anchors, fonts, wineboot, Windows execution and actual synthetic H.264/MP4 decoding passed isolated probes.
 
-Local Global Genshin 7.2 and ZZZ 3.3 reached startup/login screens with DXMT and D3DMetal. Genshin D3DMetal initially stopped at the terms dialog without accepting it automatically. The owner subsequently reported one hour of stable Genshin gameplay with D3DMetal, FPS Unlock 120 and working Surround on 2026-11-11. This is user-reported gameplay/audio evidence, distinct from automated probes. ZZZ/DXMT Game Mode was On on repeat without code changes. The earlier Off observation has no proven root cause.
+Local Global Genshin 7.2 and ZZZ 3.3 reached startup/login screens with DXMT and D3DMetal. Genshin D3DMetal initially stopped at the terms dialog without accepting it automatically. One hour of stable Genshin gameplay was subsequently reported with D3DMetal, FPS Unlock 120 and working Surround on 2026-11-11. This is user-reported gameplay/audio evidence, distinct from automated probes. ZZZ/DXMT Game Mode was On on repeat without code changes. The earlier Off observation has no proven root cause.
 
 Private screenshots, logs, account data and local machine inventories must not be committed.
 
@@ -45,7 +45,7 @@ Release asset: `wine-11.20-macgacha-1.0.tar.xz`, 91,726,084 bytes, SHA-256
 and creates that unchanged binary, its checksum, and a complete source/notice
 archive with the original receipt and release mapping. The optional manual
 workflow step attaches these to a draft prerelease, refuses published releases
-and always sets `latest=false`. Publication remains the owner's step.
+and always sets `latest=false`. Publication is a separate step.
 No release has been created or published by this integration task.
 
 ## Launcher integration preparation
@@ -53,7 +53,7 @@ No release has been created or published by this integration task.
 Catalog r2 adds MacGacha Wine 11.20 for DXMT through the existing profile.
 Catalog r3 and the app baseline add modular D3DMetal with the consented graphics
 payload. Old apps reject r3 and retain r2. The debug-only local catalog argument
-allows owner qualification before any publication. Star Rail DXMT, Genshin and
+allows qualification before any publication. Star Rail DXMT, Genshin and
 ZZZ D3DMetal, optional Surround/FPS, imported GPTK and manual rollback still
-require the owner's checks against this integrated build. The app version and
-release-note filename remain unchanged under the current owner instruction.
+require checks against this integrated build. The app version and
+release-note filename remain unchanged as requested for this preparation.
