@@ -68,7 +68,7 @@ public struct LaunchPreparation: Sendable {
         try PrefixShellFolders.validate(in: prefixFS)
         try PrefixShellFolders.requireIdle(prefix: prefix, prefixFS: prefixFS, wineBinary: binary, runtimeRoot: paths.runtimes, inspector: inspector, serverProbe: serverProbe)
         try PrefixShellFolders.repair(in: prefixFS)
-        let environment = ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all", "LC_ALL": "C"]
+        let environment = PrefixManager.preparationEnvironment(prefix: prefix)
         let needsProvisioning = (marker.provisioningRevision ?? 0) < Self.provisioningRevision
         if needsProvisioning {
             try await run(binary, ["reg", "add", Self.internetSettings, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f"], environment)

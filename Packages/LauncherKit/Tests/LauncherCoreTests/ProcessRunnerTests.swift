@@ -269,3 +269,15 @@ private func readChildPID(from file: URL) async throws -> Int32 {
     }
     throw LauncherError.io("Child did not publish its PID")
 }
+
+@Test
+func processRunnerUsesOnlySuppliedEnvironment() async throws {
+    let supplied = ["MACGACHA_CHILD_SENTINEL": "explicit", "WINEARCH": "win64"]
+    let result = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/env"),
+        arguments: [], environment: supplied, currentDirectory: nil)
+    #expect(result.exitCode == 0)
+    let entries = Set(String(decoding: result.stdout, as: UTF8.self).split(separator: "\n").map(String.init))
+    // Comparing the set avoids disclosing inherited environment values on failure.
+    let matches = entries == Set(supplied.map { "\($0.key)=\($0.value)" })
+    #expect(matches)
+}
