@@ -8,6 +8,31 @@ import RuntimeManager
 @testable import MacGacha
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct RuntimeCatalogModelTests {
+    @Test func debugCatalogFileIsIgnoredOutsideDebug() throws {
+        let arguments = ["MacGacha", "-MacGachaDebugCatalog", "/tmp/catalog.json"]
+        #if DEBUG
+        #expect(LiveRuntimeCatalogAccess.debugCatalogURL(arguments: arguments)?.path == "/tmp/catalog.json")
+        #else
+        #expect(LiveRuntimeCatalogAccess.debugCatalogURL(arguments: arguments) == nil)
+        #endif
+        #expect(LiveRuntimeCatalogAccess.debugCatalogURL(arguments: ["-MacGachaDebugCatalog", "relative.json"]) == nil)
+    }
+
+    #if DEBUG
+    @Test func debugCatalogFileValidatesLikeRemote() async throws {
+        let f = try await CatalogModelFixture.make()
+        let url = f.paths.root.appendingPathComponent("debug-catalog.json")
+        try FileManager.default.createDirectory(at: f.paths.root, withIntermediateDirectories: true)
+        try f.metadata.write(to: url)
+        let access = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline,
+            arguments: ["-MacGachaDebugCatalog", url.path])
+        #expect(try await access.refresh(force: true).catalog.revision == 1)
+        try Data("invalid".utf8).write(to: url)
+        await #expect(throws: (any Error).self) { try await access.refresh(force: true) }
+        #expect(try await access.snapshot().catalog.revision == 1)
+    }
+    #endif
+
     @Test func refreshPreservesPlayableHelperAndSuccessfulSetupActivatesOnlyRequestedVersion() async throws {
         let f = try await CatalogModelFixture.make()
         let old = try #require(f.model.runtimeCatalog?.selectedHelper(for: .surroundAudio))

@@ -26,15 +26,35 @@ actor LiveRuntimeCatalogAccess: RuntimeCatalogAccess {
 
     init(paths: AppPaths, services: any RuntimeServices, baseline: RuntimeManifest? = nil,
         now: @escaping @Sendable () -> Date = Date.init, store: RuntimeCatalogStore? = nil,
+        arguments: [String] = ProcessInfo.processInfo.arguments,
         fetch: (@Sendable () async throws -> Data)? = nil) {
         self.paths = paths; self.services = services; self.baseline = baseline; self.now = now; self.catalogStore = store
         if let fetch { self.fetch = fetch; ownedHTTP = nil }
+        else if let url = Self.debugCatalogURL(arguments: arguments) {
+            ownedHTTP = nil
+            self.fetch = {
+                try await BlockingIO.run {
+                    let fs = try ContainedFileSystem(root: url.deletingLastPathComponent())
+                    return try fs.readFile(at: SafeRelativePath(url.lastPathComponent), maxBytes: RuntimeCatalogFetcher.byteLimit)
+                }
+            }
+        }
         else {
             let owned = CatalogHTTPClient(); ownedHTTP = owned
             self.fetch = { try await RuntimeCatalogFetcher(client: owned.client).fetch() }
         }
     }
     deinit { construction?.cancel(); refreshing?.cancel() }
+
+    static func debugCatalogURL(arguments: [String]) -> URL? {
+        #if DEBUG
+        guard let index = arguments.firstIndex(of: "-MacGachaDebugCatalog"),
+            arguments.indices.contains(index + 1), arguments[index + 1].hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: arguments[index + 1])
+        #else
+        return nil
+        #endif
+    }
 
     private func service() async throws -> RuntimeCatalogService {
         if let construction { return try await construction.value }
