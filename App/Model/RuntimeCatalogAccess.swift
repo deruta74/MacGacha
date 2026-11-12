@@ -87,7 +87,9 @@ actor LiveRuntimeCatalogAccess: RuntimeCatalogAccess {
         if let refreshing { return try await refreshing.value }
         let service = try await service(), paths = paths, now = now(), fetch = fetch
         let task = Task {
-            let current = try await service.snapshot()
+            let current: RuntimeCatalogSnapshot?
+            do { current = try await service.snapshot() }
+            catch is RuntimeCatalogSignatureError { current = nil }
             let recent = try? await BlockingIO.run {
                 let fs = try ContainedFileSystem(root: paths.root)
                 let bytes = try fs.readFile(at: SafeRelativePath("RuntimeCatalog/last-check.json"), maxBytes: 1024)
@@ -95,7 +97,7 @@ actor LiveRuntimeCatalogAccess: RuntimeCatalogAccess {
                 let age = now.timeIntervalSince(date)
                 return age.isFinite && age >= 0 && age < 24 * 60 * 60
             }
-            if !force && recent == true { return current }
+            if !force && recent == true, let current { return current }
             let metadata = try await fetch()
             try Task.checkCancellation()
             let result = try await service.accept(metadata: metadata.body, signature: metadata.signature)

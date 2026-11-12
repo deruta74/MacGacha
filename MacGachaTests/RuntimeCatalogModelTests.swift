@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import CryptoKit
 import Synchronization
 import Testing
 import LauncherCore
@@ -19,6 +20,24 @@ import RuntimeManager
     }
 
     #if DEBUG
+    @Test(arguments: [false, true]) func retiredCatalogKeyCanRefreshThroughLiveAccess(force: Bool) async throws {
+        let f = try await CatalogModelFixture.make()
+        let oldKey = Curve25519.Signing.PrivateKey(), newKey = Curve25519.Signing.PrivateKey()
+        let store = RuntimeCatalogStore(root: f.paths.root)
+        let oldService = RuntimeCatalogService(baseline: f.baseline, store: store,
+            signatureVerifier: RuntimeCatalogSignatureVerifier(publicKeys: [oldKey.publicKey.rawRepresentation]))
+        let before = try await oldService.accept(metadata: f.metadata, signature: oldKey.signature(for: f.metadata))
+        let url = f.paths.root.appendingPathComponent("rotated-catalog.json")
+        try f.metadata.write(to: url)
+        try Data(newKey.signature(for: f.metadata).base64EncodedString().utf8).write(to: URL(fileURLWithPath: url.path + ".sig"))
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: RuntimeCatalogSignatureVerifier(publicKeys: [newKey.publicKey.rawRepresentation]),
+            paths: f.paths, services: f.services, baseline: f.baseline, arguments: ["-MacGachaDebugCatalog", url.path])
+        let result = try await access.refresh(force: force)
+        #expect(result.selections == before.selections)
+        #expect(result.catalog.revision == before.catalog.revision)
+        #expect(try await access.snapshot().selections == before.selections)
+    }
+
     @Test func debugCatalogFileValidatesLikeRemote() async throws {
         let f = try await CatalogModelFixture.make()
         let url = f.paths.root.appendingPathComponent("debug-catalog.json")
