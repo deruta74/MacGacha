@@ -86,11 +86,11 @@ public struct RuntimeBundleManager: Sendable {
             if candidate == nil, let ready = try inspect(bundle) { progress(.phase(.completed)); return ready }
             let fs = try ContainedFileSystem(root: store.paths.root)
             let digest = try fingerprint(bundle, components: components)
-            guard let wine = components.first(where: { $0.wineBinary != nil }), let binary = wine.wineBinary else {
+            guard let wine = components.first(where: { $0.kind == .wine }) ?? components.first(where: { $0.wineBinary != nil }), let binary = wine.wineBinary else {
                 throw LauncherError.io("Bundle Wine component is missing")
             }
             let winePath = try RuntimeJSONFile.relativePath(store.installURL(for: wine), root: store.paths.root)
-            if bundle.backend == .d3dmetal, candidate == nil {
+            if bundle.backend == .d3dmetal, components.count == 1, candidate == nil {
                 let stale = try bundlePath(bundle)
                 if try fs.itemType(at: stale) != nil {
                     let hidden = try SafeRelativePath("\(bundleParent())/.removing-\(UUID().uuidString)")
@@ -110,6 +110,15 @@ public struct RuntimeBundleManager: Sendable {
                 let source = try RuntimeTree(fs: fs, root: winePath, allowingExternalHardLinks: true)
                 var overlays: [(RuntimeTree, SafeRelativePath)] = []
                 var runtimeDigest = digest
+                let graphics: RuntimeTree?
+                if bundle.backend == .d3dmetal, components.count == 2,
+                    let component = components.first(where: { $0.kind == .d3dmetal }) {
+                    let root = try RuntimeJSONFile.relativePath(store.installURL(for: component), root: store.paths.root)
+                    graphics = try RuntimeTree(fs: fs, root: root, allowingExternalHardLinks: true, including: D3DMetalGraphics.paths)
+                    guard try fs.itemType(at: SafeRelativePath("\(winePath)/bin/wine.real")) == .regularFile else {
+                        throw LauncherError.io("Wine real loader is missing")
+                    }
+                } else { graphics = nil }
                 for c in components {
                     let root = try RuntimeJSONFile.relativePath(store.installURL(for: c), root: store.paths.root)
                     for overlay in c.overlay {
@@ -124,6 +133,11 @@ public struct RuntimeBundleManager: Sendable {
                     runtimeDigest = hash.finalize()
                 }
                 var required = source.bytes
+                if let graphics {
+                    let (sum, overflow) = required.addingReportingOverflow(graphics.bytes)
+                    guard !overflow else { throw LauncherError.io("Runtime space budget overflow") }
+                    required = sum
+                }
                 for (tree, _) in overlays {
                     let (sum, overflow) = required.addingReportingOverflow(tree.bytes)
                     guard !overflow else { throw LauncherError.io("Runtime space budget overflow") }
@@ -134,6 +148,7 @@ public struct RuntimeBundleManager: Sendable {
                 guard available >= required else { throw LauncherError.insufficientSpace(required: required, available: available) }
                 progress(.phase(.staging))
                 try source.copy(to: incoming, in: fs)
+                try graphics?.copy(to: incoming, in: fs, overlay: true)
                 for (tree, path) in overlays {
                     let target = try SafeRelativePath("\(incoming)/\(path)")
                     // DXMT directories merge; framework import replaces the complete framework.
@@ -233,7 +248,7 @@ public struct RuntimeBundleManager: Sendable {
                 let marker = try? JSONDecoder().decode(BundleMarker.self, from: data), marker.id == bundle.id,
                 marker.componentsDigest == digest else { return nil }
             root = assembled.resolved(against: store.paths.root); source = marker.source; runtimeDigest = marker.digest
-        } else if bundle.backend == .d3dmetal, let component = components.first {
+        } else if bundle.backend == .d3dmetal, components.count == 1, let component = components.first {
             root = store.installURL(for: component)
         } else { return nil }
         guard let binary = components.first(where: { $0.wineBinary != nil })?.wineBinary else { return nil }
@@ -267,11 +282,21 @@ private struct RuntimeTree {
     let root: SafeRelativePath
     let entries: [ContainedFileSystem.TreeEntry]
     let bytes: Int64
-    init(fs: ContainedFileSystem, root: SafeRelativePath, allowingExternalHardLinks: Bool = false) throws {
+    init(fs: ContainedFileSystem, root: SafeRelativePath, allowingExternalHardLinks: Bool = false,
+        including paths: [SafeRelativePath]? = nil) throws {
         self.fs = fs; self.root = root
-        entries = try fs.inspectTree(at: root, allowingExternalHardLinks: allowingExternalHardLinks)
-        try ArchivePolicy.validate(entries.map { ArchiveEntry(path: $0.path.description,
+        let all = try fs.inspectTree(at: root, allowingExternalHardLinks: allowingExternalHardLinks)
+        try ArchivePolicy.validate(all.map { ArchiveEntry(path: $0.path.description,
             kind: $0.linkTarget.map { .symlink($0) } ?? ($0.type == .directory ? .directory : .file)) })
+        if let paths {
+            guard paths.allSatisfy({ path in all.contains { $0.path == path } }) else {
+                throw LauncherError.io("D3DMetal graphics path is missing")
+            }
+            entries = all.filter { entry in paths.contains { path in
+                entry.path.components.starts(with: path.components)
+                    || (entry.type == .directory && path.components.starts(with: entry.path.components))
+            } }
+        } else { entries = all }
         var size: Int64 = 0
         for entry in entries where entry.type == .regularFile {
             let count = try fs.size(at: SafeRelativePath("\(root)/\(entry.path)")) ?? 0
