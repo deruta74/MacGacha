@@ -8,6 +8,8 @@ import io
 import importlib.util
 import json
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -18,6 +20,44 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class CatalogPublicationTests(unittest.TestCase):
+    def test_draft_upload_race_never_replaces_assets(self):
+        spec = importlib.util.spec_from_file_location("upload", ROOT / "scripts/upload-immutable-release.py")
+        upload = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(upload)
+        for race, content in [(False, b"same"), (True, b"same"), (True, b"different")]:
+            assets = {} if race else {"runtime.zip": content}
+            calls = []
+            def gh(*args):
+                calls.append(args)
+                self.assertNotIn("--clobber", args)
+                self.assertNotIn("delete-asset", args)
+                if args[1] == "view":
+                    return json.dumps({"isDraft": True, "assets": [{"name": name} for name in assets]})
+                if args[1] == "download":
+                    (Path(args[-1]) / "runtime.zip").write_bytes(assets["runtime.zip"])
+                    return ""
+                if args[1] == "upload":
+                    # A competing upload and publication occur after the draft check.
+                    assets["runtime.zip"] = content
+                    raise subprocess.CalledProcessError(1, "upload")
+                self.fail("Unexpected release mutation")
+            with tempfile.TemporaryDirectory() as directory, patch.object(upload, "gh", gh):
+                asset = Path(directory) / "runtime.zip"
+                asset.write_bytes(b"same")
+                if content == b"different":
+                    with self.assertRaises(ValueError): upload.upload("runtime-tag", [asset])
+                else:
+                    upload.upload("runtime-tag", [asset])
+                self.assertEqual(assets["runtime.zip"], content)
+                self.assertEqual(sum(call[1] == "upload" for call in calls), int(race))
+
+    def test_immutable_release_assets_cannot_be_replaced(self):
+        for name in ["crypt32-fix.yml", "surround-audio.yml", "wine.yml"]:
+            self.assertNotIn("--clobber", (ROOT / ".github/workflows" / name).read_text())
+        channel = (ROOT / ".github/workflows/runtime-catalog.yml").read_text()
+        replacements = [line.strip() for line in channel.splitlines() if "--clobber" in line]
+        self.assertEqual(replacements, ["gh release upload runtime-catalog-v1 RuntimeCatalog/runtime-catalog.json RuntimeCatalog/runtime-catalog.json.sig --clobber"])
+
     def test_workflow_actions_are_immutable(self):
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             for action in re.findall(r"uses:\s*(\S+)", path.read_text()):

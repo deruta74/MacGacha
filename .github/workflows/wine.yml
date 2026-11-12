@@ -75,4 +75,4 @@ jobs:
             exit 1
           }
           gh release edit "$tag" --prerelease --latest=false
-          gh release upload "$tag" "$RUNNER_TEMP/wine-release/"* --clobber
+          python3 -I scripts/upload-immutable-release.py "$tag" "$RUNNER_TEMP/wine-release/"*
