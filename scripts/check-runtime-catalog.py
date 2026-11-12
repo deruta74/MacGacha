@@ -13,6 +13,7 @@ import urllib.parse
 import urllib.request
 
 LIMIT = 1 << 20
+WINE_1120_PROFILES = {"d3dmetal-wine11.20-gptk4.0b3", "d3dmetal-wine11.20mg1.0-gptk4.0b3"}
 HELPERS = {"jadeite", "steamShim", "crypt32Fix", "surroundAudio", "genshinFps"}
 PREFIX = {"steamShim": "steam-shim", "crypt32Fix": "crypt32-fix", "surroundAudio": "surround-audio", "genshinFps": "genshin-fps-unlock"}
 
@@ -106,7 +107,7 @@ def validate(catalog, baseline, previous=None, resume_identical=False):
                 and len(set(binding["profileIDs"])) == len(binding["profileIDs"])
                 and all(p in baseline_bundles for p in binding["profileIDs"]), "Unknown helper profile")
         if components[identity]["kind"] in {"surroundAudio", "crypt32Fix"}:
-            require(binding["profileIDs"] == ["d3dmetal-wine11.20-gptk4.0b3"], "ABI-specific helper profile changed")
+            require(set(binding["profileIDs"]) <= WINE_1120_PROFILES, "ABI-specific helper profile changed")
     for backend, identity in catalog["recommendedBundles"].items():
         require(identity in bundles and bundles[identity]["backend"] == backend, "Invalid bundle recommendation")
     for kind, identity in catalog["recommendedHelpers"].items():
@@ -114,7 +115,7 @@ def validate(catalog, baseline, previous=None, resume_identical=False):
     for bundle_id in catalog["recommendedBundles"].values():
         profile = bindings[bundle_id]["profileID"]
         for kind, helper_id in catalog["recommendedHelpers"].items():
-            applicable = kind not in {"surroundAudio", "crypt32Fix"} or profile == "d3dmetal-wine11.20-gptk4.0b3"
+            applicable = kind not in {"surroundAudio", "crypt32Fix"} or profile in WINE_1120_PROFILES
             require(not applicable or profile in helpers[helper_id]["profileIDs"], "Incompatible recommended helper")
     for old in [baseline] + ([previous["manifest"]] if previous else []):
         for field, values in [("components", components), ("bundles", bundles)]:

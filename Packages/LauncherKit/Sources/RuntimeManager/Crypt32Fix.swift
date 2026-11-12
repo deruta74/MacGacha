@@ -6,9 +6,10 @@ import LauncherCore
 /// Drop this requirement when that bundle is replaced by Wine 11.21 or newer.
 public enum Crypt32Fix {
     public static let bundleID = "d3dmetal-wine11.20-gptk4.0b3"
-    public static let componentID = "crypt32-fix-wine-11.20-1"
+    public static let bundleIDs: Set<String> = [bundleID, "d3dmetal-wine11.20mg1.0-gptk4.0b3"]
+    public static let componentID = "crypt32-fix-wine-11.20-2"
     public static func applies(game: String, backend: RuntimeBackend, bundleID: String?) -> Bool {
-        guard backend == .d3dmetal, bundleID == Self.bundleID, let definition = GameDefinition.find(game) else { return false }
+        guard backend == .d3dmetal, bundleID.map(Self.bundleIDs.contains) == true, let definition = GameDefinition.find(game) else { return false }
         return definition.region == .mainlandChina && [.genshin, .zzz].contains(definition.family)
     }
 }
