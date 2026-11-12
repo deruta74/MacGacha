@@ -8,6 +8,15 @@ import LauncherCore
 import TestSupport
 
 @Suite struct RuntimeCatalogTests {
+    @Test func revision2AcceptedByCurrentBaseline() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: root.appendingPathComponent("App/Resources/runtime-manifest.json")))
+        let catalog = try JSONDecoder().decode(RuntimeCatalog.self, from: Data(contentsOf: root.appendingPathComponent("RuntimeCatalog/runtime-catalog.json")))
+        try RuntimeCatalogContract(manifest).validate(catalog)
+        #expect(catalog.revision == 2)
+        #expect(catalog.recommendedBundles[.dxmt]?.rawValue == "dxmt-wine11.20mg1.0-dxmt0.80")
+    }
+
     @Test func initialMigrationCanBePersistedBeforeInstalledEvidenceChanges() async throws {
         let f = try CatalogFixture(), bytes = Mutex<Data?>(nil), writes = Mutex(0)
         let old = try f.component(kind: .surroundAudio, version: "wine-11.20-1")

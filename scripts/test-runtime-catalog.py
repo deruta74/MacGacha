@@ -107,12 +107,12 @@ class CatalogPublicationTests(unittest.TestCase):
             stdout = json.dumps({"assets": [asset]})
         with patch.object(module.urllib.request, "build_opener") as opener:
             with patch.object(module.subprocess, "run", return_value=Result()):
-                module.verify_assets(candidate, self.baseline, None)
+                module.verify_assets(candidate, self.catalog["manifest"], None)
             opener.return_value.open.assert_not_called()
         asset["digest"] = "sha256:" + "0" * 64
         Result.stdout = json.dumps({"assets": [asset]})
         with patch.object(module.subprocess, "run", return_value=Result()):
-            with self.assertRaises(ValueError): module.verify_assets(candidate, self.baseline, None)
+            with self.assertRaises(ValueError): module.verify_assets(candidate, self.catalog["manifest"], None)
 
     def test_new_asset_requires_matching_bytes_and_size(self):
         candidate = copy.deepcopy(self.catalog)
@@ -131,8 +131,8 @@ class CatalogPublicationTests(unittest.TestCase):
         for payload in [b"ab", b"abcd", b"bad"]:
             with patch.object(module.urllib.request, "build_opener", return_value=Opener(payload)):
                 with self.assertRaises(ValueError):
-                    module.verify_assets(candidate, self.baseline, None)
+                    module.verify_assets(candidate, self.catalog["manifest"], None)
         with patch.object(module.urllib.request, "build_opener", return_value=Opener(b"abc")):
-            module.verify_assets(candidate, self.baseline, None)
+            module.verify_assets(candidate, self.catalog["manifest"], None)
 
 if __name__ == "__main__": unittest.main()

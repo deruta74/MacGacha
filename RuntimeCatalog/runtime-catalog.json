@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 1,
+  "revision": 2,
   "clientContract": "macgacha-runtime-v1",
   "manifest": {
     "schemaVersion": 3,
@@ -228,6 +228,28 @@
           "redistributable": true,
           "termsRevision": "surround-audio-wine-11.20-1"
         }
+      },
+      {
+        "id": "wine-11.20-macgacha-1.0",
+        "kind": "wine",
+        "version": "11.20-macgacha-1.0",
+        "sourceMode": "download",
+        "url": "https://github.com/deruta74/MacGacha/releases/download/wine-11.20-macgacha-1.0/wine-11.20-macgacha-1.0.tar.xz",
+        "size": 91726084,
+        "installedSize": 618549169,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "c3b9d33653c6585fed36edf819e6239cae5a385f87fd4f0e2d093c848f15ec7e"
+        },
+        "archive": "tar.xz",
+        "rootPath": "wine",
+        "license": {
+          "name": "LGPL-2.1-or-later",
+          "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
+          "redistributable": true,
+          "termsRevision": "LGPL-2.1"
+        },
+        "wineBinary": "bin/wine"
       }
     ],
     "bundles": [
@@ -262,6 +284,17 @@
           "d3dmetal-4.0b3"
         ],
         "environment": {}
+      },
+      {
+        "id": "dxmt-wine11.20mg1.0-dxmt0.80",
+        "displayName": "DXMT",
+        "summary": "MacGacha Wine 11.20 · DXMT 0.80",
+        "backend": "dxmt",
+        "components": [
+          "wine-11.20-macgacha-1.0",
+          "dxmt-0.80"
+        ],
+        "environment": {}
       }
     ]
   },
@@ -277,6 +310,10 @@
     {
       "bundleID": "d3dmetal-wine11.20-gptk4.0b3",
       "profileID": "d3dmetal-wine11.20-gptk4.0b3"
+    },
+    {
+      "bundleID": "dxmt-wine11.20mg1.0-dxmt0.80",
+      "profileID": "dxmt-wine11.0cx-dxmt0.80"
     }
   ],
   "helperBindings": [
@@ -324,7 +361,7 @@
     }
   ],
   "recommendedBundles": {
-    "dxmt": "dxmt-wine11.0cx-dxmt0.80",
+    "dxmt": "dxmt-wine11.20mg1.0-dxmt0.80",
     "d3dmetal": "d3dmetal-wine11.20-gptk4.0b3"
   },
   "recommendedHelpers": {
