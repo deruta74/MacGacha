@@ -6,7 +6,7 @@ import LauncherCore
 enum D3DMetalGraphics {
     static let paths: [SafeRelativePath] = (
         ["bin/wine", "lib/external", "yaagl-d3dmetal-runtime.json"]
-        + ["d3d10", "d3d11", "d3d12", "d3d12core", "dxgi", "nvapi64", "nvngx-on-metalfx", "amd_fidelityfx_framegeneration_dx12_native"].map { "lib/wine/x86_64-windows/\($0).dll" }
+        + ["d3d10", "d3d11", "d3d12", "d3d12core", "dxgi", "nvapi64", "nvngx-on-metalfx", "amd_fidelityfx_framegeneration_dx12_native", "nvngx"].map { "lib/wine/x86_64-windows/\($0).dll" }
         + ["d3d10", "d3d11", "d3d12", "d3d12core", "dxgi", "nvapi64", "nvngx-on-metalfx", "nvngx"].map { "lib/wine/x86_64-unix/\($0).so" }
     ).map { try! SafeRelativePath($0) }
 }

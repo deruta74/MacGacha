@@ -65,7 +65,7 @@ private final class MetalFixture {
     }
     var bundle: RuntimeBundle { manifest.bundles[0] }
     var manager: RuntimeBundleManager { manager(for: manifest) }
-    static let files = ["bin/wine", "lib/external/D3DMetal.framework/D3DMetal", "yaagl-d3dmetal-runtime.json"]
+    static let files = ["bin/wine", "lib/external/D3DMetal.framework/D3DMetal", "lib/external/libd3dshared.dylib", "lib/wine/x86_64-windows/nvngx.dll", "yaagl-d3dmetal-runtime.json"]
         + ["d3d10", "d3d11", "d3d12", "d3d12core", "dxgi", "nvapi64", "nvngx-on-metalfx", "amd_fidelityfx_framegeneration_dx12_native"].map { "lib/wine/x86_64-windows/\($0).dll" }
         + ["d3d10", "d3d11", "d3d12", "d3d12core", "dxgi", "nvapi64", "nvngx-on-metalfx", "nvngx"].map { "lib/wine/x86_64-unix/\($0).so" }
     func manager(for manifest: RuntimeManifest) -> RuntimeBundleManager {
