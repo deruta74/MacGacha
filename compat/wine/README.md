@@ -131,3 +131,20 @@ backends and confirmed Game Mode. They do not qualify this fresh build or
 long-session gameplay, CN, Star Rail, audio quality, catalog updates or rollback.
 The current catalog/defaults are unchanged. Keep crypt32 and Surround as
 separate ABI-scoped overlays until separately qualified.
+
+## Wine 1.0 release mapping — 2026-11-12
+
+MacGacha Wine 11.20, build 1.0, uses the qualified preview4 archive unchanged.
+The preview label occurs only in the external build receipt and source lock,
+not in any runtime archive member, wrapper or MACGACHA-NOTICE.md. The archive
+contains `wine/bin/wine` and `wine/bin/wine.real`, matching the existing Wine
+component root and loader layout.
+
+Release asset: `wine-11.20-macgacha-1.0.tar.xz`, 91,726,084 bytes, SHA-256
+`c3b9d33653c6585fed36edf819e6239cae5a385f87fd4f0e2d093c848f15ec7e`.
+`prepare-wine-release.py CANDIDATE OUTPUT` verifies the retained inventories
+and creates that unchanged binary, its checksum, and a complete source/notice
+archive with the original receipt and release mapping. The optional manual
+workflow step attaches these to a draft prerelease, refuses published releases
+and always sets `latest=false`. Publication remains the owner's step.
+No release has been created or published by this integration task.

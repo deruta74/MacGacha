@@ -3,18 +3,26 @@
 name: Wine candidate (manual build)
 on:
   workflow_dispatch:
+    inputs:
+      prepare_draft_release:
+        description: Attach verified Wine 1.0 and complete sources to a draft prerelease
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   build:
     runs-on: xcode-27
     timeout-minutes: 240
+    permissions:
+      contents: write # Only the explicit draft attachment step uses the token.
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
       - name: Check source and packaging contracts
         run: |
+          python3 -I scripts/test-prepare-wine-release.py
           python3 -I scripts/test-wine-build.py
           python3 -I scripts/test-wine-dependencies.py
           python3 -I scripts/test-wine-dependency-build.py
@@ -49,3 +57,22 @@ jobs:
             ${{ runner.temp }}/deps-a/receipt.json
           if-no-files-found: error
           retention-days: 14
+      - name: Prepare verified Wine 1.0 release assets
+        if: inputs.prepare_draft_release
+        run: python3 -I scripts/prepare-wine-release.py "$RUNNER_TEMP/wine-final-a" "$RUNNER_TEMP/wine-release"
+      - name: Attach binary and complete sources to a draft prerelease
+        if: inputs.prepare_draft_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=wine-11.20-macgacha-1.0
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --draft --prerelease --latest=false --title 'MacGacha Wine 11.20 — Version 1.0' --target "$GITHUB_SHA" --notes-file compat/wine/SOURCE-NOTICE.md
+          fi
+          [[ $(gh release view "$tag" --json isDraft --jq .isDraft) == true ]] || {
+            echo 'Refusing to change a published release' >&2
+            exit 1
+          }
+          gh release edit "$tag" --prerelease --latest=false
+          gh release upload "$tag" "$RUNNER_TEMP/wine-release/"* --clobber
