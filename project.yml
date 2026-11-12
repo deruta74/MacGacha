@@ -104,6 +104,10 @@ targets:
     deploymentTarget: "27.0"
     sources:
       - path: MacGachaTests
+      - path: Packages/LauncherKit/Tests/RuntimeManagerTests/Fixtures/manifest-0.2.6.json
+        buildPhase: resources
+      - path: RuntimeCatalog/runtime-catalog.json
+        buildPhase: resources
     dependencies:
       - target: MacGacha
       - package: LauncherKit
