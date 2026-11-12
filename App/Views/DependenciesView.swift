@@ -65,7 +65,14 @@ struct DependenciesView: View {
     }
 
     private var groups: [RuntimeVersionGroup] {
-        RuntimeVersionGroup.group(model.rows).filter { $0.category == category }
+        let groups = RuntimeVersionGroup.group(model.rows).filter { $0.category == category }
+        // D3DMetal is what games use by default, so its card leads. The manifest keeps its own
+        // order, which carries the bundled recommendation.
+        let order = ["bundle-d3dmetal", "bundle-dxmt"]
+        return groups.enumerated().sorted { a, b in
+            let (x, y) = (order.firstIndex(of: a.element.id) ?? order.count, order.firstIndex(of: b.element.id) ?? order.count)
+            return x == y ? a.offset < b.offset : x < y
+        }.map(\.element)
     }
 }
 
@@ -111,7 +118,7 @@ private struct DependencyCard: View {
                 VStack(spacing: 0) {
                     ForEach(Array(group.rows.enumerated()), id: \.element.id) { index, row in
                         if index > 0 { Divider().padding(.leading, 40) }
-                        VersionRow(row: row, isActive: row.id == active?.id, autoUpdate: autoUpdate, familyID: group.id, remove: { removing = row })
+                        VersionRow(row: row, isActive: row.id == active?.id, autoUpdate: autoUpdate, remove: { removing = row })
                     }
                 }
                 .padding(.vertical, 4)
@@ -193,7 +200,7 @@ private struct DependencyCard: View {
                 .textSelection(.enabled)
                 .detailStyle()
         case .notInstalled(let row):
-            Text(DependencyText.download(row)).detailStyle()
+            Text(DependencyText.download(row) ?? DependencyText.version(row) ?? "").detailStyle()
         case .ready(let row), .updateAvailable(let row, _):
             // With a version list the checked row already says this. The Wine
             // choice stays collapsed, so the header names what games use.
@@ -397,7 +404,8 @@ private struct ActiveVersionLine: View {
             if wineChoice {
                 Text(StatusText.joined(using, pinned ? String(localized: "Wine chosen by you") : String(localized: "Wine chosen automatically")))
             } else {
-                Text(StatusText.joined(using, DependencyText.source(row)))
+                // A helper has no name beyond its version, so the line is the version itself.
+                Text(DependencyText.joined((row.summary == nil ? [] : [using]) + DependencyText.installed(row, showsVersion: true)))
             }
         } icon: {
             Image(systemName: pinned ? "pin.fill" : "checkmark.circle.fill")
@@ -447,7 +455,6 @@ private struct VersionRow: View {
     /// Rows inside the Wine choice name the Wine and pin when used.
     var pinsChoice = false
     var autoUpdate: DependencyAutoUpdateState? = nil
-    var familyID = ""
     let remove: () -> Void
 
     var body: some View {
@@ -460,8 +467,15 @@ private struct VersionRow: View {
                 Text(pinsChoice ? DependencyText.wine(row) : DependencyText.name(row))
                     .font(.callout)
                     .monospacedDigit()
-                if case .working = row.state {
-                    InstallProgress(row: row, showsVersion: false)
+                if case .working(let phase, let fraction) = row.state {
+                    if isBackgroundUpdate {
+                        // The card header owns this update's progress bar and its Cancel.
+                        Text(RuntimePhaseText.label(for: phase, fraction: fraction))
+                            .detailStyle()
+                            .monospacedDigit()
+                    } else {
+                        InstallProgress(row: row, showsVersion: false)
+                    }
                 } else {
                     Text(caption).detailStyle()
                 }
@@ -471,9 +485,12 @@ private struct VersionRow: View {
         }
         .padding(.horizontal, pinsChoice ? 0 : 14)
         .padding(.vertical, 7)
+        .help(Text(verbatim: row.licenseName))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isActive ? .isSelected : [])
     }
+
+    private var isBackgroundUpdate: Bool { autoUpdate == .installing(id: row.id) }
 
     private var caption: String {
         var parts: [String] = []
@@ -486,13 +503,13 @@ private struct VersionRow: View {
             if let autoUpdateNote { parts.append(autoUpdateNote) }
             if let graphics = DependencyText.graphics(row) { parts.append(graphics) }
             switch row.state {
-            case .installed: parts.append(DependencyText.source(row))
-            case .notInstalled: if let size = row.downloadSize, size > 0 { parts.append(String(localized: "About \(ByteSize.text(size)) to download")) }
+            case .installed: parts += DependencyText.installed(row, showsVersion: true)
+            case .notInstalled: parts += [DependencyText.version(row), DependencyText.download(row)].compactMap { $0 }
             case .failed(let message): parts.append(message)
             case .invalid(let reason, _): parts.append(String(localized: "Damaged: \(reason)"))
             case .working: break
             }
-            return parts.reduce("") { $0.isEmpty ? $1 : StatusText.joined($0, $1) }
+            return DependencyText.joined(parts)
         }
         if isActive {
             // A selected version that isn't on disk yet is what Set Up installs, not what games use.
@@ -502,14 +519,15 @@ private struct VersionRow: View {
         }
         if model.runtimeIsRecommended(row.id) { parts.append(String(localized: "Recommended")) }
         if let autoUpdateNote { parts.append(autoUpdateNote) }
+        // These rows are titled by their version already, unless a bundle summary names them.
         switch row.state {
-        case .installed: parts.append(DependencyText.source(row))
-        case .notInstalled: parts.append(DependencyText.download(row))
+        case .installed: parts += DependencyText.installed(row, showsVersion: row.summary != nil)
+        case .notInstalled: parts += [row.summary == nil ? nil : DependencyText.version(row), DependencyText.download(row)].compactMap { $0 }
         case .failed(let message): parts.append(message)
         case .invalid(let reason, _): parts.append(String(localized: "Damaged: \(reason)"))
         case .working: break
         }
-        return parts.reduce("") { $0.isEmpty ? $1 : StatusText.joined($0, $1) }
+        return DependencyText.joined(parts)
     }
 
     /// Marks the row an automatic update is about, so the list agrees with the header.
@@ -541,10 +559,8 @@ private struct VersionRow: View {
             }
             SetUpButton(row: row, prominent: false, pinned: pinsChoice ? true : nil)
         case .working(let phase, _):
-            if phase != .deleting && phase != .cleaningUp {
-                Button("Cancel") {
-                    if autoUpdate == .installing(id: row.id) { model.cancelDependencyAutoUpdate(for: familyID) } else { model.cancel(row.id) }
-                }
+            if phase != .deleting && phase != .cleaningUp && !isBackgroundUpdate {
+                Button("Cancel") { model.cancel(row.id) }
             }
         case .invalid(_, let removable):
             if removable {
@@ -578,7 +594,7 @@ private struct WineChoice: View {
                 ForEach(group.rows) { row in
                     Divider().padding(.leading, 26)
                     VersionRow(row: row, isActive: !isAutomatic && row.id == active?.id, pinsChoice: true,
-                        autoUpdate: model.dependencyAutoUpdate(for: group.id), familyID: group.id, remove: { remove(row) })
+                        autoUpdate: model.dependencyAutoUpdate(for: group.id), remove: { remove(row) })
                 }
             }
             .padding(.top, 6)
@@ -594,7 +610,13 @@ private struct WineChoice: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         #if DEBUG
-        .onAppear { if UserDefaults.standard.bool(forKey: "MacGachaDebugExpanded") { expanded = true } }
+        // `-MacGachaDebugExpanded YES` opens every card's list, `dxmt` or `d3dmetal` only that one.
+        .onAppear {
+            let defaults = UserDefaults.standard
+            if defaults.bool(forKey: "MacGachaDebugExpanded") || defaults.string(forKey: "MacGachaDebugExpanded").map({ "bundle-" + $0 }) == group.id {
+                expanded = true
+            }
+        }
         #endif
     }
 
@@ -619,9 +641,8 @@ private struct AutomaticWineRow: View {
                 Text("Automatic", comment: "Wine version choice").font(.callout)
                 Text(caption).detailStyle()
                 if !model.autoUpdateDependencies {
-                    Text("Automatic updates are off in Settings. A new recommended version waits until you choose Update.")
+                    Text("Automatic updates are off in Settings.")
                         .detailStyle()
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 8)
@@ -641,7 +662,10 @@ private struct AutomaticWineRow: View {
 
     private var caption: String {
         let now = String(localized: "The recommended version, now \(DependencyText.wine(recommended))")
-        if case .notInstalled = recommended.state { return StatusText.joined(now, DependencyText.download(recommended)) }
+        // With updates off, the header's Update button already says what there is to get.
+        if model.autoUpdateDependencies, case .notInstalled = recommended.state, let download = DependencyText.download(recommended) {
+            return StatusText.joined(now, download)
+        }
         return now
     }
 }
@@ -758,15 +782,39 @@ enum DependencyText {
         return String(summary[split.upperBound...])
     }
 
-    static func source(_ row: RuntimeRow) -> String {
-        if case .installed(.importFromGPTK) = row.state { return String(localized: "Imported from Game Porting Toolkit") }
-        return row.licenseName
+    static func joined(_ parts: [String]) -> String {
+        parts.reduce("") { $0.isEmpty ? $1 : StatusText.joined($0, $1) }
     }
 
-    static func download(_ row: RuntimeRow) -> String {
-        let license = row.needsConsent ? String(localized: "Apple license") : row.licenseName
-        guard let size = row.downloadSize, size > 0 else { return license }
-        return StatusText.joined(String(localized: "About \(ByteSize.text(size)) to download"), license)
+    /// What to say about a version on disk: its build and, for D3DMetal, where it came from.
+    /// Licenses stay in the row's tooltip.
+    static func installed(_ row: RuntimeRow, showsVersion: Bool) -> [String] {
+        var parts = showsVersion ? [version(row)].compactMap { $0 } : []
+        if case .installed(.importFromGPTK) = row.state { parts.append(String(localized: "Imported from Game Porting Toolkit")) }
+        return parts
+    }
+
+    /// "Version 1.0": the build of a bundle's own Wine, or a helper's version. A bundle
+    /// without a Wine component of its own is named fully by its summary.
+    static func version(_ row: RuntimeRow) -> String? {
+        guard let raw = row.backend == nil ? row.version : row.wineVersion else { return nil }
+        return String(localized: "Version \(build(raw))", comment: "A dependency's version or build number, e.g. Version 11.0-1")
+    }
+
+    /// Catalog versions repeat what the name already says. `11.20-macgacha-1.0` is our build
+    /// 1.0 of Wine 11.20, and `11.0-1-crossover` or `11.0-yaagl` end with who built them.
+    /// Anything else is shown as it is.
+    static func build(_ raw: String) -> String {
+        if let ours = raw.range(of: "-macgacha-"), ours.upperBound < raw.endIndex { return String(raw[ours.upperBound...]) }
+        for builder in ["-crossover", "-yaagl"] where raw.hasSuffix(builder) && raw.count > builder.count {
+            return String(raw.dropLast(builder.count))
+        }
+        return raw
+    }
+
+    static func download(_ row: RuntimeRow) -> String? {
+        guard let size = row.downloadSize, size > 0 else { return nil }
+        return String(localized: "About \(ByteSize.text(size)) to download")
     }
 }
 

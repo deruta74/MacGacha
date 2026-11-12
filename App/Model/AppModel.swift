@@ -93,6 +93,8 @@ final class AppModel {
         var downloadSize: Int64? = nil
         var componentKind: ComponentKind? = nil
         var backend: RuntimeBackend? = nil
+        /// The raw version of a bundle's own Wine component, for the build number shown in Dependencies.
+        var wineVersion: String? = nil
 
         var category: RuntimeCategory {
             if backend != nil { return .runtimes }
@@ -841,7 +843,8 @@ final class AppModel {
                 licenseName: components.map { $0.license.name }.joined(separator: " / "),
                 state: working[id] ?? errors[id].map { .failed(message: $0) } ?? installedBundles[id].map { .installed(source: $0.source) } ?? .notInstalled,
                 canImportGPTK: bundle.backend == .d3dmetal, needsConsent: components.contains { $0.consent != nil },
-                summary: bundle.summary, downloadSize: components.reduce(Int64(0)) { $0 + ($1.size ?? 0) }, backend: bundle.backend))
+                summary: bundle.summary, downloadSize: components.reduce(Int64(0)) { $0 + ($1.size ?? 0) }, backend: bundle.backend,
+                wineVersion: components.first { $0.kind == .wine }?.version.rawValue))
         }
         for component in manifest?.components ?? [] where !covered.contains(component.id) {
             let id = component.id.rawValue

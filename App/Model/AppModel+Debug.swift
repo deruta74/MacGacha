@@ -58,7 +58,7 @@ extension AppModel {
         return model
     }
 
-    /// Debug-only stand-in for catalog r3: Wine 11.20 MacGacha 1.0 is recommended for both
+    /// Debug-only stand-in for catalog r3: MacGacha Wine 11.20 is recommended for both
     /// graphics layers, ahead of every bundle the app ships today. The shipped manifest and
     /// the published catalog stay untouched. `newerGraphics` adds an invented later D3DMetal
     /// for the import-offer screenshots only.
@@ -75,11 +75,11 @@ extension AppModel {
         components.append(try variant(of: "wine-11.0-1-crossover", as: "wine-11.20-macgacha-1.0", version: "11.20-macgacha-1.0"))
         var bundles = [
             try RuntimeBundle(id: SafeIdentifier("dxmt-wine11.20mg1.0-dxmt0.80"), displayName: "DXMT",
-                summary: "Wine 11.20 MacGacha 1.0 · DXMT 0.80", backend: .dxmt,
+                summary: "MacGacha Wine 11.20 · DXMT 0.80", backend: .dxmt,
                 components: [SafeIdentifier("wine-11.20-macgacha-1.0"), SafeIdentifier("dxmt-0.80")]),
             // The real bundle also lists our Wine. Today's package accepts one component here.
             try RuntimeBundle(id: SafeIdentifier("d3dmetal-wine11.20mg1.0-gptk4.0b3"), displayName: "D3DMetal",
-                summary: "Wine 11.20 MacGacha 1.0 · Apple D3DMetal 4.0 beta 3", backend: .d3dmetal,
+                summary: "MacGacha Wine 11.20 · Apple D3DMetal 4.0 beta 3", backend: .d3dmetal,
                 components: [SafeIdentifier("d3dmetal-4.0b3")])
         ]
         if newerGraphics {
@@ -87,7 +87,7 @@ extension AppModel {
             // first bundle per graphics layer is what Play needs. The offer never blocks Play.
             components.append(try variant(of: "d3dmetal-4.0b3", as: "d3dmetal-4.0b4", version: "4.0b4"))
             bundles.insert(try RuntimeBundle(id: SafeIdentifier("d3dmetal-wine11.20mg1.0-gptk4.0b4"), displayName: "D3DMetal",
-                summary: "Wine 11.20 MacGacha 1.0 · Apple D3DMetal 4.0 beta 4", backend: .d3dmetal,
+                summary: "MacGacha Wine 11.20 · Apple D3DMetal 4.0 beta 4", backend: .d3dmetal,
                 components: [SafeIdentifier("d3dmetal-4.0b4")]), at: 2)
         }
         return try RuntimeManifest(components: components, bundles: bundles + bundled.bundles)
