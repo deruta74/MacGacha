@@ -82,7 +82,7 @@ struct RuntimeInstallContext: Sendable {
         guard let captured = captured ?? manifest else { return }
         let bundle = captured.bundles.first { $0.id.rawValue == id }
         guard let component = captured.components.first(where: { component in
-            if let bundle { return bundle.components.contains(component.id) && component.wineBinary != nil }
+            if let bundle { return bundle.components.contains(component.id) && (bundle.backend == .d3dmetal ? component.kind == .d3dmetal : component.kind == .wine) }
             return component.id.rawValue == id
         }) else { return }
         runtimeInstallContexts[id] = RuntimeInstallContext(component: component, bundle: bundle, manifest: captured)

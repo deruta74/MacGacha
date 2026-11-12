@@ -538,7 +538,7 @@ final class AppModel {
     private func requestedComponent(_ id: String) -> RuntimeComponent? {
         if let context = runtimeInstallContexts[id] { return context.component }
         if let bundle = bundle(id) {
-            return manifest?.components.first { bundle.components.contains($0.id) && $0.wineBinary != nil }
+            return manifest?.components.first { bundle.components.contains($0.id) && (bundle.backend == .d3dmetal ? $0.kind == .d3dmetal : $0.kind == .wine) }
         }
         return manifest?.components.first { $0.id.rawValue == id }
     }
