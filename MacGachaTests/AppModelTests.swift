@@ -385,7 +385,7 @@ struct AppModelTests {
         let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: url))
         #expect(manifest.schemaVersion == 3)
-        #expect(manifest.components.count == 10)
+        #expect(manifest.components.count == 13)
         let fps = try #require(manifest.components.first { $0.id.rawValue == GenshinFps.componentID })
         #expect(fps.kind == .genshinFps && fps.archive == .zip)
         #expect(fps.license.name == "GPL-3.0-only" && fps.license.redistributable && fps.consent == nil)
@@ -395,7 +395,7 @@ struct AppModelTests {
         #expect(fps.url?.absoluteString == "https://github.com/deruta74/MacGacha/releases/download/genshin-fps-unlock-2/genshin-fps-unlock-2.zip")
         #expect(manifest.bundles.allSatisfy { !$0.components.contains(fps.id) })
         let surroundHistory = manifest.components.filter { $0.kind == .surroundAudio }
-        #expect(surroundHistory.map(\.id.rawValue) == [SurroundAudio.componentID, "surround-audio-wine-11.20-1"])
+        #expect(surroundHistory.map(\.id.rawValue) == [SurroundAudio.componentID, "surround-audio-wine-11.20-2", "surround-audio-wine-11.20-1"])
         let surround = try #require(manifest.components.first { $0.id.rawValue == SurroundAudio.componentID })
         #expect(surround.kind == .surroundAudio && surround.archive == .zip)
         #expect(surround.license.name == "LGPL-2.1-or-later" && surround.license.redistributable)

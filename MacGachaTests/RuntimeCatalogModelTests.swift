@@ -120,6 +120,8 @@ import RuntimeManager
         let base = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, fetch: { f.metadata })
         let access = HeldCatalogRefresh(base)
         let model = AppModel(paths: f.paths, services: f.services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         await model.refreshRuntimeCatalog(force: true)
         try f.publish(f.revision3); try await model.scanAndApply()
@@ -154,6 +156,8 @@ import RuntimeManager
             let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, fetch: { throw LauncherError.transport("offline") })
             #expect(try await access.snapshot().selectedHelper(for: .surroundAudio)?.id == previous.id)
             let model = AppModel(paths: f.paths, services: f.services, catalogAccess: access, defaults: nil)
+            model.autoUpdateDependencies = false
+            try await model.flushLaunchSettings()
             await model.start(); await model.catalogRefreshTask?.value
             var settings = model.launchSettings(for: "genshin"); settings.backend = .d3dmetal; settings.surroundSound = true
             model.launchSettingsCache["genshin"] = settings
@@ -253,6 +257,8 @@ import RuntimeManager
         })
         let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, store: store, fetch: { f.metadata })
         let model = AppModel(paths: f.paths, manifest: f.baseline, services: f.services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         await model.refreshRuntimeCatalog(force: true)
         try f.publish(f.revision3); try await model.scanAndApply()
@@ -275,6 +281,8 @@ import RuntimeManager
         let underlying = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, fetch: { f.metadata })
         let access = HeldCatalogRefresh(underlying)
         let model = AppModel(paths: f.paths, manifest: f.baseline, services: f.services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         await model.refreshRuntimeCatalog(force: true)
         try f.publish(f.revision3); try await model.scanAndApply()
@@ -315,6 +323,8 @@ import RuntimeManager
         let metadata = try JSONEncoder().encode(catalog)
         let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, fetch: { metadata })
         let model = AppModel(paths: f.paths, manifest: f.baseline, services: f.services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         await model.refreshRuntimeCatalog(force: true)
         f.services.state.withLock { $0.accepted = false }
@@ -383,7 +393,7 @@ private struct CatalogModelFixture: Sendable {
         var recommended = base.recommendedHelpers; recommended[.surroundAudio] = revision3.id
         let catalog = RuntimeCatalog(revision: 1, manifest: try RuntimeManifest(components: baseline.components + [revision3], bundles: baseline.bundles),
             bundleBindings: base.bundleBindings,
-            helperBindings: base.helperBindings + [.init(componentID: revision3.id, profileIDs: [try SafeIdentifier(SurroundAudio.bundleID)])],
+            helperBindings: base.helperBindings + [.init(componentID: revision3.id, profileIDs: try SurroundAudio.bundleIDs.sorted().map(SafeIdentifier.init))],
             recommendedBundles: base.recommendedBundles, recommendedHelpers: recommended)
         let metadata = try JSONEncoder().encode(catalog), services = FakeRuntimeServices()
         services.state.withLock { $0.accepted = true }
@@ -449,10 +459,16 @@ private struct OfflineCatalogFixture {
         let baseline = try await BundledRuntimeManifest.load(), services = FakeRuntimeServices()
         let previous = try #require(baseline.components.first { $0.id.rawValue == "surround-audio-wine-11.20-1" })
         let receipt = try InstalledComponent(kind: previous.kind, version: previous.version.rawValue, installedAt: .now, source: .download)
-        services.state.withLock { $0.components = [receipt]; $0.accepted = true }
+        let oldID = try SafeIdentifier(SurroundAudio.bundleID)
+        let oldRoot = paths.runtimes.appendingPathComponent("bundles/" + oldID.rawValue)
+        let digest = try #require(previous.sha256)
+        let oldBundle = InstalledRuntimeBundle(id: oldID, root: oldRoot, wineBinary: oldRoot.appendingPathComponent("bin/wine"), digest: digest, source: .download)
+        services.state.withLock { $0.components = [receipt]; $0.bundles[oldID.rawValue] = oldBundle; $0.accepted = true }
         let store: RuntimeCatalogStore? = writeFails ? RuntimeCatalogStore(read: { nil }, write: { _ in throw LauncherError.io("initial write failed") }) : nil
         let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: paths, services: services, baseline: baseline, store: store, fetch: { throw LauncherError.transport("offline") })
         let model = AppModel(paths: paths, services: services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         return Self(paths: paths, baseline: baseline, services: services, model: model)
     }
