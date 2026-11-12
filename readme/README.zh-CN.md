@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-0078D4?style=for-the-badge)](README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-555555?style=for-the-badge)](README.ja.md)
 
-> ✨ **[MacGacha 0.2.0](https://github.com/deruta74/MacGacha/releases/tag/v0.2.0) 已发布**，这是首个不带 beta 标记的版本：支持 14 种语言、HoYoPlay 风格的背景和活动、《原神》帧率解锁、《崩坏：星穹铁道》120 FPS、搭配空间音频的环绕声，以及游戏模式。已经在使用 0.1.x？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
+> ✨ **[MacGacha 0.3.0](https://github.com/deruta74/MacGacha/releases/tag/v0.3.0) 已发布**：带来自行从源代码构建的 [MacGacha Wine 11.20](https://github.com/deruta74/MacGacha/releases/tag/wine-11.20-macgacha-1.0)、依赖项自动更新、重新设计的依赖项窗口，以及更稳定的下载。已经在使用 0.2.x？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
 
 面向 Apple Silicon 的原生 macOS 启动器，支持 **《原神》**、**《崩坏：星穹铁道》** 和 **《绝区零》**。它从 HoYoverse 官方服务器安装、更新和校验游戏，管理 Wine / DXMT / D3DMetal 运行环境，并可一键启动各款游戏。
 
@@ -16,7 +16,7 @@
 
 本仓库的代码和文档可能使用大型语言模型（LLM）和 AI 代理辅助编写或修改。软件依照 [GPL-3.0 许可证](../LICENSE)按“原样”提供，不附带任何担保。
 
-原神和绝区零的国际服与中国大陆服均使用 Wine 的 Windows 11 配置。现有前缀会在启动前自动更新。此启动修复已在国际服原神 7.2（DXMT 和 D3DMetal）及国际服绝区零 3.3（D3DMetal）中验证；中国大陆服的实际游戏运行尚未验证。
+原神和绝区零的国际服与中国大陆服均使用 Wine 的 Windows 11 配置。现有前缀会在启动前自动更新。此启动修复已在国际服原神 7.2（DXMT 和 D3DMetal）及国际服绝区零 3.3（D3DMetal）中验证。中国大陆服的实际游戏运行尚未验证。
 
 ## 安装
 
@@ -62,13 +62,13 @@ xattr -dr com.apple.quarantine /Applications/MacGacha.app
 - **下载引擎。** 支持断点续传、文件校验以及可在崩溃后恢复的日志。只有哈希匹配的文件才会进入游戏文件夹。文件并行下载和组装，速度接近 2.5 Gbit/s 链路的满速。下载和完整校验会显示剩余时间，耗时较长的步骤会显示已运行时间。
 - **启动器。** 在一个窗口中管理三款游戏，使用 HoYoPlay 的背景，并保留其原始顺序。每次打开 MacGacha 都会显示下一张背景，也可通过顶部圆点切换。动态背景由 MacGacha 自带的视频播放器播放，内存占用比网页视图低约三分之一。每张背景对应的版本亮点和 HoYoPlay 当前活动都会在浏览器中打开。
 - **《原神》帧率解锁（可选）。** 《原神》游戏设置中提供开关，默认关闭，目标帧率为 120 FPS，也可自定义至最高 360 FPS。MacGacha 会向游戏加载一个小型辅助模块，仅提高帧率上限，采用 [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock) 的方法。我们自行进行可复现构建（[发布页](https://github.com/deruta74/MacGacha/releases/tag/genshin-fps-unlock-2)）。首次开启时会提示封号风险。已在国际服《原神》7.1 中测试：连续在线游玩 3.5 小时，维持 120 FPS。
-- 感谢 HouSisong 开发采用 MIT 许可证的补丁解码器 [HDiffPatch](https://github.com/sisong/HDiffPatch)。
 - **《崩坏：星穹铁道》120 FPS。** 国际服和中国大陆服的游戏设置中均有开关，每次启动前将游戏自身保存的帧率设置为 120。全新安装后，请先在游戏中更改任意一项图形设置，让游戏保存设置，然后重新启动游戏。
 - **环绕声。** 《原神》和《绝区零》可通过 D3DMetal 输出环绕声，并混音为空间音频，供 AirPods 及其他受支持的耳机使用。六声道及以上的扬声器保留自身的声道布局。默认关闭，每款游戏可单独开启。
 - **游戏模式。** macOS 为游戏开启游戏模式，启动器本身不启用。每款游戏以拥有独立名称和图标的应用运行，便于 macOS 识别。已在 D3DMetal 和 DXMT 下确认有效。可在设置中关闭。
 - **各游戏独立设置：** 图形后端、帧率限制（关闭、30、60、90 或 120）、显示器、Retina 模式、《绝区零》的 DirectX 12，以及兼容性绕过开关。
-- **运行环境。** DXMT 和 D3DMetal 均推荐使用 MacGacha Wine 11.20（构建版本 1.0）。Wine 和图形组件独立安装。D3DMetal 需要接受 Apple 条款或从 Game Porting Toolkit 导入。旧版本仍可用于回退。切换 Wine 构建会创建新的前缀，星穹铁道保存的帧率等前缀设置也会重新开始。
-- **独立更新与回退。** 依赖项自动更新默认开启，可在设置中关闭。MacGacha 仅更新已安装且选择“自动”的版本，在工作版本旁安装新版本，并等待游戏和其他操作结束后再切换。启动游戏仍使用当前版本。旧版本保留到新版本上持续至少两分钟的游戏会话正常结束。固定的版本保持不变。仅更新 Wine 时会保留导入的 GPTK 图形组件，新版 D3DMetal 则先提供更新选项。依赖项窗口始终提供版本选择与回退。
+- **MacGacha Wine 11.20。** 我们自行从源代码构建 Wine 及其包含的所有库，推荐用于 DXMT 和 D3DMetal（[发布页](https://github.com/deruta74/MacGacha/releases/tag/wine-11.20-macgacha-1.0)附有完整源代码）。Wine 和图形层分别下载。D3DMetal 需要接受 Apple 条款或从你自己的 Game Porting Toolkit 导入。
+- **依赖项窗口。** 每个图形层都有“Wine 版本”列表，包含“自动”和所有兼容构建，可一键回退。MacGacha 下载的依赖项列表使用项目密钥签名。
+- **依赖项自动更新。** 默认开启，可在设置中切换。新的推荐版本会在后台安装到当前版本旁，等到没有游戏或下载运行时再切换。手动选择的版本保持不变。游戏使用新版本运行至少两分钟并正常退出后，旧版本才会被移除。如果你自行导入了 D3DMetal，Wine 仍会独立更新，而新版 D3DMetal 则会提供更新选项。切换到新的 Wine 构建会创建全新的 Wine 前缀，因此其中保存的设置（例如《崩坏：星穹铁道》保存的帧率）也会重置。
 - **一键配置。** 游戏需要运行环境时，“设置运行环境…”会根据该游戏的设置准确列出所需组件，并一次安装完成。仅当其中包含 D3DMetal 时，才会要求接受 Apple 条款。仍可在依赖项面板中手动选择版本。
 - **兼容性组件。** 可在依赖项窗口中安装和移除 jadeite 及 Steam 启动器兼容替身（shim）。该替身由我们使用 Valve 的 Proton 源代码自行进行可复现构建（[发布页](https://github.com/deruta74/MacGacha/releases/tag/steam-shim-proton-10.0-4)）。
 - **语言。** 界面支持英语、简体中文、繁体中文、日语、韩语、俄语、乌克兰语、德语、法语、西班牙语、葡萄牙语、印度尼西亚语、泰语和越南语。默认遵循 Mac 的语言优先顺序，也可在设置中自行选择。游戏新闻和美术内容使用界面语言（乌克兰语使用英语，因为 HoYoPlay 不提供乌克兰语）。更改语言会重启 MacGacha，正在进行的下载会自动继续。
@@ -91,7 +91,7 @@ DXMT 适用于所有游戏，并作为开源替代方案保留。60 FPS 限制�
 **进行中**
 
 - **中国大陆版本（测试版）。** 设置中的区域切换可显示《原神》《崩坏：星穹铁道》和《绝区零》，并使用各自独立的安装、前缀及设置。《绝区零》可从 miHoYo 服务器安装，并借助我们的 [Wine crypt32 修复](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1)运行至登录界面之后。《原神》和《崩坏：星穹铁道》仍需进行实际游戏测试，所有中国大陆版本均未测试账号登录。欢迎拥有中国大陆服账号的用户参与测试。
-- **《崩坏：星穹铁道》游戏内热更新后的重启**，尚未测试。
+- **《崩坏：星穹铁道》游戏内热更新后的重启。** 在目前唯一的一次测试中，游戏重启后没有出现登录窗口。从 MacGacha 再次启动后可正常登录。
 - **预下载后的版本发布日更新**，仍需等待下一游戏版本进行端到端测试。
 
 **下一步**
@@ -130,7 +130,8 @@ MacGacha 是非官方社区项目，与 HoYoverse（COGNOSPHERE）或 Apple Inc.
 
 - [Wine](https://www.winehq.org) 项目，以及 CodeWeavers 提供的 CrossOver 开源 Wine。
 - 3Shain 开发的 DXMT 和 yaagl，MacGacha 的启动方案以其研究为基础。
-- dbc-hbin 提供的 Wine 11.20 + D3DMetal 构建。
+- dbc-hbin 提供的 Wine 11.20 分支（MacGacha Wine 基于此构建），以及 Wine 11.20 + D3DMetal 构建。
+- 感谢 HouSisong 开发采用 MIT 许可证的补丁解码器 [HDiffPatch](https://github.com/sisong/HDiffPatch)。
 - mkrsym1 开发的 jadeite。
 - 34736384 开发的 [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock)，我们的《原神》帧率解锁采用其方法。
 - Valve 开发的 Proton，我们的 Steam 启动器替身源于其代码。
@@ -141,4 +142,4 @@ MacGacha 是非官方社区项目，与 HoYoverse（COGNOSPHERE）或 Apple Inc.
 
 Copyright (C) 2026 deruta74。MacGacha 是依照 [GNU General Public License v3.0](../LICENSE) 发布的自由软件，并根据 GPL 第 7(b) 节附加一项条款（参见 [NOTICE](../NOTICE)）：每份转交（分发）的副本，以及所有基于 MacGacha 分发的作品，都必须在源代码和“关于”界面中保留原始项目链接 https://github.com/deruta74/MacGacha 。不对外分发的私人修改不受此要求影响。任何分发的版本，无论是否修改或收费，都必须继续采用 GPL-3.0，并提供源代码。
 
-启动器在运行时下载的组件（Wine、DXMT、D3DMetal、jadeite、Steam 替身、环绕声模块和《原神》帧率辅助模块），以及游戏本身，均遵循各自的许可证和条款。
+启动器在运行时下载的组件（MacGacha Wine 及其他 Wine 构建、DXMT、D3DMetal、jadeite、Steam 替身、环绕声模块和《原神》帧率辅助模块），以及游戏本身，均遵循各自的许可证和条款。
