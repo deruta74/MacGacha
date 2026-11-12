@@ -207,6 +207,9 @@ public actor OperationJournal {
 
     /// Batch/commit boundaries and completion use F_FULLFSYNC; file records use
     /// fsync. Disposable object hints join the next file/boundary flush.
+    /// Pre-commit fileStaged is also a hint: resume rehashes its output. Normal
+    /// output data is fsynced after staging drains, before batchStarted; commit
+    /// recovery full-syncs each restaged output before recording fileStaged.
     /// Once writing starts cancellation is deferred until the record has been synchronized.
     /// If append throws after writing any bytes, the record is possibly written: reopen
     /// and use recoveredState as the source of truth before proceeding.

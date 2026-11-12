@@ -15,7 +15,7 @@ package struct AssemblyBadObject: Error {
 
 package enum FileAssembler {
     /// One independent output descriptor and digest state per worker. All
-    /// blocking decoding, hashing and full sync runs off the scheduling actor.
+    /// blocking decoding, hashing and recovery sync runs off the scheduling actor.
     @concurrent static func assemble(_ file: FileTask, plan: InstallPlan, fs: ContainedFileSystem, durable: Bool = false,
         fallback: @escaping @Sendable (String) async throws -> Void) async throws {
         try await BlockingIO.run {
@@ -48,10 +48,12 @@ package enum FileAssembler {
         guard size == file.size else { throw LauncherError.sizeMismatch(path: file.path.description, expected: file.size, actual: size) }
         let actual = try sink.fileDigest(size: file.size) ?? hash(path, size: file.size, algorithm: file.digest.algorithm, fs: fs)
         guard actual == file.digest else { throw LauncherError.digestMismatch(path: file.path.description, expected: file.digest.hex, actual: actual.hex) }
-        // Data reaches the filesystem before fileStaged can be appended. The
-        // batch/commit journal F_FULLFSYNC flushes the device cache before any
-        // rename. Pre-commit recovery also rehashes staged data before reuse.
-        try fs.synchronizeFile(at: path, durable: durable)
+        // Normal outputs are synced together after the staging pipeline drains,
+        // before the batch/commit journal F_FULLFSYNC and any rename. Until
+        // then fileStaged is disposable: pre-commit recovery rehashes the data.
+        // Commit recovery has already crossed that boundary, so restaging must
+        // establish its own full durability before publishing fileStaged.
+        if durable { try fs.fullSync(at: path) }
     }
 
     private static func decode(_ id: String, extent: Extent, plan: InstallPlan, fs: ContainedFileSystem,

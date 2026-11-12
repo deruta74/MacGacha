@@ -51,14 +51,14 @@ import TestSupport
     for file in files { #expect(try fs.readFile(at: file.path, maxBytes: 4096) == Data(payload.utf8)) }
 }
 
-@Test(.timeLimit(.minutes(1))) func stagedFilesUseFsyncBeforeCommitBoundaries() async throws {
+@Test(.timeLimit(.minutes(1))) func stagingDefersOutputSyncUntilOperationCommitBoundary() async throws {
     let temp = try TempDir(), ops = ThroughputFileOps(), fs = try ContainedFileSystem(root: temp.url, fileOps: ops)
     let cdn = MockCDN(), object = stagingObject("object", "data")
     cdn.serve(object.id, data: Data("data".utf8))
     let file = try stagingFile("output", "data", [stagingChunk(object.id, "data")])
     let plan = try stagingPlan([object], [file]), journal = try stagingJournal(fs, plan)
     _ = try await collectStaging(stagingEngine(plan, fs, cdn, journal).stage(files: [file]))
-    #expect(ops.outputSyncs.withLock { $0 } == [false])
+    #expect(ops.outputSyncs.withLock { $0 }.isEmpty)
     #expect(try OperationJournal.replay(fs: fs, path: journalPath(plan)).stagedFiles == [file.path])
 }
 
