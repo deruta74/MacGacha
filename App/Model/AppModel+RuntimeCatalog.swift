@@ -165,6 +165,7 @@ struct RuntimeInstallContext: Sendable {
                 self.runtimeCatalogMutationID = nil; self.catalogMutationTask = nil
             }
             do {
+                try await self.cancelAutomaticCleanupForPinnedSelection(target, id: id)
                 let actual = try await catalogAccess.activate(target.selections)
                 self.catalogSelectionGeneration = UUID()
                 self.applyRuntimeCatalog(actual)

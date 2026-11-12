@@ -9,7 +9,7 @@ import DownloadEngine
 @MainActor extension AppModel {
     func scheduleDependencyAutoUpdates(retry: Bool = false) {
         if retry { dependencyAutoUpdateSuppressed = [] }
-        guard autoUpdateDependencies, !isStarting, catalogAccess != nil, runtimeCatalog != nil,
+        guard !isStarting, catalogAccess != nil, runtimeCatalog != nil,
             !runtimeCatalogUnavailable, dependencyAutoUpdateTask == nil else { return }
         let generation = UUID(); dependencyAutoUpdateGeneration = generation
         dependencyAutoUpdateReservation = true
@@ -29,6 +29,8 @@ import DownloadEngine
             }
             do {
                 try await self.flushLaunchSettings()
+                try await self.refreshAutomaticRetention()
+                try await self.cleanupAutomaticReplacements()
                 self.dependencyConsentTargets = [:]; self.refreshDependencyConsentGames()
                 var attempted = self.dependencyAutoUpdateSuppressed
                 while !Task.isCancelled, self.autoUpdateDependencies, let current = self.runtimeCatalog {
@@ -108,10 +110,15 @@ import DownloadEngine
             runtimeCatalogMutationID = id; catalogSelectionGeneration = UUID()
             defer { runtimeCatalogMutationID = nil; catalogSelectionGeneration = UUID() }
             do {
+                let paths = paths
+                try await BlockingIO.run {
+                    try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: update.familyID,
+                        previousID: update.previousID.rawValue, replacementID: update.targetID.rawValue)
+                }
                 let actual = try await catalogAccess.activate(selections)
                 applyRuntimeCatalog(actual)
                 dependencyConsentTargets[update.backend ?? .dxmt] = nil; refreshDependencyConsentGames()
-                dependencyAutoUpdates[family] = nil
+                dependencyAutoUpdates[family] = .keepingPrevious(id: id)
                 postDependencyUpdate("Automatic version activated", update: update)
             } catch {
                 await reconcileRuntimeCatalog()
@@ -160,7 +167,10 @@ import DownloadEngine
     }
 
     func postDependencyUpdate(_ message: String, update: RuntimeAutomaticUpdate) {
+        postDependencyUpdate(message, familyID: update.familyID)
+    }
+    func postDependencyUpdate(_ message: String, familyID: String) {
         if dependencyUpdateLog == nil { dependencyUpdateLog = EventLog(directory: paths.logs) }
-        dependencyUpdateLog?.post(.info, "runtime", message, metadata: ["family": update.familyID])
+        dependencyUpdateLog?.post(.info, "runtime", message, metadata: ["family": familyID])
     }
 }

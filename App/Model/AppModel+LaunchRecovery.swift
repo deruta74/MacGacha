@@ -69,6 +69,7 @@ import Launch
                 guard !Task.isCancelled, launchObservationGenerations[id] == generation else { return true }
                 finishLaunchObservation(id)
                 recoveryNotices = notices ?? recoveryNotices
+                scheduleDependencyAutoUpdates()
                 return true
             }
             launchSlotOwner = id

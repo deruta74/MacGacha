@@ -78,6 +78,7 @@ public actor LaunchManager {
             self.session = session; self.lock = lock; self.pin = pin; self.log = log
             self.lifecycleLog = log.map(SessionLifecycleLog.init)
             self.watchPhase = session.state == .running ? .running : .spawning
+            self.ready = session.reachedReady == true
         }
     }
 
@@ -196,6 +197,7 @@ public actor LaunchManager {
     public func markReady(game: String) {
         guard let context = contexts[game], context.session.state == .running, !context.hasEnded, !context.ready else { return }
         context.ready = true
+        context.session.reachedReady = true
         context.continuation?.yield(.ready)
         note(context, "game window ready")
     }
@@ -467,6 +469,7 @@ public actor LaunchManager {
         context.watchPhase = .running
         context.session.startupPending = false
         context.session.state = .running
+        context.session.reachedRunning = true
         context.session.processes = Array(Set(context.session.processes + processes)).sorted { $0.pid < $1.pid }
         try await persist(context.session)
         if !context.runningAnnounced, let process = processes.sorted(by: { $0.pid < $1.pid }).first {
@@ -627,7 +630,21 @@ public actor LaunchManager {
     }
 
     private func verifiedEnd(_ context: Context) async throws {
-        guard context.hasEnded, context.session.endLogged != true else { return }
+        guard context.hasEnded else { return }
+        if context.session.reachedRunning == true,
+            ["normal", "while MacGacha was closed"].contains(context.endOutcome), context.deferredFailure == nil {
+            let paths = paths, session = context.session
+            do {
+                try await BlockingIO.run {
+                    try RuntimeAutomaticUpdateStore(paths: paths).recordVerifiedSession(bundleID: session.bundleID, componentIDs: session.componentIDs)
+                }
+            } catch {
+                // Cleanup proof is optional. Failure keeps the previous runtime,
+                // never the user's game files or launch recovery ownership.
+                event("Automatic cleanup proof unavailable", game: session.game, level: .warning)
+            }
+        }
+        guard context.session.endLogged != true else { return }
         var snapshot = context.session
         snapshot.endLogged = true
         snapshot.startupPending = false

@@ -7,6 +7,43 @@ import RuntimeManager
 @testable import MacGacha
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct DependencyAutoUpdateModelTests {
+    @Test func cleanupNeedsNormalProofAndKeepsSharedGraphicsEvenWhenUpdatesAreOff() async throws {
+        let f = try await BundleUpgradeFixture.make()
+        var events = f.services.installEvents.stream.makeAsyncIterator()
+        f.model.autoUpdateDependencies = true
+        _ = await events.next()
+        try f.publish(f.new); f.services.emit(.phase(.completed))
+        try await waitForCatalogModel { !f.model.dependencyAutoUpdateReservation }
+        f.model.autoUpdateDependencies = false
+        let store = RuntimeAutomaticUpdateStore(paths: f.paths)
+        #expect(try await BlockingIO.run { try store.load().replacements.first?.verified } == false)
+        f.model.scheduleDependencyAutoUpdates()
+        await f.model.dependencyAutoUpdateTask?.value
+        #expect(f.services.snapshot.bundles[f.old] != nil)
+        let shared = try InstalledComponent(kind: .d3dmetal, version: "4.0b3", installedAt: .now, source: .download)
+        f.services.state.withLock { $0.components.append(shared) }
+        try await f.model.scanAndApply()
+        try await BlockingIO.run { try store.recordVerifiedSession(bundleID: f.new, componentIDs: []) }
+        f.model.scheduleDependencyAutoUpdates()
+        await f.model.dependencyAutoUpdateTask?.value
+        #expect(f.services.snapshot.bundles[f.old] == nil)
+        #expect(f.services.snapshot.bundles[f.new] != nil)
+        #expect(f.services.snapshot.components.contains(shared))
+        #expect(try await BlockingIO.run { try store.load().replacements.isEmpty })
+    }
+
+    @Test func pinningTheOldVersionCancelsDurableCleanup() async throws {
+        let f = try await BundleUpgradeFixture.make()
+        var events = f.services.installEvents.stream.makeAsyncIterator()
+        f.model.autoUpdateDependencies = true; _ = await events.next()
+        try f.publish(f.new); f.services.emit(.phase(.completed))
+        try await waitForCatalogModel { !f.model.dependencyAutoUpdateReservation }
+        f.model.useRuntimeVersion(f.old)
+        await f.model.catalogMutationTask?.value
+        #expect(f.model.runtimeIsPinned(f.old))
+        let store = RuntimeAutomaticUpdateStore(paths: f.paths)
+        #expect(try await BlockingIO.run { try store.load().replacements.isEmpty })
+    }
     @Test func backgroundInstallLeavesPlayAvailableAndActivationWaitsForDrainage() async throws {
         let f = try await BundleUpgradeFixture.make()
         var events = f.services.installEvents.stream.makeAsyncIterator()
