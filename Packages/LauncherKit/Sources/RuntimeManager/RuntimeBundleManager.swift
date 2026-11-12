@@ -184,7 +184,19 @@ public struct RuntimeBundleManager: Sendable {
                     throw LauncherError.busy("Imported graphics source changed")
                 }
             }
-            try fs.writeAtomically(Data("publication".utf8), to: SafeRelativePath("\(root)/.publication-in-progress"))
+            var destinations: [AutomaticPublicationIntent.Destination] = []
+            for component in staged.components where staged.expected[component.id] == nil {
+                destinations.append(.init(path: try RuntimeJSONFile.relativePath(store.installURL(for: component), root: store.paths.root),
+                    marker: ".macgacha-component.json", receipt: Data()))
+            }
+            if let bundle = staged.bundle {
+                destinations.append(.init(path: try bundlePath(bundle), marker: ".macgacha-bundle.json", receipt: Data()))
+            }
+            for index in destinations.indices {
+                destinations[index].receipt = try fs.readFile(at: SafeRelativePath("\(root)/\(destinations[index].path)/\(destinations[index].marker)"), maxBytes: 65_536)
+            }
+            let intent = AutomaticPublicationIntent(componentIDs: staged.components.map { $0.id.rawValue }, destinations: destinations)
+            try fs.writeAtomically(JSONEncoder().encode(intent), to: SafeRelativePath("\(root)/.publication-in-progress"))
             for component in staged.components where staged.expected[component.id] == nil {
                 let destination = try RuntimeJSONFile.relativePath(store.installURL(for: component), root: store.paths.root)
                 let incoming = try SafeRelativePath("\(root)/\(destination)")
@@ -214,7 +226,9 @@ public struct RuntimeBundleManager: Sendable {
             let fs = try ContainedFileSystem(root: store.paths.root)
             let path = try automaticStagePath(staged.token)
             guard try fs.itemType(at: path) != nil else { return }
-            if try fs.itemType(at: SafeRelativePath("\(path)/.publication-in-progress")) == nil { try fs.removeItem(at: path) }
+            let lease = try RuntimeStoreLease(store: store)
+            defer { withExtendedLifetime(lease) {} }
+            try Self.reclaimAutomaticStage(fs: fs, path: path, paths: store.paths)
             withExtendedLifetime(staged.lifetime) {}
         }
     }
@@ -232,14 +246,46 @@ public struct RuntimeBundleManager: Sendable {
             guard entries.count <= 4096 else { throw LauncherError.io("Too many automatic staging entries") }
             for entry in entries {
                 guard let name = entry.components.last, UUID(uuidString: name) != nil,
-                    try fs.itemType(at: entry) == .directory,
-                    try fs.itemType(at: SafeRelativePath("\(entry)/.publication-in-progress")) == nil else { continue }
+                    try fs.itemType(at: entry) == .directory else { continue }
                 let stageFS = try ContainedFileSystem(root: fs.directoryURL(at: entry)).pinRoot()
                 guard let lock = try? RuntimeAutomaticStageLease(fs: stageFS) else { continue }
                 defer { withExtendedLifetime(lock) {} }
-                try fs.removeItem(at: entry)
+                try reclaimAutomaticStage(fs: fs, path: entry, paths: paths)
             }
         }
+    }
+
+    // Store and staging exclusions are held by both callers. A completed move
+    // owns its destination, while an unstarted move still owns its incoming tree.
+    private static func reclaimAutomaticStage(fs: ContainedFileSystem, path: SafeRelativePath, paths: AppPaths) throws {
+        let marker = try SafeRelativePath("\(path)/.publication-in-progress")
+        guard try fs.itemType(at: marker) != nil else { try fs.removeItem(at: path); return }
+        let intent = try JSONDecoder().decode(AutomaticPublicationIntent.self, from: fs.readFile(at: marker, maxBytes: 1 << 20))
+        guard !intent.componentIDs.isEmpty, intent.componentIDs.count <= 64, intent.destinations.count <= 65 else {
+            throw LauncherError.io("Invalid automatic publication intent")
+        }
+        let pins = try RuntimeRemovalLease(paths: paths, componentIDs: intent.componentIDs)
+        defer { withExtendedLifetime(pins) {} }
+        for destination in intent.destinations {
+            let parts = destination.path.components
+            guard parts.count == 3, parts[0] == "Runtimes",
+                (parts[1] == "bundles" && destination.marker == ".macgacha-bundle.json") ||
+                (ComponentKind(rawValue: parts[1]) != nil && destination.marker == ".macgacha-component.json") else {
+                throw LauncherError.io("Invalid automatic publication destination")
+            }
+            _ = try SafeIdentifier(parts[2])
+            let target = try SafeRelativePath("\(destination.path)/\(destination.marker)")
+            let incoming = try SafeRelativePath("\(path)/\(target)")
+            if (try? fs.readFile(at: incoming, maxBytes: 65_536)) == destination.receipt {
+                // No swap occurred. An unrelated preexisting target stays intact.
+                continue
+            }
+            guard try fs.itemType(at: destination.path) != nil,
+                try fs.readFile(at: target, maxBytes: 65_536) == destination.receipt else {
+                throw LauncherError.busy("Automatic publication destination changed")
+            }
+        }
+        try fs.removeItem(at: path)
     }
 
     @discardableResult
@@ -560,4 +606,14 @@ private struct RuntimeTree {
             }
         }
     }
+}
+
+private struct AutomaticPublicationIntent: Codable {
+    struct Destination: Codable {
+        let path: SafeRelativePath
+        let marker: String
+        var receipt: Data
+    }
+    let componentIDs: [String]
+    let destinations: [Destination]
 }

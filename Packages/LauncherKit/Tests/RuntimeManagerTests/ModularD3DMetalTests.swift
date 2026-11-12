@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Synchronization
 import Testing
 import LauncherCore
 import DownloadEngine
@@ -8,6 +9,49 @@ import DownloadEngine
 import TestSupport
 
 @Suite struct ModularD3DMetalTests {
+    @Test func interruptedReplacementOfExistingTargetReclaimsIntactIncomingTree() async throws {
+        let f = try BundleFixture()
+        _ = try await f.manager.install(f.bundle)
+        let before = try #require(try await f.manager.installed(f.bundle))
+        let staged = try await f.manager.stage(f.bundle)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        let marker = try SafeRelativePath("Runtimes/bundles/\(f.bundle.id)/.macgacha-bundle.json")
+        let original = try fs.readFile(at: marker, maxBytes: 65_536)
+        // Distinct receipt bytes represent an intact preexisting target.
+        try fs.writeAtomically(original + Data("\n".utf8), to: marker)
+        let failing = f.makeManager(failurePoint: { if $0 == .beforePublish { throw LauncherError.cancelled } })
+        await #expect(throws: LauncherError.cancelled) { try await failing.publish(staged) }
+        try await failing.discard(staged)
+        #expect(try fs.contentsOfDirectory(at: SafeRelativePath("Runtimes/.automatic-staging")).isEmpty)
+        #expect(try fs.readFile(at: marker, maxBytes: 65_536) == original + Data("\n".utf8))
+        #expect(try await f.manager.installed(f.bundle)?.digest == before.digest)
+    }
+
+    @Test(arguments: [0, 1, 2, 3], [false, true])
+    func interruptedAutomaticPublicationCanReclaimStaging(publishedCount: Int, discard: Bool) async throws {
+        let f = try BundleFixture(), count = Mutex(0)
+        func interrupt() async throws {
+            let staged = try await f.manager.stage(f.bundle)
+            let failing = f.makeManager(failurePoint: { point in
+                if point == .beforePublish && publishedCount == 0 { throw LauncherError.cancelled }
+                if point == .afterPublish {
+                    let total = count.withLock { $0 += 1; return $0 }
+                    if total == publishedCount { throw LauncherError.io("Interrupted publication") }
+                }
+            })
+            await #expect(throws: (any Error).self) { try await failing.publish(staged) }
+            if discard { try await failing.discard(staged) }
+        }
+        try await interrupt()
+        try await RuntimeBundleManager.sweepAutomaticStaging(paths: f.store.paths)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        #expect(try fs.contentsOfDirectory(at: SafeRelativePath("Runtimes/.automatic-staging")).isEmpty)
+        #expect(try f.store.installed().count == min(publishedCount, 2))
+        let retry = try await f.manager.stage(f.bundle)
+        try await f.manager.publish(retry)
+        #expect(try await f.manager.installed(f.bundle) != nil)
+    }
+
     @Test func stageCloneBudgetFailureKeepsActiveComponentsAndCleansItsRoot() async throws {
         let f = try await MetalFixture.make(), before = try f.store.installed()
         let manager = f.manager(for: f.manifest, disk: FixedDiskSpace(bytes: 0))
