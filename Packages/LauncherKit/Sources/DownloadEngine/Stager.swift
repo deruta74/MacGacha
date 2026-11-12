@@ -399,17 +399,21 @@ private actor StagingSession {
             task = Task {
                 defer { self.inFlightObjects.remove(id) }
                 try await limiter.acquire()
+                let fetchedMirror: Int
                 do {
-                    let mirror = try await PipelineIOGate.$objectID.withValue(id) {
+                    fetchedMirror = try await PipelineIOGate.$objectID.withValue(id) {
                         try await fetcher.fetch(object, fs: fs, part: layout.object(object), startingMirror: mirror,
                             progress: { if let event = tracker.update(id, $0) { channel?.send(event) } })
                     }
-                    try await journal.append(.objectVerified(id: id))
-                    crashHooks.reach(.afterObjectVerified)
-                    try self.completedFetch(object, mirror: mirror)
-                    await limiter.release()
-                    return mirror
                 } catch { await limiter.release(); throw error }
+                // The limiter bounds active transfers, not journal latency.
+                // Keep the shared task pending until its recovery hint and
+                // bookkeeping finish, so readers cannot race part replacement.
+                await limiter.release()
+                try await journal.append(.objectVerified(id: id))
+                crashHooks.reach(.afterObjectVerified)
+                try self.completedFetch(object, mirror: fetchedMirror)
+                return fetchedMirror
             }
             transfers[id] = task
         }

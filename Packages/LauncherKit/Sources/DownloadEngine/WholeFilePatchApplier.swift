@@ -56,7 +56,9 @@ package enum FileRecipeAssembler {
                 guard try await FileAssembler.matches(file, plan: plan, fs: fs) else {
                     throw AssemblyBadObject(id: object.id, cause: LauncherError.digestMismatch(path: "patch output", expected: file.digest.hex, actual: "invalid"))
                 }
-                try fs.synchronizeFile(at: path, durable: durable)
+                // Normal outputs join the drained batch's pre-commit sync.
+                // Commit recovery must establish durability before fileStaged.
+                if durable { try fs.fullSync(at: path) }
             } catch let error as LauncherError {
                 switch error {
                 case .malformedPatch, .unsupportedCompressor, .sizeMismatch, .digestMismatch, .io:
