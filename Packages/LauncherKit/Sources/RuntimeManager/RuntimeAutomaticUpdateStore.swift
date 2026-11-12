@@ -57,6 +57,10 @@ public struct RuntimeAutomaticUpdateStore: Sendable {
     public func retain(familyID: String, previousID: String, replacementID: String) throws {
         _ = try SafeIdentifier(familyID); _ = try SafeIdentifier(previousID); _ = try SafeIdentifier(replacementID)
         try mutate { state in
+            // A new trial cannot reuse qualification from an earlier switch.
+            for index in state.replacements.indices where state.replacements[index].familyID == familyID && state.replacements[index].previousID == previousID {
+                state.replacements[index].qualification = nil
+            }
             guard !state.replacements.contains(where: { $0.familyID == familyID && $0.previousID == previousID && $0.replacementID == replacementID }) else { return }
             guard state.replacements.count < 128 else { throw catalogError("Too many retained automatic versions") }
             state.replacements.append(.init(id: UUID(), familyID: familyID, previousID: previousID, replacementID: replacementID, qualification: nil))
@@ -71,21 +75,33 @@ public struct RuntimeAutomaticUpdateStore: Sendable {
         guard componentIDs.count <= 64, Set(componentIDs).count == componentIDs.count else { throw catalogError("Invalid session components") }
         for id in componentIDs { _ = try SafeIdentifier(id) }
         try mutate { state in
-            var proven = Set(state.replacements.filter { record in
-                record.familyID.hasPrefix("bundle-") ? record.replacementID == bundleID : componentIDs.contains(record.replacementID)
-            }.map(\.id))
-            var changed = true
-            while changed {
-                changed = false
-                for record in state.replacements where !proven.contains(record.id) {
-                    if state.replacements.contains(where: { proven.contains($0.id) && $0.familyID == record.familyID && $0.previousID == record.replacementID }) {
-                        proven.insert(record.id); changed = true
+            let proof = RuntimeAutomaticQualification(sessionID: sessionID, bundleID: bundleID,
+                componentIDs: componentIDs, confirmedRunningSeconds: confirmedRunningSeconds)
+            for family in Set(state.replacements.map(\.familyID)).sorted() {
+                let roots = family.hasPrefix("bundle-") ? [bundleID] : componentIDs
+                for root in roots {
+                    let records = state.replacements.filter { $0.familyID == family }
+                    guard records.contains(where: { $0.replacementID == root }) else { continue }
+                    var predecessors: Set<String> = [root]
+                    var changed = true
+                    while changed {
+                        changed = false
+                        for record in records where predecessors.contains(record.replacementID) {
+                            if predecessors.insert(record.previousID).inserted { changed = true }
+                        }
+                    }
+                    // Only real session proof collapses cycles and failed-intent
+                    // branches. Pending activation must preserve the old lineage.
+                    var emitted: Set<String> = []
+                    state.replacements = state.replacements.compactMap { record in
+                        guard record.familyID == family else { return record }
+                        if record.previousID == root { return nil }
+                        guard predecessors.contains(record.previousID) else { return record }
+                        guard emitted.insert(record.previousID).inserted else { return nil }
+                        return RuntimeAutomaticReplacement(id: record.id, familyID: family,
+                            previousID: record.previousID, replacementID: root, qualification: proof)
                     }
                 }
-            }
-            for index in state.replacements.indices where proven.contains(state.replacements[index].id) {
-                state.replacements[index].qualification = .init(sessionID: sessionID, bundleID: bundleID,
-                    componentIDs: componentIDs, confirmedRunningSeconds: confirmedRunningSeconds)
             }
         }
     }

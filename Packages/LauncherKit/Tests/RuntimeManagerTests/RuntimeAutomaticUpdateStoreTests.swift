@@ -7,6 +7,36 @@ import LauncherCore
 import TestSupport
 
 @Suite struct RuntimeAutomaticUpdateStoreTests {
+    @Test(arguments: [false, true]) func failedActivationIntentDoesNotStrandQualifiedCleanup(rollback: Bool) throws {
+        let temp = try TempDir(), store = RuntimeAutomaticUpdateStore(paths: AppPaths(root: temp.url))
+        try store.retain(familyID: "bundle-dxmt", previousID: "wine-a", replacementID: "wine-b")
+        if rollback { try store.retain(familyID: "bundle-dxmt", previousID: "wine-b", replacementID: "wine-a") }
+        try store.retain(familyID: "bundle-dxmt", previousID: rollback ? "wine-b" : "wine-a", replacementID: "wine-c")
+        try store.recordVerifiedSession(bundleID: "wine-c", componentIDs: [], confirmedRunningSeconds: 120, sessionID: UUID())
+        let records = try store.load().replacements
+        #expect(records.allSatisfy { $0.verified && $0.replacementID == "wine-c" })
+        #expect(Set(records.map(\.previousID)).count == records.count)
+        #expect(Set(records.map(\.previousID)) == (rollback ? ["wine-a", "wine-b"] : ["wine-a"]))
+    }
+
+    @Test func rollbackLineageRemainsReclaimableAfterRestart() throws {
+        let temp = try TempDir(), paths = AppPaths(root: temp.url)
+        let store = RuntimeAutomaticUpdateStore(paths: paths)
+        for (previous, next) in [("wine-a", "wine-b"), ("wine-b", "wine-a"), ("wine-a", "wine-c")] {
+            try store.retain(familyID: "bundle-dxmt", previousID: previous, replacementID: next)
+        }
+        let reopened = RuntimeAutomaticUpdateStore(paths: paths)
+        try reopened.recordVerifiedSession(bundleID: "wine-c", componentIDs: [], confirmedRunningSeconds: 120, sessionID: UUID())
+        var records = try reopened.load().replacements
+        while let record = records.first(where: { candidate in
+            candidate.verified && !records.contains { $0.id != candidate.id && [$0.previousID, $0.replacementID].contains(candidate.previousID) }
+        }) {
+            try reopened.removeReplacement(id: record.id)
+            records = try reopened.load().replacements
+        }
+        #expect(records.isEmpty)
+    }
+
     @Test func graphicsDeclinePersistsPerVersionAndTheNextVersionIsNotDeclined() throws {
         let temp = try TempDir(), paths = AppPaths(root: temp.url)
         try RuntimeAutomaticUpdateStore(paths: paths).declineGraphics(version: "4.0b4")
