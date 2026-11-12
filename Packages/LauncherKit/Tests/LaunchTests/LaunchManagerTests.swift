@@ -74,10 +74,11 @@ import TestSupport
         #expect(try await f.journal() == nil)
         try await f.assertOriginalRestored()
     }
-    @Test(arguments: [false, true]) func recoveredVerifiedEndRequiresDurableRunningProof(didRun: Bool) async throws {
+    @Test(arguments: [false, true], [false, true]) func recoveredVerifiedEndRequiresDurableRunningProof(didRun: Bool, ready: Bool) async throws {
         let f = try await ManagerFixture.make(initialGame: false)
         var snapshot = try await f.saveSnapshot(state: .running, processes: [])
         snapshot.reachedRunning = didRun
+        snapshot.reachedReady = ready
         snapshot.confirmedRunningSeconds = didRun ? 120 : 119
         let saved = snapshot, paths = f.paths
         try await BlockingIO.run {
@@ -86,7 +87,7 @@ import TestSupport
         }
         _ = await f.manager().reattachAll()
         let state = try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load() }
-        #expect(state.replacements.first?.verified == didRun)
+        #expect(state.replacements.first?.verified == (didRun && ready))
     }
     @Test(arguments: [false, true], [119, 120]) func onlyNormalVerifiedSessionQualifiesAutomaticCleanup(ready: Bool, runningSeconds: Int) async throws {
         let f = try await ManagerFixture.make(), manager = f.manager(), events = ManagerEvents()

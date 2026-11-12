@@ -696,7 +696,7 @@ public actor LaunchManager {
         if let qualification = context.qualificationTask {
             qualification.cancel(); await qualification.value; context.qualificationTask = nil
         }
-        if context.session.reachedRunning == true,
+        if context.session.reachedRunning == true, context.session.reachedReady == true,
             ["normal", "while MacGacha was closed"].contains(context.endOutcome), context.deferredFailure == nil {
             let paths = paths, session = context.session
             do {
