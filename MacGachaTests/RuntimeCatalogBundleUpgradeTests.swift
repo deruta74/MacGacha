@@ -5,7 +5,6 @@ import Observation
 import Testing
 import LauncherCore
 import RuntimeManager
-import TestSupport
 import Synchronization
 @testable import MacGacha
 
@@ -44,10 +43,15 @@ import Synchronization
 
 @MainActor func waitForCatalogModel(_ condition: () -> Bool) async throws {
     while !condition() {
-        let changed = TestEvent()
-        let ready = withObservationTracking { condition() } onChange: { changed.signal() }
+        let changes = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { changes.continuation.finish() }
+        let ready = withObservationTracking { condition() } onChange: {
+            changes.continuation.yield(())
+            changes.continuation.finish()
+        }
         if ready { return }
-        try await changed.wait()
+        for await _ in changes.stream { break }
+        try Task.checkCancellation()
     }
 }
 
