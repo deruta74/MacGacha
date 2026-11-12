@@ -7,7 +7,7 @@ import os
 /// Wine's host-folder links can cause TCC prompts attributed to the launcher.
 /// Existing directories prevent shell32 from recreating those links on wineboot -u.
 enum PrefixShellFolders {
-    static let names = ["Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos"]
+    static let names = ["Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Templates", "My Documents", "My Music", "My Pictures", "My Videos"]
     static let registryValues = [
         ("Desktop", "Desktop"), ("Personal", "Documents"),
         ("{374DE290-123F-4565-9164-39C4925E467B}", "Downloads"),

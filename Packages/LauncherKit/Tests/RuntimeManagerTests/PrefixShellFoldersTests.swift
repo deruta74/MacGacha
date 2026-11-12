@@ -9,6 +9,23 @@ import TestSupport
 @testable import RuntimeManager
 
 @Suite struct PrefixShellFoldersTests {
+    @Test(arguments: ["Templates", "My Documents", "My Music", "My Pictures", "My Videos"], [false, true])
+    func legacyShellFolderAliasesAreIsolated(name: String, internalTarget: Bool) throws {
+        let temp = try TempDir(), outside = try TempDir()
+        let fs = try ContainedFileSystem(root: temp.url), target = try ContainedFileSystem(root: outside.url)
+        try target.writeAtomically(Data("saved".utf8), to: SafeRelativePath("sentinel"))
+        for profile in ["player", "Public"] {
+            try fs.createDirectory(at: SafeRelativePath("drive_c/users/\(profile)/Documents"))
+            try fs.createSymbolicLink(at: SafeRelativePath("drive_c/users/\(profile)/\(name)"),
+                target: internalTarget ? "Documents" : outside.url.path)
+        }
+        try PrefixShellFolders.repair(in: fs)
+        for profile in ["player", "Public"] {
+            #expect(try fs.itemType(at: SafeRelativePath("drive_c/users/\(profile)/\(name)"), allowingLeafSymlink: true) == .directory)
+        }
+        #expect(try target.readFile(at: SafeRelativePath("sentinel"), maxBytes: 100) == Data("saved".utf8))
+    }
+
     @Test func winebootServicesAreJoinedBeforeRepair() async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), paths = AppPaths(root: temp.url), fs = try ContainedFileSystem(root: paths.root)
