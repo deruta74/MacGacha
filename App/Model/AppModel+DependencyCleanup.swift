@@ -11,7 +11,7 @@ import RuntimeManager
         dependencyHasRetainedVersions = !state.replacements.isEmpty
         for record in state.replacements {
             if runtimeIsSelected(record.replacementID) && !runtimeIsPinned(record.previousID) {
-                dependencyAutoUpdates[record.familyID] = .keepingPrevious(id: record.replacementID)
+                dependencyAutoUpdates[record.familyID] = .keepingPrevious(id: record.previousID)
             }
         }
     }
@@ -59,7 +59,7 @@ import RuntimeManager
                 previousID: previousID, replacementID: id)
         }
         dependencyHasRetainedVersions = true
-        dependencyAutoUpdates[family] = .keepingPrevious(id: id)
+        dependencyAutoUpdates[family] = .keepingPrevious(id: previousID)
     }
 
     func cleanupAutomaticReplacements() async throws {

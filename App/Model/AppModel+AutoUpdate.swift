@@ -141,7 +141,7 @@ import DownloadEngine
                 }
                 applyRuntimeCatalog(actual)
                 dependencyConsentTargets[update.backend ?? .dxmt] = nil; refreshDependencyConsentGames()
-                dependencyAutoUpdates[family] = .keepingPrevious(id: id)
+                dependencyAutoUpdates[family] = .keepingPrevious(id: update.previousID.rawValue)
                 postDependencyUpdate("Automatic version activated", update: update)
                 try await staged.discard()
             } catch {

@@ -29,7 +29,8 @@ import RuntimeManager
         let record = try #require(try await f.records().only)
         #expect(record.familyID == f.familyID && record.previousID == f.previous && record.replacementID == f.target)
         #expect(!record.verified)
-        #expect(f.base.model.dependencyAutoUpdate(for: f.familyID) == .keepingPrevious(id: f.target))
+        // The state names the version that will be removed, which the panel shows as "Kept for now".
+        #expect(f.base.model.dependencyAutoUpdate(for: f.familyID) == .keepingPrevious(id: f.previous))
         try await f.qualify(seconds: 119)
         await f.cleanup()
         #expect(f.isInstalled(f.previous))

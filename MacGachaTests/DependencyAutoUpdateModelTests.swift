@@ -129,6 +129,8 @@ import RuntimeManager
         f.model.launchSlotOwner = nil
         try await waitForCatalogModel { !f.model.dependencyAutoUpdateReservation }
         #expect(f.model.runtimeCatalog?.selectedBundle(for: .d3dmetal)?.id.rawValue == f.new)
+        // The panel names the replaced version as the one awaiting removal.
+        #expect(f.model.dependencyAutoUpdate(for: "bundle-d3dmetal") == .keepingPrevious(id: f.old))
     }
 
     @Test(arguments: ["off", "cancel", "failure"])
