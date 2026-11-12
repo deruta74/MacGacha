@@ -9,7 +9,15 @@ public struct RuntimeAutomaticReplacement: Codable, Equatable, Sendable, Identif
     public let familyID: String
     public let previousID: String
     public let replacementID: String
-    public var verified: Bool
+    public var qualification: RuntimeAutomaticQualification?
+    public var verified: Bool { qualification != nil }
+}
+
+public struct RuntimeAutomaticQualification: Codable, Equatable, Sendable {
+    public let sessionID: UUID
+    public let bundleID: String
+    public let componentIDs: [String]
+    public let confirmedRunningSeconds: Double
 }
 
 public struct RuntimeAutomaticUpdateState: Codable, Sendable {
@@ -33,6 +41,14 @@ public struct RuntimeAutomaticUpdateStore: Sendable {
             Set(state.replacements.map(\.id)).count == state.replacements.count else { throw catalogError("Invalid automatic update state") }
         for record in state.replacements {
             _ = try SafeIdentifier(record.familyID); _ = try SafeIdentifier(record.previousID); _ = try SafeIdentifier(record.replacementID)
+            if let proof = record.qualification {
+                guard proof.confirmedRunningSeconds.isFinite, (120...31_536_000).contains(proof.confirmedRunningSeconds),
+                    proof.componentIDs.count <= 64, Set(proof.componentIDs).count == proof.componentIDs.count else {
+                    throw catalogError("Invalid automatic session qualification")
+                }
+                _ = try SafeIdentifier(proof.bundleID)
+                for id in proof.componentIDs { _ = try SafeIdentifier(id) }
+            }
         }
         for version in state.declinedGraphicsVersions { _ = try SafeIdentifier(version) }
         return state
@@ -43,13 +59,17 @@ public struct RuntimeAutomaticUpdateStore: Sendable {
         try mutate { state in
             guard !state.replacements.contains(where: { $0.familyID == familyID && $0.previousID == previousID && $0.replacementID == replacementID }) else { return }
             guard state.replacements.count < 128 else { throw catalogError("Too many retained automatic versions") }
-            state.replacements.append(.init(id: UUID(), familyID: familyID, previousID: previousID, replacementID: replacementID, verified: false))
+            state.replacements.append(.init(id: UUID(), familyID: familyID, previousID: previousID, replacementID: replacementID, qualification: nil))
         }
     }
 
     /// Only called after normal, verified end of a session that reached running.
     /// Qualifies predecessors in the same replacement chain as well.
-    public func recordVerifiedSession(bundleID: String, componentIDs: [String]) throws {
+    public func recordVerifiedSession(bundleID: String, componentIDs: [String], confirmedRunningSeconds: Double, sessionID: UUID) throws {
+        guard confirmedRunningSeconds.isFinite, (120...31_536_000).contains(confirmedRunningSeconds) else { return }
+        _ = try SafeIdentifier(bundleID)
+        guard componentIDs.count <= 64, Set(componentIDs).count == componentIDs.count else { throw catalogError("Invalid session components") }
+        for id in componentIDs { _ = try SafeIdentifier(id) }
         try mutate { state in
             var proven = Set(state.replacements.filter { record in
                 record.familyID.hasPrefix("bundle-") ? record.replacementID == bundleID : componentIDs.contains(record.replacementID)
@@ -63,7 +83,10 @@ public struct RuntimeAutomaticUpdateStore: Sendable {
                     }
                 }
             }
-            for index in state.replacements.indices where proven.contains(state.replacements[index].id) { state.replacements[index].verified = true }
+            for index in state.replacements.indices where proven.contains(state.replacements[index].id) {
+                state.replacements[index].qualification = .init(sessionID: sessionID, bundleID: bundleID,
+                    componentIDs: componentIDs, confirmedRunningSeconds: confirmedRunningSeconds)
+            }
         }
     }
 

@@ -6,9 +6,17 @@ import DownloadEngine
 import RuntimeManager
 import Diagnostics
 
+struct DependencyStagingHandle: Sendable {
+    let publish: @Sendable () async throws -> Void
+    let discard: @Sendable () async throws -> Void
+}
+
 protocol RuntimeServices: Sendable {
+    func stageDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle
     func scanBundles(_ manifest: RuntimeManifest) async throws -> [String: InstalledRuntimeBundle]
     func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, from candidate: GPTKCandidate?) -> RuntimeInstallStream
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, carryingImportedFrameworkFrom previous: RuntimeBundle) -> RuntimeInstallStream
     func remove(_ bundle: RuntimeBundle, manifest: RuntimeManifest) async throws
     func scan() async throws -> RuntimeScan
     func sweepStaging() async throws
@@ -24,6 +32,13 @@ protocol RuntimeServices: Sendable {
 }
 
 extension RuntimeServices {
+    func stageDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle {
+        throw LauncherError.io("Dependency staging unavailable")
+    }
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, carryingImportedFrameworkFrom previous: RuntimeBundle) -> RuntimeInstallStream {
+        RuntimeInstallStream(AsyncThrowingStream { $0.finish(throwing: LauncherError.io("Imported runtime update unavailable")) })
+    }
     func scanBundles(_ manifest: RuntimeManifest) async throws -> [String: InstalledRuntimeBundle] { [:] }
     func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, from candidate: GPTKCandidate?) -> RuntimeInstallStream {
         RuntimeInstallStream(AsyncThrowingStream { $0.finish(throwing: LauncherError.io("Runtime bundle service unavailable")) })
@@ -38,6 +53,17 @@ extension RuntimeServices {
 /// Core adapters own error logging, including errors thrown while pulling an install.
 /// Expensive entry points explicitly leave the caller's actor; constructing services does no disk I/O.
 final class LiveRuntimeServices: RuntimeServices, Sendable {
+    func stageDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle {
+        let manager = bundleManager(manifest)
+        let staged: RuntimeStagedUpdate
+        if let bundle = manifest.bundles.first(where: { $0.id == update.targetID }) {
+            staged = try await manager.stage(bundle, carryingImportedFrameworkFrom: importedFrom, progress: progress)
+        } else if let component = manifest.component(id: update.targetID) {
+            staged = try await manager.stage(component, progress: progress)
+        } else { throw LauncherError.io("Unknown dependency staging target") }
+        return DependencyStagingHandle(publish: { try await manager.publish(staged) }, discard: { try await manager.discard(staged) })
+    }
     private let paths: AppPaths
     private let store: RuntimeStore
     private let consent: ConsentStore
@@ -64,6 +90,18 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
 
     private func bundleManager(_ manifest: RuntimeManifest) -> RuntimeBundleManager {
         RuntimeBundleManager(manifest: manifest, store: store, consent: consent, installer: installer)
+    }
+
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, carryingImportedFrameworkFrom previous: RuntimeBundle) -> RuntimeInstallStream {
+        let manager = bundleManager(manifest)
+        return RuntimeInstallStream { continuation in
+            do {
+                _ = try await manager.install(bundle, carryingImportedFrameworkFrom: previous) { event in
+                    if event != .phase(.completed) { continuation.yield(event) }
+                }
+                continuation.yield(.phase(.completed)); continuation.finish()
+            } catch { continuation.finish(throwing: await self.record(error)) }
+        }
     }
 
     func scanBundles(_ manifest: RuntimeManifest) async throws -> [String: InstalledRuntimeBundle] {
@@ -99,6 +137,7 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
     @concurrent func sweepStaging() async throws {
         do {
             try await BlockingIO.run { try self.withStoreLock { try self.store.sweepStaging() } }
+            try await RuntimeBundleManager.sweepAutomaticStaging(paths: paths)
             await eventLog.log(.info, "runtime", "Startup staging sweep completed")
         } catch { throw await record(error) }
     }

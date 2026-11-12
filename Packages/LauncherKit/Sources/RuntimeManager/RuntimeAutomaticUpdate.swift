@@ -10,6 +10,18 @@ public struct RuntimeAutomaticUpdate: Sendable, Equatable {
     public let backend: RuntimeBackend?
     public let kind: ComponentKind?
 
+    public func changedGraphicsVersion(in snapshot: RuntimeCatalogSnapshot, importedFramework: ImportedD3DMetalIdentity? = nil,
+        isImported: Bool = false) -> SafeIdentifier? {
+        guard backend == .d3dmetal,
+            let oldBundle = snapshot.catalog.manifest.bundles.first(where: { $0.id == previousID }),
+            let newBundle = snapshot.catalog.manifest.bundles.first(where: { $0.id == targetID }),
+            let old = snapshot.catalog.manifest.components.first(where: { $0.kind == .d3dmetal && oldBundle.components.contains($0.id) }),
+            let new = snapshot.catalog.manifest.components.first(where: { $0.kind == .d3dmetal && newBundle.components.contains($0.id) }) else { return nil }
+        if isImported { return importedFramework?.version == new.version.rawValue ? nil : new.version }
+        guard old.version != new.version else { return nil }
+        return new.version
+    }
+
     public func selections(in snapshot: RuntimeCatalogSnapshot) throws -> RuntimeCatalogSelections {
         var selections = snapshot.selections
         if let backend {

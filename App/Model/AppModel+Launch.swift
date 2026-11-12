@@ -132,9 +132,6 @@ import RuntimeManager
                 if self.launchTaskGenerations[id] == generation { self.launchTasks[id] = nil; self.launchTaskGenerations[id] = nil }
             }
             do {
-                // Runtime installation owns store/component publication leases.
-                // Drain it before resolving the unchanged active launch selection.
-                if let update = self.dependencyAutoUpdateTask { update.cancel(); await update.value }
                 if let preDownload { _ = try await self.stopPreDownloadOperation(preDownload) }
                 await self.reattachOnStart()
                 if let error = self.launchStartupError { throw error }

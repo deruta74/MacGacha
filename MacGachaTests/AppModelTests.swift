@@ -581,6 +581,24 @@ private func eventually(_ condition: () -> Bool, timeout: Duration = .seconds(5)
 }
 
 final class FakeRuntimeServices: RuntimeServices, Sendable {
+    func stageDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle {
+        let stream: RuntimeInstallStream
+        if let bundle = manifest.bundles.first(where: { $0.id == update.targetID }) {
+            if let importedFrom { stream = install(bundle, manifest: manifest, carryingImportedFrameworkFrom: importedFrom) }
+            else { stream = install(bundle, manifest: manifest, from: nil) }
+        } else if let component = manifest.component(id: update.targetID) { stream = RuntimeInstallStream(install(component, from: nil)) }
+        else { throw LauncherError.io("Unknown synthetic staging target") }
+        for try await event in stream {
+            switch event {
+            case .phase(.completed): return DependencyStagingHandle(publish: {}, discard: {})
+            case .phase(.cancelled): throw LauncherError.cancelled
+            case .failed(let error): throw error
+            default: progress(event)
+            }
+        }
+        throw LauncherError.cancelled
+    }
     struct Install: Sendable { let component: RuntimeComponent; let candidate: GPTKCandidate? }
     struct State: Sendable {
         var accepted = false
@@ -588,6 +606,7 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
         var calls: [String] = []
         var installs: [Install] = []
         var bundleInstalls: [String] = []
+        var carriedImports: [String: String] = [:]
         var components: [InstalledComponent] = []
         var bundles: [String: InstalledRuntimeBundle] = [:]
         var invalid: [InvalidRuntimeEntry] = []
@@ -652,6 +671,10 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
             state.withLock { $0.bundleInstalls.append(bundle.id.rawValue); $0.continuation = continuation }
             installEvents.continuation.yield(bundle.id.rawValue)
         })
+    }
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, carryingImportedFrameworkFrom previous: RuntimeBundle) -> RuntimeInstallStream {
+        state.withLock { $0.carriedImports[bundle.id.rawValue] = previous.id.rawValue }
+        return install(bundle, manifest: manifest, from: nil)
     }
     func remove(_ c: InstalledComponent) async throws {
         try state.withLock {

@@ -17,6 +17,15 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class CatalogPublicationTests(unittest.TestCase):
+    def test_catalog_key_configuration_rejects_placeholders_and_supports_rotation(self):
+        import base64
+        key_spec = importlib.util.spec_from_file_location("catalog_keys", ROOT / "scripts/check-runtime-catalog-keys.py")
+        keys = importlib.util.module_from_spec(key_spec); key_spec.loader.exec_module(keys)
+        first = base64.b64encode(bytes(range(32))).decode()
+        second = base64.b64encode(bytes(range(1, 33))).decode()
+        self.assertEqual(len(keys.validate(first + "," + second)), 2)
+        for value in ["", "UNCONFIGURED", first + "," + first, base64.b64encode(bytes(32)).decode()]:
+            with self.assertRaises(Exception): keys.validate(value)
     def setUp(self):
         self.catalog = json.loads((ROOT / "RuntimeCatalog/runtime-catalog.json").read_text())
         self.baseline = json.loads((ROOT / "App/Resources/runtime-manifest.json").read_text())

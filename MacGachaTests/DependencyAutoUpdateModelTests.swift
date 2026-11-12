@@ -23,7 +23,7 @@ import RuntimeManager
         let shared = try InstalledComponent(kind: .d3dmetal, version: "4.0b3", installedAt: .now, source: .download)
         f.services.state.withLock { $0.components.append(shared) }
         try await f.model.scanAndApply()
-        try await BlockingIO.run { try store.recordVerifiedSession(bundleID: f.new, componentIDs: []) }
+        try await BlockingIO.run { try store.recordVerifiedSession(bundleID: f.new, componentIDs: [], confirmedRunningSeconds: 120, sessionID: UUID()) }
         f.model.scheduleDependencyAutoUpdates()
         await f.model.dependencyAutoUpdateTask?.value
         #expect(f.services.snapshot.bundles[f.old] == nil)

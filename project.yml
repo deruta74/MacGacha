@@ -61,6 +61,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: App/MacGacha.entitlements
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: App/Info.plist
+        # Ordered catalog verification keys. Configure before a Release build.
+        RUNTIME_CATALOG_PUBLIC_ED_KEYS: "UNCONFIGURED"
         # Sparkle Ed25519 public key. The private key is the SPARKLE_ED_PRIVATE_KEY secret.
         SPARKLE_PUBLIC_ED_KEY: "twDFIWAvlw1lBPC12GhgVqHMvPTpgYCUstqhuVJ/vPg="
         INFOPLIST_KEY_CFBundleDisplayName: MacGacha

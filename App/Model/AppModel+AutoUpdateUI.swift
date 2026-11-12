@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
 import RuntimeManager
+import LauncherCore
 
 /// What the Dependencies panel shows for one dependency family (`RuntimeVersionGroup.id`)
 /// while automatic updates work on it. Each case names the row ID it is about.
@@ -48,10 +49,18 @@ enum DependencyAutoUpdateState: Equatable, Sendable {
     }
 
     /// Skips the offered D3DMetal version. A later version offers again.
-    /// TODO(auto-update): remember the declined bundle ID durably.
     func declineGraphicsUpdate(for familyID: String) {
-        guard case .graphicsUpdateOffered(let id) = dependencyAutoUpdates[familyID] else { return }
-        dependencyAutoUpdates[familyID] = .graphicsUpdateDeclined(id: id)
+        guard case .graphicsUpdateOffered(let id) = dependencyAutoUpdates[familyID], let current = runtimeCatalog,
+            let bundle = current.catalog.manifest.bundles.first(where: { $0.id.rawValue == id }),
+            let version = current.catalog.manifest.components.first(where: { $0.kind == .d3dmetal && bundle.components.contains($0.id) })?.version.rawValue else { return }
+        let paths = paths
+        Task { [weak self] in
+            do {
+                try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).declineGraphics(version: version) }
+                guard self?.dependencyAutoUpdates[familyID] == .graphicsUpdateOffered(id: id) else { return }
+                self?.dependencyAutoUpdates[familyID] = .graphicsUpdateDeclined(id: id)
+            } catch { self?.show(error) }
+        }
     }
 
     /// An offer nobody has answered yet. The rail marks Dependencies with a dot until then.

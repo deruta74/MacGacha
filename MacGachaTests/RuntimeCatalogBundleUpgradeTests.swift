@@ -6,6 +6,7 @@ import Testing
 import LauncherCore
 import RuntimeManager
 import TestSupport
+import Synchronization
 @testable import MacGacha
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct RuntimeCatalogBundleUpgradeTests {
@@ -54,6 +55,7 @@ import TestSupport
     let paths: AppPaths
     let model: AppModel
     let services: FakeRuntimeServices
+    let metadata: BundleCatalogMetadata
     let old = "d3dmetal-wine11.20-gptk4.0b3"
     let new = "d3dmetal-wine11.20mg1.0-gptk4.0b3"
     static func make(pinned: Bool = false) async throws -> Self {
@@ -68,19 +70,26 @@ import TestSupport
         _ = try await service.selectBundle(id: old, pinned: pinned, installedBundleIDs: [old])
         let services = FakeRuntimeServices()
         services.state.withLock { $0.accepted = true }
-        let access = LiveRuntimeCatalogAccess(paths: paths, services: services, baseline: baseline, fetch: { metadata })
+        let metadataState = BundleCatalogMetadata(metadata)
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: paths, services: services, baseline: baseline, fetch: { metadataState.bytes.withLock { $0 } })
         let model = AppModel(paths: paths, manifest: baseline, services: services, catalogAccess: access, defaults: nil)
         model.autoUpdateDependencies = false
         try await model.flushLaunchSettings()
-        let result = Self(paths: paths, model: model, services: services)
+        let result = Self(paths: paths, model: model, services: services, metadata: metadataState)
         try result.publish(result.old)
         await model.start(); await model.catalogRefreshTask?.value
         return result
     }
-    func publish(_ id: String) throws {
+    func publish(_ id: String, source: SourceMode = .download) throws {
         let root = paths.runtimes.appendingPathComponent("bundles/\(id)")
+        let digest = try Digest(algorithm: .sha256, hex: String(repeating: "1", count: 64))
         let bundle = InstalledRuntimeBundle(id: try SafeIdentifier(id), root: root, wineBinary: root.appendingPathComponent("bin/wine"),
-            digest: try Digest(algorithm: .sha256, hex: String(repeating: "1", count: 64)), source: .download)
+            digest: digest, source: source, importedFramework: source == .importFromGPTK ? ImportedD3DMetalIdentity(version: "4.0b3", digest: digest) : nil)
         services.state.withLock { $0.bundles[id] = bundle }
     }
+}
+
+final class BundleCatalogMetadata: Sendable {
+    let bytes: Mutex<Data>
+    init(_ data: Data) { bytes = Mutex(data) }
 }

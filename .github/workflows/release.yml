@@ -74,6 +74,8 @@ jobs:
           set -euo pipefail
           public_key=$(ruby -ryaml -e 'puts YAML.load_file("project.yml").fetch("targets").fetch("MacGacha").fetch("settings").fetch("base").fetch("SPARKLE_PUBLIC_ED_KEY")')
           python3 -I scripts/make-appcast.py --check-public-key "$public_key"
+          catalog_keys=$(ruby -ryaml -e 'puts YAML.load_file("project.yml").fetch("targets").fetch("MacGacha").fetch("settings").fetch("base").fetch("RUNTIME_CATALOG_PUBLIC_ED_KEYS")')
+          python3 -I scripts/check-runtime-catalog-keys.py "$catalog_keys"
           echo "MACGACHA_BUILD_NUMBER=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
           echo "MACGACHA_DERIVED_DATA_PATH=$RUNNER_TEMP/macgacha-release-dd" >> "$GITHUB_ENV"
       - name: Install XcodeGen

@@ -244,6 +244,7 @@ final class AppModel {
     var dependencyAutoUpdates: [String: DependencyAutoUpdateState] = [:]
     var runtimeUpdatesAwaitingConsent: Set<String> = []
     var dependencyAutoUpdateReservation = false
+    var dependencyHasRetainedVersions = false
     @ObservationIgnored var dependencyAutoUpdateTask: Task<Void, Never>?
     @ObservationIgnored var dependencyAutoUpdateGeneration = UUID()
     @ObservationIgnored var dependencyAutoUpdateSuppressed: Set<String> = []
@@ -506,6 +507,7 @@ final class AppModel {
                 // inspectable and must not appear available for replacement.
             }
             try await scanAndApply()
+            try? await refreshAutomaticRetention()
             await refreshLogs()
         } catch { show(error) }
         await refreshGames()
@@ -538,7 +540,25 @@ final class AppModel {
     }
 
     func install(_ id: String) { request(id, mode: .download) }
-    func importGPTK(_ id: String) { request(id, mode: .importGPTK) }
+    func importGPTK(_ id: String) {
+        if catalogAccess != nil, !runtimeIsSelected(id) {
+            if let task = dependencyAutoUpdateTask {
+                task.cancel(); Task { [weak self] in await task.value; self?.importGPTK(id) }; return
+            }
+            guard canChangeRuntimeCatalog else { return }
+            do {
+                let target = try runtimeVersionTarget(id, pinned: false)
+                captureRuntimeInstallContext(id, manifest: target.catalog.manifest)
+                guard let context = runtimeInstallContexts[id], context.component.kind == .d3dmetal else { return }
+                let key = "catalog-" + id
+                runtimeCatalogMutationID = id; catalogSelectionGeneration = UUID()
+                catalogActivationTargets[key] = target
+                runtimeSetupChains[key] = RuntimeSetupChain(plan: RuntimeSetupPlan(gameID: key,
+                    items: [.init(id: id, name: context.bundle?.displayName ?? Self.kindName(context.component.kind), size: nil)], needsAppleTerms: true), attempted: true)
+            } catch { show(error); return }
+        }
+        request(id, mode: .importGPTK)
+    }
 
     private func bundle(_ id: String) -> RuntimeBundle? { runtimeInstallContexts[id]?.bundle ?? manifest?.bundles.first { $0.id.rawValue == id } }
     private func requestedComponent(_ id: String) -> RuntimeComponent? {
@@ -592,6 +612,7 @@ final class AppModel {
 
     func respondToConsent(accept: Bool) {
         guard let request = consentRequest else { return }
+        if !accept { revokeCatalogSetupActivation(request.id) }
         defer { scheduleRuntimeSetupUpdate() }
         consentRequest = nil
         guard accept, tasks[request.id] == nil,
@@ -664,6 +685,7 @@ final class AppModel {
 
     func cancelImport() {
         defer { scheduleRuntimeSetupUpdate() }
+        if let id = importRuntimeBundle?.id.rawValue ?? importComponent?.id.rawValue { revokeCatalogSetupActivation(id) }
         searchTask?.cancel(); searchTask = nil; searchGeneration = UUID()
         importComponent = nil; importRuntimeBundle = nil; importState = nil; extraRoots = []
         if consentRequest?.mode == .importGPTK { consentRequest = nil }

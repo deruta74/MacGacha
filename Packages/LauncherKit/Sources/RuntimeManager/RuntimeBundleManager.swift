@@ -21,9 +21,18 @@ public struct InstalledRuntimeBundle: Sendable, Equatable {
     public let wineBinary: URL
     public let digest: Digest
     public let source: SourceMode
-    public init(id: SafeIdentifier, root: URL, wineBinary: URL, digest: Digest, source: SourceMode) {
+    public let importedFramework: ImportedD3DMetalIdentity?
+    public init(id: SafeIdentifier, root: URL, wineBinary: URL, digest: Digest, source: SourceMode,
+        importedFramework: ImportedD3DMetalIdentity? = nil) {
         self.id = id; self.root = root; self.wineBinary = wineBinary; self.digest = digest; self.source = source
+        self.importedFramework = importedFramework
     }
+}
+
+public struct ImportedD3DMetalIdentity: Codable, Equatable, Sendable {
+    public let version: String?
+    public let digest: Digest
+    public init(version: String?, digest: Digest) { self.version = version; self.digest = digest }
 }
 
 private struct BundleMarker: Codable {
@@ -31,6 +40,22 @@ private struct BundleMarker: Codable {
     let digest: Digest
     let componentsDigest: Digest
     let source: SourceMode
+    let importedFramework: ImportedD3DMetalIdentity?
+}
+
+public struct RuntimeStagedUpdate: Sendable {
+    let token: UUID
+    let bundle: RuntimeBundle?
+    let components: [RuntimeComponent]
+    let expected: [SafeIdentifier: InstalledComponent]
+    let importedBundle: RuntimeBundle?
+    let importedSource: InstalledRuntimeBundle?
+    let lifetime: RuntimeAutomaticStageLease
+}
+
+final class RuntimeAutomaticStageLease: Sendable {
+    let lock: InstallLock
+    init(fs: ContainedFileSystem) throws { lock = try InstallLock(fs: fs, path: SafeRelativePath(".stage.lock")) }
 }
 
 public struct RuntimeBundleManager: Sendable {
@@ -57,6 +82,166 @@ public struct RuntimeBundleManager: Sendable {
         }
     }
 
+    /// All downloads, extraction, assembly and signature checks use an isolated
+    /// store. No active-store publication lease survives into that work.
+    public func stage(_ bundle: RuntimeBundle, carryingImportedFrameworkFrom previous: RuntimeBundle? = nil,
+        progress: @escaping @Sendable (OperationEvent) -> Void = { _ in }) async throws -> RuntimeStagedUpdate {
+        try await stage(bundle: bundle, components: selected(bundle), previous: previous, progress: progress)
+    }
+    public func stage(_ component: RuntimeComponent, progress: @escaping @Sendable (OperationEvent) -> Void = { _ in }) async throws -> RuntimeStagedUpdate {
+        guard let authoritative = manifest.component(id: component.id), try catalogBytes(authoritative) == catalogBytes(component) else {
+            throw LauncherError.io("Unknown automatic component")
+        }
+        return try await stage(bundle: nil, components: [component], previous: nil, progress: progress)
+    }
+    private func stage(bundle: RuntimeBundle?, components: [RuntimeComponent], previous: RuntimeBundle?,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> RuntimeStagedUpdate {
+        let token = UUID(), relative = try automaticStagePath(token)
+        let stagePaths = AppPaths(root: relative.resolved(against: store.paths.root))
+        let stageStore = RuntimeStore(paths: stagePaths)
+        let prepared = try await BlockingIO.run { () throws -> (RuntimeAutomaticStageLease, [SafeIdentifier: InstalledComponent]) in
+            let sourceFS = try ContainedFileSystem(root: store.paths.root).pinRoot()
+            try sourceFS.createDirectory(at: relative)
+            var prepared = false
+            defer { if !prepared { try? sourceFS.removeItem(at: relative) } }
+            let targetFS = try ContainedFileSystem(root: stagePaths.root).pinRoot()
+            let lifetime = try RuntimeAutomaticStageLease(fs: targetFS)
+            var expected: [SafeIdentifier: InstalledComponent] = [:]
+            // Shared component pins permit the active runtime's launch/session
+            // readers while preserving each immutable source during cloning.
+            let pins = try RuntimeStore.componentLocks(paths: store.paths, componentIDs: components.map { $0.id.rawValue }, mode: .shared)
+            defer { withExtendedLifetime(pins) {} }
+            var copies: [(RuntimeTree, SafeRelativePath, SafeRelativePath)] = []
+            var required: Int64 = 0
+            for component in components {
+                guard let record = try componentRecord(component) else { continue }
+                expected[component.id] = record
+                let source = try RuntimeJSONFile.relativePath(store.installURL(for: component), root: store.paths.root)
+                let destination = try RuntimeJSONFile.relativePath(stageStore.installURL(for: component), root: stagePaths.root)
+                let tree = try RuntimeTree(fs: sourceFS, root: source, allowingExternalHardLinks: true)
+                let (sum, overflow) = required.addingReportingOverflow(tree.bytes)
+                guard !overflow else { throw LauncherError.io("Automatic staging budget overflow") }
+                required = sum; copies.append((tree, source, destination))
+            }
+            let available = try disk.availableBytes(at: stagePaths.root)
+            guard available >= required else { throw LauncherError.insufficientSpace(required: required, available: available) }
+            for (tree, source, destination) in copies {
+                try tree.copy(to: destination, in: targetFS)
+                let receipt = try sourceFS.readFile(at: SafeRelativePath("\(source)/.macgacha-component.json"), maxBytes: 65_536)
+                try targetFS.writeAtomically(receipt, to: SafeRelativePath("\(destination)/.macgacha-component.json"))
+            }
+            prepared = true
+            return (lifetime, expected)
+        }
+        let staged = RuntimeStagedUpdate(token: token, bundle: bundle, components: components, expected: prepared.1,
+            importedBundle: nil, importedSource: nil, lifetime: prepared.0)
+        var capturedImport: InstalledRuntimeBundle?
+        do {
+            let stageManager = RuntimeBundleManager(manifest: manifest, store: stageStore, consent: consent,
+                installer: installer.relocated(to: stageStore), runner: runner, disk: disk, failurePoint: failurePoint)
+            if let bundle {
+                if let previous {
+                    guard let imported = try await installed(previous), imported.source == .importFromGPTK,
+                        let identity = imported.importedFramework,
+                        let graphics = components.first(where: { $0.kind == .d3dmetal }), identity.version == graphics.version.rawValue else {
+                        throw LauncherError.io("Imported graphics cannot be staged for this recommendation")
+                    }
+                    let source = imported.root.appendingPathComponent("lib/external")
+                    capturedImport = imported
+                    _ = try await stageManager.install(bundle, from: GPTKCandidate(root: source,
+                        d3dmetalFramework: source.appendingPathComponent("D3DMetal.framework"), version: identity.version), progress: progress)
+                } else { _ = try await stageManager.install(bundle, progress: progress) }
+            } else if let component = components.first, prepared.1[component.id] == nil {
+                for try await event in installer.relocated(to: stageStore).install(component) { progress(event) }
+            }
+            try Task.checkCancellation()
+            return RuntimeStagedUpdate(token: token, bundle: bundle, components: components, expected: prepared.1,
+                importedBundle: previous, importedSource: capturedImport, lifetime: prepared.0)
+        } catch {
+            try? await discard(staged)
+            throw error
+        }
+    }
+
+    /// Short, idle-only publication. Recheck all source receipts under the
+    /// same exclusions as manual runtime publication before moving any tree.
+    public func publish(_ staged: RuntimeStagedUpdate) async throws {
+        try await BlockingIO.run {
+            let lease = try RuntimeStoreLease(store: store)
+            let pins = try RuntimeRemovalLease(paths: store.paths, componentIDs: staged.components.map { $0.id.rawValue })
+            defer { withExtendedLifetime((lease, pins, staged.lifetime)) {} }
+            let fs = try ContainedFileSystem(root: store.paths.root).pinRoot()
+            let root = try automaticStagePath(staged.token)
+            for component in staged.components {
+                guard try componentRecord(component) == staged.expected[component.id] else { throw LauncherError.busy("Automatic source changed") }
+            }
+            if let previous = staged.importedBundle, let expected = staged.importedSource {
+                let source = try RuntimeJSONFile.relativePath(expected.root, root: store.paths.root)
+                let bytes = try fs.readFile(at: SafeRelativePath("\(source)/.macgacha-bundle.json"), maxBytes: 65_536)
+                let marker = try JSONDecoder().decode(BundleMarker.self, from: bytes)
+                guard marker.id == previous.id, marker.source == .importFromGPTK, marker.digest == expected.digest,
+                    marker.componentsDigest == (try fingerprint(previous, components: selected(previous))) else {
+                    throw LauncherError.busy("Imported graphics source changed")
+                }
+            }
+            try fs.writeAtomically(Data("publication".utf8), to: SafeRelativePath("\(root)/.publication-in-progress"))
+            for component in staged.components where staged.expected[component.id] == nil {
+                let destination = try RuntimeJSONFile.relativePath(store.installURL(for: component), root: store.paths.root)
+                let incoming = try SafeRelativePath("\(root)/\(destination)")
+                try fs.createDirectory(at: SafeRelativePath(destination.components.dropLast().joined(separator: "/")))
+                let marker = try fs.readFile(at: SafeRelativePath("\(incoming)/.macgacha-component.json"), maxBytes: 65_536)
+                let receipt = try JSONDecoder().decode(InstalledComponent.self, from: marker)
+                guard receipt.kind == component.kind, receipt.version == component.version.rawValue,
+                    receipt.archiveDigest == component.sha256, receipt.publicationID != nil else { throw LauncherError.io("Invalid staged component receipt") }
+                var uncertain = false
+                try RuntimePublication.publish(fs: fs, incoming: incoming, destination: destination, uncertain: &uncertain, failurePoint: failurePoint)
+            }
+            if let bundle = staged.bundle {
+                try fs.createDirectory(at: bundleParent())
+                let incoming = try SafeRelativePath("\(root)/\(bundlePath(bundle))")
+                if try fs.itemType(at: incoming) != nil {
+                    try GameModeHelper.remove(bundleID: bundle.id, paths: store.paths, fs: fs)
+                    var uncertain = false
+                    try RuntimePublication.publish(fs: fs, incoming: incoming, destination: bundlePath(bundle), uncertain: &uncertain, failurePoint: failurePoint)
+                }
+                guard try inspect(bundle) != nil else { throw LauncherError.io("Staged runtime publication is incomplete") }
+            }
+            try fs.removeItem(at: root)
+        }
+    }
+    public func discard(_ staged: RuntimeStagedUpdate) async throws {
+        try await BlockingIO.finish {
+            let fs = try ContainedFileSystem(root: store.paths.root)
+            let path = try automaticStagePath(staged.token)
+            guard try fs.itemType(at: path) != nil else { return }
+            if try fs.itemType(at: SafeRelativePath("\(path)/.publication-in-progress")) == nil { try fs.removeItem(at: path) }
+            withExtendedLifetime(staged.lifetime) {}
+        }
+    }
+    private func automaticStagePath(_ token: UUID) throws -> SafeRelativePath {
+        try SafeRelativePath("Runtimes/.automatic-staging/\(token.uuidString)")
+    }
+    public static func sweepAutomaticStaging(paths: AppPaths) async throws {
+        try await BlockingIO.run {
+            let store = RuntimeStore(paths: paths), lease = try RuntimeStoreLease(store: store)
+            defer { withExtendedLifetime(lease) {} }
+            let fs = try ContainedFileSystem(root: paths.root).pinRoot()
+            let parent = try SafeRelativePath("Runtimes/.automatic-staging")
+            guard try fs.itemType(at: parent) == .directory else { return }
+            let entries = try fs.contentsOfDirectory(at: parent)
+            guard entries.count <= 4096 else { throw LauncherError.io("Too many automatic staging entries") }
+            for entry in entries {
+                guard let name = entry.components.last, UUID(uuidString: name) != nil,
+                    try fs.itemType(at: entry) == .directory,
+                    try fs.itemType(at: SafeRelativePath("\(entry)/.publication-in-progress")) == nil else { continue }
+                let stageFS = try ContainedFileSystem(root: fs.directoryURL(at: entry)).pinRoot()
+                guard let lock = try? RuntimeAutomaticStageLease(fs: stageFS) else { continue }
+                defer { withExtendedLifetime(lock) {} }
+                try fs.removeItem(at: entry)
+            }
+        }
+    }
+
     @discardableResult
     public func install(_ bundle: RuntimeBundle, from candidate: GPTKCandidate? = nil,
         progress: @escaping @Sendable (OperationEvent) -> Void = { _ in }) async throws -> InstalledRuntimeBundle {
@@ -75,7 +260,7 @@ public struct RuntimeBundleManager: Sendable {
             try store.sweepStaging(holding: pins, deleting: { try $0.removeItem(at: $1) })
             for c in components {
                 if try componentRecord(c) == nil {
-                    guard candidate == nil && c.sourceMode == .download else {
+                    guard c.sourceMode == .download else {
                         throw LauncherError.io("Install the base Wine bundle before importing D3DMetal")
                     }
                     for try await event in installer.install(c, lease: lease, pins: pins) {
@@ -110,6 +295,7 @@ public struct RuntimeBundleManager: Sendable {
                 let source = try RuntimeTree(fs: fs, root: winePath, allowingExternalHardLinks: true)
                 var overlays: [(RuntimeTree, SafeRelativePath)] = []
                 var runtimeDigest = digest
+                var importedFramework: ImportedD3DMetalIdentity?
                 let graphics: RuntimeTree?
                 if bundle.backend == .d3dmetal, components.count == 2,
                     let component = components.first(where: { $0.kind == .d3dmetal }) {
@@ -128,6 +314,7 @@ public struct RuntimeBundleManager: Sendable {
                 if let candidate {
                     let sourceFS = try ContainedFileSystem(root: candidate.root)
                     let framework = try RuntimeTree(fs: sourceFS, root: SafeRelativePath("D3DMetal.framework"))
+                    importedFramework = try framework.frameworkIdentity()
                     overlays.append((framework, try SafeRelativePath("lib/external/D3DMetal.framework")))
                     var hash = StreamingHasher(.sha256); hash.update(Data(digest.hex.utf8)); hash.update(Data(try framework.digest().hex.utf8))
                     runtimeDigest = hash.finalize()
@@ -159,7 +346,8 @@ public struct RuntimeBundleManager: Sendable {
                 if bundle.backend == .d3dmetal { try await Self.verifyMetal(fs: fs, root: incoming, runner: runner) }
                 try fs.removeQuarantineRecursively(at: incoming)
                 try fs.synchronizeTree(at: incoming)
-                let marker = BundleMarker(id: bundle.id, digest: runtimeDigest, componentsDigest: digest, source: candidate == nil ? .download : .importFromGPTK)
+                let marker = BundleMarker(id: bundle.id, digest: runtimeDigest, componentsDigest: digest,
+                    source: candidate == nil ? .download : .importFromGPTK, importedFramework: importedFramework)
                 let markerPath = try SafeRelativePath("\(incoming)/.macgacha-bundle.json")
                 try fs.writeAtomically(JSONEncoder().encode(marker), to: markerPath)
                 try fs.fullSync(at: markerPath)
@@ -177,6 +365,30 @@ public struct RuntimeBundleManager: Sendable {
                 throw error
             }
         }
+    }
+
+    /// Preserve the user's imported framework for a Wine-only recommendation.
+    /// Both installations retain normal consent, source validation and publication exclusions.
+    @discardableResult
+    public func install(_ bundle: RuntimeBundle, carryingImportedFrameworkFrom previous: RuntimeBundle,
+        progress: @escaping @Sendable (OperationEvent) -> Void = { _ in }) async throws -> InstalledRuntimeBundle {
+        let targetComponents = try selected(bundle), oldComponents = try selected(previous)
+        guard bundle.backend == .d3dmetal, previous.backend == .d3dmetal,
+            let graphics = targetComponents.first(where: { $0.kind == .d3dmetal }),
+            let oldGraphics = oldComponents.first(where: { $0.kind == .d3dmetal }),
+            oldGraphics.kind == .d3dmetal,
+            let imported = try await installed(previous), imported.source == .importFromGPTK,
+            imported.importedFramework?.version == graphics.version.rawValue else {
+            throw LauncherError.io("Imported graphics cannot be carried to this bundle")
+        }
+        _ = try await install(bundle) { event in if event != .phase(.completed) { progress(event) } }
+        try Task.checkCancellation()
+        guard let verified = try await installed(previous), verified == imported else {
+            throw LauncherError.io("Imported graphics source changed")
+        }
+        let root = imported.root.appendingPathComponent("lib/external")
+        return try await install(bundle, from: GPTKCandidate(root: root,
+            d3dmetalFramework: root.appendingPathComponent("D3DMetal.framework"), version: graphics.version.rawValue), progress: progress)
     }
 
     public func createPrefix(game: String, bundle: RuntimeBundle) async throws -> URL {
@@ -243,18 +455,24 @@ public struct RuntimeBundleManager: Sendable {
         var root: URL
         var source = SourceMode.download
         var runtimeDigest = digest
+        var importedFramework: ImportedD3DMetalIdentity?
         if try fs.itemType(at: assembled) != nil {
             guard let data = try RuntimeJSONFile.read(SafeRelativePath("\(assembled)/.macgacha-bundle.json"), in: fs, limit: 65_536),
                 let marker = try? JSONDecoder().decode(BundleMarker.self, from: data), marker.id == bundle.id,
                 marker.componentsDigest == digest else { return nil }
             root = assembled.resolved(against: store.paths.root); source = marker.source; runtimeDigest = marker.digest
+            importedFramework = marker.importedFramework
+            if source == .importFromGPTK, importedFramework == nil {
+                importedFramework = try RuntimeTree(fs: fs, root: SafeRelativePath("\(assembled)/lib/external/D3DMetal.framework"), allowingExternalHardLinks: true).frameworkIdentity()
+            }
         } else if bundle.backend == .d3dmetal, components.count == 1, let component = components.first {
             root = store.installURL(for: component)
         } else { return nil }
         guard let binary = components.first(where: { $0.wineBinary != nil })?.wineBinary else { return nil }
         let path = try RuntimeJSONFile.relativePath(binary.resolved(against: root), root: store.paths.root)
         guard try fs.itemType(at: path) == .regularFile else { return nil }
-        return InstalledRuntimeBundle(id: bundle.id, root: root, wineBinary: binary.resolved(against: root), digest: runtimeDigest, source: source)
+        return InstalledRuntimeBundle(id: bundle.id, root: root, wineBinary: binary.resolved(against: root), digest: runtimeDigest,
+            source: source, importedFramework: importedFramework)
     }
 
     private func bundleParent() throws -> SafeRelativePath {
@@ -313,6 +531,19 @@ private struct RuntimeTree {
             else if entry.type == .regularFile { try fs.readFile(at: SafeRelativePath("\(root)/\(entry.path)")) { hash.update($0) } }
         }
         return hash.finalize()
+    }
+    func frameworkIdentity() throws -> ImportedD3DMetalIdentity {
+        var version: String?
+        for name in ["Info.plist", "Versions/A/Resources/Info.plist", "Resources/Info.plist"] {
+            let path = try SafeRelativePath("\(root)/\(name)")
+            guard (try? fs.itemType(at: path)) == .regularFile,
+                let data = try? fs.readFile(at: path, maxBytes: 65_536),
+                let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                let value = (plist["CFBundleShortVersionString"] ?? plist["CFBundleVersion"]) as? String,
+                !value.isEmpty, value.utf8.count <= 128, !value.utf8.contains(0) else { continue }
+            version = value; break
+        }
+        return try ImportedD3DMetalIdentity(version: version, digest: digest())
     }
     func copy(to target: SafeRelativePath, in destination: ContainedFileSystem, overlay: Bool = false) throws {
         try destination.createDirectory(at: target)

@@ -8,6 +8,7 @@ import RuntimeManager
     func refreshAutomaticRetention() async throws {
         let paths = paths
         let state = try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load() }
+        dependencyHasRetainedVersions = !state.replacements.isEmpty
         for record in state.replacements {
             if runtimeIsSelected(record.replacementID) && !runtimeIsPinned(record.previousID) {
                 dependencyAutoUpdates[record.familyID] = .keepingPrevious(id: record.replacementID)
@@ -24,7 +25,9 @@ import RuntimeManager
         else { return }
         let paths = paths
         try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).cancelCleanup(familyID: family) }
-        if case .keepingPrevious = dependencyAutoUpdates[family] { dependencyAutoUpdates[family] = nil }
+        let retained = try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load() }
+        dependencyHasRetainedVersions = !retained.replacements.isEmpty
+        dependencyAutoUpdates[family] = nil
     }
 
     func cleanupAutomaticReplacements() async throws {
@@ -41,6 +44,7 @@ import RuntimeManager
             if familyPinned || runtimeIsPinned(record.previousID) || runtimeIsPinned(record.replacementID) {
                 try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).cancelCleanup(familyID: record.familyID) }
                 state = try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load() }
+                dependencyHasRetainedVersions = !state.replacements.isEmpty
                 dependencyAutoUpdates[record.familyID] = nil
                 continue
             }
@@ -74,6 +78,7 @@ import RuntimeManager
                 }
                 try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).removeReplacement(id: record.id) }
                 state = try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load() }
+                dependencyHasRetainedVersions = !state.replacements.isEmpty
                 if !state.replacements.contains(where: { $0.familyID == record.familyID }) { dependencyAutoUpdates[record.familyID] = nil }
                 try await scanAndApply()
                 postDependencyUpdate("Automatic cleanup removed replaced version", familyID: record.familyID)

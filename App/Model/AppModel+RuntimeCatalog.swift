@@ -31,13 +31,12 @@ struct RuntimeInstallContext: Sendable {
         guard let catalogAccess, !runtimeCatalogRefreshing else { return }
         runtimeCatalogRefreshing = true
         let selectionGeneration = catalogSelectionGeneration
-        defer { runtimeCatalogRefreshing = false }
+        defer { runtimeCatalogRefreshing = false; scheduleDependencyAutoUpdates(retry: true) }
         do {
             let result = try await catalogAccess.refresh(force: force)
             guard catalogSelectionGeneration == selectionGeneration else { return }
             applyRuntimeCatalog(result)
             try await scanAndApply()
-            scheduleDependencyAutoUpdates(retry: true)
         } catch {
             guard catalogSelectionGeneration == selectionGeneration else { return }
             // A rename may have published before an fsync error. Re-read the
@@ -169,6 +168,7 @@ struct RuntimeInstallContext: Sendable {
                 let actual = try await catalogAccess.activate(target.selections)
                 self.catalogSelectionGeneration = UUID()
                 self.applyRuntimeCatalog(actual)
+                self.clearResolvedDependencyOffers()
                 try await self.scanAndApply()
             } catch {
                 if let publication = error as? RuntimeCatalogPublicationFailure, let actual = publication.persistedSnapshot {
