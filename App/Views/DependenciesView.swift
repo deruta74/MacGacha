@@ -75,8 +75,15 @@ private struct DependencyCard: View {
     @State private var removing: RuntimeRow?
 
     private var hasCatalog: Bool { model.runtimeCatalog != nil }
+    private var autoUpdate: DependencyAutoUpdateState? { model.dependencyAutoUpdate(for: group.id) }
     private var status: RuntimeVersionGroup.Status {
         let status = group.status(selected: model.runtimeIsSelected, recommended: model.runtimeIsRecommended, hasCatalog: hasCatalog)
+        // An automatic update works beside the version games use, so the card keeps describing that one.
+        switch autoUpdate {
+        case .installing, .waitingToActivate, .graphicsUpdateOffered, .graphicsUpdateDeclined:
+            if let active, case .installed = active.state { return .ready(active) }
+        case .keepingPrevious, nil: break
+        }
         // A Wine version the user picked by hand is a choice, not an outdated install.
         if offersWineChoice, case .updateAvailable(let current, _) = status, model.runtimeIsPinned(current.id) { return .ready(current) }
         return status
@@ -92,6 +99,10 @@ private struct DependencyCard: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(14)
+            if case .ready = status, let offer = graphicsOffer {
+                Divider().padding(.horizontal, 14)
+                GraphicsUpdateOffer(familyID: group.id, newer: offer.newer, skipped: offer.skipped)
+            }
             if offersWineChoice {
                 Divider().padding(.horizontal, 14)
                 WineChoice(group: group, active: active, remove: { removing = $0 })
@@ -100,7 +111,7 @@ private struct DependencyCard: View {
                 VStack(spacing: 0) {
                     ForEach(Array(group.rows.enumerated()), id: \.element.id) { index, row in
                         if index > 0 { Divider().padding(.leading, 40) }
-                        VersionRow(row: row, isActive: row.id == active?.id, remove: { removing = row })
+                        VersionRow(row: row, isActive: row.id == active?.id, autoUpdate: autoUpdate, familyID: group.id, remove: { removing = row })
                     }
                 }
                 .padding(.vertical, 4)
@@ -126,25 +137,42 @@ private struct DependencyCard: View {
         HStack(alignment: .top, spacing: 12) {
             DependencyIcon(familyID: group.id)
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(group.rows[0].kindName).font(.headline)
-                    badge
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(group.rows[0].kindName).font(.headline)
+                            badge
+                        }
+                        if let about = DependencyIcon.about(group.id) {
+                            Text(about)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    actions
                 }
-                if let about = DependencyIcon.about(group.id) {
-                    Text(about)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                // Below the buttons, so a long version line gets the card's full width.
                 detail.padding(.top, 2)
             }
-            Spacer(minLength: 12)
-            actions
         }
+    }
+
+    private var isOffered: Bool { if case .graphicsUpdateOffered = autoUpdate { true } else { false } }
+    /// The newer D3DMetal this card asks about. Skipping keeps the row and takes away its emphasis.
+    private var graphicsOffer: (newer: RuntimeRow, skipped: Bool)? {
+        let (id, skipped): (String, Bool) = switch autoUpdate {
+        case .graphicsUpdateOffered(let id): (id, false)
+        case .graphicsUpdateDeclined(let id): (id, true)
+        default: ("", false)
+        }
+        return group.rows.first { $0.id == id }.map { ($0, skipped) }
     }
 
     @ViewBuilder private var badge: some View {
         switch status {
+        case .ready where isOffered: StatusBadge(title: String(localized: "Update available"), tint: .accentColor)
         case .ready: StatusBadge(title: String(localized: "Installed"), tint: .green)
         case .updateAvailable: StatusBadge(title: String(localized: "Update available"), tint: .accentColor)
         case .notInstalled: StatusBadge(title: String(localized: "Not installed"), tint: .secondary)
@@ -169,7 +197,10 @@ private struct DependencyCard: View {
         case .ready(let row), .updateAvailable(let row, _):
             // With a version list the checked row already says this. The Wine
             // choice stays collapsed, so the header names what games use.
-            if offersWineChoice { ActiveVersionLine(row: row, wineChoice: true) } else if !showsVersions { ActiveVersionLine(row: row) }
+            VStack(alignment: .leading, spacing: 6) {
+                if offersWineChoice { ActiveVersionLine(row: row, wineChoice: true) } else if !showsVersions { ActiveVersionLine(row: row) }
+                if let autoUpdate { AutoUpdateNote(state: autoUpdate, group: group, wineChoice: offersWineChoice) }
+            }
         case .damaged:
             Text("A copy on disk is damaged. Remove it, then set it up again.").detailStyle()
         }
@@ -196,12 +227,160 @@ private struct DependencyCard: View {
                     .help(String(localized: "Switch to \(DependencyText.name(newer))"))
                 ActiveMenu(row: current, offersPin: !offersWineChoice, remove: { removing = current })
             case .ready(let current):
+                switch autoUpdate {
+                case .installing(let id) where AutoUpdateNote.canCancel(group, id):
+                    Button("Cancel") { model.cancelDependencyAutoUpdate(for: group.id) }
+                        .help("Stop this update. Games keep using the current version.")
+                default: EmptyView()
+                }
                 ActiveMenu(row: current, offersPin: !offersWineChoice, remove: { removing = current })
             case .damaged:
                 EmptyView()
             }
         }
         .controlSize(.regular)
+    }
+}
+
+/// One quiet line under the version in use: what an automatic update is doing with this dependency.
+private struct AutoUpdateNote: View {
+    let state: DependencyAutoUpdateState
+    let group: RuntimeVersionGroup
+    let wineChoice: Bool
+
+    /// Removing files and final cleanup always run to the end.
+    static func canCancel(_ group: RuntimeVersionGroup, _ id: String) -> Bool {
+        guard case .working(let phase, _) = group.rows.first(where: { $0.id == id })?.state else { return true }
+        return phase != .deleting && phase != .cleaningUp
+    }
+
+    private func name(_ id: String) -> String {
+        guard let row = group.rows.first(where: { $0.id == id }) else { return id }
+        return wineChoice ? DependencyText.wine(row) : DependencyText.name(row)
+    }
+
+    var body: some View {
+        switch state {
+        case .installing(let id):
+            let updating = String(localized: "Updating to \(name(id))", comment: "Background dependency update; the argument is the new version")
+            let progress: (label: String, fraction: Double?) = if case .working(let phase, let fraction) = group.rows.first(where: { $0.id == id })?.state {
+                (StatusText.joined(updating, RuntimePhaseText.label(for: phase, fraction: fraction)), fraction)
+            } else { (updating, nil) }
+            VStack(alignment: .leading, spacing: 4) {
+                Group {
+                    if let fraction = progress.fraction { ProgressView(value: fraction) } else { ProgressView().progressViewStyle(.linear) }
+                }
+                .frame(maxWidth: 260)
+                Text(progress.label)
+                    .detailStyle()
+                    .monospacedDigit()
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(progress.label)
+        case .waitingToActivate(let id):
+            note("\(name(id)) is ready. MacGacha switches to it when no game or download is running.", symbol: "clock")
+        case .keepingPrevious(let id):
+            if wineChoice {
+                note("\(name(id)) will be removed after the first game session on the new version. To keep it, choose it under Wine Version.",
+                     symbol: "clock.arrow.circlepath")
+            } else {
+                note("\(name(id)) will be removed after the first game session on the new version.", symbol: "clock.arrow.circlepath")
+            }
+        case .graphicsUpdateOffered, .graphicsUpdateDeclined:
+            // These get their own row under the header, with the buttons that answer them.
+            EmptyView()
+        }
+    }
+
+    private func note(_ text: LocalizedStringResource, symbol: String) -> some View {
+        Label { Text(text) } icon: { Image(systemName: symbol) }
+            .labelStyle(TintedIconLabelStyle(tint: .secondary))
+            .fixedSize(horizontal: false, vertical: true)
+            .detailStyle()
+    }
+}
+
+/// A newer D3DMetal waits for a yes. Wine updates on its own, but an imported D3DMetal
+/// is the user's own copy of Apple's software, so MacGacha asks before replacing it.
+/// Skipping is remembered for this D3DMetal version only, and the row stays as the way back.
+private struct GraphicsUpdateOffer: View {
+    @Environment(AppModel.self) private var model
+    let familyID: String
+    let newer: RuntimeRow
+    let skipped: Bool
+
+    private var name: String { DependencyText.graphics(newer) ?? DependencyText.name(newer) }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                text
+                Spacer(minLength: 8)
+                buttons
+            }
+            VStack(alignment: .trailing, spacing: 8) {
+                HStack(spacing: 10) {
+                    text
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) { buttons }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var text: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "arrow.down.circle")
+                .foregroundStyle(skipped ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Group {
+                    if skipped {
+                        Text("You skipped \(name)", comment: "Declined dependency update offer; the argument is the skipped version")
+                    } else {
+                        Text("\(name) is available", comment: "Dependency update offer; the argument is the new version")
+                    }
+                }
+                .font(.callout)
+                Group {
+                    if skipped {
+                        Text("You can still update whenever you like.")
+                    } else {
+                        Text("You imported D3DMetal yourself, so MacGacha asks first.")
+                    }
+                }
+                .detailStyle()
+            }
+            .fixedSize()
+        }
+    }
+
+    @ViewBuilder private var buttons: some View {
+        if !skipped {
+            Button("Skip This Version") { model.declineGraphicsUpdate(for: familyID) }
+                .buttonStyle(.borderless)
+                .help("Hide this offer. You can still update from this card later.")
+        }
+        GraphicsUpdateButtons(newer: newer)
+    }
+}
+
+/// The normal D3DMetal paths: Apple's download after its terms, or a newer Game Porting Toolkit.
+private struct GraphicsUpdateButtons: View {
+    @Environment(AppModel.self) private var model
+    let newer: RuntimeRow
+
+    var body: some View {
+        if newer.canImportGPTK {
+            Button("Import…") { model.importGPTK(newer.id) }
+                .help("Import D3DMetal from Apple's Game Porting Toolkit")
+        }
+        Button("Update…") { model.useRuntimeVersion(newer.id) }
+            .disabled(!model.canUseRuntimeVersion(newer.id))
+            .help(String(localized: "Switch to \(DependencyText.name(newer))"))
     }
 }
 
@@ -267,6 +446,8 @@ private struct VersionRow: View {
     let isActive: Bool
     /// Rows inside the Wine choice name the Wine and pin when used.
     var pinsChoice = false
+    var autoUpdate: DependencyAutoUpdateState? = nil
+    var familyID = ""
     let remove: () -> Void
 
     var body: some View {
@@ -302,6 +483,7 @@ private struct VersionRow: View {
                 parts.append(installed ? String(localized: "In use") : String(localized: "Selected"))
             }
             if model.runtimeIsRecommended(row.id) { parts.append(String(localized: "Recommended")) }
+            if let autoUpdateNote { parts.append(autoUpdateNote) }
             if let graphics = DependencyText.graphics(row) { parts.append(graphics) }
             switch row.state {
             case .installed: parts.append(DependencyText.source(row))
@@ -319,6 +501,7 @@ private struct VersionRow: View {
             parts.append(model.runtimeIsPinned(row.id) ? StatusText.joined(state, String(localized: "Pinned")) : state)
         }
         if model.runtimeIsRecommended(row.id) { parts.append(String(localized: "Recommended")) }
+        if let autoUpdateNote { parts.append(autoUpdateNote) }
         switch row.state {
         case .installed: parts.append(DependencyText.source(row))
         case .notInstalled: parts.append(DependencyText.download(row))
@@ -327,6 +510,16 @@ private struct VersionRow: View {
         case .working: break
         }
         return parts.reduce("") { $0.isEmpty ? $1 : StatusText.joined($0, $1) }
+    }
+
+    /// Marks the row an automatic update is about, so the list agrees with the header.
+    private var autoUpdateNote: String? {
+        switch autoUpdate {
+        case .waitingToActivate(row.id): String(localized: "Waiting to switch", comment: "An installed dependency version that becomes active once games close")
+        case .keepingPrevious(row.id): String(localized: "Kept for now", comment: "A replaced dependency version that is removed after the next game session")
+        case .graphicsUpdateDeclined(row.id): String(localized: "Skipped", comment: "A dependency version whose update offer the user declined")
+        default: nil
+        }
     }
 
     @ViewBuilder private var trailing: some View {
@@ -349,7 +542,9 @@ private struct VersionRow: View {
             SetUpButton(row: row, prominent: false, pinned: pinsChoice ? true : nil)
         case .working(let phase, _):
             if phase != .deleting && phase != .cleaningUp {
-                Button("Cancel") { model.cancel(row.id) }
+                Button("Cancel") {
+                    if autoUpdate == .installing(id: row.id) { model.cancelDependencyAutoUpdate(for: familyID) } else { model.cancel(row.id) }
+                }
             }
         case .invalid(_, let removable):
             if removable {
@@ -382,7 +577,8 @@ private struct WineChoice: View {
                 }
                 ForEach(group.rows) { row in
                     Divider().padding(.leading, 26)
-                    VersionRow(row: row, isActive: !isAutomatic && row.id == active?.id, pinsChoice: true, remove: { remove(row) })
+                    VersionRow(row: row, isActive: !isAutomatic && row.id == active?.id, pinsChoice: true,
+                        autoUpdate: model.dependencyAutoUpdate(for: group.id), familyID: group.id, remove: { remove(row) })
                 }
             }
             .padding(.top, 6)
@@ -422,6 +618,11 @@ private struct AutomaticWineRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Automatic", comment: "Wine version choice").font(.callout)
                 Text(caption).detailStyle()
+                if !model.autoUpdateDependencies {
+                    Text("Automatic updates are off in Settings. A new recommended version waits until you choose Update.")
+                        .detailStyle()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 8)
             if !isActive {
@@ -618,7 +819,7 @@ private struct TintedIconLabelStyle: LabelStyle {
     let tint: Color
 
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 4) {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
             configuration.icon.foregroundStyle(tint)
             configuration.title
         }

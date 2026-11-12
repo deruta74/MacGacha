@@ -54,7 +54,7 @@ struct GameRail: View {
                 .accessibilityAddTraits(game.id == selectedID ? .isSelected : [])
             }
             Spacer(minLength: 24)
-            RailButton(title: "Dependencies", symbol: "shippingbox") { panel = .dependencies }
+            RailButton(title: "Dependencies", symbol: "shippingbox", marked: model.hasUnansweredDependencyOffer) { panel = .dependencies }
             RailButton(title: "Diagnostics", symbol: "stethoscope") { panel = .diagnostics }
             SettingsLink {
                 Image(systemName: "gearshape")
@@ -107,6 +107,8 @@ private struct GameIcon: View {
 private struct RailButton: View {
     let title: LocalizedStringKey
     let symbol: String
+    /// A small dot for something inside that waits for an answer. It never blocks anything.
+    var marked = false
     let action: () -> Void
 
     var body: some View {
@@ -114,10 +116,20 @@ private struct RailButton: View {
             Image(systemName: symbol)
                 .font(.title3)
                 .frame(width: 40, height: 40)
+                .overlay(alignment: .topTrailing) {
+                    if marked {
+                        Circle()
+                            .fill(.tint)
+                            .frame(width: 7, height: 7)
+                            .padding(7)
+                            .transition(.opacity)
+                    }
+                }
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .help(Text(title))
         .accessibilityLabel(Text(title))
+        .accessibilityValue(marked ? Text("Update available") : Text(verbatim: ""))
     }
 }

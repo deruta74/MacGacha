@@ -196,6 +196,10 @@ struct GameFooter: View {
         case .failed(let message): return String(localized: "Setup didn't finish: \(message)", comment: "Runtime setup failure; the argument is the reason")
         case nil: break
         }
+        // Play gave way to Set Up for a game that worked yesterday, so the line says why.
+        if case .setUpRuntimes = action, model.runtimeSetupIsUpdate(for: game.id) {
+            return String(localized: "A dependency update needs you to accept Apple's license terms")
+        }
         // A disabled button shows no tooltip on macOS, so the reason it waits goes here.
         if let busy = busyElsewhere { return busy }
         // The result of a manual check stays until the status changes for another reason.
