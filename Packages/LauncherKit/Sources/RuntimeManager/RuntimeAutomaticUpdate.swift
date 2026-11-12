@@ -9,6 +9,7 @@ public struct RuntimeAutomaticUpdate: Sendable, Equatable {
     public let targetID: SafeIdentifier
     public let backend: RuntimeBackend?
     public let kind: ComponentKind?
+    public var absentHelperSelections: [ComponentKind: SafeIdentifier] = [:]
 
     public func changedGraphicsVersion(in snapshot: RuntimeCatalogSnapshot, importedFramework: ImportedD3DMetalIdentity? = nil,
         isImported: Bool = false) -> SafeIdentifier? {
@@ -28,6 +29,11 @@ public struct RuntimeAutomaticUpdate: Sendable, Equatable {
             guard let current = selections.bundles[backend], !current.pinned, current.id == previousID,
                 snapshot.catalog.recommendedBundles[backend] == targetID else { throw catalogError("Automatic bundle target changed") }
             selections.bundles[backend] = .init(id: targetID)
+            for (kind, target) in absentHelperSelections {
+                guard selections.helpers[kind]?.pinned == false,
+                    snapshot.catalog.recommendedHelpers[kind] == target else { throw catalogError("Automatic helper preference changed") }
+                selections.helpers[kind] = .init(id: target)
+            }
         } else if let kind {
             guard let current = selections.helpers[kind], !current.pinned, current.id == previousID,
                 snapshot.catalog.recommendedHelpers[kind] == targetID else { throw catalogError("Automatic helper target changed") }
@@ -50,7 +56,10 @@ public struct RuntimeAutomaticUpdate: Sendable, Equatable {
         for backend in [RuntimeBackend.dxmt, .d3dmetal] {
             guard let current = snapshot.selections.bundles[backend], !current.pinned, installedBundleIDs.contains(current.id),
                 let target = snapshot.catalog.recommendedBundles[backend], target != current.id else { continue }
-            let update = Self(familyID: "bundle-" + backend.rawValue, previousID: current.id, targetID: target, backend: backend, kind: nil)
+            var update = Self(familyID: "bundle-" + backend.rawValue, previousID: current.id, targetID: target, backend: backend, kind: nil)
+            for (kind, selected) in snapshot.selections.helpers where !selected.pinned && !installedComponentIDs.contains(selected.id) {
+                if let target = snapshot.catalog.recommendedHelpers[kind] { update.absentHelperSelections[kind] = target }
+            }
             if (try? update.selections(in: snapshot)) != nil { result.append(update) }
         }
         return result

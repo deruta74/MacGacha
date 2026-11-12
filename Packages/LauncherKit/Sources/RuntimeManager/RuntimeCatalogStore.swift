@@ -160,7 +160,8 @@ public actor RuntimeCatalogService {
 
     /// Commits a captured setup plan as one transaction. Unchanged selections
     /// need not be installed (e.g. an opt-in FPS helper that was never enabled).
-    /// All changed versions must have independently verified installed receipts.
+    /// Changed runtimes require verified receipts. Absent, unpinned helper
+    /// preferences may follow a bundle switch without installing optional code.
     @discardableResult public func activate(selections: RuntimeCatalogSelections,
         installedBundleIDs: Set<SafeIdentifier>, installedComponentIDs: Set<SafeIdentifier>) async throws -> RuntimeCatalogSnapshot {
         await acquire(); defer { release() }
@@ -170,7 +171,10 @@ public actor RuntimeCatalogService {
             guard installedBundleIDs.contains(selected.id) else { throw catalogError("Activation bundle is not verified installed") }
         }
         for (kind, selected) in selections.helpers where previous.selections.helpers[kind]?.id != selected.id {
-            guard installedComponentIDs.contains(selected.id) else { throw catalogError("Activation helper is not verified installed") }
+            let old = previous.selections.helpers[kind]
+            let absentPreference = old.map { !$0.pinned && !selected.pinned && !installedComponentIDs.contains($0.id) } == true
+                && selections.bundles != previous.selections.bundles
+            guard installedComponentIDs.contains(selected.id) || absentPreference else { throw catalogError("Activation helper is not verified installed") }
         }
         return try await publish(RuntimeCatalogSnapshot(catalog: previous.catalog, selections: selections, contract: contract))
     }

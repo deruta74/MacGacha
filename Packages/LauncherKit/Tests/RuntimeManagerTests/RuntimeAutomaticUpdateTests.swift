@@ -24,6 +24,21 @@ import LauncherCore
         let pinned = try await snapshot(pinned: true)
         #expect(RuntimeAutomaticUpdate.candidates(in: pinned, installedBundleIDs: [old.id], installedComponentIDs: []).isEmpty)
     }
+    @Test func absentLegacyHelpersMigrateWithoutInstallation() async throws {
+        let current = try await snapshot()
+        var selections = current.selections
+        selections.helpers[.surroundAudio] = .init(id: try SafeIdentifier("surround-audio-wine-11.20-1"))
+        selections.helpers[.crypt32Fix] = .init(id: try SafeIdentifier("crypt32-fix-wine-11.20-1"))
+        let legacy = try current.replacingSelections(selections)
+        let old = try #require(legacy.selectedBundle(for: .d3dmetal))
+        let candidates = RuntimeAutomaticUpdate.candidates(in: legacy, installedBundleIDs: [old.id], installedComponentIDs: [])
+        let bundleUpdate = try #require(candidates.first { $0.backend == .d3dmetal })
+        let target = try bundleUpdate.selections(in: legacy)
+        #expect(target.helpers[.surroundAudio]?.id.rawValue == SurroundAudio.componentID)
+        #expect(target.helpers[.crypt32Fix]?.id.rawValue == Crypt32Fix.componentID)
+        #expect(candidates.count == 1)
+    }
+
     @Test func incompatiblePinnedHelperPreventsBundleUpdate() async throws {
         let current = try await snapshot()
         var selections = current.selections
