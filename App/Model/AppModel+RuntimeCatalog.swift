@@ -157,6 +157,7 @@ struct RuntimeInstallContext: Sendable {
     }
     func beginRuntimeCatalogActivation(_ target: RuntimeCatalogSnapshot, id: String) {
         guard let catalogAccess else { runtimeCatalogMutationID = nil; return }
+        let previous = runtimeCatalog
         catalogMutationTask = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -170,6 +171,9 @@ struct RuntimeInstallContext: Sendable {
                 self.applyRuntimeCatalog(actual)
                 self.clearResolvedDependencyOffers()
                 try await self.scanAndApply()
+                if let previous {
+                    try await self.retainPreviousRuntimeOnAutomaticReturn(from: previous, to: actual, id: id)
+                }
             } catch {
                 if let publication = error as? RuntimeCatalogPublicationFailure, let actual = publication.persistedSnapshot {
                     self.catalogSelectionGeneration = UUID()

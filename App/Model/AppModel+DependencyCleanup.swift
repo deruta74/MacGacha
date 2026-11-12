@@ -30,6 +30,38 @@ import RuntimeManager
         dependencyAutoUpdates[family] = nil
     }
 
+    /// Called under the catalog mutation reservation after successful activation
+    /// and a fresh receipt scan. Failed or cancelled activation never gets here.
+    func retainPreviousRuntimeOnAutomaticReturn(from previous: RuntimeCatalogSnapshot,
+        to actual: RuntimeCatalogSnapshot, id: String) async throws {
+        let before: RuntimeCatalogSelection?, after: RuntimeCatalogSelection?
+        let recommended: SafeIdentifier?, family: String
+        if let bundle = actual.catalog.manifest.bundles.first(where: { $0.id.rawValue == id }) {
+            before = previous.selections.bundles[bundle.backend]
+            after = actual.selections.bundles[bundle.backend]
+            recommended = actual.catalog.recommendedBundles[bundle.backend]
+            family = "bundle-" + bundle.backend.rawValue
+        } else if let helper = actual.catalog.manifest.components.first(where: { $0.id.rawValue == id }) {
+            before = previous.selections.helpers[helper.kind]
+            after = actual.selections.helpers[helper.kind]
+            recommended = actual.catalog.recommendedHelpers[helper.kind]
+            family = "component-" + helper.kind.rawValue
+        } else { return }
+        guard let before, let after, before.pinned, !after.pinned,
+            after.id == recommended, after.id.rawValue == id, before.id != after.id else { return }
+        let previousID = before.id.rawValue
+        guard installedBundles[previousID] != nil || installed.contains(where: {
+            "\($0.kind.idPrefix)-\($0.version)" == previousID
+        }) else { return }
+        let paths = paths
+        try await BlockingIO.run {
+            try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: family,
+                previousID: previousID, replacementID: id)
+        }
+        dependencyHasRetainedVersions = true
+        dependencyAutoUpdates[family] = .keepingPrevious(id: id)
+    }
+
     func cleanupAutomaticReplacements() async throws {
         let paths = paths
         var state = try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load() }
