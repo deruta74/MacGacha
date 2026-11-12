@@ -54,3 +54,12 @@ private final class CatalogHTTP: HTTPClient, Sendable {
     }
     func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) { throw LauncherError.io("Unexpected POST") }
 }
+
+@Test func runtimeArchiveDestinationsAreRestricted() throws {
+    for host in ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "codeberg.org"] {
+        #expect(RuntimeArchivePolicy.allows(try #require(URL(string: "https://\(host)/asset"))))
+    }
+    for value in ["http://github.com/asset", "https://github.com:444/asset", "https://user@github.com/asset", "https://github.com/asset#fragment", "https://127.0.0.1/asset", "https://[::1]/asset", "https://example.com/asset", "https://github.com.evil.invalid/asset"] {
+        #expect(!RuntimeArchivePolicy.allows(try #require(URL(string: value))))
+    }
+}

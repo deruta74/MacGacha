@@ -1,0 +1,13 @@
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -305,7 +305,9 @@
+             [NSApp setMainMenu:mainMenu];
+             [NSApp setWindowsMenu:submenu];
+ 
+-            [NSApp setApplicationIconImage:self.applicationIcon];
++            /* Opt-in: preserve the helper bundle icon during promotion. */
++            if (![[[NSBundle mainBundle] objectForInfoDictionaryKey:@"MacGachaPreserveBundleIcon"] boolValue])
++                [NSApp setApplicationIconImage:self.applicationIcon];
+         }
+     }
+ 

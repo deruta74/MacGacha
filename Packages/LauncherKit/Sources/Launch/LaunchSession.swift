@@ -35,6 +35,11 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     public var endLogged: Bool?
     /// Retains startup grace when inspection uncertainty changes state to pending.
     public var startupPending: Bool?
+    /// Durable qualification for automatic runtime cleanup, absent in legacy journals.
+    public var reachedRunning: Bool?
+    public var reachedReady: Bool?
+    /// Confirmed intervals between live process observations, excluding time while closed.
+    public var confirmedRunningSeconds: Double?
     public var recoveryLocation: LaunchRecoveryLocation?
     /// Additive recovery context: never rediscover a different launch's log or executable.
     public var sessionLogURL: URL?
@@ -47,7 +52,8 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         hides: [HideEntry] = [], proxyPort: UInt16? = nil, createdAt: Date = Date(),
         sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil, processGroupIDs: Set<Int32>? = nil,
         bootSessionUUID: String? = nil, sessionStartTime: UInt64? = nil, endLogged: Bool? = nil,
-        recoveryLocation: LaunchRecoveryLocation? = nil, startupPending: Bool? = nil) {
+        recoveryLocation: LaunchRecoveryLocation? = nil, startupPending: Bool? = nil,
+        reachedRunning: Bool? = nil, reachedReady: Bool? = nil, confirmedRunningSeconds: Double? = nil) {
         self.sessionID = sessionID; self.game = game; self.installRoot = installRoot; self.installIdentity = installIdentity
         self.prefix = prefix; self.bundleID = bundleID; self.runtimeDigest = runtimeDigest; self.wineBinary = wineBinary
         self.wineserver = wineserver; self.componentIDs = componentIDs; self.recipeVersion = recipeVersion
@@ -58,9 +64,14 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         self.endLogged = endLogged
         self.recoveryLocation = recoveryLocation
         self.startupPending = startupPending
+        self.reachedRunning = reachedRunning; self.reachedReady = reachedReady
+        self.confirmedRunningSeconds = confirmedRunningSeconds
     }
 
     func validate() throws {
+        guard confirmedRunningSeconds.map({ $0.isFinite && $0 >= 0 && $0 <= 31_536_000 }) ?? true else {
+            throw LauncherError.journalCorrupt("Invalid running qualification")
+        }
         _ = try SafeIdentifier(game); _ = try SafeIdentifier(bundleID)
         for id in componentIDs { _ = try SafeIdentifier(id) }
         for url in [installRoot, prefix, wineBinary, wineserver] + (sessionLogURL.map { [$0] } ?? []) {

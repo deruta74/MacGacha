@@ -31,7 +31,7 @@ struct RuntimeInstallContext: Sendable {
         guard let catalogAccess, !runtimeCatalogRefreshing else { return }
         runtimeCatalogRefreshing = true
         let selectionGeneration = catalogSelectionGeneration
-        defer { runtimeCatalogRefreshing = false }
+        defer { runtimeCatalogRefreshing = false; scheduleDependencyAutoUpdates(retry: true) }
         do {
             let result = try await catalogAccess.refresh(force: force)
             guard catalogSelectionGeneration == selectionGeneration else { return }
@@ -82,7 +82,7 @@ struct RuntimeInstallContext: Sendable {
         guard let captured = captured ?? manifest else { return }
         let bundle = captured.bundles.first { $0.id.rawValue == id }
         guard let component = captured.components.first(where: { component in
-            if let bundle { return bundle.components.contains(component.id) && component.wineBinary != nil }
+            if let bundle { return bundle.components.contains(component.id) && (bundle.backend == .d3dmetal ? component.kind == .d3dmetal : component.kind == .wine) }
             return component.id.rawValue == id
         }) else { return }
         runtimeInstallContexts[id] = RuntimeInstallContext(component: component, bundle: bundle, manifest: captured)
@@ -112,7 +112,7 @@ struct RuntimeInstallContext: Sendable {
     func canRemoveRuntime(_ id: String) -> Bool {
         // Keep the preference and pin when an idle user confirms removal. A
         // later Set Up reinstalls that exact version instead of switching it.
-        catalogAccess == nil || canChangeRuntimeCatalog
+        !dependencyAutoUpdateReservation && (catalogAccess == nil || canChangeRuntimeCatalog)
     }
     func runtimeVersionTarget(_ id: String, pinned: Bool? = nil) throws -> RuntimeCatalogSnapshot {
         guard let current = runtimeCatalog else { throw LauncherError.io("Runtime catalog unavailable") }
@@ -130,6 +130,11 @@ struct RuntimeInstallContext: Sendable {
     }
     /// The row owns one captured target. Unrelated backend/helper pins survive.
     func useRuntimeVersion(_ id: String, pinned: Bool? = nil) {
+        if let task = dependencyAutoUpdateTask {
+            task.cancel()
+            Task { [weak self] in await task.value; self?.useRuntimeVersion(id, pinned: pinned) }
+            return
+        }
         guard canChangeRuntimeCatalog, canBeginGameOrRuntimeOperation() else { return }
         do {
             let target = try runtimeVersionTarget(id, pinned: pinned)
@@ -152,6 +157,7 @@ struct RuntimeInstallContext: Sendable {
     }
     func beginRuntimeCatalogActivation(_ target: RuntimeCatalogSnapshot, id: String) {
         guard let catalogAccess else { runtimeCatalogMutationID = nil; return }
+        let previous = runtimeCatalog
         catalogMutationTask = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -159,10 +165,15 @@ struct RuntimeInstallContext: Sendable {
                 self.runtimeCatalogMutationID = nil; self.catalogMutationTask = nil
             }
             do {
+                try await self.cancelAutomaticCleanupForPinnedSelection(target, id: id)
                 let actual = try await catalogAccess.activate(target.selections)
                 self.catalogSelectionGeneration = UUID()
                 self.applyRuntimeCatalog(actual)
+                self.clearResolvedDependencyOffers()
                 try await self.scanAndApply()
+                if let previous {
+                    try await self.retainPreviousRuntimeOnAutomaticReturn(from: previous, to: actual, id: id)
+                }
             } catch {
                 if let publication = error as? RuntimeCatalogPublicationFailure, let actual = publication.persistedSnapshot {
                     self.catalogSelectionGeneration = UUID()

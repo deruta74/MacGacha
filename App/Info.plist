@@ -10,5 +10,7 @@
     <false/>
     <key>SUAllowsAutomaticUpdates</key>
     <false/>
+    <key>RuntimeCatalogPublicEdKeys</key>
+    <string>$(RUNTIME_CATALOG_PUBLIC_ED_KEYS)</string>
 </dict>
 </plist>

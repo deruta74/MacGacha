@@ -26,7 +26,7 @@ func prefixCreationRunsWinebootOnce() async throws {
     #expect(url.path == paths.prefixes.appendingPathComponent("genshin-dxmt").path)
     let call = try #require(runner.invocations.first)
     #expect(call.executable == wine)
-    #expect(call.environment == ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": "winemenubuilder.exe=d"])
+    #expect(call.environment.filter { $0.key.hasPrefix("WINE") } == ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": "winemenubuilder.exe=d"])
     #expect(call.currentDirectory == nil)
     let json = try prefixTestJSON(fs, marker)
     #expect(json["schemaVersion"] as? Int == 1)
@@ -254,7 +254,7 @@ func prefixWineIdentityChangesUpgradeInPlace() async throws {
     let createdAt = try #require(prefixTestJSON(fs, marker)["createdAt"] as? String)
     let runner = FakeProcessRunner { invocation async throws in
         #expect(invocation.arguments == ["wineboot", "-u"])
-        #expect(invocation.environment == ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": "winemenubuilder.exe=d"])
+        #expect(invocation.environment.filter { $0.key.hasPrefix("WINE") } == ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": "winemenubuilder.exe=d"])
         #expect(invocation.currentDirectory == nil)
         #expect(try fs.readFile(at: save, maxBytes: 64) == Data("saved game".utf8))
         #expect(try fs.readFile(at: registry, maxBytes: 64) == Data("user settings".utf8))
@@ -307,7 +307,7 @@ func failedPrefixUpgradeIsRetriedWithOldRuntimeAndPreservesData(changedPath: Boo
     let upgradingBytes = Mutex<Data?>(nil)
     let runner = FakeProcessRunner { invocation async throws in
         #expect(invocation.arguments == ["wineboot", "-u"])
-        #expect(invocation.environment == ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": "winemenubuilder.exe=d"])
+        #expect(invocation.environment.filter { $0.key.hasPrefix("WINE") } == ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": "winemenubuilder.exe=d"])
         let json = try prefixTestJSON(fs, marker)
         #expect(json["state"] as? String == "upgrading")
         #expect(json["game"] as? String == "failed-upgrade")

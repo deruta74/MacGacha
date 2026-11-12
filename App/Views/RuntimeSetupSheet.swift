@@ -13,16 +13,31 @@ struct RuntimeSetupSheet: View {
     private var plan: RuntimeSetupPlan? { model.runtimeSetupPlan(for: game.id) }
     /// No plan can mean everything is installed, or that the runtime list isn't readable yet.
     private var ready: Bool { plan == nil && !model.missingComponents(for: game.id) }
+    /// An automatic update that stopped at Apple's terms, for a game that was already set up.
+    private var isUpdate: Bool { plan != nil && model.runtimeSetupIsUpdate(for: game.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Set Up \(game.name)", comment: "Runtime setup sheet title; the argument is the game's name")
-                    .font(.title2.weight(.semibold))
-                Text("\(game.name) is a Windows game. MacGacha runs it with these compatibility components, matched to the game's settings.",
-                     comment: "Runtime setup sheet explanation; the argument is the game's name")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Group {
+                    if isUpdate {
+                        Text("Update Dependencies for \(game.name)", comment: "Runtime setup sheet title for an update; the argument is the game's name")
+                    } else {
+                        Text("Set Up \(game.name)", comment: "Runtime setup sheet title; the argument is the game's name")
+                    }
+                }
+                .font(.title2.weight(.semibold))
+                Group {
+                    if isUpdate {
+                        Text("MacGacha keeps dependencies up to date on its own, but this update needs your agreement first. \(game.name) is ready to play as soon as it's installed.",
+                             comment: "Runtime setup sheet explanation for an update; the argument is the game's name")
+                    } else {
+                        Text("\(game.name) is a Windows game. MacGacha runs it with these compatibility components, matched to the game's settings.",
+                             comment: "Runtime setup sheet explanation; the argument is the game's name")
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 24)
             .padding(.top, 20)
@@ -97,7 +112,7 @@ struct RuntimeSetupSheet: View {
             Button("Cancel", role: .cancel) { dismiss() }
                 .keyboardShortcut(.cancelAction)
             // The sheet closes first so Apple's terms, when needed, can take its place.
-            Button("Install") {
+            Button(isUpdate ? String(localized: "Update") : String(localized: "Install")) {
                 model.installRecommended(for: game.id)
                 dismiss()
             }

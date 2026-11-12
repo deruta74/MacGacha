@@ -8,6 +8,30 @@ import LauncherCore
 import TestSupport
 
 @Suite struct RuntimeCatalogTests {
+    @Test func newBaselineRecommendsBothMacGachaWineBundles() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let manifest = try RuntimeManifest.load(from: root.appendingPathComponent("App/Resources/runtime-manifest.json"))
+        #expect(manifest.defaultBundle(for: .dxmt)?.id.rawValue == "dxmt-wine11.20mg1.0-dxmt0.80")
+        #expect(manifest.defaultBundle(for: .d3dmetal)?.id.rawValue == "d3dmetal-wine11.20mg1.0-gptk4.0b3")
+        #expect(manifest.defaultBundle(for: .d3dmetal)?.components.count == 2)
+    }
+    @Test func pinnedOldD3DMetalWithNewHelpersIsValidSelection() async throws {
+        let fixture = try CatalogFixture()
+        let service = RuntimeCatalogService(baseline: fixture.baseline)
+        let old = try SafeIdentifier(SurroundAudio.bundleID)
+        let snapshot = try await service.selectBundle(id: old, pinned: true, installedBundleIDs: [old])
+        #expect(snapshot.selections.bundles[.d3dmetal]?.pinned == true)
+        #expect(snapshot.selectedHelper(for: .surroundAudio)?.id.rawValue == SurroundAudio.componentID)
+    }
+    @Test func revision2AcceptedByCurrentBaseline() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: root.appendingPathComponent("Packages/LauncherKit/Tests/RuntimeManagerTests/Fixtures/manifest-0.2.6.json")))
+        let catalog = try JSONDecoder().decode(RuntimeCatalog.self, from: Data(contentsOf: root.appendingPathComponent("Packages/LauncherKit/Tests/RuntimeManagerTests/Fixtures/catalog-r2.json")))
+        try RuntimeCatalogContract(manifest).validate(catalog)
+        #expect(catalog.revision == 2)
+        #expect(catalog.recommendedBundles[.dxmt]?.rawValue == "dxmt-wine11.20mg1.0-dxmt0.80")
+    }
+
     @Test func initialMigrationCanBePersistedBeforeInstalledEvidenceChanges() async throws {
         let f = try CatalogFixture(), bytes = Mutex<Data?>(nil), writes = Mutex(0)
         let old = try f.component(kind: .surroundAudio, version: "wine-11.20-1")
@@ -267,8 +291,9 @@ import TestSupport
         let service = RuntimeCatalogService(baseline: baseline)
         let snapshot = try await service.accept(metadata: bytes)
         #expect(snapshot.catalog.revision >= 1)
-        #expect(snapshot.selectedHelper(for: .surroundAudio)?.id.rawValue == SurroundAudio.componentID)
+        #expect(snapshot.selectedHelper(for: .surroundAudio)?.id == snapshot.catalog.recommendedHelpers[.surroundAudio])
         let migrated = RuntimeCatalogService(baseline: baseline,
+            installedBundleIDs: [try SafeIdentifier(SurroundAudio.bundleID)],
             installedComponentIDs: [try SafeIdentifier("surround-audio-wine-11.20-1")])
         #expect(try await migrated.snapshot().selectedHelper(for: .surroundAudio)?.id.rawValue == "surround-audio-wine-11.20-1")
     }
@@ -491,7 +516,7 @@ private final class CatalogFixture {
     init() throws {
         let dxmt = try JSONDecoder().decode(RuntimeManifest.self, from: bundleManifestData())
         let apple = try Self.makeComponent(kind: .d3dmetal, version: "test")
-        let surround = try Self.makeComponent(kind: .surroundAudio, version: "wine-11.20-2")
+        let surround = try Self.makeComponent(kind: .surroundAudio, version: SurroundAudio.version)
         let fps = try Self.makeComponent(kind: .genshinFps, version: "2")
         let bundle = try RuntimeBundle(id: SafeIdentifier(SurroundAudio.bundleID), displayName: "D3DMetal", backend: .d3dmetal, components: [apple.id])
         baseline = try RuntimeManifest(components: dxmt.components + [apple, surround, fps], bundles: dxmt.bundles + [bundle])

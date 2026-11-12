@@ -129,8 +129,23 @@ struct RuntimeCatalogContract: Sendable {
         guard update.revision >= history.revision else { throw catalogError("Revision regression") }
         let components = try merge(history.manifest.components, update.manifest.components, id: { $0.id })
         let bundles = try merge(history.manifest.bundles, update.manifest.bundles, id: { $0.id })
-        let bindings = try merge(history.bundleBindings, update.bundleBindings, id: { $0.bundleID })
-        let helpers = try merge(history.helperBindings, update.helperBindings, id: { $0.componentID })
+        // Revision zero is app-owned compatibility, not published remote history.
+        // A baseline can promote an existing remote bundle or extend helper scope.
+        // Preserve its descriptors, but let the first validated remote metadata
+        // retain the original published bindings. Subsequent revisions are immutable.
+        let bindings: [RuntimeCatalogBundleBinding]
+        let helpers: [RuntimeCatalogHelperBinding]
+        if history.revision == 0 {
+            bindings = update.bundleBindings + history.bundleBindings.filter { old in
+                !update.bundleBindings.contains { $0.bundleID == old.bundleID }
+            }
+            helpers = update.helperBindings + history.helperBindings.filter { old in
+                !update.helperBindings.contains { $0.componentID == old.componentID }
+            }
+        } else {
+            bindings = try merge(history.bundleBindings, update.bundleBindings, id: { $0.bundleID })
+            helpers = try merge(history.helperBindings, update.helperBindings, id: { $0.componentID })
+        }
         if update.revision == history.revision {
             guard components.count == history.manifest.components.count, bundles.count == history.manifest.bundles.count,
                 bindings.count == history.bundleBindings.count, helpers.count == history.helperBindings.count,

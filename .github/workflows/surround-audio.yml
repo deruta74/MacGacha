@@ -65,4 +65,4 @@ jobs:
             echo 'Refusing to change a published release' >&2
             exit 1
           }
-          gh release upload "$tag" out-a/surround-audio-wine-11.20-2.zip "$RUNNER_TEMP/cache-a/wine-11.20.tar.xz" --clobber
+          python3 -I scripts/upload-immutable-release.py "$tag" out-a/surround-audio-wine-11.20-2.zip "$RUNNER_TEMP/cache-a/wine-11.20.tar.xz"

@@ -220,3 +220,9 @@ private func manifestFixtureData(_ modify: (inout [[String: Any]]) -> Void = { _
     modify(&components)
     return try JSONSerialization.data(withJSONObject: ["schemaVersion": 2, "components": components])
 }
+
+@Test(arguments: ["size", "installedSize"], [Int64.max, Int64.max - 1])
+func rejectsExcessiveRuntimeSizes(field: String, value: Int64) throws {
+    let data = try manifestFixtureData { $0[0][field] = value }
+    #expect(throws: (any Error).self) { try JSONDecoder().decode(RuntimeManifest.self, from: data) }
+}

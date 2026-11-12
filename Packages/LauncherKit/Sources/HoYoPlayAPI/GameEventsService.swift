@@ -38,6 +38,7 @@ public actor GameEventsService {
     private static let indexLimit = 1 << 20
     public static let postLimit = 20
     public static let titleLimit = 512 // Unicode scalars, at most 2048 UTF-8 bytes.
+    private let fileOps: any FileOps
     private let directory: URL
     private let region: Region
     private let language: HoYoPlayLanguage
@@ -51,7 +52,8 @@ public actor GameEventsService {
 
     public init(cacheDirectory: URL, region: Region = .global, language: HoYoPlayLanguage = .enUS,
         http: (any HTTPClient)? = nil, now: @escaping @Sendable () -> Date = Date.init,
-        requestTimeout: Duration = .seconds(30)) {
+        requestTimeout: Duration = .seconds(30), fileOps: any FileOps = SystemFileOps()) {
+        self.fileOps = fileOps
         directory = region == .global ? cacheDirectory : cacheDirectory.appendingPathComponent(region.rawValue, isDirectory: true)
         self.region = region; self.language = region == .mainlandChina ? .zhCN : language
         currentDate = now; self.requestTimeout = requestTimeout
@@ -68,8 +70,8 @@ public actor GameEventsService {
     public func loadCached() async -> [String: GameEventsSnapshot] {
         guard !hydrated, directory.isFileURL, !Task.isCancelled else { return cached() }
         do {
-            let fs = try ContainedFileSystem(root: directory.deletingLastPathComponent())
-            hydrate(fs, root: try SafeRelativePath(directory.lastPathComponent))
+            let fs = try await BlockingIO.run { try ContainedFileSystem(root: self.directory.deletingLastPathComponent(), fileOps: self.fileOps) }
+            await hydrate(fs, root: try SafeRelativePath(directory.lastPathComponent))
         } catch { }
         return cached()
     }
@@ -84,10 +86,12 @@ public actor GameEventsService {
         return result
     }
 
-    private func hydrate(_ fs: ContainedFileSystem, root: SafeRelativePath) {
+    private func hydrate(_ fs: ContainedFileSystem, root: SafeRelativePath) async {
         guard !hydrated else { return }
+        let data = try? await BlockingIO.run { try fs.readFile(at: SafeRelativePath("\(root)/events-index.json"), maxBytes: Self.indexLimit) }
+        guard !hydrated, !Task.isCancelled else { return }
         hydrated = true
-        guard let data = try? fs.readFile(at: SafeRelativePath("\(root)/events-index.json"), maxBytes: Self.indexLimit),
+        guard let data,
             let saved = try? JSONDecoder().decode([String: GameEventsSnapshot].self, from: data), saved.count <= 3 else { return }
         let valid = saved.filter { id, entry in
             GameDefinition.find(id)?.region == region && entry.region == region && entry.language == language
@@ -103,10 +107,10 @@ public actor GameEventsService {
     private func update() async -> [String: GameEventsSnapshot] {
         do {
             guard directory.isFileURL, requestTimeout > .zero else { return cached() }
-            let fs = try ContainedFileSystem(root: directory.deletingLastPathComponent())
+            let fs = try await BlockingIO.run { try ContainedFileSystem(root: self.directory.deletingLastPathComponent(), fileOps: self.fileOps) }
             let root = try SafeRelativePath(directory.lastPathComponent)
-            try fs.createDirectory(at: root)
-            hydrate(fs, root: root)
+            try await BlockingIO.run { try fs.createDirectory(at: root) }
+            await hydrate(fs, root: root)
             let games = try JSONDecoder().decode(EventsEnvelope<EventsGames>.self,
                 from: await json(Self.apiURL("getGames", region: region, language: language)))
             guard games.retcode == 0, games.data.games.count <= 100 else { return cached() }
@@ -126,7 +130,7 @@ public actor GameEventsService {
                     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
                     let bytes = try encoder.encode(next)
                     guard bytes.count <= Self.indexLimit else { continue }
-                    try fs.writeAtomically(bytes, to: SafeRelativePath("\(root)/events-index.json"))
+                    try await BlockingIO.run { try fs.writeAtomically(bytes, to: SafeRelativePath("\(root)/events-index.json")) }
                     snapshot.withLock { $0 = next }
                 } catch { /* Keep this game's previous successful result, including its original expiry. */ }
                 if Task.isCancelled { break }

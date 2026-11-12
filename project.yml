@@ -61,11 +61,13 @@ targets:
         CODE_SIGN_ENTITLEMENTS: App/MacGacha.entitlements
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: App/Info.plist
+        # Ordered catalog verification keys. Configure before a Release build.
+        RUNTIME_CATALOG_PUBLIC_ED_KEYS: "CtVKjxQNaDC+TI5EkM9CRuPGrT/Nepo8Qw9d0I8oKVk="
         # Sparkle Ed25519 public key. The private key is the SPARKLE_ED_PRIVATE_KEY secret.
         SPARKLE_PUBLIC_ED_KEY: "twDFIWAvlw1lBPC12GhgVqHMvPTpgYCUstqhuVJ/vPg="
         INFOPLIST_KEY_CFBundleDisplayName: MacGacha
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 deruta74. GPL-3.0."
-        MARKETING_VERSION: 0.2.6
+        MARKETING_VERSION: 0.3.0
         CURRENT_PROJECT_VERSION: 1
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
         SWIFT_VERSION: "6.0"
@@ -102,6 +104,10 @@ targets:
     deploymentTarget: "27.0"
     sources:
       - path: MacGachaTests
+      - path: Packages/LauncherKit/Tests/RuntimeManagerTests/Fixtures/manifest-0.2.6.json
+        buildPhase: resources
+      - path: RuntimeCatalog/runtime-catalog.json
+        buildPhase: resources
     dependencies:
       - target: MacGacha
       - package: LauncherKit

@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: xcode-27
     timeout-minutes: 45
     permissions:
       contents: write
@@ -57,6 +57,14 @@ jobs:
           fi
           python3 -I scripts/check-runtime-catalog.py RuntimeCatalog/runtime-catalog.json "${args[@]}" --verify-assets
           echo "CATALOG_REVISION=$(python3 -c 'import json; print(json.load(open("RuntimeCatalog/runtime-catalog.json"))["revision"])')" >> "$GITHUB_ENV"
+      - name: Sign the exact catalog bytes
+        env:
+          RUNTIME_CATALOG_ED_PRIVATE_KEY: ${{ secrets.RUNTIME_CATALOG_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          export RUNTIME_CATALOG_PUBLIC_ED_KEYS=$(ruby -ryaml -e 'puts YAML.load_file("project.yml").fetch("targets").fetch("MacGacha").fetch("settings").fetch("base").fetch("RUNTIME_CATALOG_PUBLIC_ED_KEYS")')
+          python3 -I scripts/check-runtime-catalog-keys.py "$RUNTIME_CATALOG_PUBLIC_ED_KEYS"
+          swift scripts/sign-runtime-catalog.swift RuntimeCatalog/runtime-catalog.json RuntimeCatalog/runtime-catalog.json.sig
       - name: Publish immutable revision and promote channel
         shell: bash
         run: |
@@ -70,16 +78,22 @@ jobs:
               mkdir existing
               gh release download "$snapshot" --pattern runtime-catalog.json --dir existing
               cmp RuntimeCatalog/runtime-catalog.json existing/runtime-catalog.json
+              if [[ $(gh release view "$snapshot" --json assets --jq 'any(.assets[]; .name == "runtime-catalog.json.sig")') == true ]]; then
+                gh release download "$snapshot" --pattern runtime-catalog.json.sig --dir existing
+                RUNTIME_CATALOG_PUBLIC_ED_KEYS=$(ruby -ryaml -e 'puts YAML.load_file("project.yml").fetch("targets").fetch("MacGacha").fetch("settings").fetch("base").fetch("RUNTIME_CATALOG_PUBLIC_ED_KEYS")') swift scripts/verify-runtime-catalog.swift existing/runtime-catalog.json existing/runtime-catalog.json.sig
+              else
+                gh release upload "$snapshot" RuntimeCatalog/runtime-catalog.json.sig
+              fi
             else
               # A prior release-create may have succeeded before its upload failed.
-              gh release upload "$snapshot" RuntimeCatalog/runtime-catalog.json
+              gh release upload "$snapshot" RuntimeCatalog/runtime-catalog.json RuntimeCatalog/runtime-catalog.json.sig
             fi
           else
-            gh release create "$snapshot" --target "$GITHUB_SHA" --latest=false --title "Runtime catalog revision $CATALOG_REVISION" --notes "Compatible runtime component catalog. This is not an application update." RuntimeCatalog/runtime-catalog.json
+            gh release create "$snapshot" --target "$GITHUB_SHA" --latest=false --title "Runtime catalog revision $CATALOG_REVISION" --notes "Compatible runtime component catalog. This is not an application update." RuntimeCatalog/runtime-catalog.json RuntimeCatalog/runtime-catalog.json.sig
           fi
           if ! gh release view runtime-catalog-v1 >/dev/null 2>&1; then
-            gh release create runtime-catalog-v1 --target "$GITHUB_SHA" --latest=false --title "Runtime catalog" --notes "Current compatible runtime component catalog. Previous installed versions remain available for rollback." RuntimeCatalog/runtime-catalog.json
+            gh release create runtime-catalog-v1 --target "$GITHUB_SHA" --latest=false --title "Runtime catalog" --notes "Current compatible runtime component catalog. Previous installed versions remain available for rollback." RuntimeCatalog/runtime-catalog.json RuntimeCatalog/runtime-catalog.json.sig
           else
             [[ $(gh release view runtime-catalog-v1 --json isDraft --jq .isDraft) == false ]]
-            gh release upload runtime-catalog-v1 RuntimeCatalog/runtime-catalog.json --clobber
+            gh release upload runtime-catalog-v1 RuntimeCatalog/runtime-catalog.json RuntimeCatalog/runtime-catalog.json.sig --clobber
           fi

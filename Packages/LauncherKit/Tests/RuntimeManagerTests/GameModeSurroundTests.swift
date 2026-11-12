@@ -18,10 +18,10 @@ private struct AudioRegistration: GameModeRegistering { func register(_ app: URL
         let source = try RuntimeJSONFile.relativePath(bundle.root, root: f.store.paths.root)
         let stock = try SafeRelativePath("\(source)/lib/wine/x86_64-unix/winecoreaudio.so")
         try fs.writeAtomically(gameModeMachO() + Data("stock".utf8), to: stock)
-        let component = try SafeRelativePath("Runtimes/surroundAudio/wine-11.20-2")
+        let component = try SafeRelativePath("Runtimes/surroundAudio/\(SurroundAudio.version)")
         let module = try SafeRelativePath("\(component)/x86_64-unix/winecoreaudio.so")
         try fs.writeAtomically(gameModeMachO(rpaths: ["@loader_path/../.."], dylibs: ["@rpath/wine/x86_64-unix/driver.so"]) + Data("spatial".utf8), to: module)
-        let record = try InstalledComponent(kind: .surroundAudio, version: "wine-11.20-2", installedAt: Date(timeIntervalSince1970: 1), source: .download)
+        let record = try InstalledComponent(kind: .surroundAudio, version: "\(SurroundAudio.version)", installedAt: Date(timeIntervalSince1970: 1), source: .download)
         try fs.writeAtomically(JSONEncoder().encode(record), to: SafeRelativePath("\(component)/.macgacha-component.json"))
         let icons = try FixedGameModeIcon(), manager = GameModeHelper(paths: f.store.paths, icons: icons, registration: AudioRegistration())
         let game = GameDefinition.find(gameID)!, other = GameDefinition.find(gameID == "genshin" ? "genshin-cn" : "genshin")!
@@ -76,7 +76,7 @@ private struct AudioRegistration: GameModeRegistering { func register(_ app: URL
         let fs = try ContainedFileSystem(root: f.store.paths.root)
         let source = try RuntimeJSONFile.relativePath(bundle.root, root: f.store.paths.root)
         try fs.writeAtomically(gameModeMachO(), to: SafeRelativePath("\(source)/lib/wine/x86_64-unix/winecoreaudio.so"))
-        let version = "wine-11.20-3"
+        let version = "wine-11.20-4"
         let component = try SafeRelativePath("Runtimes/surroundAudio/\(version)")
         let module = try SafeRelativePath("\(component)/\(SurroundAudio.modulePath)")
         try fs.writeAtomically(gameModeMachO() + Data("revision3".utf8), to: module)
@@ -111,10 +111,10 @@ private struct AudioRegistration: GameModeRegistering { func register(_ app: URL
         let bundle = InstalledRuntimeBundle(id: try SafeIdentifier(SurroundAudio.bundleID), root: installed.root,
             wineBinary: installed.wineBinary, digest: installed.digest, source: .download)
         let fs = try ContainedFileSystem(root: f.store.paths.root)
-        let component = try SafeRelativePath("Runtimes/surroundAudio/wine-11.20-2")
+        let component = try SafeRelativePath("Runtimes/surroundAudio/\(SurroundAudio.version)")
         let module = try SafeRelativePath("\(component)/x86_64-unix/winecoreaudio.so")
         try fs.writeAtomically(gameModeMachO(), to: module)
-        let record = try InstalledComponent(kind: .surroundAudio, version: "wine-11.20-2", installedAt: Date(timeIntervalSince1970: 1), source: .download)
+        let record = try InstalledComponent(kind: .surroundAudio, version: "\(SurroundAudio.version)", installedAt: Date(timeIntervalSince1970: 1), source: .download)
         try fs.writeAtomically(JSONEncoder().encode(record), to: SafeRelativePath("\(component)/.macgacha-component.json"))
         let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: AudioRegistration())
         await #expect(throws: (any Error).self) {

@@ -83,6 +83,7 @@ public struct URLSessionHTTPClient: HTTPClient {
 
     private func request(_ url: URL, method: String, offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
         guard !Task.isCancelled else { throw LauncherError.cancelled }
+        guard redirectPolicy(url) else { throw LauncherError.transport("HTTP destination is not allowed") }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.httpMethod = method
         if method == "POST" { request.httpBody = Data() }

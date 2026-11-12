@@ -49,8 +49,13 @@ struct RuntimeCatalogStoredState: Codable, Sendable {
     let schemaVersion: Int
     let catalog: RuntimeCatalog
     let selections: RuntimeCatalogSelections
-    init(_ snapshot: RuntimeCatalogSnapshot) {
+    let signedMetadata: RuntimeSignedCatalog?
+    init(_ snapshot: RuntimeCatalogSnapshot, signedMetadata: RuntimeSignedCatalog? = nil) {
         schemaVersion = 1; catalog = snapshot.catalog; selections = snapshot.selections
+        self.signedMetadata = signedMetadata
+    }
+    init(catalog: RuntimeCatalog, selections: RuntimeCatalogSelections, signedMetadata: RuntimeSignedCatalog?) {
+        schemaVersion = 1; self.catalog = catalog; self.selections = selections; self.signedMetadata = signedMetadata
     }
 }
 
@@ -67,11 +72,15 @@ public actor RuntimeCatalogService {
     private var recoveryFallback: RuntimeCatalogSnapshot?
     private var mutating = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private let signatureVerifier: RuntimeCatalogSignatureVerifier?
+    private var signedMetadata: RuntimeSignedCatalog?
 
     public init(baseline: RuntimeManifest, store: RuntimeCatalogStore? = nil,
-        installedBundleIDs: Set<SafeIdentifier> = [], installedComponentIDs: Set<SafeIdentifier> = []) {
+        installedBundleIDs: Set<SafeIdentifier> = [], installedComponentIDs: Set<SafeIdentifier> = [],
+        signatureVerifier: RuntimeCatalogSignatureVerifier? = nil) {
         contract = RuntimeCatalogContract(baseline); self.store = store
         self.installedBundleIDs = installedBundleIDs; self.installedComponentIDs = installedComponentIDs
+        self.signatureVerifier = signatureVerifier
     }
 
     public func snapshot() async throws -> RuntimeCatalogSnapshot {
@@ -93,15 +102,32 @@ public actor RuntimeCatalogService {
 
     /// Validation/refresh only. Existing choices, including unpinned choices,
     /// remain active until an explicit successful installation or rollback.
-    @discardableResult public func accept(metadata: Data) async throws -> RuntimeCatalogSnapshot {
+    @discardableResult public func accept(metadata: Data, signature: Data? = nil) async throws -> RuntimeCatalogSnapshot {
         guard metadata.count <= RuntimeCatalog.metadataLimit else { throw catalogError("Metadata exceeds size limit") }
+        try signatureVerifier?.verify(body: metadata, signature: signature)
         let update = try JSONDecoder().decode(RuntimeCatalog.self, from: metadata)
         await acquire(); defer { release() }
         try Task.checkCancellation()
-        let previous = try await loaded()
+        let previous: RuntimeCatalogSnapshot
+        do { previous = try await loaded() }
+        catch is RuntimeCatalogSignatureError {
+            // A freshly authenticated revision can recover a cache signed by a
+            // retired key. Keep only preferences validated against that revision.
+            guard signatureVerifier != nil, let signature, let store,
+                let rejected = try await BlockingIO.run({ try store.load() }),
+                update.revision > rejected.catalog.revision || (update.revision == rejected.catalog.revision && rejected.signedMetadata?.body == metadata) else {
+                throw RuntimeCatalogSignatureError.rejected
+            }
+            let proof = RuntimeSignedCatalog(body: metadata, signature: signature)
+            previous = try contract.restoring(RuntimeCatalogStoredState(catalog: update, selections: rejected.selections, signedMetadata: proof))
+            hasPersistedState = true; signedMetadata = nil
+        }
+        if update.revision == previous.catalog.revision, let signedMetadata, signedMetadata.body != metadata {
+            throw catalogError("Changed signed bytes at the same revision")
+        }
         let catalog = try contract.merging(update, into: previous.catalog)
         let next = try RuntimeCatalogSnapshot(catalog: catalog, selections: previous.selections, contract: contract)
-        return try await publish(next)
+        return try await publish(next, proof: signature.map { RuntimeSignedCatalog(body: metadata, signature: $0) })
     }
 
     /// The caller must verify these installed IDs through the runtime stores.
@@ -134,7 +160,8 @@ public actor RuntimeCatalogService {
 
     /// Commits a captured setup plan as one transaction. Unchanged selections
     /// need not be installed (e.g. an opt-in FPS helper that was never enabled).
-    /// All changed versions must have independently verified installed receipts.
+    /// Changed runtimes require verified receipts. Absent, unpinned helper
+    /// preferences may follow a bundle switch without installing optional code.
     @discardableResult public func activate(selections: RuntimeCatalogSelections,
         installedBundleIDs: Set<SafeIdentifier>, installedComponentIDs: Set<SafeIdentifier>) async throws -> RuntimeCatalogSnapshot {
         await acquire(); defer { release() }
@@ -144,7 +171,10 @@ public actor RuntimeCatalogService {
             guard installedBundleIDs.contains(selected.id) else { throw catalogError("Activation bundle is not verified installed") }
         }
         for (kind, selected) in selections.helpers where previous.selections.helpers[kind]?.id != selected.id {
-            guard installedComponentIDs.contains(selected.id) else { throw catalogError("Activation helper is not verified installed") }
+            let old = previous.selections.helpers[kind]
+            let absentPreference = old.map { !$0.pinned && !selected.pinned && !installedComponentIDs.contains($0.id) } == true
+                && selections.bundles != previous.selections.bundles
+            guard installedComponentIDs.contains(selected.id) || absentPreference else { throw catalogError("Activation helper is not verified installed") }
         }
         return try await publish(RuntimeCatalogSnapshot(catalog: previous.catalog, selections: selections, contract: contract))
     }
@@ -167,9 +197,10 @@ public actor RuntimeCatalogService {
             if let state {
                 // A decoded state that cannot migrate is not corrupt JSON.
                 // Fail closed rather than replacing its valid history/pins.
-                let restored = try contract.restoring(state)
+                let restored = try Self.restore(state, contract: contract, verifier: signatureVerifier)
                 try Task.checkCancellation()
                 hasPersistedState = true
+                signedMetadata = state.signedMetadata
                 current = restored; return restored
             }
         }
@@ -186,7 +217,11 @@ public actor RuntimeCatalogService {
         for kind in selections.helpers.keys {
             if let recommended = selections.helpers[kind], !installedComponentIDs.contains(recommended.id),
                 let working = contract.baseline.manifest.components.first(where: { $0.kind == kind && installedComponentIDs.contains($0.id) }) {
-                selections.helpers[kind] = RuntimeCatalogSelection(id: working.id)
+                var proposed = selections
+                proposed.helpers[kind] = RuntimeCatalogSelection(id: working.id)
+                // A leftover ABI helper alone must not invalidate a newly
+                // recommended backend. Preserve it only with compatible selections.
+                if (try? contract.validate(proposed, in: contract.baseline)) != nil { selections = proposed }
             }
         }
         let initial = try RuntimeCatalogSnapshot(catalog: contract.baseline, selections: selections, contract: contract)
@@ -194,11 +229,12 @@ public actor RuntimeCatalogService {
         current = initial; return initial
     }
 
-    private func publish(_ snapshot: RuntimeCatalogSnapshot) async throws -> RuntimeCatalogSnapshot {
+    private func publish(_ snapshot: RuntimeCatalogSnapshot, proof: RuntimeSignedCatalog? = nil) async throws -> RuntimeCatalogSnapshot {
         try Task.checkCancellation()
+        let retainedProof = proof ?? signedMetadata
         if let store {
             do {
-                try await BlockingIO.run { try store.save(RuntimeCatalogStoredState(snapshot)) }
+                try await BlockingIO.run { try store.save(RuntimeCatalogStoredState(snapshot, signedMetadata: retainedProof)) }
                 hasPersistedState = true
             } catch {
                 recoveryFallback = hasPersistedState ? nil : current
@@ -213,32 +249,48 @@ public actor RuntimeCatalogService {
         // A cancellation after durable publication cannot roll the disk back:
         // memory must reflect the same completed atomic transaction.
         current = snapshot
+        signedMetadata = retainedProof
         return snapshot
     }
 
     private func reconcilePersistedState() async throws -> RuntimeCatalogSnapshot {
         guard let store else { throw RuntimeCatalogPublicationFailure(persistedSnapshot: nil) }
         let contract = self.contract
+        let verifier = signatureVerifier
         let fallback = recoveryFallback
         let worker = Task.detached {
             try await BlockingIO.run {
-                if let state = try store.load() { return (try contract.restoring(state), true) }
+                if let state = try store.load() { return (try Self.restore(state, contract: contract, verifier: verifier), true, state.signedMetadata) }
                 // A first write that failed before publication may still have
                 // no state file; only that previously observed absence permits
                 // keeping its bundled initial snapshot.
-                if let fallback { return (fallback, false) }
+                if let fallback { return (fallback, false, nil as RuntimeSignedCatalog?) }
                 throw catalogError("Published state is unavailable")
             }
         }
         do {
-            let (restored, persisted) = try await worker.value
+            let (restored, persisted, proof) = try await worker.value
             current = restored; hasPersistedState = persisted
+            signedMetadata = proof
             recoveryRequired = false; recoveryFallback = nil
             return restored
         } catch {
             current = nil
             throw RuntimeCatalogPublicationFailure(persistedSnapshot: nil)
         }
+    }
+
+    private static func restore(_ state: RuntimeCatalogStoredState, contract: RuntimeCatalogContract,
+        verifier: RuntimeCatalogSignatureVerifier?) throws -> RuntimeCatalogSnapshot {
+        guard let verifier else { return try contract.restoring(state) }
+        guard let proof = state.signedMetadata else {
+            // Unsigned 0.2.x caches can retain only selections already trusted
+            // by the compiled baseline. Their recommendations never authorize installs.
+            return try RuntimeCatalogSnapshot(catalog: contract.baseline, selections: state.selections, contract: contract)
+        }
+        try verifier.verify(body: proof.body, signature: proof.signature)
+        let catalog = try JSONDecoder().decode(RuntimeCatalog.self, from: proof.body)
+        return try contract.restoring(RuntimeCatalogStoredState(catalog: catalog, selections: state.selections, signedMetadata: proof))
     }
 
     private func acquire() async {

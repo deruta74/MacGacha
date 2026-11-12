@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import CryptoKit
 import Synchronization
 import Testing
 import LauncherCore
@@ -8,6 +9,49 @@ import RuntimeManager
 @testable import MacGacha
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct RuntimeCatalogModelTests {
+    @Test func debugCatalogFileIsIgnoredOutsideDebug() throws {
+        let arguments = ["MacGacha", "-MacGachaDebugCatalog", "/tmp/catalog.json"]
+        #if DEBUG
+        #expect(LiveRuntimeCatalogAccess.debugCatalogURL(arguments: arguments)?.path == "/tmp/catalog.json")
+        #else
+        #expect(LiveRuntimeCatalogAccess.debugCatalogURL(arguments: arguments) == nil)
+        #endif
+        #expect(LiveRuntimeCatalogAccess.debugCatalogURL(arguments: ["-MacGachaDebugCatalog", "relative.json"]) == nil)
+    }
+
+    #if DEBUG
+    @Test(arguments: [false, true]) func retiredCatalogKeyCanRefreshThroughLiveAccess(force: Bool) async throws {
+        let f = try await CatalogModelFixture.make()
+        let oldKey = Curve25519.Signing.PrivateKey(), newKey = Curve25519.Signing.PrivateKey()
+        let store = RuntimeCatalogStore(root: f.paths.root)
+        let oldService = RuntimeCatalogService(baseline: f.baseline, store: store,
+            signatureVerifier: RuntimeCatalogSignatureVerifier(publicKeys: [oldKey.publicKey.rawRepresentation]))
+        let before = try await oldService.accept(metadata: f.metadata, signature: oldKey.signature(for: f.metadata))
+        let url = f.paths.root.appendingPathComponent("rotated-catalog.json")
+        try f.metadata.write(to: url)
+        try Data(newKey.signature(for: f.metadata).base64EncodedString().utf8).write(to: URL(fileURLWithPath: url.path + ".sig"))
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: RuntimeCatalogSignatureVerifier(publicKeys: [newKey.publicKey.rawRepresentation]),
+            paths: f.paths, services: f.services, baseline: f.baseline, arguments: ["-MacGachaDebugCatalog", url.path])
+        let result = try await access.refresh(force: force)
+        #expect(result.selections == before.selections)
+        #expect(result.catalog.revision == before.catalog.revision)
+        #expect(try await access.snapshot().selections == before.selections)
+    }
+
+    @Test func debugCatalogFileValidatesLikeRemote() async throws {
+        let f = try await CatalogModelFixture.make()
+        let url = f.paths.root.appendingPathComponent("debug-catalog.json")
+        try FileManager.default.createDirectory(at: f.paths.root, withIntermediateDirectories: true)
+        try f.metadata.write(to: url)
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline,
+            arguments: ["-MacGachaDebugCatalog", url.path])
+        #expect(try await access.refresh(force: true).catalog.revision == 1)
+        try Data("invalid".utf8).write(to: url)
+        await #expect(throws: (any Error).self) { try await access.refresh(force: true) }
+        #expect(try await access.snapshot().catalog.revision == 1)
+    }
+    #endif
+
     @Test func refreshPreservesPlayableHelperAndSuccessfulSetupActivatesOnlyRequestedVersion() async throws {
         let f = try await CatalogModelFixture.make()
         let old = try #require(f.model.runtimeCatalog?.selectedHelper(for: .surroundAudio))
@@ -32,7 +76,7 @@ import RuntimeManager
         f.model.useRuntimeVersion(old.id.rawValue)
         try await catalogWait { f.model.runtimeCatalogMutationID == nil }
         #expect(f.model.runtimeIsPinned(old.id.rawValue))
-        let restored = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline, fetch: { f.metadata })
+        let restored = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, fetch: { f.metadata })
         #expect(try await restored.snapshot().selections.helpers[.surroundAudio]?.id == old.id)
         #expect(try await restored.snapshot().selections.helpers[.surroundAudio]?.pinned == true)
         await f.model.remove(old.id.rawValue)
@@ -86,15 +130,17 @@ import RuntimeManager
         try await catalogWait { model.runtimeCatalogMutationID == nil }
         #expect(model.runtimeCatalog?.selectedHelper(for: .surroundAudio)?.id == previous)
         #expect(services.snapshot.components.contains { $0.version == target.version.rawValue && $0.kind == target.kind })
-        let reopened = LiveRuntimeCatalogAccess(paths: paths, services: services, baseline: baseline, fetch: { throw LauncherError.transport("offline") })
+        let reopened = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: paths, services: services, baseline: baseline, fetch: { throw LauncherError.transport("offline") })
         #expect(try await reopened.snapshot().selectedHelper(for: .surroundAudio)?.id == previous)
     }
 
     @Test func refreshStartedDuringActivationCannotPublishItsOldSelectionAfterward() async throws {
         let f = try await CatalogModelFixture.make()
-        let base = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline, fetch: { f.metadata })
+        let base = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, fetch: { f.metadata })
         let access = HeldCatalogRefresh(base)
         let model = AppModel(paths: f.paths, services: f.services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         await model.refreshRuntimeCatalog(force: true)
         try f.publish(f.revision3); try await model.scanAndApply()
@@ -126,9 +172,11 @@ import RuntimeManager
         #expect(f.services.snapshot.components.contains { $0.version == previous.version.rawValue } == writeFails)
         #expect(f.model.runtimeCatalog?.selectedHelper(for: .surroundAudio)?.id == previous.id)
         if !writeFails {
-            let access = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline, fetch: { throw LauncherError.transport("offline") })
+            let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, fetch: { throw LauncherError.transport("offline") })
             #expect(try await access.snapshot().selectedHelper(for: .surroundAudio)?.id == previous.id)
             let model = AppModel(paths: f.paths, services: f.services, catalogAccess: access, defaults: nil)
+            model.autoUpdateDependencies = false
+            try await model.flushLaunchSettings()
             await model.start(); await model.catalogRefreshTask?.value
             var settings = model.launchSettings(for: "genshin"); settings.backend = .d3dmetal; settings.surroundSound = true
             model.launchSettingsCache["genshin"] = settings
@@ -159,7 +207,7 @@ import RuntimeManager
     @Test func automaticChecksAreThrottledAndInvalidFutureDatesCannotSuppressRefresh() async throws {
         let f = try await CatalogModelFixture.make()
         let calls = Mutex(0), date = Mutex(Date(timeIntervalSince1970: 1000))
-        let access = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline,
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline,
             now: { date.withLock { $0 } }, fetch: { calls.withLock { $0 += 1 }; return f.metadata })
         _ = try await access.snapshot()
         #expect(calls.withLock { $0 } == 0)
@@ -183,7 +231,7 @@ import RuntimeManager
 
     @Test func failedCheckRetriesWithoutLosingCachedActiveSelection() async throws {
         let f = try await CatalogModelFixture.make(), calls = Mutex(0)
-        let access = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline,
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline,
             now: { Date(timeIntervalSince1970: 1000) }, fetch: {
                 let count = calls.withLock { $0 += 1; return $0 }
                 if count == 1 { throw LauncherError.transport("private synthetic request") }
@@ -200,7 +248,7 @@ import RuntimeManager
     @Test func startupPublishesLocalSnapshotBeforeBackgroundMetadataReturns() async throws {
         let f = try await CatalogModelFixture.make(), gate = CatalogFetchGate()
         let paths = AppPaths(root: FileManager.default.temporaryDirectory.appendingPathComponent("catalog-startup-\(UUID().uuidString)"))
-        let access = LiveRuntimeCatalogAccess(paths: paths, services: f.services, baseline: f.baseline, fetch: {
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: paths, services: f.services, baseline: f.baseline, fetch: {
             await gate.wait(); return f.metadata
         })
         let model = AppModel(paths: paths, services: f.services, catalogAccess: access, defaults: nil)
@@ -226,8 +274,10 @@ import RuntimeManager
                 if $0.fail { $0.unreadable = unreadable; throw LauncherError.io("after rename") }
             }
         })
-        let access = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline, store: store, fetch: { f.metadata })
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, store: store, fetch: { f.metadata })
         let model = AppModel(paths: f.paths, manifest: f.baseline, services: f.services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         await model.refreshRuntimeCatalog(force: true)
         try f.publish(f.revision3); try await model.scanAndApply()
@@ -247,9 +297,11 @@ import RuntimeManager
 
     @Test func refreshReturningAfterActivationCannotRestoreStaleSelection() async throws {
         let f = try await CatalogModelFixture.make()
-        let underlying = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline, fetch: { f.metadata })
+        let underlying = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, fetch: { f.metadata })
         let access = HeldCatalogRefresh(underlying)
         let model = AppModel(paths: f.paths, manifest: f.baseline, services: f.services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         await model.refreshRuntimeCatalog(force: true)
         try f.publish(f.revision3); try await model.scanAndApply()
@@ -288,8 +340,10 @@ import RuntimeManager
             bundleBindings: old.bundleBindings + [.init(bundleID: alternative.id, profileID: metal.id)], helperBindings: old.helperBindings,
             recommendedBundles: recommended, recommendedHelpers: old.recommendedHelpers)
         let metadata = try JSONEncoder().encode(catalog)
-        let access = LiveRuntimeCatalogAccess(paths: f.paths, services: f.services, baseline: f.baseline, fetch: { metadata })
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: f.paths, services: f.services, baseline: f.baseline, fetch: { metadata })
         let model = AppModel(paths: f.paths, manifest: f.baseline, services: f.services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         await model.refreshRuntimeCatalog(force: true)
         f.services.state.withLock { $0.accepted = false }
@@ -352,20 +406,22 @@ private struct CatalogModelFixture: Sendable {
         let baseline = try await BundledRuntimeManifest.load()
         let old = try #require(baseline.components.first { $0.id.rawValue == SurroundAudio.componentID })
         var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])
-        object["id"] = "surround-audio-wine-11.20-3"; object["version"] = "wine-11.20-3"
+        object["id"] = "surround-audio-wine-11.20-4"; object["version"] = "wine-11.20-4"
         let revision3 = try JSONDecoder().decode(RuntimeComponent.self, from: JSONSerialization.data(withJSONObject: object))
         let base = RuntimeCatalog.bundled(baseline)
         var recommended = base.recommendedHelpers; recommended[.surroundAudio] = revision3.id
         let catalog = RuntimeCatalog(revision: 1, manifest: try RuntimeManifest(components: baseline.components + [revision3], bundles: baseline.bundles),
             bundleBindings: base.bundleBindings,
-            helperBindings: base.helperBindings + [.init(componentID: revision3.id, profileIDs: [try SafeIdentifier(SurroundAudio.bundleID)])],
+            helperBindings: base.helperBindings + [.init(componentID: revision3.id, profileIDs: try SurroundAudio.bundleIDs.sorted().map(SafeIdentifier.init))],
             recommendedBundles: base.recommendedBundles, recommendedHelpers: recommended)
         let metadata = try JSONEncoder().encode(catalog), services = FakeRuntimeServices()
         services.state.withLock { $0.accepted = true }
         let record = try InstalledComponent(kind: old.kind, version: old.version.rawValue, installedAt: .now, source: .download)
         services.state.withLock { $0.components = [record] }
-        let access = LiveRuntimeCatalogAccess(paths: paths, services: services, baseline: baseline, fetch: { metadata })
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: paths, services: services, baseline: baseline, fetch: { metadata })
         let model = AppModel(paths: paths, manifest: baseline, services: services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start()
         await model.catalogRefreshTask?.value
         return Self(paths: paths, baseline: baseline, metadata: metadata, revision3: revision3, services: services, model: model)
@@ -422,10 +478,16 @@ private struct OfflineCatalogFixture {
         let baseline = try await BundledRuntimeManifest.load(), services = FakeRuntimeServices()
         let previous = try #require(baseline.components.first { $0.id.rawValue == "surround-audio-wine-11.20-1" })
         let receipt = try InstalledComponent(kind: previous.kind, version: previous.version.rawValue, installedAt: .now, source: .download)
-        services.state.withLock { $0.components = [receipt]; $0.accepted = true }
+        let oldID = try SafeIdentifier(SurroundAudio.bundleID)
+        let oldRoot = paths.runtimes.appendingPathComponent("bundles/" + oldID.rawValue)
+        let digest = try #require(previous.sha256)
+        let oldBundle = InstalledRuntimeBundle(id: oldID, root: oldRoot, wineBinary: oldRoot.appendingPathComponent("bin/wine"), digest: digest, source: .download)
+        services.state.withLock { $0.components = [receipt]; $0.bundles[oldID.rawValue] = oldBundle; $0.accepted = true }
         let store: RuntimeCatalogStore? = writeFails ? RuntimeCatalogStore(read: { nil }, write: { _ in throw LauncherError.io("initial write failed") }) : nil
-        let access = LiveRuntimeCatalogAccess(paths: paths, services: services, baseline: baseline, store: store, fetch: { throw LauncherError.transport("offline") })
+        let access = LiveRuntimeCatalogAccess(signatureVerifier: nil, paths: paths, services: services, baseline: baseline, store: store, fetch: { throw LauncherError.transport("offline") })
         let model = AppModel(paths: paths, services: services, catalogAccess: access, defaults: nil)
+        model.autoUpdateDependencies = false
+        try await model.flushLaunchSettings()
         await model.start(); await model.catalogRefreshTask?.value
         return Self(paths: paths, baseline: baseline, services: services, model: model)
     }

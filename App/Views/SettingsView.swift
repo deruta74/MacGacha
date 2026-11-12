@@ -57,6 +57,16 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Update dependencies automatically", isOn: Binding(
+                    get: { model.autoUpdateDependencies },
+                    set: { model.autoUpdateDependencies = $0 }
+                ))
+            } footer: {
+                Text("MacGacha installs new recommended versions of Wine and other dependencies in the background. Versions you choose by hand stay as they are.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Animated backgrounds", isOn: Binding(
                     get: { animatedBackgrounds },
                     set: { animatedBackgrounds = $0; animatedChosen = true }

@@ -385,7 +385,7 @@ struct AppModelTests {
         let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: url))
         #expect(manifest.schemaVersion == 3)
-        #expect(manifest.components.count == 10)
+        #expect(manifest.components.count == 13)
         let fps = try #require(manifest.components.first { $0.id.rawValue == GenshinFps.componentID })
         #expect(fps.kind == .genshinFps && fps.archive == .zip)
         #expect(fps.license.name == "GPL-3.0-only" && fps.license.redistributable && fps.consent == nil)
@@ -395,7 +395,7 @@ struct AppModelTests {
         #expect(fps.url?.absoluteString == "https://github.com/deruta74/MacGacha/releases/download/genshin-fps-unlock-2/genshin-fps-unlock-2.zip")
         #expect(manifest.bundles.allSatisfy { !$0.components.contains(fps.id) })
         let surroundHistory = manifest.components.filter { $0.kind == .surroundAudio }
-        #expect(surroundHistory.map(\.id.rawValue) == [SurroundAudio.componentID, "surround-audio-wine-11.20-1"])
+        #expect(surroundHistory.map(\.id.rawValue) == [SurroundAudio.componentID, "surround-audio-wine-11.20-2", "surround-audio-wine-11.20-1"])
         let surround = try #require(manifest.components.first { $0.id.rawValue == SurroundAudio.componentID })
         #expect(surround.kind == .surroundAudio && surround.archive == .zip)
         #expect(surround.license.name == "LGPL-2.1-or-later" && surround.license.redistributable)
@@ -418,8 +418,8 @@ struct AppModelTests {
         let manifest = try RuntimeManifest.load(from: url)
         let model = AppModel(paths: testPaths(), manifest: manifest, services: PreviewRuntimeServices(), defaults: nil)
         await model.start()
-        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + ["jadeite-4.1.0", "steam-shim-proton-10.0-4", Crypt32Fix.componentID, SurroundAudio.componentID, GenshinFps.componentID, "surround-audio-wine-11.20-1"])
-        #expect(manifest.bundles.first?.id.rawValue == "dxmt-wine11.0cx-dxmt0.80")
+        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + manifest.components.filter { [.jadeite, .steamShim, .crypt32Fix, .surroundAudio, .genshinFps].contains($0.kind) }.map { $0.id.rawValue })
+        #expect(manifest.bundles.first?.id.rawValue == "dxmt-wine11.20mg1.0-dxmt0.80")
         #expect(model.rows.contains { $0.id == "dxmt-wine11.0-dxmt0.80" })
         let dxmt = manifest.bundles[0].id.rawValue
         model.install(dxmt)
@@ -581,6 +581,24 @@ private func eventually(_ condition: () -> Bool, timeout: Duration = .seconds(5)
 }
 
 final class FakeRuntimeServices: RuntimeServices, Sendable {
+    func stageDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle {
+        let stream: RuntimeInstallStream
+        if let bundle = manifest.bundles.first(where: { $0.id == update.targetID }) {
+            if let importedFrom { stream = install(bundle, manifest: manifest, carryingImportedFrameworkFrom: importedFrom) }
+            else { stream = install(bundle, manifest: manifest, from: nil) }
+        } else if let component = manifest.component(id: update.targetID) { stream = RuntimeInstallStream(install(component, from: nil)) }
+        else { throw LauncherError.io("Unknown synthetic staging target") }
+        for try await event in stream {
+            switch event {
+            case .phase(.completed): return DependencyStagingHandle(publish: {}, discard: {})
+            case .phase(.cancelled): throw LauncherError.cancelled
+            case .failed(let error): throw error
+            default: progress(event)
+            }
+        }
+        throw LauncherError.cancelled
+    }
     struct Install: Sendable { let component: RuntimeComponent; let candidate: GPTKCandidate? }
     struct State: Sendable {
         var accepted = false
@@ -588,6 +606,7 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
         var calls: [String] = []
         var installs: [Install] = []
         var bundleInstalls: [String] = []
+        var carriedImports: [String: String] = [:]
         var components: [InstalledComponent] = []
         var bundles: [String: InstalledRuntimeBundle] = [:]
         var invalid: [InvalidRuntimeEntry] = []
@@ -652,6 +671,10 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
             state.withLock { $0.bundleInstalls.append(bundle.id.rawValue); $0.continuation = continuation }
             installEvents.continuation.yield(bundle.id.rawValue)
         })
+    }
+    func install(_ bundle: RuntimeBundle, manifest: RuntimeManifest, carryingImportedFrameworkFrom previous: RuntimeBundle) -> RuntimeInstallStream {
+        state.withLock { $0.carriedImports[bundle.id.rawValue] = previous.id.rawValue }
+        return install(bundle, manifest: manifest, from: nil)
     }
     func remove(_ c: InstalledComponent) async throws {
         try state.withLock {

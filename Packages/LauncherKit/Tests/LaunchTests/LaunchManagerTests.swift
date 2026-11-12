@@ -12,6 +12,100 @@ import TestSupport
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct LaunchManagerTests {
+    @Test func reattachedLiveSessionContinuesQualificationWhileServerWaits() async throws {
+        let f = try await ManagerFixture.make(logsEnabled: false), wait = TestEvent()
+        var snapshot = try await f.saveSnapshot(state: .running, processes: [f.gameProcess.identity])
+        snapshot.reachedRunning = true; snapshot.reachedReady = true; snapshot.confirmedRunningSeconds = 30
+        let paths = f.paths, saved = snapshot
+        try await BlockingIO.run {
+            try LaunchJournal(paths: paths).write(saved)
+            try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: "bundle-dxmt", previousID: "previous-runtime", replacementID: saved.bundleID)
+        }
+        let runner = FakeProcessRunner { invocation in
+            if invocation.arguments == ["-w"] { try await wait.wait() }
+            return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let manager = f.manager(runner: runner)
+        _ = await manager.reattachAll()
+        await f.clock.waitForSleep(1, duration: .seconds(5)); f.clock.advance(by: .seconds(5))
+        await f.clock.waitForSleep(2, duration: .seconds(5)); f.clock.advance(by: .seconds(300))
+        await f.clock.waitForSleep(3, duration: .seconds(5))
+        f.inspector.update { $0.processes = []; $0.alive = [] }; wait.signal()
+        await f.clock.waitForSleep(1, duration: .seconds(3)); f.clock.advance(by: .seconds(3))
+        await f.waitForRestore(manager)
+        #expect(try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load().replacements.first?.verified } == true)
+    }
+    @Test func qualificationSamplesWhileWineServerWaitRemainsBlocked() async throws {
+        let f = try await ManagerFixture.make(logsEnabled: false), wait = TestEvent()
+        let paths = f.paths, bundleID = f.bundle.id.rawValue
+        try await BlockingIO.run {
+            try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: "bundle-dxmt", previousID: "previous-runtime", replacementID: bundleID)
+        }
+        let runner = FakeProcessRunner { invocation in
+            if invocation.arguments == ["-w"] { try await wait.wait() }
+            return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let manager = f.manager(runner: runner), events = ManagerEvents()
+        let consumer = await f.consume(manager, events: events)
+        await events.waitForRunning(); await manager.markReady(game: "starrail"); await events.waitForReady()
+        await f.clock.waitForSleep(1, duration: .seconds(5))
+        f.clock.advance(by: .seconds(120))
+        await f.clock.waitForSleep(2, duration: .seconds(5))
+        f.inspector.update { $0.processes = []; $0.alive = [] }; wait.signal()
+        await f.clock.waitForSleep(1, duration: .seconds(3)); f.clock.advance(by: .seconds(3))
+        await consumer.value
+        #expect(try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load().replacements.first?.verified } == true)
+    }
+    @Test func automaticCleanupMetadataFailureDoesNotStrandGameRecovery() async throws {
+        let f = try await ManagerFixture.make(logsEnabled: false), manager = f.manager(), events = ManagerEvents()
+        let paths = f.paths, bundleID = f.bundle.id.rawValue
+        try await BlockingIO.run {
+            try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: "bundle-dxmt", previousID: "previous-runtime", replacementID: bundleID)
+        }
+        let consumer = await f.consume(manager, events: events)
+        await events.waitForRunning(); await manager.markReady(game: "starrail"); await events.waitForReady()
+        await f.clock.waitForSleep(1, duration: .seconds(3)); f.clock.advance(by: .seconds(120))
+        await f.clock.waitForSleep(2, duration: .seconds(3))
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: paths.root)
+            try fs.writeAtomically(Data("invalid".utf8), to: SafeRelativePath("RuntimeCatalog/automatic-updates.json"))
+        }
+        try await f.end(manager); await consumer.value
+        #expect(try await f.journal() == nil)
+        try await f.assertOriginalRestored()
+    }
+    @Test(arguments: [false, true], [false, true]) func recoveredVerifiedEndRequiresDurableRunningProof(didRun: Bool, ready: Bool) async throws {
+        let f = try await ManagerFixture.make(initialGame: false)
+        var snapshot = try await f.saveSnapshot(state: .running, processes: [])
+        snapshot.reachedRunning = didRun
+        snapshot.reachedReady = ready
+        snapshot.confirmedRunningSeconds = didRun ? 120 : 119
+        let saved = snapshot, paths = f.paths
+        try await BlockingIO.run {
+            try LaunchJournal(paths: paths).write(saved)
+            try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: "bundle-dxmt", previousID: "previous-runtime", replacementID: saved.bundleID)
+        }
+        _ = await f.manager().reattachAll()
+        let state = try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load() }
+        #expect(state.replacements.first?.verified == (didRun && ready))
+    }
+    @Test(arguments: [false, true], [119, 120]) func onlyNormalVerifiedSessionQualifiesAutomaticCleanup(ready: Bool, runningSeconds: Int) async throws {
+        let f = try await ManagerFixture.make(), manager = f.manager(), events = ManagerEvents()
+        let consumer = await f.consume(manager, events: events)
+        await events.waitForRunning()
+        let snapshot = try #require(try await f.journal())
+        let paths = f.paths
+        try await BlockingIO.run {
+            try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: "bundle-dxmt", previousID: "previous-runtime", replacementID: snapshot.bundleID)
+        }
+        if ready { await manager.markReady(game: "starrail"); await events.waitForReady() }
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        f.clock.advance(by: .seconds(runningSeconds))
+        await f.clock.waitForSleep(2, duration: .seconds(3))
+        try await f.end(manager); await consumer.value
+        let state = try await BlockingIO.run { try RuntimeAutomaticUpdateStore(paths: paths).load() }
+        #expect(state.replacements.first?.verified == (ready && runningSeconds >= 120))
+    }
     @Test(arguments: [StarRailFrameRateOutcome.missing, .unreadable, .applied, .unchanged])
     func missingStarRailValueLaunchesAndPostsNote(outcome: StarRailFrameRateOutcome) async throws {
         let f = try await ManagerFixture.make()

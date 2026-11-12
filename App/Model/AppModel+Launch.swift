@@ -22,6 +22,7 @@ import RuntimeManager
         try settings.validate(for: id)
         let revision = UUID(), preferences = launchPreferences
         launchSettingsRevision = revision; launchSettingsRevisions[id] = revision; launchSettingsCache[id] = settings
+        refreshDependencyConsentGames()
         enqueueSettingsWrite(key: id) {
             try preferences.save(settings, game: id)
         } didCommit: { [weak self] in self?.durableLaunchSettings[id] = settings } rollback: { [weak self] in

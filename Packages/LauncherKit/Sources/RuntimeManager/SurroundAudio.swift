@@ -6,9 +6,10 @@ import LauncherCore
 /// launch integration opts in through a verified per-game runtime helper.
 public enum SurroundAudio {
     public static let bundleID = "d3dmetal-wine11.20-gptk4.0b3"
-    public static let componentID = "surround-audio-wine-11.20-2"
+    public static let bundleIDs: Set<String> = [bundleID, "d3dmetal-wine11.20mg1.0-gptk4.0b3"]
+    public static let componentID = "surround-audio-wine-11.20-3"
     public static func applies(game: String, backend: RuntimeBackend, bundleID: String?) -> Bool {
-        guard backend == .d3dmetal, bundleID == Self.bundleID, let family = GameDefinition.find(game)?.family else { return false }
+        guard backend == .d3dmetal, bundleID.map(Self.bundleIDs.contains) == true, let family = GameDefinition.find(game)?.family else { return false }
         return family == .genshin || family == .zzz
     }
     public static let version = String(componentID.dropFirst(ComponentKind.surroundAudio.idPrefix.count + 1))

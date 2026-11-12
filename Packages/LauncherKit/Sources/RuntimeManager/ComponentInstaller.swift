@@ -6,6 +6,13 @@ import LauncherCore
 import DownloadEngine
 
 public struct ComponentInstaller: Sendable {
+    func relocated(to store: RuntimeStore) -> ComponentInstaller {
+        if let fetcher, let extractor {
+            return ComponentInstaller(store: store, consent: consent, fetcher: fetcher, extractor: extractor,
+                disk: disk, fileOps: fileOps, failurePoint: failurePoint)
+        }
+        return ComponentInstaller(store: store, consent: consent, disk: disk, fileOps: fileOps, failurePoint: failurePoint)
+    }
     /// Deterministic failure boundaries for publish/recovery tests. The default is a no-op.
     public enum PublishPoint: Sendable, Equatable { case beforePublish, afterPublish }
 

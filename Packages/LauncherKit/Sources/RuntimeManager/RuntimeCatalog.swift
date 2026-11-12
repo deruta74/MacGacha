@@ -85,8 +85,8 @@ public struct RuntimeCatalog: Codable, Sendable {
             if helpers[component.kind] == nil { helpers[component.kind] = component.id }
             let profiles = manifest.bundles.filter { bundle in
                 switch component.kind {
-                case .crypt32Fix: return bundle.id.rawValue == Crypt32Fix.bundleID
-                case .surroundAudio: return bundle.id.rawValue == SurroundAudio.bundleID
+                case .crypt32Fix: return (component.id.rawValue == Crypt32Fix.componentID ? Crypt32Fix.bundleIDs : [Crypt32Fix.bundleID]).contains(bundle.id.rawValue)
+                case .surroundAudio: return (component.id.rawValue == SurroundAudio.componentID ? SurroundAudio.bundleIDs : [SurroundAudio.bundleID]).contains(bundle.id.rawValue)
                 default: return true
                 }
             }.map(\.id)

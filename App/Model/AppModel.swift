@@ -93,6 +93,8 @@ final class AppModel {
         var downloadSize: Int64? = nil
         var componentKind: ComponentKind? = nil
         var backend: RuntimeBackend? = nil
+        /// The raw version of a bundle's own Wine component, for the build number shown in Dependencies.
+        var wineVersion: String? = nil
 
         var category: RuntimeCategory {
             if backend != nil { return .runtimes }
@@ -173,7 +175,7 @@ final class AppModel {
     @ObservationIgnored var cancelledCatalogSetups: Set<String> = []
     @ObservationIgnored var catalogActivationTargets: [String: RuntimeCatalogSnapshot] = [:]
     @ObservationIgnored var runtimeInstallContexts: [String: RuntimeInstallContext] = [:]
-    @ObservationIgnored private let services: any RuntimeServices
+    @ObservationIgnored let services: any RuntimeServices
     @ObservationIgnored let artServices: [Region: any GameArtProviding]
     @ObservationIgnored var artHydrationTasks: [Region: Task<Void, Never>] = [:]
     @ObservationIgnored var artTasks: [Region: Task<Void, Never>] = [:]
@@ -238,6 +240,17 @@ final class AppModel {
     #if DEBUG
     var debugLaunchRuntimesReady = false
     #endif
+    // TODO(auto-update): inert placeholders behind `AppModel+AutoUpdateUI.swift`.
+    var dependencyAutoUpdates: [String: DependencyAutoUpdateState] = [:]
+    var runtimeUpdatesAwaitingConsent: Set<String> = []
+    var dependencyAutoUpdateReservation = false
+    var dependencyHasRetainedVersions = false
+    @ObservationIgnored var dependencyAutoUpdateTask: Task<Void, Never>?
+    @ObservationIgnored var dependencyAutoUpdateGeneration = UUID()
+    @ObservationIgnored var dependencyAutoUpdateSuppressed: Set<String> = []
+    @ObservationIgnored var dependencyConsentTargets: [RuntimeBackend: RuntimeAutomaticUpdate] = [:]
+    @ObservationIgnored var dependencyWorking: [String: RowState] = [:]
+    @ObservationIgnored var dependencyUpdateLog: EventLog?
     var launchSettingsRevisions: [String: UUID] = [:]
     var launchStates: [String: LaunchUIState] = [:]
     var launchNotes: [String: LaunchNote] = [:]
@@ -456,7 +469,7 @@ final class AppModel {
     }
 
     deinit {
-        catalogRefreshTask?.cancel(); catalogMutationTask?.cancel()
+        catalogRefreshTask?.cancel(); catalogMutationTask?.cancel(); dependencyAutoUpdateTask?.cancel()
         rosettaRefreshTask?.cancel(); rosettaPollTask?.cancel(); rosettaInstallTask?.cancel()
         for check in runtimeSetupRosettaChecks.values { check.task.cancel() }
         for task in tasks.values { task.cancel() }
@@ -480,7 +493,7 @@ final class AppModel {
         if defaults?.data(forKey: LanguageRestartContinuation.defaultsKey) != nil { setLanguageRestart(UUID()) }
         startArtStartup()
         let eventsHydration = hydrateGameEvents()
-        defer { isStarting = false }
+        defer { isStarting = false; scheduleDependencyAutoUpdates() }
         refreshConnectedDisplays()
         await ensureGameStartup().value
         await continueLanguageRestart(arguments: launchArguments)
@@ -494,6 +507,7 @@ final class AppModel {
                 // inspectable and must not appear available for replacement.
             }
             try await scanAndApply()
+            try? await refreshAutomaticRetention()
             await refreshLogs()
         } catch { show(error) }
         await refreshGames()
@@ -526,18 +540,41 @@ final class AppModel {
     }
 
     func install(_ id: String) { request(id, mode: .download) }
-    func importGPTK(_ id: String) { request(id, mode: .importGPTK) }
+    func importGPTK(_ id: String) {
+        if catalogAccess != nil, !runtimeIsSelected(id) {
+            if let task = dependencyAutoUpdateTask {
+                task.cancel(); Task { [weak self] in await task.value; self?.importGPTK(id) }; return
+            }
+            guard canChangeRuntimeCatalog else { return }
+            do {
+                let target = try runtimeVersionTarget(id, pinned: false)
+                captureRuntimeInstallContext(id, manifest: target.catalog.manifest)
+                guard let context = runtimeInstallContexts[id], context.component.kind == .d3dmetal else { return }
+                let key = "catalog-" + id
+                runtimeCatalogMutationID = id; catalogSelectionGeneration = UUID()
+                catalogActivationTargets[key] = target
+                runtimeSetupChains[key] = RuntimeSetupChain(plan: RuntimeSetupPlan(gameID: key,
+                    items: [.init(id: id, name: context.bundle?.displayName ?? Self.kindName(context.component.kind), size: nil)], needsAppleTerms: true), attempted: true)
+            } catch { show(error); return }
+        }
+        request(id, mode: .importGPTK)
+    }
 
     private func bundle(_ id: String) -> RuntimeBundle? { runtimeInstallContexts[id]?.bundle ?? manifest?.bundles.first { $0.id.rawValue == id } }
     private func requestedComponent(_ id: String) -> RuntimeComponent? {
         if let context = runtimeInstallContexts[id] { return context.component }
         if let bundle = bundle(id) {
-            return manifest?.components.first { bundle.components.contains($0.id) && $0.wineBinary != nil }
+            return manifest?.components.first { bundle.components.contains($0.id) && (bundle.backend == .d3dmetal ? $0.kind == .d3dmetal : $0.kind == .wine) }
         }
         return manifest?.components.first { $0.id.rawValue == id }
     }
 
     private func request(_ id: String, mode: ConsentMode) {
+        if let task = dependencyAutoUpdateTask {
+            task.cancel()
+            Task { [weak self] in await task.value; self?.request(id, mode: mode) }
+            return
+        }
         guard canBeginGameOrRuntimeOperation(allowingCatalogID: id) else { return }
         guard tasks[id] == nil, consentRequest == nil,
             let component = requestedComponent(id),
@@ -575,6 +612,7 @@ final class AppModel {
 
     func respondToConsent(accept: Bool) {
         guard let request = consentRequest else { return }
+        if !accept { revokeCatalogSetupActivation(request.id) }
         defer { scheduleRuntimeSetupUpdate() }
         consentRequest = nil
         guard accept, tasks[request.id] == nil,
@@ -647,6 +685,7 @@ final class AppModel {
 
     func cancelImport() {
         defer { scheduleRuntimeSetupUpdate() }
+        if let id = importRuntimeBundle?.id.rawValue ?? importComponent?.id.rawValue { revokeCatalogSetupActivation(id) }
         searchTask?.cancel(); searchTask = nil; searchGeneration = UUID()
         importComponent = nil; importRuntimeBundle = nil; importState = nil; extraRoots = []
         if consentRequest?.mode == .importGPTK { consentRequest = nil }
@@ -835,16 +874,20 @@ final class AppModel {
             let components = (manifest?.components ?? []).filter { bundle.components.contains($0.id) }
             result.append(RuntimeRow(id: id, kindName: bundle.displayName, version: components.map { $0.version.rawValue }.joined(separator: " + "),
                 licenseName: components.map { $0.license.name }.joined(separator: " / "),
-                state: working[id] ?? errors[id].map { .failed(message: $0) } ?? installedBundles[id].map { .installed(source: $0.source) } ?? .notInstalled,
+                state: working[id] ?? dependencyWorking[id] ?? errors[id].map { .failed(message: $0) } ?? installedBundles[id].map { .installed(source: $0.source) } ?? .notInstalled,
                 canImportGPTK: bundle.backend == .d3dmetal, needsConsent: components.contains { $0.consent != nil },
-                summary: bundle.summary, downloadSize: components.reduce(Int64(0)) { $0 + ($1.size ?? 0) }, backend: bundle.backend))
+                summary: bundle.summary, downloadSize: components.reduce(Int64(0)) { total, component in
+                    let sum = total.addingReportingOverflow(component.size ?? 0)
+                    return sum.overflow ? Int64.max : sum.partialValue
+                }, backend: bundle.backend,
+                wineVersion: components.first { $0.kind == .wine }?.version.rawValue))
         }
         for component in manifest?.components ?? [] where !covered.contains(component.id) {
             let id = component.id.rawValue
             let existing = installed.first { $0.kind == component.kind && $0.version == component.version.rawValue }
             result.append(RuntimeRow(id: id, kindName: Self.kindName(component.kind), version: component.version.rawValue,
                 licenseName: component.license.name,
-                state: working[id] ?? errors[id].map { .failed(message: $0) } ?? existing.map { .installed(source: $0.source) } ?? .notInstalled,
+                state: working[id] ?? dependencyWorking[id] ?? errors[id].map { .failed(message: $0) } ?? existing.map { .installed(source: $0.source) } ?? .notInstalled,
                 canImportGPTK: component.kind == .d3dmetal, needsConsent: component.consent != nil, downloadSize: component.size, componentKind: component.kind))
         }
         for component in installed where !covered.contains(where: { $0.rawValue == Self.id(component) }) && !result.contains(where: { $0.id == Self.id(component) }) {
@@ -863,6 +906,10 @@ final class AppModel {
 
     func setRuntimeSetupProgress(_ progress: RuntimeSetupProgress?, for id: String) {
         if runtimeSetupProgress[id] != progress { runtimeSetupProgress[id] = progress }
+    }
+
+    func setDependencyUpdateError(_ error: LauncherError?, for id: String) {
+        errors[id] = error?.userMessage; rebuildRows()
     }
 
     private func cacheRuntimeConsent(_ accepted: Bool, for component: RuntimeComponent) {

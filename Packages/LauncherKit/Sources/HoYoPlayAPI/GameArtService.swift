@@ -6,7 +6,7 @@ import LauncherCore
 import DownloadEngine
 
 /// A memory snapshot is always synchronous. Disk hydration and every refresh run on
-/// this actor, off the main actor. No failure is surfaced to the user.
+/// this actor, with filesystem work delegated to BlockingIO. No failure is surfaced to the user.
 public actor GameArtService {
     private static let ttl: TimeInterval = 6 * 3600
     // Three games × (16 backgrounds × 5 assets + icon + logo), plus headroom.
@@ -17,6 +17,7 @@ public actor GameArtService {
         Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0.id) })
     }
     private nonisolated let snapshot = Mutex<[String: GameArt]>([:])
+    private let fileOps: any FileOps
     private let directory: URL
     private let language: HoYoPlayLanguage
     private let region: Region
@@ -30,10 +31,11 @@ public actor GameArtService {
     private var flight: (id: UUID, task: Task<[String: GameArt], Never>)?
 
     public init(cacheDirectory: URL, region: Region = .global, language: HoYoPlayLanguage = .enUS, http: (any HTTPClient)? = nil, log: EventLog? = nil,
-        now: @escaping @Sendable () -> Date = Date.init, requestTimeout: Duration = .seconds(30)) {
+        now: @escaping @Sendable () -> Date = Date.init, requestTimeout: Duration = .seconds(30), fileOps: any FileOps = SystemFileOps()) {
         // Preserve the existing Global cache. CN owns its index and assets in a
         // separate directory, which Global's regular-file pruning leaves alone.
         self.directory = region == .global ? cacheDirectory : cacheDirectory.appendingPathComponent(region.rawValue, isDirectory: true)
+        self.fileOps = fileOps
         self.region = region; self.language = region == .mainlandChina ? .zhCN : language
         self.log = log; self.now = now; self.requestTimeout = requestTimeout
         if let http { self.http = http; ownedHTTP = nil }
@@ -49,17 +51,19 @@ public actor GameArtService {
     public func loadCached() async -> [String: GameArt] {
         guard !hydrated, !Task.isCancelled, directory.isFileURL else { return cached() }
         do {
-            let fs = try ContainedFileSystem(root: directory.deletingLastPathComponent())
+            let fs = try await BlockingIO.run { try ContainedFileSystem(root: self.directory.deletingLastPathComponent(), fileOps: self.fileOps) }
             let root = try SafeRelativePath(directory.lastPathComponent)
-            hydrate(fs, root: root)
+            await hydrate(fs, root: root)
         } catch { }
         return cached()
     }
 
-    private func hydrate(_ fs: ContainedFileSystem, root: SafeRelativePath) {
+    private func hydrate(_ fs: ContainedFileSystem, root: SafeRelativePath) async {
         guard !hydrated else { return }
+        let saved = try? await BlockingIO.run { try self.readIndex(fs, root: root) }
+        guard !hydrated, !Task.isCancelled else { return }
         hydrated = true
-        if let saved = try? readIndex(fs, root: root) { index = saved }
+        if let saved { index = saved }
         snapshot.withLock { $0 = buildArt(index) }
     }
 
@@ -68,7 +72,7 @@ public actor GameArtService {
     public nonisolated func cachedIcon(for gameID: String) async -> Data? {
         guard GameDefinition.find(gameID)?.region == region else { return nil }
         return try? await BlockingIO.run {
-            let fs = try ContainedFileSystem(root: self.directory.deletingLastPathComponent())
+            let fs = try ContainedFileSystem(root: self.directory.deletingLastPathComponent(), fileOps: self.fileOps)
             let root = try SafeRelativePath(self.directory.lastPathComponent)
             let saved = try self.readIndex(fs, root: root)
             guard let url = saved.games[gameID]?.icon, let asset = saved.assets[url.absoluteString],
@@ -90,10 +94,10 @@ public actor GameArtService {
     private func update() async -> [String: GameArt] {
         do {
             guard directory.isFileURL, requestTimeout > .zero else { return cached() }
-            let fs = try ContainedFileSystem(root: directory.deletingLastPathComponent())
+            let fs = try await BlockingIO.run { try ContainedFileSystem(root: self.directory.deletingLastPathComponent(), fileOps: self.fileOps) }
             let root = try SafeRelativePath(directory.lastPathComponent)
-            try fs.createDirectory(at: root)
-            hydrate(fs, root: root)
+            try await BlockingIO.run { try fs.createDirectory(at: root) }
+            await hydrate(fs, root: root)
             let age = now().timeIntervalSince(index.fetchedAt)
             // Art fetched in another language is stale however fresh it is, and so is an index from
             // before background lists, so an app update shows every background without waiting.
@@ -160,10 +164,10 @@ public actor GameArtService {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let bytes = try encoder.encode(next)
             guard bytes.count <= Self.indexLimit else { return cached() }
-            try fs.writeAtomically(bytes, to: SafeRelativePath("\(root)/art-index.json"))
+            try await BlockingIO.run { try fs.writeAtomically(bytes, to: SafeRelativePath("\(root)/art-index.json")) }
             index = next
             let art = buildArt(next); snapshot.withLock { $0 = art }
-            try? prune(fs, root: root, index: next)
+            try? await BlockingIO.run { try self.prune(fs, root: root, index: next) }
             return art
         } catch {
             await log?.log(.info, "game-art", "Refresh skipped", metadata: ["reason": Self.reason(error)])
@@ -182,7 +186,9 @@ public actor GameArtService {
             let http = http; let log = log; let date = now()
             do {
                 files[key] = try await Self.deadline(requestTimeout) {
-                    try await Self.download(url, video: video, http: http, log: log, fs: fs, root: root, date: date)
+                    try await BlockingIO.run {
+                        try await Self.download(url, video: video, http: http, log: log, fs: fs, root: root, date: date)
+                    }
                 }
             } catch {
                 await log?.log(.info, "game-art", "Asset skipped",
@@ -236,7 +242,7 @@ public actor GameArtService {
         }
     }
 
-    private func prune(_ fs: ContainedFileSystem, root: SafeRelativePath, index: ArtIndex) throws {
+    private nonisolated func prune(_ fs: ContainedFileSystem, root: SafeRelativePath, index: ArtIndex) throws {
         var keep = Set(index.assets.values.map(\.file)); keep.insert("art-index.json")
         for path in try fs.contentsOfDirectory(at: root) where !keep.contains(path.components.last ?? "") {
             if try fs.itemType(at: path, allowingLeafSymlink: true) == .regularFile { try fs.removeFile(at: path) }
@@ -295,7 +301,7 @@ public actor GameArtService {
             try fs.rename(from: part, to: SafeRelativePath("\(root)/\(file)"))
             return AssetRecord(file: file, fetchedAt: date)
         } catch {
-            await Task.detached { try? fs.removeFile(at: part) }.value
+            try? await BlockingIO.finish { try fs.removeFile(at: part) }
             throw error
         }
     }

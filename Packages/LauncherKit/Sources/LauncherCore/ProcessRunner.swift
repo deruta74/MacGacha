@@ -80,7 +80,7 @@ public struct SystemProcessRunner: ProcessRunner {
         defer { stderrReader.close() }
         process.executableURL = executable
         process.arguments = arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, supplied in supplied }
+        process.environment = environment
         process.currentDirectoryURL = currentDirectory
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "cerberoVersion": "1.28.7",
+  "recipeArchive": {
+    "name": "cerbero-1.28.7.tar.gz",
+    "url": "https://api.github.com/repos/GStreamer/cerbero/tarball/e0e7007e210dab3e2f3e898939e2cfe1fd02f123",
+    "sha256": "1595a4f628cc75c29239952f1080ea0458fce0e77b7dc798aa388f3b2ac2db8b"
+  },
+  "upstreamCommit": "e0e7007e210dab3e2f3e898939e2cfe1fd02f123",
+  "status": "partial-source-inputs-not-complete-corresponding-source",
+  "sourceArchives": [
+    {
+      "name": "ffmpeg-7.1.tar.xz",
+      "url": "https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz",
+      "sha256": "40973d44970dbc83ef302b0609f2e74982be2d85916dd2ee7472d30678a7abe6",
+      "package": "ffmpeg",
+      "version": "7.1",
+      "recipe": "recipes/ffmpeg.recipe"
+    },
+    {
+      "name": "zlib-1.3.1.tar.gz",
+      "url": "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
+      "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+      "package": "zlib",
+      "version": "1.3.1",
+      "recipe": "recipes/zlib.recipe"
+    },
+    {
+      "name": "gstreamer-1.28.7.tar.xz",
+      "url": "https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.7.tar.xz",
+      "sha256": "787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e",
+      "package": "gstreamer-1.0",
+      "version": "1.28.7",
+      "recipe": "recipes/gstreamer-1.0.recipe"
+    }
+  ]
+}

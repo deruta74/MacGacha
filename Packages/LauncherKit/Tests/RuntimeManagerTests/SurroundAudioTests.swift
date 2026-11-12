@@ -8,6 +8,17 @@ import DownloadEngine
 import TestSupport
 
 @Suite struct SurroundAudioTests {
+    @Test func helpersApplyToBothWine1120ProfilesOnly() throws {
+        for profile in ["d3dmetal-wine11.20-gptk4.0b3", "d3dmetal-wine11.20mg1.0-gptk4.0b3"] {
+            #expect(SurroundAudio.applies(game: "genshin", backend: .d3dmetal, bundleID: profile))
+            #expect(Crypt32Fix.applies(game: "genshin-cn", backend: .d3dmetal, bundleID: profile))
+            #expect(!SurroundAudio.applies(game: "genshin", backend: .dxmt, bundleID: profile))
+            #expect(!Crypt32Fix.applies(game: "genshin", backend: .d3dmetal, bundleID: profile))
+        }
+        for version in ["wine-11.20-1", "wine-11.20-2"] {
+            #expect(try SurroundAudio.moduleVersion(SafeRelativePath("Runtimes/surroundAudio/\(version)/x86_64-unix/winecoreaudio.so"), runtimes: SafeRelativePath("Runtimes")).rawValue == version)
+        }
+    }
     @Test func manifestRoundTripAndABIScope() throws {
         let component = try surroundComponent(Data("zip".utf8))
         let manifest = try RuntimeManifest(components: [component])
@@ -31,7 +42,7 @@ import TestSupport
         let installer = surroundInstaller(store: store, cdn: cdn)
         for try await _ in installer.install(component) { }
         let installed = try #require(store.installed().first)
-        #expect(installed.kind == .surroundAudio && installed.version == "wine-11.20-2")
+        #expect(installed.kind == .surroundAudio && installed.version == SurroundAudio.version)
         #expect(installed.archiveDigest == component.sha256)
         let fs = try ContainedFileSystem(root: store.installURL(for: component))
         #expect(try fs.readFile(at: SurroundAudio.modulePath, maxBytes: 1024) == Data("module".utf8))
@@ -61,7 +72,7 @@ import TestSupport
         try fs.removeItem(at: SafeRelativePath("Games/genshin/launch-session.json"))
         try store.remove(installed)
         #expect(try store.installed().isEmpty)
-        #expect(try fs.itemType(at: SafeRelativePath("Runtimes/surroundAudio/wine-11.20-2")) == nil)
+        #expect(try fs.itemType(at: SafeRelativePath("Runtimes/surroundAudio/\(SurroundAudio.version)")) == nil)
     }
 
     @Test func rejectsUnverifiedArchiveBeforePublication() async throws {
@@ -79,7 +90,7 @@ import TestSupport
 private func surroundComponent(_ bytes: Data) throws -> RuntimeComponent {
     var hash = StreamingHasher(.sha256); hash.update(bytes)
     return try RuntimeComponent(id: SafeIdentifier(SurroundAudio.componentID), kind: .surroundAudio,
-        version: SafeIdentifier("wine-11.20-2"), sourceMode: .download,
+        version: SafeIdentifier(SurroundAudio.version), sourceMode: .download,
         url: URL(string: "https://fixtures.invalid/archive"), size: Int64(bytes.count), installedSize: 1024,
         sha256: hash.finalize(), archive: .zip,
         license: ComponentLicense(name: "LGPL-2.1-or-later", url: URL(string: "https://fixtures.invalid/license")!,

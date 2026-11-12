@@ -59,6 +59,9 @@ public actor LaunchManager {
         // Reattached UI observers must stop their window timers at verified end.
         var hasEnded = false
         var ready = false
+        var runningTimer: (@Sendable () -> Duration)?
+        var lastConfirmedElapsed: Duration = .zero
+        var qualificationTask: Task<Void, Never>?
         var runningAnnounced = false
         var endOutcome = "while MacGacha was closed"
         var restoreEntryCount = 0
@@ -78,6 +81,7 @@ public actor LaunchManager {
             self.session = session; self.lock = lock; self.pin = pin; self.log = log
             self.lifecycleLog = log.map(SessionLifecycleLog.init)
             self.watchPhase = session.state == .running ? .running : .spawning
+            self.ready = session.reachedReady == true
         }
     }
 
@@ -196,6 +200,7 @@ public actor LaunchManager {
     public func markReady(game: String) {
         guard let context = contexts[game], context.session.state == .running, !context.hasEnded, !context.ready else { return }
         context.ready = true
+        context.session.reachedReady = true
         context.continuation?.yield(.ready)
         note(context, "game window ready")
     }
@@ -411,6 +416,7 @@ public actor LaunchManager {
 
     private func watch(game: String, executable: String) async {
         guard let context = contexts[game] else { return }
+        if context.session.state == .running { await startQualificationMonitor(context) }
         let watcher = SessionWatcher(runtimesRoot: paths.runtimes, inspector: inspector, runner: runner, clock: clock)
         let reaper = context.ownedWrapper.map { OwnedWrapperReaper(identity: $0) }
         let supervisionClock = clock
@@ -467,8 +473,24 @@ public actor LaunchManager {
         context.watchPhase = .running
         context.session.startupPending = false
         context.session.state = .running
+        if processes.isEmpty {
+            context.runningTimer = nil; context.lastConfirmedElapsed = .zero
+        } else if let timer = context.runningTimer {
+            context.session.reachedRunning = true
+            let elapsed = timer()
+            let interval = (elapsed - context.lastConfirmedElapsed).components
+            let seconds = max(0, Double(interval.seconds) + Double(interval.attoseconds) / 1e18)
+            context.session.confirmedRunningSeconds = min(31_536_000, (context.session.confirmedRunningSeconds ?? 0) + seconds)
+            context.lastConfirmedElapsed = elapsed
+        } else {
+            context.session.reachedRunning = true
+            let timerClock = clock
+            let timer = AnyLaunchClock(timerClock)
+            context.runningTimer = { timer.now }
+        }
         context.session.processes = Array(Set(context.session.processes + processes)).sorted { $0.pid < $1.pid }
         try await persist(context.session)
+        if !processes.isEmpty { await startQualificationMonitor(context) }
         if !context.runningAnnounced, let process = processes.sorted(by: { $0.pid < $1.pid }).first {
             context.runningAnnounced = true
             note(context, "game process detected: pid \(process.pid)")
@@ -477,6 +499,49 @@ public actor LaunchManager {
         }
         if !processes.isEmpty { try await startFpsInjector(context) }
     }
+
+    private func startQualificationMonitor(_ context: Context) async {
+        guard context.qualificationTask == nil, !context.hasEnded,
+            (context.session.confirmedRunningSeconds ?? 0) < 120 else { return }
+        let paths = paths, session = context.session
+        let needed = (try? await BlockingIO.run {
+            try RuntimeAutomaticUpdateStore(paths: paths).load().replacements.contains { record in
+                !record.verified && (record.familyID.hasPrefix("bundle-")
+                    ? record.replacementID == session.bundleID : session.componentIDs.contains(record.replacementID))
+            }
+        }) ?? false
+        guard needed, contexts[session.game] === context, !context.hasEnded else { return }
+        let sampleClock = clock
+        context.qualificationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await sampleClock.sleep(for: .seconds(5)) } catch { return }
+                guard let self else { return }
+                guard await self.sampleQualification(game: session.game, sessionID: session.sessionID) else { return }
+            }
+        }
+    }
+
+    private func sampleQualification(game: String, sessionID: UUID) async -> Bool {
+        guard let context = contexts[game], context.session.sessionID == sessionID, !context.hasEnded,
+            context.session.state == .running, (context.session.confirmedRunningSeconds ?? 0) < 120,
+            let executable = Self.executable(context.session) else { return false }
+        let session = context.session, inspector = inspector, root = paths.runtimes
+        let name = executable.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map { $0.lowercased() } ?? ""
+        do {
+            let games = try await BlockingIO.run {
+                try inspector.processes(environmentContains: "WINEPREFIX", value: session.prefix.path,
+                    scope: session.inspectionScope(runtimesRoot: root)).filter { SessionWatcher.isGame($0, name: name) }.map(\.identity)
+            }
+            guard contexts[game] === context, !context.hasEnded, !Task.isCancelled else { return false }
+            guard !games.isEmpty else { context.runningTimer = nil; context.lastConfirmedElapsed = .zero; return false }
+            try await observed(game: game, processes: games)
+            return true
+        } catch {
+            context.runningTimer = nil; context.lastConfirmedElapsed = .zero
+            return false
+        }
+    }
+
 
     private func startFpsInjector(_ context: Context) async throws {
         guard let command = context.fpsInjector, !context.fpsAttempted, !context.hasEnded else { return }
@@ -627,7 +692,25 @@ public actor LaunchManager {
     }
 
     private func verifiedEnd(_ context: Context) async throws {
-        guard context.hasEnded, context.session.endLogged != true else { return }
+        guard context.hasEnded else { return }
+        if let qualification = context.qualificationTask {
+            qualification.cancel(); await qualification.value; context.qualificationTask = nil
+        }
+        if context.session.reachedRunning == true, context.session.reachedReady == true,
+            ["normal", "while MacGacha was closed"].contains(context.endOutcome), context.deferredFailure == nil {
+            let paths = paths, session = context.session
+            do {
+                try await BlockingIO.run {
+                    try RuntimeAutomaticUpdateStore(paths: paths).recordVerifiedSession(bundleID: session.bundleID,
+                        componentIDs: session.componentIDs, confirmedRunningSeconds: session.confirmedRunningSeconds ?? 0, sessionID: session.sessionID)
+                }
+            } catch {
+                // Cleanup proof is optional. Failure keeps the previous runtime,
+                // never the user's game files or launch recovery ownership.
+                event("Automatic cleanup proof unavailable", game: session.game, level: .warning)
+            }
+        }
+        guard context.session.endLogged != true else { return }
         var snapshot = context.session
         snapshot.endLogged = true
         snapshot.startupPending = false

@@ -95,7 +95,8 @@ public struct PrefixManager: Sendable {
                 try fs.synchronizeTree(at: prefix)
                 arguments = ["wineboot", "--init"]
             }
-            let environment = ["WINEPREFIX": url.path, "WINEDEBUG": "-all", "WINEDLLOVERRIDES": runtimeDigest == nil ? "winemenubuilder.exe=d" : "winemenubuilder.exe=d;mscoree=d;mshtml=d"]
+            var environment = Self.preparationEnvironment(prefix: url)
+            environment["WINEDLLOVERRIDES"] = runtimeDigest == nil ? "winemenubuilder.exe=d" : "winemenubuilder.exe=d;mscoree=d;mshtml=d"
             let result = try await runner.run(wineBinary, arguments: arguments,
                 environment: environment,
                 currentDirectory: nil)
@@ -124,6 +125,16 @@ public struct PrefixManager: Sendable {
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
             throw error
         }
+    }
+
+    static func preparationEnvironment(prefix: URL, base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        let allowed: Set<String> = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG"]
+        var result = base.filter { allowed.contains($0.key) || $0.key.hasPrefix("LC_") }
+        result["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        result["LC_ALL"] = "C"
+        result["WINEPREFIX"] = prefix.path
+        result["WINEDEBUG"] = "-all"
+        return result
     }
 
     private func finishShellFolders(_ fs: ContainedFileSystem, prefix: URL, wineBinary: URL,
