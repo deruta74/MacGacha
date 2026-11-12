@@ -812,9 +812,12 @@ enum DependencyText {
         return raw
     }
 
+    /// Apple's payload keeps its consent hint: Set Up asks for the license before downloading.
     static func download(_ row: RuntimeRow) -> String? {
-        guard let size = row.downloadSize, size > 0 else { return nil }
-        return String(localized: "About \(ByteSize.text(size)) to download")
+        let consent = row.needsConsent ? String(localized: "Apple license") : nil
+        guard let size = row.downloadSize, size > 0 else { return consent }
+        let text = String(localized: "About \(ByteSize.text(size)) to download")
+        return consent.map { StatusText.joined(text, $0) } ?? text
     }
 }
 
