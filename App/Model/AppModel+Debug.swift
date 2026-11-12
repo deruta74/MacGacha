@@ -72,25 +72,16 @@ extension AppModel {
             return try JSONDecoder().decode(RuntimeComponent.self, from: JSONSerialization.data(withJSONObject: json))
         }
         var components = bundled.components
-        components.append(try variant(of: "wine-11.0-1-crossover", as: "wine-11.20-macgacha-1.0", version: "11.20-macgacha-1.0"))
-        var bundles = [
-            try RuntimeBundle(id: SafeIdentifier("dxmt-wine11.20mg1.0-dxmt0.80"), displayName: "DXMT",
-                summary: "MacGacha Wine 11.20 · DXMT 0.80", backend: .dxmt,
-                components: [SafeIdentifier("wine-11.20-macgacha-1.0"), SafeIdentifier("dxmt-0.80")]),
-            // The real bundle also lists our Wine. Today's package accepts one component here.
-            try RuntimeBundle(id: SafeIdentifier("d3dmetal-wine11.20mg1.0-gptk4.0b3"), displayName: "D3DMetal",
-                summary: "MacGacha Wine 11.20 · Apple D3DMetal 4.0 beta 3", backend: .d3dmetal,
-                components: [SafeIdentifier("d3dmetal-4.0b3")])
-        ]
+        var bundles = bundled.bundles
         if newerGraphics {
             // After the active bundle: a preview model reads the full manifest, where the
             // first bundle per graphics layer is what Play needs. The offer never blocks Play.
             components.append(try variant(of: "d3dmetal-4.0b3", as: "d3dmetal-4.0b4", version: "4.0b4"))
             bundles.insert(try RuntimeBundle(id: SafeIdentifier("d3dmetal-wine11.20mg1.0-gptk4.0b4"), displayName: "D3DMetal",
                 summary: "MacGacha Wine 11.20 · Apple D3DMetal 4.0 beta 4", backend: .d3dmetal,
-                components: [SafeIdentifier("d3dmetal-4.0b4")]), at: 2)
+                components: [SafeIdentifier("wine-11.20-macgacha-1.0"), SafeIdentifier("d3dmetal-4.0b4")]), at: 2)
         }
-        return try RuntimeManifest(components: components, bundles: bundles + bundled.bundles)
+        return try RuntimeManifest(components: components, bundles: bundles)
     }
 
     /// A mix of states over the debug catalog: both graphics layers on our Wine, the older

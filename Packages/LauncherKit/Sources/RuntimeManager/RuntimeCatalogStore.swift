@@ -186,7 +186,11 @@ public actor RuntimeCatalogService {
         for kind in selections.helpers.keys {
             if let recommended = selections.helpers[kind], !installedComponentIDs.contains(recommended.id),
                 let working = contract.baseline.manifest.components.first(where: { $0.kind == kind && installedComponentIDs.contains($0.id) }) {
-                selections.helpers[kind] = RuntimeCatalogSelection(id: working.id)
+                var proposed = selections
+                proposed.helpers[kind] = RuntimeCatalogSelection(id: working.id)
+                // A leftover ABI helper alone must not invalidate a newly
+                // recommended backend. Preserve it only with compatible selections.
+                if (try? contract.validate(proposed, in: contract.baseline)) != nil { selections = proposed }
             }
         }
         let initial = try RuntimeCatalogSnapshot(catalog: contract.baseline, selections: selections, contract: contract)

@@ -1,10 +1,72 @@
 {
   "schemaVersion": 1,
-  "revision": 2,
+  "revision": 3,
   "clientContract": "macgacha-runtime-v1",
   "manifest": {
     "schemaVersion": 3,
     "components": [
+      {
+        "id": "wine-11.20-macgacha-1.0",
+        "kind": "wine",
+        "version": "11.20-macgacha-1.0",
+        "sourceMode": "download",
+        "url": "https://github.com/deruta74/MacGacha/releases/download/wine-11.20-macgacha-1.0/wine-11.20-macgacha-1.0.tar.xz",
+        "size": 91726084,
+        "installedSize": 618549169,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "c3b9d33653c6585fed36edf819e6239cae5a385f87fd4f0e2d093c848f15ec7e"
+        },
+        "archive": "tar.xz",
+        "rootPath": "wine",
+        "license": {
+          "name": "LGPL-2.1-or-later",
+          "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
+          "redistributable": true,
+          "termsRevision": "LGPL-2.1"
+        },
+        "wineBinary": "bin/wine"
+      },
+      {
+        "id": "crypt32-fix-wine-11.20-2",
+        "kind": "crypt32Fix",
+        "version": "wine-11.20-2",
+        "sourceMode": "download",
+        "url": "https://github.com/deruta74/MacGacha/releases/download/crypt32-fix-wine-11.20-1/crypt32-fix-wine-11.20-1.zip",
+        "size": 365755,
+        "installedSize": 1104123,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "42b5998cb54409d5329f3e23281c0de765147e7bb20708ae877b8c5fef330b0a"
+        },
+        "archive": "zip",
+        "license": {
+          "name": "LGPL-2.1-or-later",
+          "url": "https://github.com/deruta74/MacGacha/blob/main/compat/crypt32-fix/NOTICE.md",
+          "redistributable": true,
+          "termsRevision": "crypt32-fix-wine-11.20-1"
+        }
+      },
+      {
+        "id": "surround-audio-wine-11.20-3",
+        "kind": "surroundAudio",
+        "version": "wine-11.20-3",
+        "sourceMode": "download",
+        "url": "https://github.com/deruta74/MacGacha/releases/download/surround-audio-wine-11.20-2/surround-audio-wine-11.20-2.zip",
+        "size": 94056,
+        "installedSize": 264437,
+        "sha256": {
+          "algorithm": "sha256",
+          "hex": "52cb41924c0dce3eee818fa88d2ac00f97192881020e601bee1c816605278a26"
+        },
+        "archive": "zip",
+        "license": {
+          "name": "LGPL-2.1-or-later",
+          "url": "https://github.com/deruta74/MacGacha/blob/main/compat/surround-audio/NOTICE.md",
+          "redistributable": true,
+          "termsRevision": "surround-audio-wine-11.20-2"
+        }
+      },
       {
         "id": "wine-11.0-yaagl",
         "kind": "wine",
@@ -228,31 +290,31 @@
           "redistributable": true,
           "termsRevision": "surround-audio-wine-11.20-1"
         }
-      },
-      {
-        "id": "wine-11.20-macgacha-1.0",
-        "kind": "wine",
-        "version": "11.20-macgacha-1.0",
-        "sourceMode": "download",
-        "url": "https://github.com/deruta74/MacGacha/releases/download/wine-11.20-macgacha-1.0/wine-11.20-macgacha-1.0.tar.xz",
-        "size": 91726084,
-        "installedSize": 618549169,
-        "sha256": {
-          "algorithm": "sha256",
-          "hex": "c3b9d33653c6585fed36edf819e6239cae5a385f87fd4f0e2d093c848f15ec7e"
-        },
-        "archive": "tar.xz",
-        "rootPath": "wine",
-        "license": {
-          "name": "LGPL-2.1-or-later",
-          "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html",
-          "redistributable": true,
-          "termsRevision": "LGPL-2.1"
-        },
-        "wineBinary": "bin/wine"
       }
     ],
     "bundles": [
+      {
+        "id": "dxmt-wine11.20mg1.0-dxmt0.80",
+        "displayName": "DXMT",
+        "summary": "MacGacha Wine 11.20 · DXMT 0.80",
+        "backend": "dxmt",
+        "components": [
+          "wine-11.20-macgacha-1.0",
+          "dxmt-0.80"
+        ],
+        "environment": {}
+      },
+      {
+        "id": "d3dmetal-wine11.20mg1.0-gptk4.0b3",
+        "displayName": "D3DMetal",
+        "summary": "MacGacha Wine 11.20 · Apple D3DMetal 4.0 beta 3",
+        "backend": "d3dmetal",
+        "components": [
+          "wine-11.20-macgacha-1.0",
+          "d3dmetal-4.0b3"
+        ],
+        "environment": {}
+      },
       {
         "id": "dxmt-wine11.0cx-dxmt0.80",
         "displayName": "DXMT",
@@ -284,17 +346,6 @@
           "d3dmetal-4.0b3"
         ],
         "environment": {}
-      },
-      {
-        "id": "dxmt-wine11.20mg1.0-dxmt0.80",
-        "displayName": "DXMT",
-        "summary": "MacGacha Wine 11.20 · DXMT 0.80",
-        "backend": "dxmt",
-        "components": [
-          "wine-11.20-macgacha-1.0",
-          "dxmt-0.80"
-        ],
-        "environment": {}
       }
     ]
   },
@@ -314,6 +365,10 @@
     {
       "bundleID": "dxmt-wine11.20mg1.0-dxmt0.80",
       "profileID": "dxmt-wine11.0cx-dxmt0.80"
+    },
+    {
+      "bundleID": "d3dmetal-wine11.20mg1.0-gptk4.0b3",
+      "profileID": "d3dmetal-wine11.20mg1.0-gptk4.0b3"
     }
   ],
   "helperBindings": [
@@ -358,17 +413,31 @@
       "profileIDs": [
         "d3dmetal-wine11.20-gptk4.0b3"
       ]
+    },
+    {
+      "componentID": "crypt32-fix-wine-11.20-2",
+      "profileIDs": [
+        "d3dmetal-wine11.20-gptk4.0b3",
+        "d3dmetal-wine11.20mg1.0-gptk4.0b3"
+      ]
+    },
+    {
+      "componentID": "surround-audio-wine-11.20-3",
+      "profileIDs": [
+        "d3dmetal-wine11.20-gptk4.0b3",
+        "d3dmetal-wine11.20mg1.0-gptk4.0b3"
+      ]
     }
   ],
   "recommendedBundles": {
     "dxmt": "dxmt-wine11.20mg1.0-dxmt0.80",
-    "d3dmetal": "d3dmetal-wine11.20-gptk4.0b3"
+    "d3dmetal": "d3dmetal-wine11.20mg1.0-gptk4.0b3"
   },
   "recommendedHelpers": {
     "jadeite": "jadeite-4.1.0",
     "steamShim": "steam-shim-proton-10.0-4",
-    "crypt32Fix": "crypt32-fix-wine-11.20-1",
-    "surroundAudio": "surround-audio-wine-11.20-2",
+    "crypt32Fix": "crypt32-fix-wine-11.20-2",
+    "surroundAudio": "surround-audio-wine-11.20-3",
     "genshinFps": "genshin-fps-unlock-2"
   }
 }

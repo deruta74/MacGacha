@@ -116,7 +116,12 @@ def validate(catalog, baseline, previous=None, resume_identical=False):
         profile = bindings[bundle_id]["profileID"]
         for kind, helper_id in catalog["recommendedHelpers"].items():
             applicable = kind not in {"surroundAudio", "crypt32Fix"} or profile in WINE_1120_PROFILES
-            require(not applicable or profile in helpers[helper_id]["profileIDs"], "Incompatible recommended helper")
+            # New compiled profiles can extend app-owned helper compatibility
+            # without rewriting immutable historical remote bindings.
+            compiled_extension = kind not in {"surroundAudio", "crypt32Fix"} and any(
+                c["id"] == helper_id and c["kind"] == kind for c in baseline["components"])
+            require(not applicable or profile in helpers[helper_id]["profileIDs"] or compiled_extension,
+                    "Incompatible recommended helper")
     for old in [baseline] + ([previous["manifest"]] if previous else []):
         for field, values in [("components", components), ("bundles", bundles)]:
             for item in old[field]: require(values.get(item["id"]) == item, "Historical identity removed or changed")

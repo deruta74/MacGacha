@@ -377,7 +377,7 @@ private struct CatalogModelFixture: Sendable {
         let baseline = try await BundledRuntimeManifest.load()
         let old = try #require(baseline.components.first { $0.id.rawValue == SurroundAudio.componentID })
         var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])
-        object["id"] = "surround-audio-wine-11.20-3"; object["version"] = "wine-11.20-3"
+        object["id"] = "surround-audio-wine-11.20-4"; object["version"] = "wine-11.20-4"
         let revision3 = try JSONDecoder().decode(RuntimeComponent.self, from: JSONSerialization.data(withJSONObject: object))
         let base = RuntimeCatalog.bundled(baseline)
         var recommended = base.recommendedHelpers; recommended[.surroundAudio] = revision3.id

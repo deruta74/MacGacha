@@ -418,8 +418,8 @@ struct AppModelTests {
         let manifest = try RuntimeManifest.load(from: url)
         let model = AppModel(paths: testPaths(), manifest: manifest, services: PreviewRuntimeServices(), defaults: nil)
         await model.start()
-        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + ["jadeite-4.1.0", "steam-shim-proton-10.0-4", Crypt32Fix.componentID, SurroundAudio.componentID, GenshinFps.componentID, "surround-audio-wine-11.20-1"])
-        #expect(manifest.bundles.first?.id.rawValue == "dxmt-wine11.0cx-dxmt0.80")
+        #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + manifest.components.filter { [.jadeite, .steamShim, .crypt32Fix, .surroundAudio, .genshinFps].contains($0.kind) }.map { $0.id.rawValue })
+        #expect(manifest.bundles.first?.id.rawValue == "dxmt-wine11.20mg1.0-dxmt0.80")
         #expect(model.rows.contains { $0.id == "dxmt-wine11.0-dxmt0.80" })
         let dxmt = manifest.bundles[0].id.rawValue
         model.install(dxmt)
