@@ -165,7 +165,7 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
 3. Don't commit build output, `MacGacha.xcodeproj`, `docs/`, `spike/`, secrets or downloaded binaries.
 4. Write commit messages and PR descriptions in plain English: a short title, then bullets on what changed and why, then how it was tested.
 5. If the change adds a module, script, feature or rule, update this file in the same PR, and the README roadmap when a user-visible feature lands.
-6. CI (`.github/workflows/ci.yml`) must pass on the PR's latest commit. PRs are squash-merged.
+6. Workflow actions use immutable commit references, checked by the catalog policy suite. CI (`.github/workflows/ci.yml`) must pass on the PR's latest commit. PRs are squash-merged.
 
 ## Current state
 

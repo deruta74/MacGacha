@@ -7,6 +7,7 @@ import hashlib
 import io
 import importlib.util
 import json
+import re
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -17,6 +18,11 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class CatalogPublicationTests(unittest.TestCase):
+    def test_workflow_actions_are_immutable(self):
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            for action in re.findall(r"uses:\s*(\S+)", path.read_text()):
+                self.assertRegex(action, r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$", str(path))
+
     def test_catalog_key_configuration_rejects_placeholders_and_supports_rotation(self):
         import base64
         key_spec = importlib.util.spec_from_file_location("catalog_keys", ROOT / "scripts/check-runtime-catalog-keys.py")
