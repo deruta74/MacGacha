@@ -189,10 +189,10 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
   - app icon (`App/Resources/Assets.xcassets`);
   - Rosetta prerequisite model: async status checks at startup, activation and before Play/setup, bounded install polling, and an embedded x86_64 prompt helper; the SwiftUI presentation is integrated separately.
 - **In progress:** Mainland China editions. Region selection, the three CN editions with their own IDs, folders, recipes and edition-aware adopt, and the region picker are done. CN Genshin/ZZZ on Wine 11.20 have a pinned crypt32 signature-verification correction (Wine MR 11824), included in recommended runtime setup independently of the game-patches toggle; release publication remains a separate step. ZZZ CN installs from the live CN CDN and reaches the login screen; full CN live acceptance remains pending.
-- **Released:** v0.2.0 (2026-11-01), the first release without the beta tag, after v0.1.0–0.1.3 betas. Ad-hoc signed DMGs built with `scripts/package-dmg.sh`. Don't promise Apple signing or notarization in user-facing text.
+- **Released:** v0.2.0 (2026-11-01), the first release without the beta tag, after v0.1.0–0.1.3 betas. v0.3.0 ships MacGacha Wine 11.20, the signed runtime catalog and automatic dependency updates. Ad-hoc signed DMGs built with `scripts/package-dmg.sh`. Don't promise Apple signing or notarization in user-facing text.
 - **Prepared, awaiting qualification/publication:** MacGacha Wine 11.20 build 1.0 for both backends, catalog r2 DXMT and r3 modular D3DMetal. Historical versions and profiles remain available. Switching bundles creates a new prefix.
 - **Planned (README order):** Wine 11.21 runtime (retires the crypt32 fix), spatial-audio head tracking.
 
 Update this section when a milestone task lands.
 
-- `compat/wine/RELEASE-READINESS.md` tracks the 0.2.7 source-Wine qualification and remaining integration/design/release gates. `ReleaseNotes/0.2.7.md` remains a draft until that work lands.
+- `compat/wine/RELEASE-READINESS.md` records the source-Wine qualification evidence for MacGacha Wine 11.20 (build 1.0), shipped with 0.3.0.

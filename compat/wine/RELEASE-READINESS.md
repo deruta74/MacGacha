@@ -1,4 +1,4 @@
-# 0.2.7 preparation — not a release approval
+# MacGacha Wine 11.20 qualification (shipped with 0.3.0)
 
 ## Qualified local candidate
 
@@ -11,17 +11,9 @@ Local Global Genshin 7.2 and ZZZ 3.3 reached startup/login screens with DXMT and
 
 Private screenshots, logs, account data and local machine inventories must not be committed.
 
-## Remaining before release
+## Integration and live checks — 2026-11-12
 
-- Complete and review the Dependencies design separately. The source-Wine build changes do not modify that UI.
-- Integrate the candidate into supported launcher runtime profiles and catalog bindings. Diagnostic app overrides used for local tests are not shipped integration.
-- Verify automatic Wine selection and advanced compatible-version selection, existing installations, failed-update preservation and explicit rollback against the final integrated build. Retain historical IDs and bytes.
-- Complete a long ZZZ session and qualify any additional advertised editions/backends. CN and Star Rail are not qualified by this matrix.
-- Review the exact distributable source closure and per-component notices. Keep Apple graphics separate. Optional feature differences remain documented in SOURCE-NOTICE.md.
-- Complete the 0.2.7 user-facing release notes after the final scope lands. The current file is explicitly a draft.
-- Rebuild and check the final app after the design/integration changes, then prepare signed update metadata using the established release process.
-
-Pushing this branch does not publish a runtime, modify the live catalog, merge a PR or release 0.2.7.
+The candidate is integrated as the `wine-11.20-macgacha-1.0` component with DXMT and modular D3DMetal bundles, recommended for both backends in catalog revision 3. A Debug build with the signed revision 3 catalog installed and activated the new bundles automatically, kept Play available during background installation, and removed replaced versions after qualifying sessions. Global Star Rail ran on DXMT and D3DMetal, Global Genshin on D3DMetal with FPS unlock and Surround, and explicit rollback to the previous DXMT bundle worked. Star Rail's in-game hotfix restart showed no login window once. A normal relaunch logged in. Mainland China editions are not qualified by this matrix.
 
 ## Packaging check — 2026-11-11
 
@@ -29,7 +21,7 @@ The retained preview4 runtime and source-delivery archives passed SHA-256 and ar
 
 The complete local test script passed using a SwiftPM scratch directory and Xcode derived data outside Documents. An initial run inside the existing Documents `.build` failed code signing because of Finder metadata. Package tests, app tests, string checks and the Release build passed on the clean path. No Swift source compiler warnings were emitted. Xcode emitted AppIntents metadata and dependency-scan warnings.
 
-A local 0.2.7 DMG was built and verified, including strict app code-signature verification, embedded framework loading and `hdiutil verify`. It is a preparation artifact with the current UI/runtime catalog, not the final release. Rebuild after Dependencies design and runtime integration.
+A local preparation DMG was built and verified, including strict app code-signature verification, embedded framework loading and `hdiutil verify`. The 0.3.0 DMG is built by the release workflow.
 
 ## Wine 1.0 release mapping — 2026-11-12
 
