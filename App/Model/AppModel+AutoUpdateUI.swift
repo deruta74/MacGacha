@@ -34,8 +34,8 @@ enum DependencyAutoUpdateState: Equatable, Sendable {
     /// The "Update dependencies automatically" setting, on by default.
     /// TODO(auto-update): persist with the global launch preferences, like `gameModeEnabled`.
     var autoUpdateDependencies: Bool {
-        get { autoUpdateDependenciesPlaceholder }
-        set { autoUpdateDependenciesPlaceholder = newValue }
+        get { globalLaunchSettings.autoUpdateDependencies }
+        set { setGlobalLaunchPreference(\.autoUpdateDependencies, to: newValue) }
     }
 
     func dependencyAutoUpdate(for familyID: String) -> DependencyAutoUpdateState? {

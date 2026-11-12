@@ -6,16 +6,20 @@ import Foundation
 public struct GlobalLaunchSettings: Codable, Equatable, Sendable {
     public var sessionLogsEnabled: Bool
     public var gameModeEnabled: Bool
+    public var autoUpdateDependencies: Bool
     public var genshinFpsRiskAcknowledged: Bool
-    public init(sessionLogsEnabled: Bool = true, gameModeEnabled: Bool = true, genshinFpsRiskAcknowledged: Bool = false) {
+    public init(sessionLogsEnabled: Bool = true, gameModeEnabled: Bool = true, genshinFpsRiskAcknowledged: Bool = false,
+        autoUpdateDependencies: Bool = true) {
         self.sessionLogsEnabled = sessionLogsEnabled; self.gameModeEnabled = gameModeEnabled
         self.genshinFpsRiskAcknowledged = genshinFpsRiskAcknowledged
+        self.autoUpdateDependencies = autoUpdateDependencies
     }
-    private enum CodingKeys: CodingKey { case sessionLogsEnabled, gameModeEnabled, genshinFpsRiskAcknowledged }
+    private enum CodingKeys: CodingKey { case sessionLogsEnabled, gameModeEnabled, genshinFpsRiskAcknowledged, autoUpdateDependencies }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         sessionLogsEnabled = try values.decodeIfPresent(Bool.self, forKey: .sessionLogsEnabled) ?? true
         gameModeEnabled = try values.decodeIfPresent(Bool.self, forKey: .gameModeEnabled) ?? true
+        autoUpdateDependencies = try values.decodeIfPresent(Bool.self, forKey: .autoUpdateDependencies) ?? true
         genshinFpsRiskAcknowledged = try values.decodeIfPresent(Bool.self, forKey: .genshinFpsRiskAcknowledged) ?? false
     }
 }

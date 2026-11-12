@@ -241,7 +241,6 @@ final class AppModel {
     var debugLaunchRuntimesReady = false
     #endif
     // TODO(auto-update): inert placeholders behind `AppModel+AutoUpdateUI.swift`.
-    var autoUpdateDependenciesPlaceholder = true
     var dependencyAutoUpdates: [String: DependencyAutoUpdateState] = [:]
     var runtimeUpdatesAwaitingConsent: Set<String> = []
     var launchSettingsRevisions: [String: UUID] = [:]
