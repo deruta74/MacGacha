@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Dispatch
 import Synchronization
 import Testing
 import LauncherCore
@@ -9,6 +10,29 @@ import DownloadEngine
 import TestSupport
 
 @Suite struct GameEventsServiceTests {
+    @Test func failedEventsPublicationPreservesCachedSnapshot() async throws {
+        let temp = try TempDir(), http = EventsHTTP(), directory = temp.url.appendingPathComponent("GameEvents")
+        let previous = await GameEventsService(cacheDirectory: directory, http: http).refresh()
+        http.content = content([])
+        let io = CacheFaultFileOps { _, destination in
+            if destination == "events-index.json" { throw LauncherError.io("Injected publication failure") }
+        }
+        let service = GameEventsService(cacheDirectory: directory, http: http, fileOps: io)
+        #expect(await service.refresh() == previous)
+        #expect(await GameEventsService(cacheDirectory: directory, http: http).loadCached() == previous)
+    }
+
+    @Test func stalledEventsCacheDoesNotBlockAsyncProgress() async throws {
+        let temp = try TempDir(), io = CacheStallFileOps()
+        let service = GameEventsService(cacheDirectory: temp.url.appendingPathComponent("GameEvents"), http: EventsHTTP(), fileOps: io)
+        let task = Task { await service.refresh() }
+        defer { io.release.signal(); task.cancel() }
+        for await _ in io.entered.stream { break }
+        io.release.signal()
+        #expect(!(await task.value).isEmpty)
+        #expect(!io.timedOut.withLock { $0 })
+    }
+
     @Test(arguments: [Region.global, .mainlandChina])
     func activityPostsUseEditionIDsAndVerbatimDates(region: Region) async throws {
         let temp = try TempDir(), http = EventsHTTP(region: region)
@@ -212,3 +236,38 @@ private final class EventsDate: Sendable {
 }
 
 private let eventsFixtureDate = Date(timeIntervalSince1970: 1_800_000_000)
+
+final class CacheStallFileOps: FileOps, Sendable {
+    let entered = AsyncStream<Void>.makeStream()
+    let release = DispatchSemaphore(value: 0)
+    let timedOut = Mutex(false)
+    private let first = Mutex(true)
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(descriptor, bytes: bytes) }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws {
+        if first.withLock({ value in let result = value; value = false; return result }) {
+            entered.continuation.yield(())
+            if release.wait(timeout: .now() + 3) != .success { timedOut.withLock { $0 = true } }
+        }
+        try SystemFileOps().synchronize(descriptor, durable: durable)
+    }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
+}
+
+final class CacheFaultFileOps: FileOps, Sendable {
+    let cancelledCleanup = Mutex(false)
+    let renameHook: @Sendable (String, String) throws -> Void
+    init(_ renameHook: @escaping @Sendable (String, String) throws -> Void) { self.renameHook = renameHook }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try SystemFileOps().write(descriptor, bytes: bytes) }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try SystemFileOps().synchronize(descriptor, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try renameHook(source, destination)
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
+        if name.hasPrefix(".incoming-") && Task.isCancelled { cancelledCleanup.withLock { $0 = true } }
+        try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
+    }
+}

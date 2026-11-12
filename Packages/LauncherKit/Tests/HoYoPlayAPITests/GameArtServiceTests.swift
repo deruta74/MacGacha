@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Dispatch
 import Synchronization
 import Testing
 import LauncherCore
@@ -482,4 +483,39 @@ func highlightsBrowserLinksAreValidatedAlsoWhenDecoded(value: String) throws {
     }
     #expect(await service.cachedIcon(for: "genshin") == nil)
     #expect(http.requestLog.count == count)
+}
+
+@Test func stalledArtCacheDoesNotBlockAsyncProgress() async throws {
+    let temp = try TempDir(), io = CacheStallFileOps(), cdn = MockCDN()
+    try artFixtures(cdn)
+    let service = GameArtService(cacheDirectory: temp.url.appendingPathComponent("GameArt"), http: cdn, fileOps: io)
+    let task = Task { await service.refresh() }
+    defer { io.release.signal(); task.cancel() }
+    for await _ in io.entered.stream { break }
+    io.release.signal()
+    #expect(!(await task.value).isEmpty)
+    #expect(!io.timedOut.withLock { $0 })
+}
+
+@Test func cancelledArtPublicationJoinsUncancelledPartCleanup() async throws {
+    let temp = try TempDir(), cdn = MockCDN()
+    try artFixtures(cdn)
+    let entered = AsyncStream<Void>.makeStream(), release = DispatchSemaphore(value: 0)
+    let io = CacheFaultFileOps { source, _ in
+        if source.hasPrefix(".incoming-") {
+            entered.continuation.yield(())
+            guard release.wait(timeout: .now() + 30) == .success else { throw LauncherError.io("Test deadline") }
+            throw LauncherError.cancelled
+        }
+    }
+    let directory = temp.url.appendingPathComponent("GameArt")
+    let service = GameArtService(cacheDirectory: directory, http: cdn, fileOps: io)
+    let task = Task { await service.refresh() }
+    defer { release.signal(); task.cancel() }
+    for await _ in entered.stream { break }
+    task.cancel(); release.signal()
+    #expect(await task.value.isEmpty)
+    #expect(!io.cancelledCleanup.withLock { $0 })
+    let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+    #expect(!names.contains { $0.hasPrefix(".incoming-") })
 }
