@@ -90,7 +90,7 @@ def validate(catalog, baseline, previous=None, resume_identical=False):
                     and re.fullmatch(r"[0-9a-f]{64}", digest["hex"]) is not None, "Download must have HTTPS and SHA256")
             require(component["archive"] in {"zip", "tar.gz", "tar.xz"}, "Unsupported archive format")
             require(type(component["size"]) is int and 0 < component["size"] <= 16 << 30, "Invalid archive size")
-            require(type(component["installedSize"]) is int and component["installedSize"] >= 0, "Invalid installed size")
+            require(type(component["installedSize"]) is int and 0 <= component["installedSize"] <= 64 << 30, "Invalid installed size")
     for identity, bundle in bundles.items():
         profile = bindings[identity]["profileID"]
         require(profile in baseline_bundles, "Unknown compiled compatibility profile")

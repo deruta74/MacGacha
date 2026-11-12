@@ -876,7 +876,10 @@ final class AppModel {
                 licenseName: components.map { $0.license.name }.joined(separator: " / "),
                 state: working[id] ?? dependencyWorking[id] ?? errors[id].map { .failed(message: $0) } ?? installedBundles[id].map { .installed(source: $0.source) } ?? .notInstalled,
                 canImportGPTK: bundle.backend == .d3dmetal, needsConsent: components.contains { $0.consent != nil },
-                summary: bundle.summary, downloadSize: components.reduce(Int64(0)) { $0 + ($1.size ?? 0) }, backend: bundle.backend,
+                summary: bundle.summary, downloadSize: components.reduce(Int64(0)) { total, component in
+                    let sum = total.addingReportingOverflow(component.size ?? 0)
+                    return sum.overflow ? Int64.max : sum.partialValue
+                }, backend: bundle.backend,
                 wineVersion: components.first { $0.kind == .wine }?.version.rawValue))
         }
         for component in manifest?.components ?? [] where !covered.contains(component.id) {

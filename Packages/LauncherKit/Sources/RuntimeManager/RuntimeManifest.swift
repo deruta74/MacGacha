@@ -83,6 +83,10 @@ public struct RuntimeComponent: Codable, Sendable, Identifiable {
         guard size.map({ $0 >= 0 }) ?? true, installedSize.map({ $0 >= 0 }) ?? true else {
             throw LauncherError.io("Runtime sizes must be nonnegative")
         }
+        guard size.map({ $0 <= 16 << 30 }) ?? true,
+            installedSize.map({ $0 <= 64 << 30 }) ?? true else {
+            throw LauncherError.io("Runtime sizes exceed supported bounds")
+        }
         guard sha256.map({ $0.algorithm == .sha256 }) ?? true else {
             throw LauncherError.io("Runtime digest must use SHA-256")
         }
