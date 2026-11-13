@@ -38,15 +38,27 @@ public struct PlayTimeStore: Sendable {
         try read(in: ContainedFileSystem(root: paths.root, fileOps: fileOps)).games
     }
 
-    public func record(sessionID: UUID, game: String, runningSince: Date?, endedAt: Date, recovered: Bool) throws {
+    public func record(sessionID: UUID, game: String, runningSince: Date?, endedAt: Date, recovered: Bool, supervisedSeconds: Double? = nil) throws {
         guard GameDefinition.find(game) != nil else { throw LauncherError.journalCorrupt("Invalid play time game") }
         guard let start = runningSince, start.timeIntervalSinceReferenceDate.isFinite,
             endedAt.timeIntervalSinceReferenceDate.isFinite else { return }
-        let seconds = endedAt.timeIntervalSince(start)
-        guard seconds.isFinite, seconds > 0, !recovered || seconds <= Self.recoveryWindowSeconds else { return }
+        // Old journals have no monotonic checkpoint. Treat them as bounded recovery,
+        // even if an earlier version classified the end as live.
+        let measured = recovered ? nil : supervisedSeconds
+        let seconds = measured ?? endedAt.timeIntervalSince(start)
+        guard seconds.isFinite, seconds > 0,
+            measured != nil || seconds <= Self.recoveryWindowSeconds else { return }
         try mutate { state, _ in
-            _ = Self.add(id: sessionID.uuidString, game: game, start: start, seconds: seconds, to: &state)
+            _ = Self.add(id: Self.playID(for: sessionID), game: game, start: start, seconds: seconds, to: &state)
         }
+    }
+
+    /// Domain separation prevents reuse as another identifier. The random UUID has
+    /// enough entropy that the public digest cannot be reversed to the private ID.
+    static func playID(for sessionID: UUID) -> String {
+        var hasher = StreamingHasher(.sha256)
+        hasher.update(Data("MacGacha.play-time.v1:\(sessionID.uuidString)".utf8))
+        return hasher.finalize().hex
     }
 
     /// nil means a previous transaction already completed backfill. Missing,
@@ -85,7 +97,7 @@ public struct PlayTimeStore: Sendable {
     private func read(in fs: ContainedFileSystem) throws -> State {
         guard try fs.itemType(at: Self.file) != nil else { return State() }
         do {
-            let state = try JSONDecoder().decode(State.self, from: fs.readFile(at: Self.file, maxBytes: Self.maximumBytes))
+            var state = try JSONDecoder().decode(State.self, from: fs.readFile(at: Self.file, maxBytes: Self.maximumBytes))
             guard state.schemaVersion == 1, state.games.count <= GameDefinition.all.count,
                 state.countedSessionIDs.count <= 100_000,
                 state.countedSessionIDs.allSatisfy({ $0.utf8.count <= 160 }) else { throw invalidState() }
@@ -95,6 +107,11 @@ public struct PlayTimeStore: Sendable {
                     summary.lastSessionSeconds <= summary.totalSeconds,
                     summary.lastPlayed.timeIntervalSinceReferenceDate.isFinite else { throw invalidState() }
             }
+            // Migrate existing UUID receipts so old accounting also deduplicates
+            // the redaction-safe correlation key without changing totals.
+            state.countedSessionIDs = Set(state.countedSessionIDs.map {
+                UUID(uuidString: $0).map(Self.playID(for:)) ?? $0
+            })
             return state
         } catch { throw invalidState() }
     }

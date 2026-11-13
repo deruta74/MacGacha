@@ -35,7 +35,7 @@ struct PlayTimeStoreTests {
         #expect(try store.load()["zzz"]?.totalSeconds == 86_400)
         // A continuously supervised session can legitimately exceed the recovery bound.
         try store.record(sessionID: UUID(), game: "zzz", runningSince: Date(timeIntervalSince1970: 90_000),
-            endedAt: Date(timeIntervalSince1970: 180_000), recovered: false)
+            endedAt: Date(timeIntervalSince1970: 180_000), recovered: false, supervisedSeconds: 90_000)
         #expect(try store.load()["zzz"]?.totalSeconds == 176_400)
     }
 
@@ -96,6 +96,39 @@ struct PlayTimeStoreTests {
         try ContainedFileSystem(root: temp.url).writeAtomically(lines, to: SafeRelativePath("Logs/macgacha.log"))
         #expect(try store.backfill()?.sessions == 0)
         #expect(try store.load()["genshin"]?.totalSeconds == 100)
+    }
+
+    @Test func existingUUIDReceiptsDeduplicateHashedLogPairs() throws {
+        let temp = try ManagerTemporaryDirectory(), paths = AppPaths(root: temp.url), id = UUID()
+        let store = PlayTimeStore(paths: paths), fs = try ContainedFileSystem(root: temp.url)
+        try store.record(sessionID: id, game: "genshin", runningSince: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 200), recovered: false, supervisedSeconds: 100)
+        let path = try SafeRelativePath("PlayTime/play-time.json")
+        var state = try #require(JSONSerialization.jsonObject(with: fs.readFile(at: path, maxBytes: 8 << 20)) as? [String: Any])
+        state["countedSessionIDs"] = [id.uuidString]
+        try fs.writeAtomically(JSONSerialization.data(withJSONObject: state), to: path)
+        var lines = Data()
+        for (message, time) in [("Game running", 100.0), ("Session ended", 200.0)] {
+            var record = try JSONDecoder().decode(EventLog.Record.self, from: eventLine("genshin", message, time))
+            record.metadata["playID"] = PlayTimeStore.playID(for: id)
+            lines.append(try JSONEncoder().encode(record)); lines.append(10)
+        }
+        try fs.writeAtomically(lines, to: SafeRelativePath("Logs/macgacha.log"))
+        #expect(try store.backfill()?.sessions == 0)
+        #expect(try store.load()["genshin"]?.totalSeconds == 100)
+    }
+
+    @Test func redactedLegacyIdentifiersDoNotBecomeUnrelatedBackfillReceipts() throws {
+        let temp = try ManagerTemporaryDirectory(), store = PlayTimeStore(paths: AppPaths(root: temp.url))
+        var lines = Data()
+        for (message, time) in [("Game running", 100.0), ("Session ended", 200.0)] {
+            var record = try JSONDecoder().decode(EventLog.Record.self, from: eventLine("genshin", message, time))
+            record.metadata["sessionID"] = "[REDACTED]"
+            lines.append(try JSONEncoder().encode(record)); lines.append(10)
+        }
+        try ContainedFileSystem(root: temp.url).writeAtomically(lines, to: SafeRelativePath("Logs/macgacha.log"))
+        #expect(try store.backfill()?.sessions == 0)
+        #expect(try store.load().isEmpty)
     }
 
     @Test func outOfOrderHistoryDoesNotCreateOverlappingCredit() throws {

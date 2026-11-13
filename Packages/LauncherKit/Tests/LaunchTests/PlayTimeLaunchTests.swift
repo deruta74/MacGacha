@@ -3,11 +3,72 @@
 import Foundation
 import Synchronization
 import Testing
-import LauncherCore
+@testable import LauncherCore
 import TestSupport
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct PlayTimeLaunchTests {
+    @Test(arguments: [-3600.0, 360_000.0])
+    func liveDurationIgnoresWallClockJumps(wallJump: Double) async throws {
+        let f = try await ManagerFixture.make(), time = Mutex(Date(timeIntervalSince1970: 10_000))
+        let manager = f.manager(now: { time.withLock { $0 } }), events = ManagerEvents(), paths = f.paths
+        let consumer = await f.consume(manager, events: events)
+        await events.waitForRunning()
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        time.withLock { $0 = Date(timeIntervalSince1970: 10_000 + wallJump) }
+        f.inspector.update { $0.processes = []; $0.alive = [] }
+        f.clock.advance(by: .seconds(600))
+        await consumer.value
+        let summary = try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"] }
+        #expect(summary?.totalSeconds == 600)
+        #expect(summary?.lastSessionSeconds == 600)
+        #expect(summary?.lastPlayed == Date(timeIntervalSince1970: 10_000))
+    }
+
+    @Test func realRedactedLifecycleLogDoesNotDuplicateRecordedSession() async throws {
+        let f = try await ManagerFixture.make(), paths = f.paths
+        let log = EventLog(directory: paths.logs), manager = f.manager(log: log), events = ManagerEvents()
+        let backfillFirstRoot = try ManagerTemporaryDirectory()
+        let consumer = await f.consume(manager, events: events)
+        await events.waitForRunning()
+        let session = try #require(try await f.journal())
+        try await f.end(manager)
+        await consumer.value
+        await log.flush()
+        try await BlockingIO.run {
+            let store = PlayTimeStore(paths: paths), before = try store.load()
+            let fs = try ContainedFileSystem(root: paths.root), path = try SafeRelativePath("Logs/macgacha.log")
+            let data = try fs.readFile(at: path, maxBytes: 8 << 20)
+            var lines = Data()
+            var pairs = 0
+            for line in data.split(separator: 10) {
+                let event = try JSONDecoder().decode(EventLog.Record.self, from: Data(line))
+                guard ["Game running", "Session ended"].contains(event.message) else { continue }
+                pairs += 1
+                #expect(event.metadata["sessionID"] == nil)
+                let playID = try #require(event.metadata["playID"])
+                #expect((try? Digest(algorithm: .sha256, hex: playID)) != nil)
+                // Only normalize timestamps: retain the real writer's redacted metadata.
+                // This avoids sleeping for its whole-second wall-clock resolution.
+                let date = Date(timeIntervalSince1970: event.message == "Game running" ? 1000 : 1003)
+                let normalized = EventLog.Record(ts: ISO8601DateFormatter().string(from: date),
+                    level: event.level, category: event.category, message: event.message, metadata: event.metadata)
+                lines.append(try JSONEncoder().encode(normalized)); lines.append(10)
+            }
+            #expect(pairs == 2)
+            try fs.writeAtomically(lines, to: path)
+            #expect(try store.backfill()?.sessions == 0)
+            #expect(try store.load() == before)
+            let freshPaths = AppPaths(root: backfillFirstRoot.url)
+            let fresh = PlayTimeStore(paths: freshPaths)
+            try ContainedFileSystem(root: freshPaths.root).writeAtomically(lines, to: path)
+            #expect(try fresh.backfill()?.sessions == 1)
+            try fresh.record(sessionID: session.sessionID, game: "starrail", runningSince: session.runningSince,
+                endedAt: Date(), recovered: false, supervisedSeconds: 3)
+            #expect(try fresh.load()["starrail"]?.totalSeconds == 3)
+        }
+    }
+
     @Test func liveEndExcludesPreparationAndRetryUsesOriginalEnd() async throws {
         let f = try await ManagerFixture.make(initialGame: false), time = Mutex(Date(timeIntervalSince1970: 1000))
         let manager = f.manager(now: { time.withLock { $0 } }), events = ManagerEvents()
@@ -26,12 +87,12 @@ import TestSupport
         let ended = try #require(try await f.journal())
         #expect(ended.verifiedEndedAt == Date(timeIntervalSince1970: 2600))
         let paths = f.paths
-        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 3)
         // Journal finalization retries must neither inflate nor duplicate the interval.
         time.withLock { $0 = Date(timeIntervalSince1970: 9000) }
         try await manager.recoverIfNeeded(game: "starrail")
         #expect(try await f.journal() == nil)
-        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 3)
     }
 
     @Test(arguments: [3600.0, 86_400.0, 86_401.0])
@@ -53,6 +114,7 @@ import TestSupport
         session.runningSince = Date(timeIntervalSince1970: 1000)
         session.verifiedEndedAt = Date(timeIntervalSince1970: 101_000)
         session.playTimeEndRecovered = false
+        session.supervisedPlaySeconds = 100_000
         session.endLogged = true
         let saved = session, paths = f.paths
         try await BlockingIO.run { try LaunchJournal(paths: paths).write(saved) }
@@ -77,7 +139,7 @@ import TestSupport
         }
         time.withLock { $0 = Date(timeIntervalSince1970: 5000) }
         try await manager.recoverIfNeeded(game: "starrail")
-        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 3)
         #expect(try await f.journal() == nil)
     }
 
@@ -91,10 +153,11 @@ import TestSupport
     }
 
     @Test(arguments: ["uncertain", "helper", "live"])
-    func reattachedWatcherRequiresPositiveGameObservationForUnboundedEnd(mode: String) async throws {
+    func reattachedWatcherMeasuresOnlyObservedSpanAndRetainsSavedDuration(mode: String) async throws {
         let f = try await ManagerFixture.make(initialGame: mode == "live")
         var session = try await f.saveSnapshot(state: .running, processes: [])
         session.runningSince = Date(timeIntervalSince1970: 0)
+        session.supervisedPlaySeconds = 120
         let saved = session, paths = f.paths
         try await BlockingIO.run { try LaunchJournal(paths: paths).write(saved) }
         if mode == "uncertain" { f.inspector.update { $0.failuresRemaining = 1 } }
@@ -105,7 +168,7 @@ import TestSupport
         f.inspector.update { $0.processes = []; $0.alive = [] }
         f.clock.advance(by: .seconds(3))
         await f.waitForRestore(manager)
-        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == (mode == "live" ? 200_000 : nil))
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == (mode == "live" ? 123 : nil))
     }
 
     @Test(arguments: [false, true])
@@ -134,7 +197,7 @@ import TestSupport
             f.clock.advance(by: .seconds(3))
             await consumer.value
         }
-        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == (recovered ? 600 : 3))
         #expect(try await f.journal() == nil)
     }
 

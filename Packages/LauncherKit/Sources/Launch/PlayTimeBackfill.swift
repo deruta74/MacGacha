@@ -32,7 +32,21 @@ enum PlayTimeBackfill {
                 continue
             }
             lastTimestamp[game] = date
-            let id = event.metadata["sessionID"].flatMap(UUID.init(uuidString:))?.uuidString
+            let id: String?
+            if let playID = event.metadata["playID"] {
+                guard let digest = try? Digest(algorithm: .sha256, hex: playID) else {
+                    pending[game] = .overlapping
+                    continue
+                }
+                id = digest.hex
+            } else if let legacyID = event.metadata["sessionID"] {
+                // A redacted ID cannot safely fall back to a different identity.
+                guard let uuid = UUID(uuidString: legacyID) else {
+                    pending[game] = .overlapping
+                    continue
+                }
+                id = PlayTimeStore.playID(for: uuid)
+            } else { id = nil }
             if event.message == "Game running" {
                 pending[game] = pending[game] == nil ? .running(date, id) : .overlapping
             } else {
