@@ -31,6 +31,13 @@ extension AppModel {
                 preview.preDownloads[game.id] = overlay
             }
             model = preview
+        } else if name == "moving", let first = games.first {
+            // Copying to another drive: the move owns the operation slot, so the footer shows its phase and Cancel.
+            let copying = GameState(status: .installed(tag: "7.1.0"), activity: .working(.staging, fraction: 0.42, bytesPerSecond: nil))
+            model = preview(logLines: [], games: Dictionary(uniqueKeysWithValues: games.map {
+                ($0.id, $0.id == first.id ? copying : GameState(status: .installed(tag: "7.1.0")))
+            }), region: region)
+            model?.gameOperation = GameOperationToken(id: first.id, generation: UUID(), kind: .updating, isMoving: true)
         } else if let name, let state = debugGameState(name) {
             model = preview(logLines: [], games: Dictionary(uniqueKeysWithValues: games.map { ($0.id, state) }), region: region)
         } else if let name, name.hasPrefix("busy") {
