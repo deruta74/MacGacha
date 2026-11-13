@@ -45,7 +45,11 @@ private struct GameSnapshot: Sendable {
     let record: GameRecord?
     var error: LauncherError? = nil
 }
-@concurrent private func readGame(_ services: any GameServices, id: String) async -> GameSnapshot {
+@concurrent private func readGame(_ services: any GameServices, id: String, draining: Bool = false) async -> GameSnapshot {
+    if draining {
+        do { try await services.waitUntilIdle(id) }
+        catch { return GameSnapshot(status: await services.status(id), record: try? await services.record(id), error: launcherError(error)) }
+    }
     let status = await services.status(id)
     do { return GameSnapshot(status: status, record: try await services.record(id)) }
     catch { return GameSnapshot(status: status, record: nil, error: launcherError(error)) }
@@ -267,24 +271,30 @@ private struct GameSnapshot: Sendable {
             // Cancellation may have raced with publication. Read the durable state
             // in an uncancelled task, retaining services rather than the model.
             let ejectPause = failure == .installVolumeUnavailable || self?.gameLocationPauseReasons[id] == .installVolumeUnavailable
-            let snapshot = await Task.detached {
-                // Eject pauses retain the reservation through drainage. Ordinary
-                // pauses keep their existing restart-owned drainage contract.
-                do { if ejectPause { try await services.waitUntilIdle(id) } }
-                catch { return GameSnapshot(status: await services.status(id), record: try? await services.record(id), error: launcherError(error)) }
-                return await readGame(services, id: id)
-            }.value
+            var snapshot = await Task.detached { await readGame(services, id: id, draining: ejectPause) }.value
             guard let self, self.gameOperation == token else { return }
+            let cacheInfo = try? await services.preDownloadInfo(id, refresh: false)
+            guard self.gameOperation == token else { return }
+            // An ordinary pause may become an eject pause during either read.
+            // Join in an uncancelled task and reread after all workers release ownership.
+            if !ejectPause, self.gameLocationPauseReasons[id] == .installVolumeUnavailable {
+                snapshot = await Task.detached { await readGame(services, id: id, draining: true) }.value
+                guard self.gameOperation == token else { return }
+            }
             if failure == .installVolumeUnavailable { self.gameLocationPauseReasons[id] = .installVolumeUnavailable }
             if let reason = self.gameLocationPauseReasons[id], !completed { self.show(reason) }
             else if let failure { self.show(failure) }
             let activity: GameActivity?
             if !completed, failure == nil, let approval { activity = .needsApproval(required: approval.required, available: approval.available) }
             else { activity = nil }
+            // Final publication supersedes location reads begun during the operation.
+            // No suspension may separate this publication from releasing the token.
+            let finalRevision = UUID()
+            self.gameRevisions[id] = finalRevision
             self.applyGame(snapshot, id: id, activity: activity, reportError: failure == nil)
-            if let info = try? await services.preDownloadInfo(id, refresh: false), self.gameOperation == token {
+            if let cacheInfo {
                 self.preDownloadRevisions[id] = UUID()
-                self.preDownloads[id] = PreDownloadOverlay(info: info)
+                self.preDownloads[id] = PreDownloadOverlay(info: cacheInfo)
             }
             if case .insufficientSpace(let required, let available) = failure, case .paused = snapshot.status {
                 var state = self.games[id] ?? GameState(status: snapshot.status)
@@ -304,7 +314,7 @@ private struct GameSnapshot: Sendable {
                 let location = snapshot.record?.installPath {
                 let probe = self.purgeableSpace
                 let important = try? await BlockingIO.run { probe.importantUsageBytes(at: location) }
-                guard self.gameRevisions[id] == token.generation,
+                guard self.gameRevisions[id] == finalRevision,
                     var state = self.games[id], state.activity == activity, state.spaceShortage == shortage else { return }
                 state.spaceShortage?.purgeable = important.map { max(0, max(0, $0) - max(0, shortage.available)) }
                 self.setGameState(id, state)

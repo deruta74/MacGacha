@@ -99,9 +99,17 @@ import GameLibrary
 
     private static func volumeEvent(_ event: VolumeEvent, affects path: URL) -> Bool {
         guard let url = event.volume else { return true }
-        // Component-aware containment also supports nonstandard mount roots.
-        let volume = GameLocation.volumeRoot(for: url) ?? url.standardizedFileURL
-        let location = GameLocation.volumeRoot(for: path) ?? path.standardizedFileURL
-        return location.pathComponents.starts(with: volume.pathComponents)
+        // Preserve the complete mount root: a nested image is not its parent drive.
+        return locationComponents(path).starts(with: locationComponents(url))
+    }
+
+    private static func locationComponents(_ url: URL) -> [String] {
+        let components = url.standardizedFileURL.pathComponents
+        let folded = components.map { $0.lowercased() }
+        if folded.count >= 5, folded[1...4].elementsEqual(["system", "volumes", "data", "volumes"]) {
+            return ["/", "Volumes"] + components.dropFirst(5)
+        }
+        if folded.count >= 2, folded[1] == "volumes" { return ["/", "Volumes"] + components.dropFirst(2) }
+        return components
     }
 }
