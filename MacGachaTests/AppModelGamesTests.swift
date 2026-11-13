@@ -349,7 +349,9 @@ struct AppModelGamesTests {
 
     @Test func droppingModelCancelsActiveGameStream() async throws {
         let fake = FakeGameServices()
-        var model: AppModel? = AppModel(manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(),
+        let root = URL(fileURLWithPath: "/tmp/macgacha-game-lifetime-\(UUID())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var model: AppModel? = AppModel(paths: AppPaths(root: root), manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(),
             defaults: nil, gameServices: fake)
         weak let reference = model
         model?.installGame("genshin", voices: [], at: gameLocation, approved: true)

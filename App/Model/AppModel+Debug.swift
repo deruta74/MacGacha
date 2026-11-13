@@ -55,6 +55,13 @@ extension AppModel {
             model = preview
         } else { model = debugLaunchPreview(state: name, recoveryNotice: notice, region: region) }
         if notice, let recovery = debugRecoveryNotice(in: region) { model?.recoveryNotices = [recovery] }
+        if defaults.bool(forKey: "MacGachaDebugPlayTime") {
+            // Inert sample totals for screenshots: 42 h in all, last session 1 h 20 min a day ago.
+            let json = #"{"totalSeconds":151320,"lastSessionSeconds":4800,"lastPlayed":\#(Date.now.timeIntervalSinceReferenceDate - 86_400)}"#
+            if let summary = try? JSONDecoder().decode(PlayTimeSummary.self, from: Data(json.utf8)) {
+                model?.playTimeSummaries = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, summary) })
+            }
+        }
         return model
     }
 

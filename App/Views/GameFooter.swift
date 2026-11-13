@@ -207,7 +207,7 @@ struct GameFooter: View {
         case .checking: return String(localized: "Checking for updates…")
         case .upToDate:
             if case .installed(let tag) = state.status {
-                return String(localized: "Version \(tag) · Up to date", comment: "Game status after a manual update check; the argument is the game version")
+                return withPlayTime(String(localized: "Version \(tag) · Up to date", comment: "Game status after a manual update check; the argument is the game version"))
             }
         case .failed(let error):
             return String(localized: "Couldn't check for updates: \(error.userMessage)", comment: "Manual game update check failed; the argument is the reason")
@@ -216,14 +216,20 @@ struct GameFooter: View {
         switch state.status {
         case .unknown: return String(localized: "Checking for updates…")
         case .notInstalled: return String(localized: "Not installed")
-        case .installed(let tag): return String(localized: "Version \(tag) · Installed", comment: "Game status; the argument is the game version")
+        case .installed(let tag): return withPlayTime(String(localized: "Version \(tag) · Installed", comment: "Game status; the argument is the game version"))
         case .updateAvailable(let from, let to):
-            return String(localized: "Version \(from) · Version \(to) is available", comment: "Game status: installed version, then the newer one")
+            return withPlayTime(String(localized: "Version \(from) · Version \(to) is available", comment: "Game status: installed version, then the newer one"))
         case .paused:
             return state.spaceShortage == nil ? String(localized: "Paused") : String(localized: "Paused — Not enough free disk space")
         case .uninstallPaused: return String(localized: "Uninstall didn't finish")
         case .locationUnavailable: return String(localized: "Install location unavailable — connect the drive it's on")
         }
+    }
+
+    /// Play time rides on the quiet idle line instead of adding another row over the art.
+    private func withPlayTime(_ line: String) -> String {
+        guard let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 else { return line }
+        return StatusText.joined(line, TimeText.played(summary.totalSeconds))
     }
 
     /// Something the last launch couldn't apply. It stays until Play is pressed again.
@@ -607,6 +613,11 @@ struct GameMenu: View {
             if case .recoveryNeeded = model.launchState(for: game.id) {
                 Button("Try Restoring Again", systemImage: "arrow.clockwise") { model.retryRecovery(game.id) }
             }
+            if let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 {
+                Section(TimeText.played(summary.totalSeconds)) {
+                    Text(TimeText.lastSession(summary))
+                }
+            }
             if isInstalled {
                 Button("Game Settings…", systemImage: "slider.horizontal.3") { gameSheet = .settings(game.id) }
             }
@@ -693,6 +704,23 @@ enum TimeText {
         let minutes = Duration.seconds((seconds + 59) / 60 * 60)
         let text = minutes.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
         return String(localized: "\(text) left", comment: "Estimated time remaining, e.g. 12 min left")
+    }
+
+    /// Total play time: hours and minutes under ten hours, whole hours after that.
+    static func played(_ seconds: Double) -> String {
+        let minutes = Int64(max(0, seconds) / 60)
+        let duration = Duration.seconds(minutes * 60)
+        let units: Set<Duration.UnitsFormatStyle.Unit> = minutes >= 600 ? [.hours] : [.hours, .minutes]
+        let text = duration.formatted(.units(allowed: units, width: .abbreviated, maximumUnitCount: 2, fractionalPart: .hide(rounded: .down)))
+        return String(localized: "Played \(text)", comment: "Total play time, e.g. Played 42 hr")
+    }
+
+    /// The last session for the game menu, e.g. "Last played yesterday for 1 hr 20 min".
+    static func lastSession(_ summary: PlayTimeSummary) -> String {
+        let when = summary.lastPlayed.formatted(.relative(presentation: .named))
+        let length = Duration.seconds(Int64(max(60, summary.lastSessionSeconds) / 60) * 60)
+            .formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
+        return String(localized: "Last played \(when) for \(length)", comment: "Game menu; arguments are a relative date (yesterday) and a duration (1 hr 20 min)")
     }
 
     /// A running clock, e.g. 1:05, so a phase without a percentage visibly moves.

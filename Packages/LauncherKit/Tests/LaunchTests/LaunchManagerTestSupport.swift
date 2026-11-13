@@ -220,11 +220,16 @@ final class ManagerFixture: Sendable {
     func manager(hideHooks: LaunchFileHooks = .none, beforeJournalRead: @escaping @Sendable () throws -> Void = {},
         beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {}, inspector overrideInspector: (any ProcessInspector)? = nil,
         log: EventLog? = nil, displayProbe: any DisplayProbe = FixedDisplayProbe(), gameMode: (any GameModeProviding)? = nil,
-        runner overrideRunner: (any ProcessRunner)? = nil, beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) -> LaunchManager {
+        runner overrideRunner: (any ProcessRunner)? = nil, clock overrideClock: ManagerClock? = nil, bootSessionUUID: String = ManagerFixture.bootSessionUUID,
+        playTimeInstant overrideInstant: (@Sendable () throws -> (bootSessionUUID: String, seconds: Double))? = nil, now: @escaping @Sendable () -> Date = Date.init, journalFileOps overrideJournalOps: (any FileOps)? = nil, beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) -> LaunchManager {
         LaunchManager(paths: paths, runtimes: runtime, prefixes: prefixes, preparation: preparation,
-            spawner: spawner, inspector: overrideInspector ?? inspector, runner: overrideRunner ?? runner, clock: clock, log: log, displayProbe: displayProbe, gameMode: gameMode,
-            proxyFactory: { [proxy] _, log in proxy.start(log: log); return proxy }, baseEnvironment: [:], journalFileOps: journalOps, hideHooks: hideHooks, beforeJournalRead: beforeJournalRead, beforeRecoveryRead: beforeRecoveryRead,
-            sessionProvenance: { (Self.bootSessionUUID, Self.sessionStartTime) }, beforeSessionLogWrite: beforeSessionLogWrite)
+            spawner: spawner, inspector: overrideInspector ?? inspector, runner: overrideRunner ?? runner, clock: overrideClock ?? clock, log: log, displayProbe: displayProbe, gameMode: gameMode,
+            proxyFactory: { [proxy] _, log in proxy.start(log: log); return proxy }, baseEnvironment: [:], journalFileOps: overrideJournalOps ?? journalOps, hideHooks: hideHooks, beforeJournalRead: beforeJournalRead, beforeRecoveryRead: beforeRecoveryRead,
+            sessionProvenance: { (bootSessionUUID, Self.sessionStartTime) },
+            playTimeInstant: overrideInstant ?? { [clock = overrideClock ?? clock] in
+                let value = clock.now.offset.components
+                return (bootSessionUUID, Double(value.seconds) + Double(value.attoseconds) / 1e18)
+            }, beforeSessionLogWrite: beforeSessionLogWrite, now: now)
     }
     func consume(_ manager: LaunchManager, events: ManagerEvents, build: String = "4.6.0") async -> Task<Void, Never> {
         let stream = await manager.launch(game: game, installRoot: installRoot, gameBuild: build)
@@ -297,7 +302,7 @@ extension ManagerFixture {
 }
 
 final class ManagerJournalFileOps: FileOps, Sendable {
-    private let failNext = Mutex(false)
+    private let failAfter = Mutex<Int?>(nil)
     private let failNextDelete = Mutex(false)
     private struct DeletionSync {
         var armed = false
@@ -310,7 +315,7 @@ final class ManagerJournalFileOps: FileOps, Sendable {
     func allowDeletionSync() { deletionSync.withLock { $0.armed = false } }
     var deletionSyncFailures: Int { deletionSync.withLock { $0.failures } }
     var deletionSyncSuccesses: Int { deletionSync.withLock { $0.successes } }
-    func arm() { failNext.withLock { $0 = true } }
+    func arm(afterPublications: Int = 0) { failAfter.withLock { $0 = afterPublications } }
     func armDelete() { failNextDelete.withLock { $0 = true } }
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
         try SystemFileOps().write(descriptor, bytes: bytes)
@@ -329,7 +334,12 @@ final class ManagerJournalFileOps: FileOps, Sendable {
         try SystemFileOps().synchronize(descriptor, durable: durable)
     }
     func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
-        if destination == "launch-session.json", failNext.withLock({ let value = $0; $0 = false; return value }) {
+        if destination == "launch-session.json", failAfter.withLock({ remaining in
+            guard let value = remaining else { return false }
+            if value > 0 { remaining = value - 1; return false }
+            remaining = nil
+            return true
+        }) {
             throw LauncherError.io("injected launch journal publication failure")
         }
         try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
