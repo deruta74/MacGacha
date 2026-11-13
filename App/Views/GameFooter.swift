@@ -639,7 +639,8 @@ struct GameMenu: View {
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
                 Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
             }
-            if isInstalled, !waitingForApproval, !model.isGameOperationRunning, !isLive {
+            // An active pre-download of this game doesn't hide Move: the model pauses and drains it first.
+            if isInstalled, !waitingForApproval, !isLive {
                 Button("Move…", systemImage: "folder.badge.gearshape") { choosingMoveFolder = true }
                     .disabled(!model.canMoveGame(game.id))
             }
