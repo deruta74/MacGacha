@@ -13,7 +13,9 @@ public final class SessionLock: Sendable {
     public static func acquire(paths: AppPaths, game: String) throws -> SessionLock {
         let id = try SafeIdentifier(game)
         let fs = try ContainedFileSystem(root: paths.root)
-        return try SessionLock(InstallLock(fs: fs, path: SafeRelativePath("Games/\(id)/.session.lock")))
+        let lock = try SessionLock(InstallLock(fs: fs, path: SafeRelativePath("Games/\(id)/.session.lock")))
+        try LaunchMutationBarrier.requireNoMove(paths: paths, game: game)
+        return lock
     }
 }
 

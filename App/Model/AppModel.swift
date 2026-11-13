@@ -190,6 +190,7 @@ final class AppModel {
     @ObservationIgnored var gameTask: Task<Void, Never>?
     @ObservationIgnored var gameStartupTask: Task<Void, Never>?
     @ObservationIgnored var gameActivationTask: Task<Void, Never>?
+    var gameMoveRecoveryReservation = false
     var gameOperation: GameOperationToken?
     private(set) var languageRestart: UUID?
     func setLanguageRestart(_ value: UUID?) { languageRestart = value }
@@ -943,6 +944,14 @@ final class AppModel {
         if bundle(id) != nil { return installedBundles[id] == nil ? .idle : .installed }
         if let component = requestedComponent(id), installed.contains(where: { $0.kind == component.kind && $0.version == component.version.rawValue }) { return .installed }
         return .idle
+    }
+
+    func showMoveVolumeUnavailable(originalFolder: Bool) {
+        if originalFolder {
+            lastError = String(localized: "A drive was disconnected, so the move stopped. The game stays in its original folder. Reconnect the drive and move it again.")
+        } else {
+            lastError = String(localized: "A drive was disconnected before the move finished cleaning up. Reconnect the drive to finish cleanup.")
+        }
     }
 
     func show(_ error: any Error) {

@@ -632,8 +632,8 @@ public struct ContainedFileSystem: Sendable, Hashable {
     /// hard links with names outside this tree are refused by default. Owned runtime
     /// mirrors may explicitly allow them; untrusted archive/import callers must not.
     /// Bounded like other tree operations.
-    package func inspectTree(at path: SafeRelativePath, allowingExternalHardLinks: Bool = false) throws -> [TreeEntry] {
-        guard let fd = try directory(path.components, create: false) else { throw LauncherError.io("Directory is missing") }
+    package func inspectTree(at path: SafeRelativePath? = nil, allowingExternalHardLinks: Bool = false) throws -> [TreeEntry] {
+        guard let fd = try directory(path?.components ?? [], create: false) else { throw LauncherError.io("Directory is missing") }
         defer { close(fd) }
         var budget = Self.entryLimit
         var result: [TreeEntry] = []
@@ -659,7 +659,7 @@ public struct ContainedFileSystem: Sendable, Hashable {
             result.append(TreeEntry(path: relative, type: type == S_IFDIR ? .directory : type == S_IFREG ? .regularFile : .other,
                 linkTarget: target, size: uniqueSize))
         }
-        guard allowingExternalHardLinks || hardlinks.values.allSatisfy({ $0.count == $0.expected }) else { throw LauncherError.unsafePath(path.description) }
+        guard allowingExternalHardLinks || hardlinks.values.allSatisfy({ $0.count == $0.expected }) else { throw LauncherError.unsafePath(path?.description ?? "tree") }
         return result
     }
 
@@ -1445,5 +1445,103 @@ extension ContainedFileSystem {
         try removeFile(at: note)
         try removeEmptyDirectory(at: folder)
         return true
+    }
+}
+
+// Move primitives keep descriptor ownership and non-replacing publication together.
+extension ContainedFileSystem {
+    package func moveDirectory(at source: SafeRelativePath, to destination: SafeRelativePath,
+        in targetFS: Self, matching identity: FileSystemIdentity) throws {
+        guard let parent = try directory(Array(source.components.dropLast()), create: false),
+            let target = try targetFS.directory(Array(destination.components.dropLast()), create: false) else {
+            throw LauncherError.io("Move parent is missing")
+        }
+        defer { close(parent); close(target) }
+        guard let child = try pinDirectoryIfPresent(at: source), try child.rootIdentity() == identity,
+            try targetFS.entry(destination.components.last!, parent: target) == nil else {
+            throw LauncherError.io("Move folder changed or destination exists")
+        }
+        try fileOps.rename(from: source.components.last!, in: parent,
+            to: destination.components.last!, in: target, exclusive: true)
+        try synchronize(parent)
+        try targetFS.synchronize(target)
+    }
+
+    package func createExclusiveDirectory(at path: SafeRelativePath) throws -> Self {
+        guard let parent = try directory(Array(path.components.dropLast()), create: false) else {
+            throw LauncherError.io("Move parent is missing")
+        }
+        defer { close(parent) }
+        guard mkdirat(parent, path.components.last!, 0o700) == 0 else {
+            throw LauncherError.fileSystemFailure("Cannot create move staging")
+        }
+        try synchronize(parent)
+        guard let child = try pinDirectoryIfPresent(at: path) else { throw LauncherError.io("Move staging is missing") }
+        return child
+    }
+
+    /// copyfile metadata includes permissions, times, ACLs and extended attributes.
+    /// File data uses the bounded cancellable copy loop, preferring a clone.
+    package func copyMoveFile(at path: SafeRelativePath, to target: Self) throws {
+        let size = try self.size(at: path)
+        guard let size else { throw LauncherError.io("Move source disappeared") }
+        _ = try copyRegularFile(at: path, to: path, in: target, maxBytes: size, preferClone: true)
+        // A clone or data copy may already have retained read-only mode bits.
+        // Make only this independent output writable until copyfile restores
+        // the source attributes using the still-open output descriptor.
+        try target.withRegularDescriptor(at: path, writing: false, create: false) { descriptor, _, _ in
+            guard fchmod(descriptor, 0o600) == 0 else { throw LauncherError.fileSystemFailure("Cannot prepare move attributes") }
+        }
+        let input = try openForReading(at: path), output = try target.openForWriting(at: path, truncate: false)
+        defer { try? input.close(); try? output.close() }
+        guard fcopyfile(input.fileDescriptor, output.fileDescriptor, nil,
+            copyfile_flags_t(COPYFILE_STAT | COPYFILE_XATTR | COPYFILE_ACL)) == 0 else {
+            throw LauncherError.fileSystemFailure("Cannot preserve move attributes")
+        }
+        try target.fileOps.synchronize(output.fileDescriptor, durable: true)
+    }
+
+    package func copyMoveDirectoryAttributes(to target: Self, at path: SafeRelativePath? = nil) throws {
+        guard let input = try directory(path?.components ?? [], create: false),
+            let output = try target.directory(path?.components ?? [], create: false) else {
+            throw LauncherError.io("Move directory disappeared")
+        }
+        defer { close(input); close(output) }
+        guard fcopyfile(input, output, nil, copyfile_flags_t(COPYFILE_STAT | COPYFILE_XATTR | COPYFILE_ACL)) == 0 else {
+            throw LauncherError.fileSystemFailure("Cannot preserve directory attributes")
+        }
+        try target.synchronize(output)
+    }
+}
+
+extension ContainedFileSystem {
+    /// Only the identity-verified, discarded side of a move may have its directory
+    /// permissions relaxed. The authoritative source/destination is never changed.
+    package func removeMoveRoot(checkAvailability: () throws -> Void) throws {
+        func empty(_ descriptor: Int32, depth: Int, budget: inout Int) throws {
+            try checkAvailability()
+            guard depth <= 128 else { throw LauncherError.io("Removal depth exceeds limit") }
+            var info = stat()
+            guard fstat(descriptor, &info) == 0, fchmod(descriptor, info.st_mode & 0o7777 | 0o700) == 0 else {
+                throw LauncherError.fileSystemFailure("Cannot prepare discarded move directory")
+            }
+            for name in try names(in: descriptor, budget: &budget) {
+                try checkAvailability()
+                guard let childInfo = try entry(name, parent: descriptor) else { continue }
+                if childInfo.st_mode & S_IFMT == S_IFDIR {
+                    let child = openat(descriptor, name, Self.directoryFlags)
+                    guard child >= 0 else { throw accessError("move cleanup") }
+                    defer { close(child) }
+                    try empty(child, depth: depth + 1, budget: &budget)
+                    try fileOps.unlink(name, in: descriptor, isDirectory: true)
+                } else { try fileOps.unlink(name, in: descriptor, isDirectory: false) }
+            }
+            try synchronize(descriptor)
+        }
+        guard pinnedRoot != nil else { throw LauncherError.io("Move root is not pinned") }
+        var budget = Self.entryLimit
+        try withRootDirectoryDescriptor { try empty($0, depth: 0, budget: &budget) }
+        try checkAvailability()
+        try removePinnedRoot(onlyIfEmpty: true)
     }
 }

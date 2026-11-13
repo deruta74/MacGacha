@@ -11,6 +11,7 @@ typealias GameEventStream = AsyncThrowingStream<OperationEvent, any Error>
 
 protocol GameServices: Sendable {
     func start() async
+    func recoverPendingMoves() async -> [String]
     func waitUntilIdle(_ id: String) async throws
     func waitForPreDownloadDrain(_ id: String) async throws
     func requireGameLocationAvailable(_ id: String) async throws
@@ -30,10 +31,15 @@ protocol GameServices: Sendable {
     func verify(_ id: String, mode: Verifier.Mode) async -> GameEventStream
     func setVoices(_ id: String, _ voices: Set<String>) async -> GameEventStream
     func uninstall(_ id: String) async throws
+    func move(_ id: String, to folder: URL) async -> GameEventStream
 }
 
 /// Existing fakes and previews opt out without touching delivery or disk.
 extension GameServices {
+    func recoverPendingMoves() async -> [String] { [] }
+    func move(_ id: String, to folder: URL) async -> GameEventStream {
+        GameEventStream { $0.finish(throwing: LauncherError.busy("Moving is unavailable")) }
+    }
     func requireGameLocationAvailable(_ id: String) async throws {
         if case .locationUnavailable = await status(id) { throw LauncherError.installVolumeUnavailable }
     }
@@ -74,6 +80,7 @@ final class LiveGameServices: GameServices, Sendable {
     private func library(for game: GameDefinition) -> GameLibrary { libraries[game.region]! }
 
     func start() async { await libraries[.global]!.start() }
+    func recoverPendingMoves() async -> [String] { await libraries[.global]!.recoverPendingMoves() }
     func waitUntilIdle(_ id: String) async throws {
         let game = try Self.requireGame(id)
         try await library(for: game).waitUntilIdle(id)
@@ -167,6 +174,10 @@ final class LiveGameServices: GameServices, Sendable {
     func setVoices(_ id: String, _ voices: Set<String>) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
         return logged(await library(for: game).setVoices(game, voices), id: id)
+    }
+    func move(_ id: String, to folder: URL) async -> GameEventStream {
+        guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
+        return logged(await library(for: game).move(game, to: folder), id: id)
     }
     func uninstall(_ id: String) async throws {
         do { let game = try Self.requireGame(id); try await library(for: game).uninstall(game) }

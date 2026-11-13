@@ -33,6 +33,7 @@ import LauncherCore
     }
 
     func canBeginGameOrRuntimeOperation(allowingCatalogID: String? = nil) -> Bool {
+        guard !gameMoveRecoveryReservation else { return false }
         guard runtimeCatalogMutationID == nil || runtimeCatalogMutationID == allowingCatalogID else { return false }
         guard languageRestart == nil, !updater.isInstallingUpdate else {
             show(LauncherError.busy("Application update is installing"))
@@ -43,7 +44,7 @@ import LauncherCore
 
     /// Reservations outlive UI progress and keep draining or recovering work safe.
     var isBusyForUpdates: Bool {
-        dependencyAutoUpdateReservation || runtimeCatalogMutationID != nil || languageRestart != nil || isStarting || launchSlotOwner != nil || liveSessionGameName != nil ||
+        dependencyAutoUpdateReservation || runtimeCatalogMutationID != nil || languageRestart != nil || gameMoveRecoveryReservation || isStarting || launchSlotOwner != nil || liveSessionGameName != nil ||
             launchStates.values.contains { if case .recoveryNeeded = $0 { true } else { false } } ||
             isGameOperationRunning || isRuntimeOperationRunning || consentRequest != nil || importState != nil ||
             runtimeSetupProgress.values.contains { if case .installing = $0 { true } else { false } }

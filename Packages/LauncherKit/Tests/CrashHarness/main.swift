@@ -46,6 +46,17 @@ struct CrashHarness {
     static func main() async {
         do {
             let args = CommandLine.arguments
+            if args.count == 5, args[1] == "move-game" {
+                let root = URL(fileURLWithPath: args[2])
+                let paths = AppPaths(root: root.appendingPathComponent("app"))
+                let store = GameRecordStore(directory: paths.games)
+                let point = args[3], cross = args[4] == "cross"
+                let mover = GameMover(paths: paths, store: store, sameVolume: { _, _ in !cross }, checkpoint: {
+                    if $0.rawValue == point { Darwin._exit(137) }
+                })
+                try await mover.move(GameDefinition.all[0], to: root.appendingPathComponent("new"))
+                return
+            }
             if args.count == 5, args[1] == "launch-integration" {
                 try await runLaunchIntegration(root: URL(fileURLWithPath: args[2]), mode: args[3], conflict: args[4] == "conflict")
                 return

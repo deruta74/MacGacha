@@ -130,7 +130,7 @@ package final class PipelineProgress: Sendable {
     package func initialize(downloaded: Int64, total: Int64, credited: Set<String>, predicted: Set<String>) {
         state.withLock { s in s.downloaded = downloaded; s.total = total; s.credited = credited; s.predicted = predicted }
     }
-    func stage(_ staged: Int64, total: Int64) { state.withLock { $0.staged = staged; $0.totalStaged = total } }
+    package func stage(_ staged: Int64, total: Int64) { state.withLock { $0.staged = staged; $0.totalStaged = total } }
     func total(_ value: Int64) { state.withLock { $0.total = max(value, $0.downloaded) } }
     package func update(_ id: String, _ bytes: Int64) -> PipelineProgressSnapshot? {
         state.withLock { s in

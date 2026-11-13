@@ -184,7 +184,12 @@ struct GameFooter: View {
         if case .working(let phase, _, _, _, _) = state.activity {
             switch phase {
             case .committing, .deleting, .cleaningUp: return String(localized: "Finishing up — this can't be paused")
-            default: return String(localized: "Keep MacGacha open — you can pause and resume any time")
+            default:
+                // A cancelled move is not resumed: the game simply stays where it was.
+                if model.gameMovePhase(for: game.id) != nil {
+                    return String(localized: "Keep MacGacha open — if you cancel, the game stays where it is")
+                }
+                return String(localized: "Keep MacGacha open — you can pause and resume any time")
             }
         }
         if let launchLine { return launchLine }
@@ -469,16 +474,18 @@ struct PrimaryActionButton: View {
                 .accessibilityLabel(state.progressDetail.map { StatusText.joined(label, $0) } ?? label)
             }
             if canPause {
+                // Stopping a move cancels it rather than pausing, so the button says so.
+                let moving = model.gameMovePhase(for: game.id) != nil
                 Button {
                     model.pauseGame(game.id)
                 } label: {
-                    Image(systemName: "pause.fill")
+                    Image(systemName: moving ? "xmark" : "pause.fill")
                         .frame(width: 30, height: 30)
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
-                .help("Pause")
-                .accessibilityLabel("Pause")
+                .help(moving ? "Cancel Move" : "Pause")
+                .accessibilityLabel(moving ? "Cancel Move" : "Pause")
             }
         }
         .padding(.leading, 18)
@@ -571,7 +578,9 @@ struct PrimaryActionButton: View {
     private func progressLabel(at now: ContinuousClock.Instant) -> String {
         guard case .working(let phase, let fraction, _, let downloaded, _) = state.activity else { return "" }
         let localWork = (phase == .staging && downloaded == nil) || (phase == .checkingSpace && fraction != nil)
-        let label = localWork ? String(localized: "Installing…") : RuntimePhaseText.label(for: phase, fraction: fraction)
+        let label = if let move = model.gameMovePhase(for: game.id) { move.label }
+            else if localWork { String(localized: "Installing…") }
+            else { RuntimePhaseText.label(for: phase, fraction: fraction) }
         switch state.timing?.display(at: now) ?? .none {
         case .none:
             return label
@@ -603,6 +612,7 @@ struct GameMenu: View {
     @Binding var gameSheet: GameSheet?
     @Binding var confirmingUninstall: Bool
     @Binding var confirmingPreDownloadDeletion: Bool
+    @State private var choosingMoveFolder = false
 
     /// While waiting for approval only folder actions make sense; verify and voices would start new work.
     private var waitingForApproval: Bool {
@@ -629,6 +639,11 @@ struct GameMenu: View {
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
                 Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
             }
+            // An active pre-download of this game doesn't hide Move: the model pauses and drains it first.
+            if isInstalled, !waitingForApproval, !isLive {
+                Button("Move…", systemImage: "folder.badge.gearshape") { choosingMoveFolder = true }
+                    .disabled(!model.canMoveGame(game.id))
+            }
             // Hidden while the drive is away: Finder can't reveal an unmounted folder.
             if let folder = model.gameLocationURL(for: game.id) {
                 Button("Show in Finder", systemImage: "folder") {
@@ -654,6 +669,13 @@ struct GameMenu: View {
         .foregroundStyle(.white)
         .help("More for \(game.name)")
         .accessibilityLabel("More for \(game.name)")
+        // The game goes into a folder with its usual name inside the chosen one.
+        .fileImporter(isPresented: $choosingMoveFolder, allowedContentTypes: [.folder]) { result in
+            guard case .success(let folder) = result else { return }
+            model.moveGame(game.id, to: folder)
+        }
+        .fileDialogMessage("Choose where to move \(game.name)")
+        .fileDialogConfirmationLabel("Move Here")
     }
 
     /// The game is launching, running or still being restored; its files must stay put.

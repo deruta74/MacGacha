@@ -30,6 +30,7 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
 
 @MainActor extension AppModel {
     var languageRestartBlocker: LanguageRestartBlocker? {
+        if gameMoveRecoveryReservation { return .unresumableOperation("move-recovery") }
         if let id = launchSlotOwner { return .game(id) }
         if let id = launchStates.keys.sorted().first(where: {
             if case .recoveryNeeded = launchStates[$0] { true } else { false }
@@ -42,7 +43,7 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
             !runtimeSetupRosettaChecks.isEmpty { return .runtimeWork }
         if let operation = gameOperation {
             let record = gameRecords[operation.id]
-            if operation.isUninstall || record?.uninstalling == true || (record?.pending == nil && !operation.isVerification && !operation.isPreDownload) {
+            if operation.isMoving || operation.isUninstall || record?.uninstalling == true || (record?.pending == nil && !operation.isVerification && !operation.isPreDownload) {
                 return .unresumableOperation(operation.id)
             }
         }
