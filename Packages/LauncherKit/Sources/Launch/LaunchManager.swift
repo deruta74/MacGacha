@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Darwin
 import Foundation
 import LauncherCore
 import GameLibrary
@@ -31,6 +32,7 @@ public actor LaunchManager {
     private let runner: any ProcessRunner
     private let clock: any Clock<Duration>
     private let now: @Sendable () -> Date
+    private let playTimeInstant: @Sendable () throws -> (bootSessionUUID: String, seconds: Double)
     private let gameMode: (any GameModeProviding)?
     private let displayProbe: any DisplayProbe
     private let proxyFactory: ProxyFactory
@@ -64,9 +66,6 @@ public actor LaunchManager {
         var lastConfirmedElapsed: Duration = .zero
         var qualificationTask: Task<Void, Never>?
         var runningAnnounced = false
-        var observedGameInProcess = false
-        var playClock: AnyLaunchClock?
-        var lastPlayElapsed: Duration = .zero
         var endOutcome = "while MacGacha was closed"
         var restoreEntryCount = 0
         var ownedWrapper: ProcessIdentity?
@@ -94,6 +93,7 @@ public actor LaunchManager {
         runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, displayProbe: any DisplayProbe = SystemDisplayProbe(), gameMode: (any GameModeProviding)? = nil,
         now: @escaping @Sendable () -> Date = Date.init) {
         self.now = now
+        self.playTimeInstant = Self.currentPlayTimeInstant
         self.gameMode = gameMode ?? GameModeHelper(paths: paths)
         self.eventLog = log ?? EventLog(directory: paths.logs)
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: {})
@@ -116,10 +116,12 @@ public actor LaunchManager {
         beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {},
         recipeOverrides: [String: LaunchRecipe] = [:],
         sessionProvenance: @escaping @Sendable () throws -> (bootSessionUUID: String, sessionStartTime: UInt64) = LaunchManager.currentSessionProvenance,
+        playTimeInstant: @escaping @Sendable () throws -> (bootSessionUUID: String, seconds: Double) = LaunchManager.currentPlayTimeInstant,
         beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {},
         fpsInjectorStatus: @escaping @Sendable (ProcessIdentity) throws -> SessionChildStatus = OwnedSessionChild.systemStatus,
         now: @escaping @Sendable () -> Date = Date.init) {
         self.now = now
+        self.playTimeInstant = playTimeInstant
         self.gameMode = gameMode
         self.eventLog = log ?? EventLog(directory: paths.logs)
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: beforeSessionLogWrite)
@@ -154,6 +156,17 @@ public actor LaunchManager {
     package nonisolated static func currentSessionProvenance() throws -> (bootSessionUUID: String, sessionStartTime: UInt64) {
         // Called on BlockingIO before the first durable snapshot and spawn.
         (try SystemProcessInspector.bootSessionUUID(), UInt64(Date().timeIntervalSince1970 * 1_000_000))
+    }
+
+    /// Boot-scoped monotonic seconds include sleep and survive launcher restarts.
+    /// Read with boot identity on BlockingIO, never on a cooperative worker.
+    package nonisolated static func currentPlayTimeInstant() throws -> (bootSessionUUID: String, seconds: Double) {
+        let boot = try SystemProcessInspector.bootSessionUUID()
+        var instant = timespec()
+        guard clock_gettime(CLOCK_MONOTONIC_RAW, &instant) == 0 else {
+            throw LauncherError.io("Monotonic play time clock unavailable")
+        }
+        return (boot, Double(instant.tv_sec) + Double(instant.tv_nsec) / 1e9)
     }
 
     public func launch(game: GameDefinition, installRoot: URL, gameBuild: String) -> AsyncStream<LaunchEvent> {
@@ -438,12 +451,8 @@ public actor LaunchManager {
                     childrenEnded: { try await self.fpsChildHasEnded(game: game) }) { processes in
                     try await self.observed(game: game, processes: processes)
                 }
-                checkpointPlayTime(context, gameObserved: false)
                 context.hasEnded = true
-                if context.session.verifiedEndedAt == nil {
-                    context.session.verifiedEndedAt = now()
-                    context.session.playTimeEndRecovered = !context.observedGameInProcess
-                }
+                await checkpointPlayTimeEnd(context)
                 context.fpsWorker?.cancel()
                 context.endOutcome = context.ready ? "normal" : "before ready"
                 context.session.state = .ending; try await persist(context.session)
@@ -483,7 +492,6 @@ public actor LaunchManager {
 
     private func observed(game: String, processes: [ProcessIdentity]) async throws {
         guard let context = contexts[game] else { return }
-        checkpointPlayTime(context, gameObserved: !processes.isEmpty)
         context.watchPhase = .running
         context.session.startupPending = false
         context.session.state = .running
@@ -502,9 +510,14 @@ public actor LaunchManager {
             let timer = AnyLaunchClock(timerClock)
             context.runningTimer = { timer.now }
         }
-        if !processes.isEmpty { context.observedGameInProcess = true }
         if !processes.isEmpty, context.session.runningSince == nil, context.session.verifiedEndedAt == nil {
+            let readInstant = playTimeInstant
+            let instant = try? await BlockingIO.run { try readInstant() }
             context.session.runningSince = now()
+            if let instant, instant.bootSessionUUID == context.session.bootSessionUUID,
+                instant.seconds.isFinite, instant.seconds >= 0 {
+                context.session.runningMonotonicSeconds = instant.seconds
+            }
         }
         context.session.processes = Array(Set(context.session.processes + processes)).sorted { $0.pid < $1.pid }
         try await persist(context.session)
@@ -518,18 +531,19 @@ public actor LaunchManager {
         if !processes.isEmpty { try await startFpsInjector(context) }
     }
 
-    private func checkpointPlayTime(_ context: Context, gameObserved: Bool) {
+    private func checkpointPlayTimeEnd(_ context: Context) async {
         guard context.session.verifiedEndedAt == nil else { return }
-        if let timer = context.playClock {
-            let elapsed = timer.now
-            let interval = (elapsed - context.lastPlayElapsed).components
-            let seconds = max(0, Double(interval.seconds) + Double(interval.attoseconds) / 1e18)
-            context.session.supervisedPlaySeconds = (context.session.supervisedPlaySeconds ?? 0) + seconds
-            context.lastPlayElapsed = elapsed
-        } else if gameObserved {
-            let timerClock = clock
-            context.playClock = AnyLaunchClock(timerClock)
-            context.session.supervisedPlaySeconds = context.session.supervisedPlaySeconds ?? context.session.confirmedRunningSeconds ?? 0
+        let readInstant = playTimeInstant
+        let instant = try? await BlockingIO.run { try readInstant() }
+        context.session.verifiedEndedAt = now()
+        context.session.playTimeEndRecovered = true
+        // Old partial process-local checkpoints cannot recover an unobserved span.
+        context.session.supervisedPlaySeconds = nil
+        if let start = context.session.runningMonotonicSeconds, let instant,
+            instant.bootSessionUUID == context.session.bootSessionUUID,
+            instant.seconds.isFinite, instant.seconds >= start {
+            context.session.supervisedPlaySeconds = instant.seconds - start
+            context.session.playTimeEndRecovered = false
         }
     }
 
@@ -745,8 +759,7 @@ public actor LaunchManager {
             }
         }
         if context.session.verifiedEndedAt == nil {
-            context.session.verifiedEndedAt = now()
-            context.session.playTimeEndRecovered = true
+            await checkpointPlayTimeEnd(context)
             try await persist(context.session)
         }
         // This checkpoint remains in the journal until accounting and file recovery
@@ -809,12 +822,11 @@ public actor LaunchManager {
                 // Durable hide ownership wins, but a failed first checkpoint must
                 // not discard the running/end observations already made here.
                 persisted.runningSince = persisted.runningSince ?? context.session.runningSince
-                if let measured = context.session.supervisedPlaySeconds {
-                    persisted.supervisedPlaySeconds = max(persisted.supervisedPlaySeconds ?? 0, measured)
-                }
+                persisted.runningMonotonicSeconds = persisted.runningMonotonicSeconds ?? context.session.runningMonotonicSeconds
                 if persisted.verifiedEndedAt == nil {
                     persisted.verifiedEndedAt = context.session.verifiedEndedAt
                     persisted.playTimeEndRecovered = context.session.playTimeEndRecovered
+                    persisted.supervisedPlaySeconds = context.session.supervisedPlaySeconds
                 }
                 persisted.state = .recoveryPending
                 persisted.startupPending = !context.hasEnded && context.watchPhase == .spawning
@@ -911,8 +923,6 @@ public actor LaunchManager {
                     // Spawning without identities may precede a delayed Wine
                     // wrapper. Only startup's complete absence grace can end it.
                     let present = try await presence(snapshot)
-                    context.observedGameInProcess = present.gameRunning
-                    checkpointPlayTime(context, gameObserved: present.gameRunning)
                     let starting = snapshot.state == .spawning || snapshot.startupPending == true || present.alive
                     if starting {
                         guard let executable = Self.executable(snapshot) else {

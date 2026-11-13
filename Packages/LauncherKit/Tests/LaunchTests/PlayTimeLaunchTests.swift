@@ -8,6 +8,43 @@ import TestSupport
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct PlayTimeLaunchTests {
+    @Test(arguments: [false, true])
+    func restartUsesRealRunningSnapshotAndBoundsRebootFallback(rebooted: Bool) async throws {
+        let f = try await ManagerFixture.make(), paths = f.paths
+        let wait = PlayTimeWaitingRunner(), events = ManagerEvents()
+        let first = f.manager(runner: wait, now: { Date(timeIntervalSince1970: 1000) })
+        let consumer = await f.consume(first, events: events)
+        await events.waitForRunning()
+        try await wait.entered.wait()
+        // No observation callbacks run while the real supervisor awaits wineserver.
+        f.clock.advance(by: .seconds(600))
+        let running = try #require(try await f.journal())
+        wait.released.signal()
+        try await f.end(first)
+        await consumer.value
+        await f.waitForRestore(first)
+        // Replay the actual crash-time journal after releasing the first manager's
+        // ownership. Remove its later accounting so it cannot mask a lost interval.
+        try await BlockingIO.run {
+            try LaunchJournal(paths: paths).write(running)
+            try ContainedFileSystem(root: paths.root).removeFile(at: SafeRelativePath("PlayTime/play-time.json"))
+        }
+        let nextClock = ManagerClock()
+        nextClock.advance(by: .seconds(rebooted ? 10 : 600))
+        f.inspector.update { $0.processes = [f.gameProcess]; $0.alive = [f.gameProcess.identity] }
+        let next = f.manager(clock: nextClock,
+            bootSessionUUID: rebooted ? "CB1D5699-35A6-48E8-A53F-9A88C918DAE8" : ManagerFixture.bootSessionUUID,
+            now: { Date(timeIntervalSince1970: 1900) })
+        _ = await next.reattachAll()
+        await nextClock.waitForSleep(1, duration: .seconds(3))
+        f.inspector.update { $0.processes = []; $0.alive = [] }
+        nextClock.advance(by: .seconds(3))
+        await f.waitForRestore(next)
+        let summary = try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"] }
+        #expect(summary?.totalSeconds == (rebooted ? 900 : 603))
+        #expect(summary?.lastPlayed == Date(timeIntervalSince1970: 1000))
+    }
+
     @Test(arguments: [-3600.0, 360_000.0])
     func liveDurationIgnoresWallClockJumps(wallJump: Double) async throws {
         let f = try await ManagerFixture.make(), time = Mutex(Date(timeIntervalSince1970: 10_000))
@@ -153,7 +190,7 @@ import TestSupport
     }
 
     @Test(arguments: ["uncertain", "helper", "live"])
-    func reattachedWatcherMeasuresOnlyObservedSpanAndRetainsSavedDuration(mode: String) async throws {
+    func legacyReattachedWatcherWithoutBootInstantUsesBoundedRecovery(mode: String) async throws {
         let f = try await ManagerFixture.make(initialGame: mode == "live")
         var session = try await f.saveSnapshot(state: .running, processes: [])
         session.runningSince = Date(timeIntervalSince1970: 0)
@@ -168,7 +205,7 @@ import TestSupport
         f.inspector.update { $0.processes = []; $0.alive = [] }
         f.clock.advance(by: .seconds(3))
         await f.waitForRestore(manager)
-        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == (mode == "live" ? 123 : nil))
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == nil)
     }
 
     @Test(arguments: [false, true])
@@ -242,5 +279,17 @@ private final class PlayTimeEndCheckpointOps: FileOps, Sendable {
     }
     func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
         try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
+    }
+}
+
+private struct PlayTimeWaitingRunner: ProcessRunner {
+    let entered = TestEvent()
+    let released = TestEvent()
+    func run(_ executable: URL, arguments: [String], environment: [String: String], currentDirectory: URL?) async throws -> ProcessResult {
+        if arguments == ["-w"] {
+            entered.signal()
+            try await released.wait()
+        }
+        return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
 }

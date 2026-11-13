@@ -39,7 +39,9 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     public var runningSince: Date?
     public var verifiedEndedAt: Date?
     public var playTimeEndRecovered: Bool?
-    /// Monotonic supervised time, checkpointed without persisting a clock instant.
+    /// CLOCK_MONOTONIC_RAW seconds at the first game observation, scoped to bootSessionUUID.
+    public var runningMonotonicSeconds: Double?
+    /// Frozen monotonic duration at verified end, retained for accounting retries.
     public var supervisedPlaySeconds: Double?
     /// Durable qualification for automatic runtime cleanup, absent in legacy journals.
     public var reachedRunning: Bool?
@@ -60,7 +62,7 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         bootSessionUUID: String? = nil, sessionStartTime: UInt64? = nil, endLogged: Bool? = nil,
         recoveryLocation: LaunchRecoveryLocation? = nil, startupPending: Bool? = nil,
         reachedRunning: Bool? = nil, reachedReady: Bool? = nil, confirmedRunningSeconds: Double? = nil,
-        runningSince: Date? = nil, verifiedEndedAt: Date? = nil, playTimeEndRecovered: Bool? = nil, supervisedPlaySeconds: Double? = nil) {
+        runningSince: Date? = nil, verifiedEndedAt: Date? = nil, playTimeEndRecovered: Bool? = nil, supervisedPlaySeconds: Double? = nil, runningMonotonicSeconds: Double? = nil) {
         self.sessionID = sessionID; self.game = game; self.installRoot = installRoot; self.installIdentity = installIdentity
         self.prefix = prefix; self.bundleID = bundleID; self.runtimeDigest = runtimeDigest; self.wineBinary = wineBinary
         self.wineserver = wineserver; self.componentIDs = componentIDs; self.recipeVersion = recipeVersion
@@ -76,11 +78,15 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         self.runningSince = runningSince; self.verifiedEndedAt = verifiedEndedAt
         self.playTimeEndRecovered = playTimeEndRecovered
         self.supervisedPlaySeconds = supervisedPlaySeconds
+        self.runningMonotonicSeconds = runningMonotonicSeconds
     }
 
     func validate() throws {
         guard [runningSince, verifiedEndedAt].compactMap({ $0 }).allSatisfy({ $0.timeIntervalSinceReferenceDate.isFinite }) else {
             throw LauncherError.journalCorrupt("Invalid play time interval")
+        }
+        guard runningMonotonicSeconds.map({ $0.isFinite && $0 >= 0 && bootSessionUUID != nil }) ?? true else {
+            throw LauncherError.journalCorrupt("Invalid monotonic play time start")
         }
         guard supervisedPlaySeconds.map({ $0.isFinite && $0 >= 0 }) ?? true else {
             throw LauncherError.journalCorrupt("Invalid supervised play time")
