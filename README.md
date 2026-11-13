@@ -88,6 +88,8 @@ All three games start and play with a community anti-cheat workaround. None of t
 DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin, and it can be changed per game.
 
 **In progress**
+
+- **Metal HUD.** Per-game settings storage and launch support are ready for D3DMetal and DXMT. The settings toggle and shortcut hint are pending.
 - **Mainland China editions (beta).** A region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and runs past the login screen with our [Wine crypt32 fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 and 崩坏：星穹铁道 still need in-game testing, and login hasn't been tested on any mainland edition. Testers with mainland accounts are welcome.
 - **Star Rail's in-game hotfix restart.** In the one test so far the game came back without its login window. Starting it again from MacGacha logged in normally.
 - **Release day with a pre-download**, which waits for the next game version to be tested end to end.

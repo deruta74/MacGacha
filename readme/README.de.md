@@ -90,6 +90,8 @@ DXMT funktioniert mit jedem Spiel und bleibt als Open-Source-Alternative verfüg
 
 **In Arbeit**
 
+- **Metal HUD.** Die Speicherung pro Spiel und die Startunterstützung für D3DMetal und DXMT sind fertig. Der Schalter in den Einstellungen und der Hinweis zur Tastenkombination stehen noch aus.
+
 - **Versionen für Festlandchina (Beta).** Ein Regionsschalter in den Einstellungen zeigt 原神, 崩坏：星穹铁道 und 绝区零 mit eigenen Installationen, Präfixen und Einstellungen. 绝区零 lässt sich von den miHoYo-Servern installieren und läuft mit unserem [Wine-crypt32-Fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1) über den Anmeldebildschirm hinaus. 原神 und 崩坏：星穹铁道 müssen noch im Spiel getestet werden. Die Anmeldung wurde bei keiner Festlandchina-Version geprüft. Tester mit entsprechenden Konten sind willkommen.
 - **Neustart nach einem Hotfix innerhalb von Star Rail.** Im bislang einzigen Test startete das Spiel ohne sein Anmeldefenster neu. Nach einem erneuten Start über MacGacha funktionierte die Anmeldung wie gewohnt.
 - **Veröffentlichungstag mit vorzeitigem Herunterladen**, der noch mit der nächsten Spielversion von Anfang bis Ende getestet werden muss.
