@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-555555?style=for-the-badge)](README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-0078D4?style=for-the-badge)](README.ja.md)
 
-> ✨ **[MacGacha 0.3.0](https://github.com/deruta74/MacGacha/releases/tag/v0.3.0) を公開しました**。ソースから独自にビルドした [MacGacha Wine 11.20](https://github.com/deruta74/MacGacha/releases/tag/wine-11.20-macgacha-1.0)、依存関係の自動更新、刷新した依存関係ウィンドウ、より安定したダウンロードをお届けします。すでに 0.2.x をお使いの場合は、MacGacha が自動更新します。気になる点があれば[ご報告ください](#feedback)。
+> ✨ **[MacGacha 0.3.1](https://github.com/deruta74/MacGacha/releases/tag/v0.3.1) を公開しました**。Metal HUD、プレイ時間、外付けドライブ上のゲーム、別のフォルダやドライブへのゲームの移動に対応しました。すでに 0.3.0 をお使いの場合は、MacGacha が自動更新します。気になる点があれば[ご報告ください](#feedback)。
 
 Apple Silicon で **『原神』**、**『崩壊：スターレイル』**、**『ゼンレスゾーンゼロ』** を利用するための、macOS ネイティブのランチャーです。HoYoverse の公式サーバーからゲームをインストール、更新、検証し、Wine / DXMT / D3DMetal の実行環境を管理して、各ゲームをワンクリックで起動します。
 
