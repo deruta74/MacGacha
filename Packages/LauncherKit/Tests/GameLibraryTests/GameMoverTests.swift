@@ -11,6 +11,86 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameMoverTests {
+    @Test(arguments: [MoveSyncBoundary.sourceParent, .destinationParent], [MoveDurabilityTrigger.rollbackRename, .forwardRename])
+    func retriedSameVolumeRollbackSyncsBothParentsBeforeRetiringJournal(boundary: MoveSyncBoundary, trigger: MoveDurabilityTrigger) async throws {
+        let temp = try TempDir(), f = try MoveFixture(root: temp.url)
+        try await f.save()
+        let ops = MoveDurabilityOps(fixture: f, trigger: trigger, boundary: boundary)
+        let store = GameRecordStore(directory: f.paths.games, fileOps: ops)
+        let mover = GameMover(paths: f.paths, store: store, disk: MoveDisk(), fileOps: ops,
+            checkpoint: { if trigger == .rollbackRename && $0 == .published { throw LauncherError.cancelled } })
+        await #expect(throws: (any Error).self) { try await mover.move(f.game, to: f.destination) }
+        #expect(ops.didTrigger)
+        #expect(FileManager.default.fileExists(atPath: f.source.path))
+        #expect(!FileManager.default.fileExists(atPath: f.final.path))
+        #expect(try await f.store.readState("move-journal.json", for: f.game.id, maxBytes: 65536) != nil)
+        await #expect(throws: (any Error).self) { try await mover.recover(f.game.id) }
+        #expect(try await f.store.readState("move-journal.json", for: f.game.id, maxBytes: 65536) != nil)
+        ops.allowSyncs()
+        try await mover.recover(f.game.id)
+        let events = ops.events
+        let retired = try #require(events.firstIndex(of: "retire"))
+        #expect(try #require(events.firstIndex(of: "sync:sourceParent")) < retired)
+        #expect(try #require(events.firstIndex(of: "sync:destinationParent")) < retired)
+        #expect(try await f.store.load(f.game.id)?.installPath == f.source)
+        #expect(try await f.store.readState("move-journal.json", for: f.game.id, maxBytes: 65536) == nil)
+    }
+
+    @Test(arguments: [MoveDurabilityTrigger.stagingRemoved, .sourceRemoved])
+    func missingCleanupTreeStillRequiresParentSyncBeforeJournalRetirement(trigger: MoveDurabilityTrigger) async throws {
+        let temp = try TempDir(), f = try MoveFixture(root: temp.url)
+        try await f.save()
+        let rollback = trigger == .stagingRemoved
+        let boundary: MoveSyncBoundary = rollback ? .destinationParent : .sourceParent
+        let ops = MoveDurabilityOps(fixture: f, trigger: trigger, boundary: boundary)
+        let store = GameRecordStore(directory: f.paths.games, fileOps: ops)
+        let mover = GameMover(paths: f.paths, store: store, disk: MoveDisk(), fileOps: ops,
+            sameVolume: { _, _ in false }, checkpoint: { if rollback && $0 == .verified { throw LauncherError.cancelled } })
+        await #expect(throws: (any Error).self) { try await mover.move(f.game, to: f.destination) }
+        #expect(ops.didTrigger)
+        #expect(!FileManager.default.fileExists(atPath: rollback ? f.staging.path : f.source.path))
+        #expect(try await f.store.readState("move-journal.json", for: f.game.id, maxBytes: 65536) != nil)
+        await #expect(throws: (any Error).self) { try await mover.recover(f.game.id) }
+        #expect(try await f.store.readState("move-journal.json", for: f.game.id, maxBytes: 65536) != nil)
+        ops.allowSyncs()
+        try await mover.recover(f.game.id)
+        let events = ops.events, retired = try #require(events.firstIndex(of: "retire"))
+        #expect(try #require(events.firstIndex(of: "sync:sourceParent")) < retired)
+        #expect(try #require(events.firstIndex(of: "sync:destinationParent")) < retired)
+        #expect(try await f.store.load(f.game.id)?.installPath == (rollback ? f.source : f.final))
+        #expect(try await f.store.readState("move-journal.json", for: f.game.id, maxBytes: 65536) == nil)
+    }
+
+    @Test func retryOfUncertainJournalRemovalSyncsEvenWhenJournalIsAbsent() async throws {
+        let temp = try TempDir(), f = try MoveFixture(root: temp.url)
+        try await f.save()
+        let ops = MoveDurabilityOps(fixture: f, trigger: .journalRemoved, boundary: .recordParent)
+        let store = GameRecordStore(directory: f.paths.games, fileOps: ops)
+        let mover = GameMover(paths: f.paths, store: store, disk: MoveDisk(), fileOps: ops)
+        await #expect(throws: (any Error).self) { try await mover.move(f.game, to: f.destination) }
+        #expect(ops.didTrigger)
+        #expect(try await f.store.readState("move-journal.json", for: f.game.id, maxBytes: 65536) == nil)
+        await #expect(throws: (any Error).self) { try await mover.recover(f.game.id) }
+        ops.allowSyncs()
+        try await mover.recover(f.game.id)
+        #expect(ops.events.contains("sync:recordParent"))
+        #expect(try await f.store.load(f.game.id)?.installPath == f.final)
+    }
+
+    @Test func uncertainRecordSwitchIsDurableBeforeOldCopyRemoval() async throws {
+        let temp = try TempDir(), f = try MoveFixture(root: temp.url)
+        try await f.save()
+        let ops = MoveDurabilityOps(fixture: f, trigger: .recordRenamed, boundary: nil)
+        let store = GameRecordStore(directory: f.paths.games, fileOps: ops)
+        let mover = GameMover(paths: f.paths, store: store, disk: MoveDisk(), fileOps: ops, sameVolume: { _, _ in false })
+        await #expect(throws: (any Error).self) { try await mover.move(f.game, to: f.destination) }
+        let events = ops.events
+        let removed = try #require(events.firstIndex(of: "removeSource"))
+        #expect(try #require(events.firstIndex(of: "sync:recordParent")) < removed)
+        #expect(try await f.store.load(f.game.id)?.installPath == f.final)
+        #expect(!FileManager.default.fileExists(atPath: f.source.path))
+    }
+
     @Test(arguments: [false, true])
     func ejectDuringCopyRollsBackAfterReconnectAndAllowsFreshMove(sourceEjected: Bool) async throws {
         let temp = try TempDir(), f = try MoveFixture(root: temp.url)
@@ -426,6 +506,80 @@ private final class MoveDriveProbe: GameLocationProbing {
     func requireAvailable(at root: URL) throws {
         if unavailable.withLock({ $0?.standardizedFileURL.path == root.standardizedFileURL.path }) {
             throw LauncherError.installVolumeUnavailable
+        }
+    }
+}
+
+enum MoveSyncBoundary: String, Sendable { case sourceParent, destinationParent, recordParent }
+enum MoveDurabilityTrigger: Sendable { case rollbackRename, forwardRename, stagingRemoved, sourceRemoved, journalRemoved, recordRenamed }
+private final class MoveDurabilityOps: FileOps {
+    private struct State {
+        var triggered = false
+        var failing = true
+        var events: [String] = []
+    }
+    private let state = Mutex(State())
+    private let trigger: MoveDurabilityTrigger
+    private let boundary: MoveSyncBoundary?
+    private let directories: [String: MoveSyncBoundary]
+    private let gameName: String
+    private let base = SystemFileOps()
+
+    init(fixture: MoveFixture, trigger: MoveDurabilityTrigger, boundary: MoveSyncBoundary?) {
+        self.trigger = trigger; self.boundary = boundary
+        gameName = fixture.game.defaultInstallDirectoryName
+        directories = [
+            fixture.source.deletingLastPathComponent().resolvingSymlinksInPath().path: .sourceParent,
+            fixture.destination.resolvingSymlinksInPath().path: .destinationParent,
+            fixture.paths.games.appendingPathComponent(fixture.game.id).resolvingSymlinksInPath().path: .recordParent
+        ]
+    }
+    var didTrigger: Bool { state.withLock { $0.triggered } }
+    var events: [String] { state.withLock { $0.events } }
+    func allowSyncs() { state.withLock { $0.failing = false; $0.events = [] } }
+    private func directoryKind(_ fd: Int32) throws -> MoveSyncBoundary? {
+        var bytes = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard fcntl(fd, F_GETPATH, &bytes) == 0 else { throw LauncherError.io("Missing move test descriptor") }
+        let path = bytes.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+        return directories[URL(fileURLWithPath: path).resolvingSymlinksInPath().path]
+    }
+    func write(_ fd: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try base.write(fd, bytes: bytes) }
+    func synchronize(_ fd: Int32, durable: Bool) throws {
+        let kind = try directoryKind(fd)
+        let fail = state.withLock { state in
+            guard state.triggered else { return false }
+            if let kind { state.events.append("sync:" + kind.rawValue) }
+            return state.failing && kind != nil && kind == boundary
+        }
+        if fail { throw LauncherError.io("Injected move directory synchronization failure") }
+        try base.synchronize(fd, durable: durable)
+    }
+    func rename(from source: String, in src: Int32, to destination: String, in dst: Int32, exclusive: Bool) throws {
+        try base.rename(from: source, in: src, to: destination, in: dst, exclusive: exclusive)
+        if trigger == .forwardRename && source == "Game" && destination == gameName {
+            state.withLock { $0.triggered = true }
+        }
+        if trigger == .rollbackRename && source == gameName && destination == "Game" {
+            state.withLock { $0.triggered = true }
+        }
+        if trigger == .recordRenamed && destination == "record.json" {
+            state.withLock { $0.triggered = true }
+            throw LauncherError.io("Injected failure after record rename")
+        }
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
+        let kind = try directoryKind(directory)
+        try base.unlink(name, in: directory, isDirectory: isDirectory)
+        state.withLock { state in
+            if trigger == .stagingRemoved && name.hasPrefix(".macgacha-moving-") && isDirectory { state.triggered = true }
+            if name == "Game", isDirectory, kind == .sourceParent {
+                if trigger == .sourceRemoved { state.triggered = true }
+                if state.triggered { state.events.append("removeSource") }
+            }
+            if name == "move-journal.json" {
+                if trigger == .journalRemoved { state.triggered = true }
+                if state.triggered { state.events.append("retire") }
+            }
         }
     }
 }

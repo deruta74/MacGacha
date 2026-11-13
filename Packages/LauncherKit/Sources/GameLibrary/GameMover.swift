@@ -265,6 +265,10 @@ public struct GameMover: Sendable {
                 }
             }
         }
+        // A prior rename/unlink may have succeeded before its sync failed.
+        // Re-establish both barriers even when this retry found nothing to do.
+        try sourceParent.synchronizeParentDirectory(of: SafeRelativePath(current.installPath.lastPathComponent))
+        try parent.synchronizeParentDirectory(of: final)
         try await store.deleteState(Self.journalName, for: id)
         log?.post(.info, "game", "Move rolled back", metadata: ["game": id])
     }
@@ -277,7 +281,10 @@ public struct GameMover: Sendable {
         try requireVolumes(journal.original.installPath, journal.destination)
         guard let identity = journal.destinationIdentity else { throw LauncherError.journalCorrupt("Missing move identity") }
         _ = try ContainedFileSystem(root: journal.destination, fileOps: fileOps, expectedRootIdentity: identity).pinRoot()
+        try synchronizeMoveParents(journal)
         journal.phase = .switched
+        // This journal shares the record's directory. Its durable publication
+        // also heals an uncertain record rename before the old copy is removed.
         try await save(journal, game: game)
         try await checkpoint(.switched)
         if !journal.sameVolume {
@@ -288,6 +295,9 @@ public struct GameMover: Sendable {
                 try source.removeMoveRoot { try requireVolumes(journal.original.installPath, journal.destination) }
             }
         }
+        // Also persist an old-root deletion whose previous sync failed, even
+        // when this retry observed the source already absent.
+        try synchronizeMoveParents(journal)
         journal.phase = .cleaned
         try await save(journal, game: game)
         try await checkpoint(.cleaned)
@@ -296,6 +306,16 @@ public struct GameMover: Sendable {
 }
 
 private extension GameMover {
+    func synchronizeMoveParents(_ journal: MoveJournal) throws {
+        try requireVolumes(journal.original.installPath, journal.destination)
+        let source = try ContainedFileSystem(root: journal.original.installPath.deletingLastPathComponent(),
+            fileOps: fileOps, expectedRootIdentity: journal.sourceParentIdentity).pinRoot()
+        let destination = try ContainedFileSystem(root: journal.destination.deletingLastPathComponent(),
+            fileOps: fileOps, expectedRootIdentity: journal.parentIdentity).pinRoot()
+        try source.synchronizeParentDirectory(of: SafeRelativePath(journal.original.installPath.lastPathComponent))
+        try destination.synchronizeParentDirectory(of: SafeRelativePath(journal.destination.lastPathComponent))
+    }
+
     func validateLinks(_ entries: [ContainedFileSystem.TreeEntry]) throws {
         let links = Dictionary(uniqueKeysWithValues: entries.compactMap { entry in entry.linkTarget.map { (entry.path.description, $0) } })
         for entry in entries where entry.linkTarget != nil {
