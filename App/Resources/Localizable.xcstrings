@@ -11453,6 +11453,88 @@
         }
       }
     },
+    "In the game, Shift-F9 hides or shows it. If F9 controls media on your keyboard, add Fn." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Im Spiel blendest du es mit Umschalt-F9 ein oder aus. Wenn F9 auf deiner Tastatur Medien steuert, drücke zusätzlich Fn."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En el juego, Mayús-F9 lo oculta o lo muestra. Si F9 controla el contenido multimedia en tu teclado, añade Fn."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En jeu, Maj-F9 le masque ou l’affiche. Si F9 contrôle les médias sur votre clavier, ajoutez Fn."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Di dalam game, Shift-F9 menyembunyikan atau menampilkannya. Jika F9 di keyboard mengatur media, tambahkan Fn."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲーム中に Shift-F9 で表示と非表示を切り替えます。F9 がメディアキーの場合は Fn も押してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임 중 Shift-F9로 숨기거나 표시합니다. 키보드의 F9가 미디어 키라면 Fn도 함께 누르세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No jogo, Shift-F9 oculta ou mostra. Se F9 controla mídia no seu teclado, adicione Fn."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "В игре Shift-F9 скрывает и показывает его. Если F9 на клавиатуре управляет медиа, добавьте Fn."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ในเกม กด Shift-F9 เพื่อซ่อนหรือแสดง หาก F9 บนคีย์บอร์ดใช้ควบคุมสื่อ ให้กด Fn ด้วย"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "У грі Shift-F9 приховує та показує його. Якщо F9 на клавіатурі керує медіа, додайте Fn."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trong trò chơi, Shift-F9 ẩn hoặc hiện nó. Nếu F9 trên bàn phím điều khiển phương tiện, hãy nhấn thêm Fn."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在游戏中按 Shift-F9 可隐藏或显示。如果键盘上的 F9 用于媒体控制，请同时按 Fn。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在遊戲中按 Shift-F9 可隱藏或顯示。如果鍵盤上的 F9 用於媒體控制，請同時按 Fn。"
+          }
+        }
+      }
+    },
     "In use" : {
       "localizations" : {
         "de" : {
@@ -15485,6 +15567,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "中國大陸（測試版）"
+          }
+        }
+      }
+    },
+    "Metal HUD" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal HUD"
           }
         }
       }
@@ -20752,6 +20916,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "顯示動態背景"
+          }
+        }
+      }
+    },
+    "Shows the frame rate, frame time and GPU load over the game from the next launch." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeigt ab dem nächsten Start Bildrate, Frame-Zeit und GPU-Last über dem Spiel an."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Muestra la tasa de fotogramas, el tiempo de fotograma y la carga de la GPU sobre el juego desde el próximo inicio."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Affiche la fréquence d’images, le temps d’image et la charge du GPU par-dessus le jeu dès le prochain lancement."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Menampilkan frame rate, waktu frame, dan beban GPU di atas game mulai peluncuran berikutnya."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "次回の起動から、ゲーム画面にフレームレート、フレーム時間、GPU 負荷を表示します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다음 실행부터 게임 위에 프레임 속도, 프레임 시간, GPU 부하를 표시합니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mostra a taxa de quadros, o tempo de quadro e o uso da GPU sobre o jogo a partir da próxima abertura."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Со следующего запуска показывает поверх игры частоту кадров, время кадра и нагрузку на GPU."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "แสดงอัตราเฟรม เวลาเฟรม และภาระ GPU บนหน้าจอเกมตั้งแต่การเปิดครั้งถัดไป"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "З наступного запуску показує поверх гри частоту кадрів, час кадру та навантаження на GPU."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hiển thị tốc độ khung hình, thời gian khung hình và tải GPU trên màn hình trò chơi từ lần mở tiếp theo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从下次启动起，在游戏画面上显示帧率、帧时间和 GPU 负载。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從下次啟動起，在遊戲畫面上顯示影格率、影格時間和 GPU 負載。"
           }
         }
       }

@@ -36,6 +36,10 @@ import GameLibrary
         await f.model.start()
         f.launch.onOpen = {
             #expect(f.model.languageRestart != nil)
+            #expect(throws: LauncherError.busy("Application language restart is in progress")) {
+                try f.model.setMetalHUD(true, for: "genshin")
+            }
+            #expect(!f.model.metalHUD(for: "genshin"))
             #expect(throws: LauncherError.self) {
                 try f.model.saveLaunchSettings(f.model.launchSettings(for: "genshin"), for: "genshin")
             }

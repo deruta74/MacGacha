@@ -19,6 +19,16 @@ private func resolve(_ game: String, settings: LaunchSettings? = nil, components
         componentRoots: components, baseEnvironment: base)
 }
 
+@Test(arguments: [RuntimeBackend.dxmt, .d3dmetal], [false, true])
+func metalHUDEnvironmentIsExplicitForEveryEdition(backend: RuntimeBackend, enabled: Bool) throws {
+    for game in GameDefinition.all.map(\.id) {
+        var settings = LaunchSettings.defaults(for: game)
+        settings.backend = backend; settings.compatibilityPatches = false; settings.metalHUD = enabled
+        let value = try resolve(game, settings: settings, base: ["MTL_HUD_ENABLED": "inherited"])
+        #expect(value.environment["MTL_HUD_ENABLED"] == (enabled ? "1" : nil))
+    }
+}
+
 @Test func genshinDefaultsD3DMetal() throws {
     let value = try resolve("genshin")
     #expect(value.executable == wine)

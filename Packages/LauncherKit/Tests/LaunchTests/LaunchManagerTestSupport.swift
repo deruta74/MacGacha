@@ -256,9 +256,9 @@ final class ManagerTemporaryDirectory: Sendable {
 }
 
 extension ManagerFixture {
-    func saveSnapshot(state: LaunchSession.State, processes: [ProcessIdentity], backend: RuntimeBackend = .d3dmetal, sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil, processGroupIDs: Set<Int32>? = nil) async throws -> LaunchSession {
+    func saveSnapshot(state: LaunchSession.State, processes: [ProcessIdentity], backend: RuntimeBackend = .d3dmetal, metalHUD: Bool = false, sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil, processGroupIDs: Set<Int32>? = nil) async throws -> LaunchSession {
         try await BlockingIO.run {
-            let settings = LaunchSettings(backend: backend, retina: false, frameLimit: 60, directX12: false, compatibilityPatches: true)
+            let settings = LaunchSettings(backend: backend, retina: false, frameLimit: 60, directX12: false, compatibilityPatches: true, metalHUD: metalHUD)
             var snapshot = LaunchSession(sessionID: UUID(), game: "starrail", installRoot: self.installRoot,
                 installIdentity: try ContainedFileSystem(root: self.installRoot).rootIdentity(), prefix: self.prefix,
                 bundleID: self.bundle.id.rawValue, runtimeDigest: self.bundle.digest, wineBinary: self.bundle.wineBinary,

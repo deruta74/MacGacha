@@ -8,6 +8,28 @@ import TestSupport
 @testable import Launch
 
 @Suite struct LaunchSettingsTests {
+    @Test func legacySettingsDecodeWithMetalHUDOff() throws {
+        let data = Data(#"{"backend":"dxmt","retina":true,"frameLimit":90,"directX12":false,"compatibilityPatches":false,"unlockFPS":true,"unlockTarget":120,"surroundSound":true}"#.utf8)
+        let settings = try JSONDecoder().decode(LaunchSettings.self, from: data)
+        #expect(!settings.metalHUD)
+        #expect(settings.backend == .dxmt && settings.retina && settings.frameLimit == 90)
+        #expect(!settings.directX12 && !settings.compatibilityPatches)
+        #expect(settings.unlockFPS && settings.unlockTarget == 120 && settings.surroundSound)
+    }
+
+    @Test(arguments: GameDefinition.all.map(\.id)) func metalHUDDefaultsOff(game: String) {
+        #expect(!LaunchSettings.defaults(for: game).metalHUD)
+    }
+
+    @Test(arguments: [false, true]) func metalHUDAlwaysEncodesAndRoundTrips(enabled: Bool) throws {
+        var settings = LaunchSettings.defaults(for: "genshin-cn")
+        settings.metalHUD = enabled
+        let data = try JSONEncoder().encode(settings)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["metalHUD"] as? Bool == enabled)
+        #expect(try JSONDecoder().decode(LaunchSettings.self, from: data) == settings)
+    }
+
     @Test func legacySettingsDecodeWithUnlockOff() throws {
         let settings = try JSONDecoder().decode(LaunchSettings.self, from: Data(#"{"backend":"dxmt","frameLimit":60}"#.utf8))
         #expect(!settings.unlockFPS && settings.unlockTarget == 120)

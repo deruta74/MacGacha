@@ -11,6 +11,14 @@ import RuntimeManager
     func launchState(for id: String) -> LaunchUIState? { launchStates[id] }
     func launchSettings(for id: String) -> LaunchSettings { launchSettingsCache[id] ?? .defaults(for: id) }
 
+    func metalHUD(for gameID: String) -> Bool { launchSettings(for: gameID).metalHUD }
+
+    func setMetalHUD(_ enabled: Bool, for gameID: String) throws {
+        var settings = launchSettings(for: gameID)
+        settings.metalHUD = enabled
+        try saveLaunchSettings(settings, for: gameID)
+    }
+
     /// The synchronous view API validates immediately and updates its observable
     /// snapshot. Serialized durable writes leave the main actor; Play and export
     /// join the queue, and a write failure is surfaced rather than launching with

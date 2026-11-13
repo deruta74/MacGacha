@@ -12,14 +12,16 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
     public var compatibilityPatches: Bool
     public var display: DisplayChoice?
     public var surroundSound: Bool
+    public var metalHUD: Bool
     public var unlockFPS: Bool
     public var unlockTarget: Int
 
     public init(backend: RuntimeBackend, retina: Bool, frameLimit: Int?, directX12: Bool, compatibilityPatches: Bool, display: DisplayChoice? = nil,
-        unlockFPS: Bool = false, unlockTarget: Int = 120, surroundSound: Bool = false) {
+        unlockFPS: Bool = false, unlockTarget: Int = 120, surroundSound: Bool = false, metalHUD: Bool = false) {
         self.backend = backend; self.retina = retina; self.frameLimit = frameLimit
         self.directX12 = directX12; self.compatibilityPatches = compatibilityPatches; self.display = display
         self.unlockFPS = unlockFPS; self.unlockTarget = unlockTarget; self.surroundSound = surroundSound
+        self.metalHUD = metalHUD
     }
 
     public static func defaults(for game: String) -> Self {
@@ -27,7 +29,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
             directX12: GameDefinition.find(game)?.family == .zzz, compatibilityPatches: true)
     }
 
-    private enum CodingKeys: CodingKey { case backend, retina, frameLimit, directX12, compatibilityPatches, display, unlockFPS, unlockTarget, surroundSound }
+    private enum CodingKeys: CodingKey { case backend, retina, frameLimit, directX12, compatibilityPatches, display, unlockFPS, unlockTarget, surroundSound, metalHUD }
     // The store supplies the game so absent fields get that game's defaults.
     // A standalone decoder uses the shared defaults (60 FPS, DirectX 12 off).
     static let gameKey = CodingUserInfoKey(rawValue: "MacGacha.launchSettings.game")!
@@ -41,6 +43,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         compatibilityPatches = try c.decodeIfPresent(Bool.self, forKey: .compatibilityPatches) ?? defaults.compatibilityPatches
         display = try c.decodeIfPresent(DisplayChoice.self, forKey: .display)
         surroundSound = try c.decodeIfPresent(Bool.self, forKey: .surroundSound) ?? false
+        metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
         unlockFPS = try c.decodeIfPresent(Bool.self, forKey: .unlockFPS) ?? defaults.unlockFPS
         unlockTarget = try c.decodeIfPresent(Int.self, forKey: .unlockTarget) ?? defaults.unlockTarget
         try validate(for: decoder.userInfo[Self.gameKey] as? String)
@@ -54,6 +57,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         try c.encode(directX12, forKey: .directX12); try c.encode(compatibilityPatches, forKey: .compatibilityPatches)
         try c.encodeIfPresent(display, forKey: .display)
         try c.encode(surroundSound, forKey: .surroundSound)
+        try c.encode(metalHUD, forKey: .metalHUD)
         try c.encode(unlockFPS, forKey: .unlockFPS); try c.encode(unlockTarget, forKey: .unlockTarget)
     }
 

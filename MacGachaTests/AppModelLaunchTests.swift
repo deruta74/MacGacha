@@ -14,6 +14,29 @@ import RuntimeManager
 
 @Suite(.serialized) @MainActor
 struct AppModelLaunchTests {
+    @Test(arguments: GameDefinition.all.map(\.id)) func metalHUDPersistsOnlyForItsEdition(game: String) async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        let model = fixture.model
+        await model.reattachOnStart()
+        #expect(!model.metalHUD(for: game))
+        var otherSettings = model.launchSettings(for: game)
+        otherSettings.backend = .dxmt; otherSettings.retina = true
+        try model.saveLaunchSettings(otherSettings, for: game)
+        try model.setMetalHUD(true, for: game)
+        #expect(model.metalHUD(for: game))
+        try await model.flushLaunchSettings()
+        let next = fixture.makeModel()
+        await next.reattachOnStart()
+        var expected = otherSettings; expected.metalHUD = true
+        #expect(next.launchSettings(for: game) == expected)
+        for other in GameDefinition.all where other.id != game { #expect(!next.metalHUD(for: other.id)) }
+        try next.setMetalHUD(false, for: game)
+        try await next.flushLaunchSettings()
+        #expect(!next.metalHUD(for: game))
+        let saved = try await BlockingIO.run { try LaunchSettingsStore(paths: fixture.paths).load(game) }
+        #expect(saved == otherSettings)
+    }
+
     @Test(arguments: ["starrail", "starrail-cn"]) func starRailUnlockTargetIsValidatedBeforeSaving(game: String) throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
         let original = fixture.model.launchSettings(for: game)

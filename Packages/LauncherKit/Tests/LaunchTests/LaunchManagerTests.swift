@@ -476,12 +476,17 @@ import TestSupport
         try await f.assertOriginalRestored()
     }
 
-    @Test func reattachUsesSnapshotNotSettings() async throws {
+    @Test(arguments: [false, true]) func reattachUsesSnapshotNotSettings(metalHUD: Bool) async throws {
         let f = try await ManagerFixture.make(), manager = f.manager()
-        _ = try await f.saveSnapshot(state: .spawning, processes: [f.gameProcess.identity], backend: .dxmt, processGroupIDs: [54321])
-        try await BlockingIO.run { try LaunchSettingsStore(paths: f.paths).save(.defaults(for: "starrail"), for: "starrail") }
+        _ = try await f.saveSnapshot(state: .spawning, processes: [f.gameProcess.identity], backend: .dxmt, metalHUD: metalHUD, processGroupIDs: [54321])
+        try await BlockingIO.run {
+            var changed = LaunchSettings.defaults(for: "starrail"); changed.metalHUD = !metalHUD
+            try LaunchSettingsStore(paths: f.paths).save(changed, for: "starrail")
+        }
         let sessions = await manager.reattachAll()
         #expect(sessions["starrail"]?.settings.backend == .dxmt)
+        #expect(sessions["starrail"]?.settings.metalHUD == metalHUD)
+        #expect(f.spawner.calls.isEmpty)
         #expect(sessions["starrail"]?.bundleID == "bundle-a")
         #expect(f.inspector.values.prefixes.allSatisfy { $0 == f.prefix.path })
         await f.clock.waitForSleep(1, duration: .seconds(3))
