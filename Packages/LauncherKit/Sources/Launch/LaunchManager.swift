@@ -57,6 +57,7 @@ public actor LaunchManager {
         let pin: RuntimePin
         var log: SessionLog?
         var lifecycleLog: SessionLifecycleLog?
+        var recoveredLogEvidenceReady = false
         var proxy: (any LaunchSessionProxy)?
         // Process lifetime is independent of file recovery and journal durability.
         // Reattached UI observers must stop their window timers at verified end.
@@ -439,7 +440,6 @@ public actor LaunchManager {
 
     private func watch(game: String, executable: String) async {
         guard let context = contexts[game] else { return }
-        if context.session.state == .running { await startQualificationMonitor(context) }
         let watcher = SessionWatcher(runtimesRoot: paths.runtimes, inspector: inspector, runner: runner, clock: clock)
         let reaper = context.ownedWrapper.map { OwnedWrapperReaper(identity: $0) }
         let supervisionClock = clock
@@ -447,6 +447,8 @@ public actor LaunchManager {
         defer { reaper?.continueReaping(clock: reaperClock) }
         while true {
             do {
+                try await prepareRecoveredLog(context)
+                if context.session.state == .running { await startQualificationMonitor(context) }
                 var watching = context.session
                 watching.state = context.watchPhase
                 try await watcher.watch(session: watching, executable: executable, ownedWrapper: context.ownedWrapper, ownedReaper: reaper,
@@ -550,7 +552,7 @@ public actor LaunchManager {
 
     private func checkpointPlayTimeEnd(_ context: Context) async {
         guard context.session.verifiedEndedAt == nil else { return }
-        let session = context.session, paths = paths, readInstant = playTimeInstant
+        let session = context.session, readInstant = playTimeInstant
         let observed = context.observedGameInProcess
         let end = now()
         let seconds: Double?
@@ -562,16 +564,13 @@ public actor LaunchManager {
                 seconds = instant.seconds - start
             } else { seconds = nil }
         } else {
-            let modified = try? await BlockingIO.run {
-                try session.sessionLogURL.flatMap { try SessionLog.lastModificationDate(paths: paths, game: session.game, url: $0) }
-            }
             var evidence = max(session.supervisedPlaySeconds ?? 0, session.confirmedRunningSeconds ?? 0)
             if let start = session.runningMonotonicSeconds, let last = session.lastLifeMonotonicSeconds, last >= start {
                 evidence = max(evidence, last - start)
             } else if let start = session.runningSince, let last = session.lastLifeAt, last <= end {
                 evidence = max(evidence, last.timeIntervalSince(start))
             }
-            if let start = session.runningSince, let modified, modified <= end {
+            if let start = session.runningSince, let modified = session.sessionLogEvidenceAt, modified <= end {
                 evidence = max(evidence, modified.timeIntervalSince(start))
             }
             seconds = min(evidence, PlayTimeStore.recoveryWindowSeconds)
@@ -581,8 +580,32 @@ public actor LaunchManager {
         context.session.supervisedPlaySeconds = seconds
     }
 
+    private func prepareRecoveredLog(_ context: Context) async throws {
+        guard context.lifecycleLog == nil, !context.recoveredLogEvidenceReady,
+            let url = context.session.sessionLogURL else { return }
+        var snapshot = context.session
+        if snapshot.sessionLogEvidenceCaptured != true {
+            let paths = paths, game = snapshot.game, discoveredAt = now()
+            let modified = try? await BlockingIO.run {
+                try SessionLog.lastModificationDate(paths: paths, game: game, url: url)
+            }
+            snapshot.sessionLogEvidenceAt = modified.flatMap { $0 <= discoveredAt ? $0 : nil }
+            snapshot.sessionLogEvidenceCaptured = true
+            // Retain the first read through failed or uncertain publication.
+            // Readiness remains false until the checkpoint is durably saved.
+            context.session.sessionLogEvidenceAt = snapshot.sessionLogEvidenceAt
+            context.session.sessionLogEvidenceCaptured = true
+        }
+        // Re-publish even an existing marker to resolve uncertain writes before
+        // any cap, ticker or lifecycle append can change the evidence inode.
+        try await persist(snapshot)
+        context.session = snapshot
+        context.recoveredLogEvidenceReady = true
+        enableRecoveredLog(context)
+    }
+
     private func enableRecoveredLog(_ context: Context) {
-        guard context.lifecycleLog == nil, let url = context.session.sessionLogURL,
+        guard context.recoveredLogEvidenceReady, context.lifecycleLog == nil, let url = context.session.sessionLogURL,
             url.deletingLastPathComponent().standardizedFileURL == paths.logs.standardizedFileURL,
             LaunchLogFiles.parseName(url.lastPathComponent)?.game == context.session.game else { return }
         let log = SessionLifecycleLog(recovering: url, ticker: ClockSessionLogTicker(clock: clock))
@@ -872,6 +895,10 @@ public actor LaunchManager {
                 }
                 // Durable hide ownership wins, but a failed first checkpoint must
                 // not discard the running/end observations already made here.
+                if persisted.sessionLogEvidenceCaptured != true, context.session.sessionLogEvidenceCaptured == true {
+                    persisted.sessionLogEvidenceCaptured = true
+                    persisted.sessionLogEvidenceAt = context.session.sessionLogEvidenceAt
+                }
                 persisted.runningSince = persisted.runningSince ?? context.session.runningSince
                 persisted.runningMonotonicSeconds = persisted.runningMonotonicSeconds ?? context.session.runningMonotonicSeconds
                 if let last = context.session.lastLifeAt {
@@ -967,8 +994,10 @@ public actor LaunchManager {
                 let context = Context(session: snapshot, lock: lock, pin: pin)
                 contexts[game] = context
                 unresolvedStartup.remove(game)
-                // Unknown-end log metadata must be captured before recovery writes.
+                // Capture once before capping every recovered log, including
+                // helper-only and uncertain process states.
                 do {
+                    try await prepareRecoveredLog(context)
                     // Spawning without identities may precede a delayed Wine
                     // wrapper. Only startup's complete absence grace can end it.
                     let present = try await presence(snapshot)

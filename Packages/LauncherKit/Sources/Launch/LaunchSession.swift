@@ -44,6 +44,9 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     /// Last positive process observation, persisted with the existing observation write.
     public var lastLifeAt: Date?
     public var lastLifeMonotonicSeconds: Double?
+    /// One-time recovery evidence, including an explicit absence, before log mutation.
+    public var sessionLogEvidenceCaptured: Bool?
+    public var sessionLogEvidenceAt: Date?
     /// Frozen monotonic duration at verified end, retained for accounting retries.
     public var supervisedPlaySeconds: Double?
     /// Durable qualification for automatic runtime cleanup, absent in legacy journals.
@@ -65,7 +68,7 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         bootSessionUUID: String? = nil, sessionStartTime: UInt64? = nil, endLogged: Bool? = nil,
         recoveryLocation: LaunchRecoveryLocation? = nil, startupPending: Bool? = nil,
         reachedRunning: Bool? = nil, reachedReady: Bool? = nil, confirmedRunningSeconds: Double? = nil,
-        runningSince: Date? = nil, verifiedEndedAt: Date? = nil, playTimeEndRecovered: Bool? = nil, supervisedPlaySeconds: Double? = nil, runningMonotonicSeconds: Double? = nil, lastLifeAt: Date? = nil, lastLifeMonotonicSeconds: Double? = nil) {
+        runningSince: Date? = nil, verifiedEndedAt: Date? = nil, playTimeEndRecovered: Bool? = nil, supervisedPlaySeconds: Double? = nil, runningMonotonicSeconds: Double? = nil, lastLifeAt: Date? = nil, lastLifeMonotonicSeconds: Double? = nil, sessionLogEvidenceCaptured: Bool? = nil, sessionLogEvidenceAt: Date? = nil) {
         self.sessionID = sessionID; self.game = game; self.installRoot = installRoot; self.installIdentity = installIdentity
         self.prefix = prefix; self.bundleID = bundleID; self.runtimeDigest = runtimeDigest; self.wineBinary = wineBinary
         self.wineserver = wineserver; self.componentIDs = componentIDs; self.recipeVersion = recipeVersion
@@ -83,10 +86,11 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         self.supervisedPlaySeconds = supervisedPlaySeconds
         self.runningMonotonicSeconds = runningMonotonicSeconds
         self.lastLifeAt = lastLifeAt; self.lastLifeMonotonicSeconds = lastLifeMonotonicSeconds
+        self.sessionLogEvidenceCaptured = sessionLogEvidenceCaptured; self.sessionLogEvidenceAt = sessionLogEvidenceAt
     }
 
     func validate() throws {
-        guard [runningSince, verifiedEndedAt, lastLifeAt].compactMap({ $0 }).allSatisfy({ $0.timeIntervalSinceReferenceDate.isFinite }) else {
+        guard [runningSince, verifiedEndedAt, lastLifeAt, sessionLogEvidenceAt].compactMap({ $0 }).allSatisfy({ $0.timeIntervalSinceReferenceDate.isFinite }) else {
             throw LauncherError.journalCorrupt("Invalid play time interval")
         }
         guard [runningMonotonicSeconds, lastLifeMonotonicSeconds].compactMap({ $0 }).allSatisfy({ $0.isFinite && $0 >= 0 && bootSessionUUID != nil }) else {

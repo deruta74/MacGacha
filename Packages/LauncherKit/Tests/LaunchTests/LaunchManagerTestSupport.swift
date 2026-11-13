@@ -302,7 +302,7 @@ extension ManagerFixture {
 }
 
 final class ManagerJournalFileOps: FileOps, Sendable {
-    private let failNext = Mutex(false)
+    private let failAfter = Mutex<Int?>(nil)
     private let failNextDelete = Mutex(false)
     private struct DeletionSync {
         var armed = false
@@ -315,7 +315,7 @@ final class ManagerJournalFileOps: FileOps, Sendable {
     func allowDeletionSync() { deletionSync.withLock { $0.armed = false } }
     var deletionSyncFailures: Int { deletionSync.withLock { $0.failures } }
     var deletionSyncSuccesses: Int { deletionSync.withLock { $0.successes } }
-    func arm() { failNext.withLock { $0 = true } }
+    func arm(afterPublications: Int = 0) { failAfter.withLock { $0 = afterPublications } }
     func armDelete() { failNextDelete.withLock { $0 = true } }
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
         try SystemFileOps().write(descriptor, bytes: bytes)
@@ -334,7 +334,12 @@ final class ManagerJournalFileOps: FileOps, Sendable {
         try SystemFileOps().synchronize(descriptor, durable: durable)
     }
     func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
-        if destination == "launch-session.json", failNext.withLock({ let value = $0; $0 = false; return value }) {
+        if destination == "launch-session.json", failAfter.withLock({ remaining in
+            guard let value = remaining else { return false }
+            if value > 0 { remaining = value - 1; return false }
+            remaining = nil
+            return true
+        }) {
             throw LauncherError.io("injected launch journal publication failure")
         }
         try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)

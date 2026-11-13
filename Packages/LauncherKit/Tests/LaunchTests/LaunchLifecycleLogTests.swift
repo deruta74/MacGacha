@@ -279,7 +279,8 @@ import TestSupport
         _ = try await f.saveSnapshot(state: .running, processes: [], sessionLogURL: log.url)
         // First recovery cannot durably record the verified end. The guard owns
         // the next retry, without a watcher, once that transient write recovers.
-        f.journalOps.arm()
+        // Allow the recovered-log evidence checkpoint before failing the end.
+        f.journalOps.arm(afterPublications: 1)
         let manager = f.manager()
         _ = await manager.reattachAll()
         #expect(await manager.liveSession(for: "starrail")?.state == .recoveryPending)

@@ -9,6 +9,102 @@ import RuntimeManager
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct PlayTimeLaunchTests {
+    @Test(arguments: [false, true], [false, true])
+    func recoveredHelpersCapLogsWithoutReplacingCapturedEvidence(uncertain: Bool, restart: Bool) async throws {
+        let f = try await ManagerFixture.make(initialGame: false), paths = f.paths, origin = 2_100_000_000.0
+        let log = try await BlockingIO.run {
+            let log = try SessionLog.create(paths: paths, game: "starrail", header: [:],
+                now: Date(timeIntervalSince1970: origin), timeZone: TimeZone(secondsFromGMT: 0)!,
+                maxBytes: 4096, ticker: ManagerNoopLogTicker())
+            let file = try FileHandle(forWritingTo: log.url)
+            try file.seekToEnd(); try file.write(contentsOf: Data(repeating: 65, count: 8192)); try file.close()
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: origin + 600)], ofItemAtPath: log.url.path)
+            return log
+        }
+        var session = try await f.saveSnapshot(state: .running, processes: [], sessionLogURL: log.url)
+        session.runningSince = Date(timeIntervalSince1970: origin)
+        session.runningMonotonicSeconds = 0
+        let saved = session
+        try await BlockingIO.run { try LaunchJournal(paths: paths).write(saved) }
+        f.clock.advance(by: .seconds(172_800))
+        f.inspector.update { $0.processes = [f.serverProcess]; $0.failuresRemaining = uncertain ? 1 : 0 }
+        let manager = f.manager(now: { Date(timeIntervalSince1970: origin + 172_800) })
+        _ = await manager.reattachAll()
+        await manager.flushLogs()
+        let size = try await BlockingIO.run { try FileManager.default.attributesOfItem(atPath: log.url.path)[.size] as? Int }
+        #expect(size == 4096)
+        let captured = try #require(try await f.journal())
+        #expect(captured.sessionLogEvidenceCaptured == true)
+        #expect(captured.sessionLogEvidenceAt == Date(timeIntervalSince1970: origin + 600))
+        // Model a later cap/write timestamp without relying on real elapsed time.
+        try await BlockingIO.run {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: origin + 100_000)], ofItemAtPath: log.url.path)
+        }
+        try await f.end(manager)
+        await f.waitForRestore(manager)
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+        if restart {
+            try await BlockingIO.run {
+                try LaunchJournal(paths: paths).write(captured)
+                try ContainedFileSystem(root: paths.root).removeFile(at: SafeRelativePath("PlayTime/play-time.json"))
+                try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: origin + 120_000)], ofItemAtPath: log.url.path)
+            }
+            _ = await f.manager(now: { Date(timeIntervalSince1970: origin + 172_800) }).reattachAll()
+            #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+        }
+        withExtendedLifetime(log) {}
+    }
+
+    @Test func recoveredLogWaitsForDurableEvidenceBeforeCapping() async throws {
+        let f = try await ManagerFixture.make(initialGame: false), paths = f.paths, origin = 2_100_000_000.0
+        let log = try await BlockingIO.run {
+            let log = try SessionLog.create(paths: paths, game: "starrail", header: [:],
+                now: Date(timeIntervalSince1970: origin), timeZone: TimeZone(secondsFromGMT: 0)!,
+                maxBytes: 4096, ticker: ManagerNoopLogTicker())
+            let file = try FileHandle(forWritingTo: log.url)
+            try file.seekToEnd(); try file.write(contentsOf: Data(repeating: 65, count: 8192)); try file.close()
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: origin + 600)], ofItemAtPath: log.url.path)
+            return log
+        }
+        var session = try await f.saveSnapshot(state: .running, processes: [], sessionLogURL: log.url)
+        session.runningSince = Date(timeIntervalSince1970: origin)
+        session.runningMonotonicSeconds = 0
+        let saved = session
+        try await BlockingIO.run { try LaunchJournal(paths: paths).write(saved) }
+        f.clock.advance(by: .seconds(172_800))
+        f.inspector.update { $0.processes = [f.serverProcess]; $0.failuresRemaining = 0 }
+        let ops = PlayTimeEvidenceSyncOps()
+        let manager = f.manager(now: { Date(timeIntervalSince1970: origin + 172_800) }, journalFileOps: ops)
+        _ = await manager.reattachAll()
+        await f.clock.waitForSleep(1, duration: .seconds(1))
+        await manager.flushLogs()
+        let uncapped = try await BlockingIO.run { try FileManager.default.attributesOfItem(atPath: log.url.path)[.size] as? Int }
+        #expect((uncapped ?? 0) > 8192)
+        #expect(try await f.journal()?.sessionLogEvidenceCaptured == true)
+        // The rename succeeded, but its directory sync did not. A retry must
+        // durably republish the captured value before enabling any log writer.
+        try await BlockingIO.run {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: origin + 100_000)], ofItemAtPath: log.url.path)
+        }
+        ops.allow()
+        f.clock.advance(by: .seconds(1))
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        await manager.flushLogs()
+        let size = try await BlockingIO.run { try FileManager.default.attributesOfItem(atPath: log.url.path)[.size] as? Int }
+        #expect(size == 4096)
+        let captured = try #require(try await f.journal())
+        #expect(captured.sessionLogEvidenceCaptured == true)
+        #expect(captured.sessionLogEvidenceAt == Date(timeIntervalSince1970: origin + 600))
+        // Model a later cap/write timestamp without relying on real elapsed time.
+        try await BlockingIO.run {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: origin + 100_000)], ofItemAtPath: log.url.path)
+        }
+        try await f.end(manager)
+        await f.waitForRestore(manager)
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+        withExtendedLifetime(log) {}
+    }
+
     @Test func slowerLifeObservationCannotReplaceNewerEvidence() async throws {
         let f = try await ManagerFixture.make(logsEnabled: false), paths = f.paths, bundleID = f.bundle.id.rawValue
         try await BlockingIO.run {
@@ -402,5 +498,30 @@ private struct PlayTimeWaitingRunner: ProcessRunner {
             try await released.wait()
         }
         return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+    }
+}
+
+private final class PlayTimeEvidenceSyncOps: FileOps, Sendable {
+    private struct State { var fail = true; var published = false }
+    private let state = Mutex(State())
+    func allow() { state.withLock { $0.fail = false } }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        try SystemFileOps().write(descriptor, bytes: bytes)
+    }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws {
+        let fail = state.withLock { state in
+            guard state.published else { return false }
+            state.published = false
+            return state.fail
+        }
+        if fail { throw LauncherError.io("injected recovery evidence directory sync failure") }
+        try SystemFileOps().synchronize(descriptor, durable: durable)
+    }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+        if destination == "launch-session.json" { state.withLock { $0.published = true } }
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
+        try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
     }
 }
