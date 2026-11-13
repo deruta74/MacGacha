@@ -195,6 +195,19 @@ struct GameSettingsSheet: View {
                     }
                 }
                 Section {
+                    Toggle("Metal HUD", isOn: settings.metalHUD)
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Shows the frame rate, frame time and GPU load over the game from the next launch.")
+                        // The shortcut belongs to D3DMetal's own HUD menu, so DXMT only gets the switch.
+                        if settings.wrappedValue.backend == .d3dmetal {
+                            Text("In the game, Shift-F9 hides or shows it. If F9 controls media on your keyboard, add Fn.")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Section {
                     Toggle("Retina resolution", isOn: settings.retina)
                 } footer: {
                     Text("Sharper, but much heavier on the GPU.")
