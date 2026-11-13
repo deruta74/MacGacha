@@ -268,17 +268,26 @@ private struct GameSnapshot: Sendable {
                 else { failure = error }
             }
             guard self?.gameOperation == token else { return }
+            // Retire older location reads before capture, preserving later events.
+            let finalizationRevision = UUID()
+            self?.gameRevisions[id] = finalizationRevision
+            var snapshotRevision: UUID? = finalizationRevision
             // Cancellation may have raced with publication. Read the durable state
             // in an uncancelled task, retaining services rather than the model.
             let ejectPause = failure == .installVolumeUnavailable || self?.gameLocationPauseReasons[id] == .installVolumeUnavailable
+            var drained = ejectPause
             var snapshot = await Task.detached { await readGame(services, id: id, draining: ejectPause) }.value
             guard let self, self.gameOperation == token else { return }
             let cacheInfo = try? await services.preDownloadInfo(id, refresh: false)
             guard self.gameOperation == token else { return }
-            // An ordinary pause may become an eject pause during either read.
-            // Join in an uncancelled task and reread after all workers release ownership.
-            if !ejectPause, self.gameLocationPauseReasons[id] == .installVolumeUnavailable {
-                snapshot = await Task.detached { await readGame(services, id: id, draining: true) }.value
+            // Recheck after every read: a mount may finish its refresh already,
+            // or queue behind this consumer. Late ejects still require drainage.
+            while self.gameRevisions[id] != snapshotRevision ||
+                (!drained && self.gameLocationPauseReasons[id] == .installVolumeUnavailable) {
+                let needsDrain = !drained && self.gameLocationPauseReasons[id] == .installVolumeUnavailable
+                snapshotRevision = self.gameRevisions[id]
+                snapshot = await Task.detached { await readGame(services, id: id, draining: needsDrain) }.value
+                drained = drained || needsDrain
                 guard self.gameOperation == token else { return }
             }
             if failure == .installVolumeUnavailable { self.gameLocationPauseReasons[id] = .installVolumeUnavailable }
@@ -287,10 +296,9 @@ private struct GameSnapshot: Sendable {
             let activity: GameActivity?
             if !completed, failure == nil, let approval { activity = .needsApproval(required: approval.required, available: approval.available) }
             else { activity = nil }
-            // Final publication supersedes location reads begun during the operation.
+            // Publish for the latest observed revision without replacing it.
             // No suspension may separate this publication from releasing the token.
-            let finalRevision = UUID()
-            self.gameRevisions[id] = finalRevision
+            let finalRevision = snapshotRevision
             self.applyGame(snapshot, id: id, activity: activity, reportError: failure == nil)
             if let cacheInfo {
                 self.preDownloadRevisions[id] = UUID()

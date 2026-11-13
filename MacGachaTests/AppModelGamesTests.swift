@@ -16,6 +16,42 @@ import Launch
 
 @Suite(.serialized) @MainActor
 struct AppModelGamesTests {
+    @Test(.timeLimit(.minutes(1)), arguments: ["snapshot", "cacheInfo"], [false, true])
+    func remountDuringEjectFinalizationRestoresAvailableState(read: String, notifiedEject: Bool) async throws {
+        let gate = GameReadGate(), source = TestVolumeEventSource(), fake = FakeGameServices()
+        defer { gate.release(); fake.finish() }
+        let (model, _, _) = try gameFixture(fake: fake, volumeEvents: source)
+        let path = URL(fileURLWithPath: "/Volumes/Games SSD/Game")
+        let volume = URL(fileURLWithPath: "/Volumes/Games SSD")
+        fake.setLocation(path, for: "genshin")
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        model.setGameRecord("genshin", try await fake.record("genshin"))
+        model.updateGame("genshin")
+        let operation = try #require(model.gameTask)
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        if read == "snapshot" { fake.gateNextRecordRead(gate) }
+        else { fake.gateNextCacheInfoRead(gate) }
+        fake.setStatus(.locationUnavailable(path), for: "genshin")
+        if notifiedEject { source.send(.unmounted(volume)) }
+        else { fake.fail(.installVolumeUnavailable) }
+        await gate.waitUntilEntered()
+        fake.setStatus(.paused(.update), for: "genshin")
+        source.send(.mounted(volume))
+        if !notifiedEject {
+            // This refresh completes before the consumer. A preserved revision
+            // alone cannot prevent the older final snapshot from overwriting it.
+            await model.volumeEventTask?.value
+            #expect(model.games["genshin"]?.status == .paused(.update))
+        }
+        gate.release()
+        await operation.value; await model.volumeEventTask?.value
+        #expect(model.games["genshin"]?.status == .paused(.update))
+        #expect(model.gameLocationURL(for: "genshin") == path)
+        #expect(model.unavailableVolumeName(for: "genshin") == nil)
+        #expect(model.gameLocationPauseReason(for: "genshin") == .installVolumeUnavailable)
+        #expect(fake.calls.count == 1)
+    }
+
     @Test(.timeLimit(.minutes(1)), arguments: ["snapshot", "cacheInfo"])
     func lateEjectDuringFinalizationRetainsReservationUntilDrain(read: String) async throws {
         let milestones = AsyncStream<Bool>.makeStream()
