@@ -84,7 +84,8 @@ import RuntimeManager
     }
 
     func reattachOnStart() async {
-        if let task = launchStartupTask { await task.value; return }
+        let playTimeStartup = startPlayTime()
+        if let task = launchStartupTask { await task.value; await playTimeStartup.value; return }
         let services = launchServices, preferences = launchPreferences
         let task = Task { [weak self] in
             guard let self else { return }
@@ -116,6 +117,8 @@ import RuntimeManager
         }
         launchStartupTask = task
         await task.value
+        await playTimeStartup.value
+        await refreshPlayTime()
     }
 
     func play(_ id: String) {
@@ -179,7 +182,9 @@ import RuntimeManager
             await captureLog(id)
             observeGameWindow(id)
         case .ready: launchStates[id] = .ready; launchWindows.ready(gameID: id)
-        case .ended: recordVerifiedEnd(id)
+        case .ended:
+            recordVerifiedEnd(id)
+            await refreshPlayTime()
         case .restored(let outcome):
             switch outcome {
             case .pending:
@@ -195,6 +200,7 @@ import RuntimeManager
             case .clean:
                 _ = await refreshLaunchSession(id)
             }
+            await refreshPlayTime()
         case .failed(let failure):
             if sessionLogsEnabled { launchLogURLs[id] = failure.logURL ?? launchLogURLs[id] }
             else { launchLogURLs[id] = nil }

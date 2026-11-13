@@ -30,6 +30,7 @@ public actor LaunchManager {
     private let inspector: any ProcessInspector
     private let runner: any ProcessRunner
     private let clock: any Clock<Duration>
+    private let now: @Sendable () -> Date
     private let gameMode: (any GameModeProviding)?
     private let displayProbe: any DisplayProbe
     private let proxyFactory: ProxyFactory
@@ -63,6 +64,7 @@ public actor LaunchManager {
         var lastConfirmedElapsed: Duration = .zero
         var qualificationTask: Task<Void, Never>?
         var runningAnnounced = false
+        var observedGameInProcess = false
         var endOutcome = "while MacGacha was closed"
         var restoreEntryCount = 0
         var ownedWrapper: ProcessIdentity?
@@ -87,7 +89,9 @@ public actor LaunchManager {
 
     public init(paths: AppPaths, runtimes: any LaunchRuntimeProviding, prefixes: any LaunchPrefixProviding,
         preparation: any LaunchPreparing, spawner: any ProcessSpawner, inspector: any ProcessInspector,
-        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, displayProbe: any DisplayProbe = SystemDisplayProbe(), gameMode: (any GameModeProviding)? = nil) {
+        runner: any ProcessRunner, clock: any Clock<Duration>, log: EventLog? = nil, displayProbe: any DisplayProbe = SystemDisplayProbe(), gameMode: (any GameModeProviding)? = nil,
+        now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
         self.gameMode = gameMode ?? GameModeHelper(paths: paths)
         self.eventLog = log ?? EventLog(directory: paths.logs)
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: {})
@@ -111,7 +115,9 @@ public actor LaunchManager {
         recipeOverrides: [String: LaunchRecipe] = [:],
         sessionProvenance: @escaping @Sendable () throws -> (bootSessionUUID: String, sessionStartTime: UInt64) = LaunchManager.currentSessionProvenance,
         beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {},
-        fpsInjectorStatus: @escaping @Sendable (ProcessIdentity) throws -> SessionChildStatus = OwnedSessionChild.systemStatus) {
+        fpsInjectorStatus: @escaping @Sendable (ProcessIdentity) throws -> SessionChildStatus = OwnedSessionChild.systemStatus,
+        now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
         self.gameMode = gameMode
         self.eventLog = log ?? EventLog(directory: paths.logs)
         self.sessionLogWriter = Self.makeSessionLogWriter(beforeWrite: beforeSessionLogWrite)
@@ -431,6 +437,10 @@ public actor LaunchManager {
                     try await self.observed(game: game, processes: processes)
                 }
                 context.hasEnded = true
+                if context.session.verifiedEndedAt == nil {
+                    context.session.verifiedEndedAt = now()
+                    context.session.playTimeEndRecovered = !context.observedGameInProcess
+                }
                 context.fpsWorker?.cancel()
                 context.endOutcome = context.ready ? "normal" : "before ready"
                 context.session.state = .ending; try await persist(context.session)
@@ -488,13 +498,17 @@ public actor LaunchManager {
             let timer = AnyLaunchClock(timerClock)
             context.runningTimer = { timer.now }
         }
+        if !processes.isEmpty { context.observedGameInProcess = true }
+        if !processes.isEmpty, context.session.runningSince == nil, context.session.verifiedEndedAt == nil {
+            context.session.runningSince = now()
+        }
         context.session.processes = Array(Set(context.session.processes + processes)).sorted { $0.pid < $1.pid }
         try await persist(context.session)
         if !processes.isEmpty { await startQualificationMonitor(context) }
         if !context.runningAnnounced, let process = processes.sorted(by: { $0.pid < $1.pid }).first {
             context.runningAnnounced = true
             note(context, "game process detected: pid \(process.pid)")
-            event("Game running", game: game, metadata: ["pid": String(process.pid)])
+            event("Game running", game: game, metadata: ["pid": String(process.pid), "sessionID": context.session.sessionID.uuidString])
             context.continuation?.yield(.running)
         }
         if !processes.isEmpty { try await startFpsInjector(context) }
@@ -653,6 +667,7 @@ public actor LaunchManager {
         }
         guard let (session, outcome) = context.finalization else { preconditionFailure("Missing restore finalization") }
         do {
+            try await recordPlayTime(session)
             try await BlockingIO.run {
                 if case .conflict(let movedTo) = outcome {
                     try RecoveryNoticeStore(paths: paths).record(RecoveryNotice(id: session.sessionID, game: session.game,
@@ -710,6 +725,15 @@ public actor LaunchManager {
                 event("Automatic cleanup proof unavailable", game: session.game, level: .warning)
             }
         }
+        if context.session.verifiedEndedAt == nil {
+            context.session.verifiedEndedAt = now()
+            context.session.playTimeEndRecovered = true
+            try await persist(context.session)
+        }
+        // This checkpoint remains in the journal until accounting and file recovery
+        // both finish. A crash cannot replace the interval with a later detection.
+        do { try await recordPlayTime(context.session) }
+        catch { event("Play time recording deferred", game: context.session.game, level: .warning) }
         guard context.session.endLogged != true else { return }
         var snapshot = context.session
         snapshot.endLogged = true
@@ -721,7 +745,16 @@ public actor LaunchManager {
         let outcome = context.endOutcome
         note(context, outcome == "while MacGacha was closed"
             ? "Session ended while MacGacha was closed" : "session ended: \(outcome)")
-        event("Session ended", game: context.session.game, metadata: ["outcome": outcome])
+        event("Session ended", game: context.session.game, metadata: ["outcome": outcome, "sessionID": context.session.sessionID.uuidString])
+    }
+
+    private func recordPlayTime(_ session: LaunchSession) async throws {
+        guard let end = session.verifiedEndedAt, session.runningSince != nil else { return }
+        let paths = paths
+        try await BlockingIO.run {
+            try PlayTimeStore(paths: paths).record(sessionID: session.sessionID, game: session.game,
+                runningSince: session.runningSince, endedAt: end, recovered: session.playTimeEndRecovered ?? true)
+        }
     }
 
     private func restored(_ context: Context, outcome: RestoreOutcome) {
@@ -752,6 +785,13 @@ public actor LaunchManager {
                 for owned in [context.ownedWrapper, context.fpsChild?.identity].compactMap({ $0 }) {
                     if !persisted.processes.contains(owned) { persisted.processes.append(owned) }
                     persisted.processGroupIDs = (persisted.processGroupIDs ?? []).union([owned.pid])
+                }
+                // Durable hide ownership wins, but a failed first checkpoint must
+                // not discard the running/end observations already made here.
+                persisted.runningSince = persisted.runningSince ?? context.session.runningSince
+                if persisted.verifiedEndedAt == nil {
+                    persisted.verifiedEndedAt = context.session.verifiedEndedAt
+                    persisted.playTimeEndRecovered = context.session.playTimeEndRecovered
                 }
                 persisted.state = .recoveryPending
                 persisted.startupPending = !context.hasEnded && context.watchPhase == .spawning
@@ -847,8 +887,9 @@ public actor LaunchManager {
                 do {
                     // Spawning without identities may precede a delayed Wine
                     // wrapper. Only startup's complete absence grace can end it.
-                    let present = try await alive(snapshot)
-                    let starting = snapshot.state == .spawning || snapshot.startupPending == true || present
+                    let present = try await presence(snapshot)
+                    context.observedGameInProcess = present.gameRunning
+                    let starting = snapshot.state == .spawning || snapshot.startupPending == true || present.alive
                     if starting {
                         guard let executable = Self.executable(snapshot) else {
                             await pending(context, reason: "The snapshot's executable could not be confirmed"); continue
@@ -880,13 +921,19 @@ public actor LaunchManager {
     }
 
     private func alive(_ session: LaunchSession) async throws -> Bool {
+        try await presence(session).alive
+    }
+
+    private func presence(_ session: LaunchSession) async throws -> (alive: Bool, gameRunning: Bool) {
         let inspector = inspector, scope = session.inspectionScope(runtimesRoot: paths.runtimes)
+        let name = Self.executable(session).map(Self.executableLeaf)
         return try await BlockingIO.run {
             let processes = try inspector.processes(environmentContains: "WINEPREFIX", value: session.prefix.path, scope: scope)
-            if session.processes.contains(where: { inspector.isAlive($0) }) { return true }
-            // Any prefix-matching helper can still start the game after a crash
-            // before the wrapper identity was journaled.
-            return !processes.isEmpty
+            // A helper or reused recovery watcher does not prove a live game.
+            // Only positive executable observations authorize an unbounded end.
+            let gameRunning = name.map { name in processes.contains { SessionWatcher.isGame($0, name: name) } } ?? false
+            let present = session.processes.contains(where: { inspector.isAlive($0) }) || !processes.isEmpty
+            return (present, gameRunning)
         }
     }
 

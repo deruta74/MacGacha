@@ -253,6 +253,9 @@ final class AppModel {
     @ObservationIgnored var dependencyUpdateLog: EventLog?
     var launchSettingsRevisions: [String: UUID] = [:]
     var launchStates: [String: LaunchUIState] = [:]
+    var playTimeSummaries: [String: PlayTimeSummary] = [:]
+    @ObservationIgnored var playTimeStartupTask: Task<Void, Never>?
+    @ObservationIgnored var playTimeRefreshRevision = UUID()
     var launchNotes: [String: LaunchNote] = [:]
     @ObservationIgnored var launchFailures: [String: LaunchFailureInfo] = [:]
     var recoveryNotices: [RecoveryNotice] = []

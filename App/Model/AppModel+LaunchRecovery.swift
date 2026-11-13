@@ -65,6 +65,7 @@ import Launch
                 recordVerifiedEnd(id)
                 // Load notices before cancelling this observer's ticker, so its
                 // cancellation cannot suppress the BlockingIO-backed notice read.
+                await refreshPlayTime()
                 let notices = try? await launchServices.notices()
                 guard !Task.isCancelled, launchObservationGenerations[id] == generation else { return true }
                 finishLaunchObservation(id)
@@ -76,8 +77,11 @@ import Launch
             // A read captured before termination may return after a newer end
             // observation. Verified end is irreversible until the next attempt.
             let hasEnded = observation.hasEnded || knownEndedLaunchGames.contains(id)
-            if hasEnded { recordVerifiedEnd(id) }
-            else { liveLaunchGames.insert(id) }
+            if hasEnded {
+                recordVerifiedEnd(id)
+                await refreshPlayTime()
+                guard !Task.isCancelled, launchObservationGenerations[id] == generation else { return true }
+            } else { liveLaunchGames.insert(id) }
             switch observation.session.state {
             case .running where !hasEnded:
                 if launchStates[id] != .ready && launchStates[id] != .running {

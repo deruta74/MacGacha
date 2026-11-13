@@ -35,6 +35,10 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     public var endLogged: Bool?
     /// Retains startup grace when inspection uncertainty changes state to pending.
     public var startupPending: Bool?
+    /// Wall-clock play interval. Absent in journals written before play-time tracking.
+    public var runningSince: Date?
+    public var verifiedEndedAt: Date?
+    public var playTimeEndRecovered: Bool?
     /// Durable qualification for automatic runtime cleanup, absent in legacy journals.
     public var reachedRunning: Bool?
     public var reachedReady: Bool?
@@ -53,7 +57,8 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         sessionLogURL: URL? = nil, gameExecutable: SafeRelativePath? = nil, processGroupIDs: Set<Int32>? = nil,
         bootSessionUUID: String? = nil, sessionStartTime: UInt64? = nil, endLogged: Bool? = nil,
         recoveryLocation: LaunchRecoveryLocation? = nil, startupPending: Bool? = nil,
-        reachedRunning: Bool? = nil, reachedReady: Bool? = nil, confirmedRunningSeconds: Double? = nil) {
+        reachedRunning: Bool? = nil, reachedReady: Bool? = nil, confirmedRunningSeconds: Double? = nil,
+        runningSince: Date? = nil, verifiedEndedAt: Date? = nil, playTimeEndRecovered: Bool? = nil) {
         self.sessionID = sessionID; self.game = game; self.installRoot = installRoot; self.installIdentity = installIdentity
         self.prefix = prefix; self.bundleID = bundleID; self.runtimeDigest = runtimeDigest; self.wineBinary = wineBinary
         self.wineserver = wineserver; self.componentIDs = componentIDs; self.recipeVersion = recipeVersion
@@ -66,9 +71,14 @@ public struct LaunchSession: Codable, Equatable, Sendable {
         self.startupPending = startupPending
         self.reachedRunning = reachedRunning; self.reachedReady = reachedReady
         self.confirmedRunningSeconds = confirmedRunningSeconds
+        self.runningSince = runningSince; self.verifiedEndedAt = verifiedEndedAt
+        self.playTimeEndRecovered = playTimeEndRecovered
     }
 
     func validate() throws {
+        guard [runningSince, verifiedEndedAt].compactMap({ $0 }).allSatisfy({ $0.timeIntervalSinceReferenceDate.isFinite }) else {
+            throw LauncherError.journalCorrupt("Invalid play time interval")
+        }
         guard confirmedRunningSeconds.map({ $0.isFinite && $0 >= 0 && $0 <= 31_536_000 }) ?? true else {
             throw LauncherError.journalCorrupt("Invalid running qualification")
         }

@@ -108,22 +108,10 @@ targets:
         buildPhase: resources
       - path: RuntimeCatalog/runtime-catalog.json
         buildPhase: resources
+    # The hosted test bundle uses the app's package graph. Linking those products
+    # again creates duplicate static/dynamic targets and dependency-scan warnings.
     dependencies:
       - target: MacGacha
-      - package: LauncherKit
-        product: LauncherCore
-      - package: LauncherKit
-        product: DownloadEngine
-      - package: LauncherKit
-        product: Diagnostics
-      - package: LauncherKit
-        product: HoYoPlayAPI
-      - package: LauncherKit
-        product: Sophon
-      - package: LauncherKit
-        product: GameLibrary
-      - package: LauncherKit
-        product: Launch
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lo7ted.macgacha.tests

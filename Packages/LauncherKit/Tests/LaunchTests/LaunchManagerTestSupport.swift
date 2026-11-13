@@ -220,11 +220,11 @@ final class ManagerFixture: Sendable {
     func manager(hideHooks: LaunchFileHooks = .none, beforeJournalRead: @escaping @Sendable () throws -> Void = {},
         beforeRecoveryRead: @escaping @Sendable () async throws -> Void = {}, inspector overrideInspector: (any ProcessInspector)? = nil,
         log: EventLog? = nil, displayProbe: any DisplayProbe = FixedDisplayProbe(), gameMode: (any GameModeProviding)? = nil,
-        runner overrideRunner: (any ProcessRunner)? = nil, beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) -> LaunchManager {
+        runner overrideRunner: (any ProcessRunner)? = nil, now: @escaping @Sendable () -> Date = Date.init, journalFileOps overrideJournalOps: (any FileOps)? = nil, beforeSessionLogWrite: @escaping @Sendable () throws -> Void = {}) -> LaunchManager {
         LaunchManager(paths: paths, runtimes: runtime, prefixes: prefixes, preparation: preparation,
             spawner: spawner, inspector: overrideInspector ?? inspector, runner: overrideRunner ?? runner, clock: clock, log: log, displayProbe: displayProbe, gameMode: gameMode,
-            proxyFactory: { [proxy] _, log in proxy.start(log: log); return proxy }, baseEnvironment: [:], journalFileOps: journalOps, hideHooks: hideHooks, beforeJournalRead: beforeJournalRead, beforeRecoveryRead: beforeRecoveryRead,
-            sessionProvenance: { (Self.bootSessionUUID, Self.sessionStartTime) }, beforeSessionLogWrite: beforeSessionLogWrite)
+            proxyFactory: { [proxy] _, log in proxy.start(log: log); return proxy }, baseEnvironment: [:], journalFileOps: overrideJournalOps ?? journalOps, hideHooks: hideHooks, beforeJournalRead: beforeJournalRead, beforeRecoveryRead: beforeRecoveryRead,
+            sessionProvenance: { (Self.bootSessionUUID, Self.sessionStartTime) }, beforeSessionLogWrite: beforeSessionLogWrite, now: now)
     }
     func consume(_ manager: LaunchManager, events: ManagerEvents, build: String = "4.6.0") async -> Task<Void, Never> {
         let stream = await manager.launch(game: game, installRoot: installRoot, gameBuild: build)

@@ -91,6 +91,8 @@ DXMT fonctionne avec tous les jeux et reste disponible comme solution open sourc
 
 **En cours**
 
+- **Temps de jeu.** Le suivi local et la récupération de l’historique sont prêts pour chaque édition. L’affichage du temps de jeu est intégré séparément.
+
 - **Éditions pour la Chine continentale (bêta).** Un sélecteur de région dans les réglages affiche 原神, 崩坏：星穹铁道 et 绝区零 avec leurs propres installations, préfixes et réglages. 绝区零 s’installe depuis les serveurs miHoYo et fonctionne au-delà de l’écran de connexion grâce à notre [correctif Wine crypt32](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 et 崩坏：星穹铁道 doivent encore être testés en jeu, et la connexion au compte n’a été testée sur aucune édition de Chine continentale. Les testeurs disposant de comptes de cette région sont les bienvenus.
 - **Redémarrage après un correctif intégré à Star Rail.** Lors du seul test effectué jusqu’ici, le jeu a redémarré sans sa fenêtre de connexion. Le relancer depuis MacGacha a permis de se connecter normalement.
 - **Jour de sortie avec un pré-téléchargement**, qui reste à tester de bout en bout avec la prochaine version du jeu.
