@@ -13,6 +13,8 @@ protocol GameServices: Sendable {
     func start() async
     func waitUntilIdle(_ id: String) async throws
     func waitForPreDownloadDrain(_ id: String) async throws
+    func requireGameLocationAvailable(_ id: String) async throws
+    func locationStatus(_ id: String) async throws -> GameStatus
     func status(_ id: String) async -> GameStatus
     func checkForUpdate(_ id: String) async throws -> GameStatus
     func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo
@@ -32,6 +34,10 @@ protocol GameServices: Sendable {
 
 /// Existing fakes and previews opt out without touching delivery or disk.
 extension GameServices {
+    func requireGameLocationAvailable(_ id: String) async throws {
+        if case .locationUnavailable = await status(id) { throw LauncherError.installVolumeUnavailable }
+    }
+    func locationStatus(_ id: String) async throws -> GameStatus { await status(id) }
     func waitForPreDownloadDrain(_ id: String) async throws { try await waitUntilIdle(id) }
     func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo { .unavailable }
     func preDownload(_ id: String) async -> GameEventStream { GameEventStream { $0.finish() } }
@@ -50,7 +56,7 @@ final class LiveGameServices: GameServices, Sendable {
     init(paths: AppPaths = .standard(), http: (any HTTPClient)? = nil,
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), retry: RetryPolicy = RetryPolicy(),
         sleeper: any Sleeper = ContinuousSleeper(), log: EventLog? = nil,
-        guard operationGuard: (any GameOperationGuard)? = nil) {
+        guard operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe()) {
         let store = GameRecordStore(directory: paths.games), eventLog = log ?? EventLog(directory: paths.logs)
         self.store = store; self.log = eventLog
         var libraries: [Region: GameLibrary] = [:], sessions: [Region: DeliveryHTTPSession] = [:]
@@ -60,8 +66,8 @@ final class LiveGameServices: GameServices, Sendable {
             else { let owned = DeliveryHTTPSession(region: region); sessions[region] = owned; client = owned.client }
             let fetcher = ChunkFetcher(http: client, retry: retry, sleeper: sleeper)
             libraries[region] = GameLibrary(paths: paths, api: DeliveryAPI(http: client, region: region),
-                runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog),
-                store: store, disk: disk, log: eventLog, guard: operationGuard)
+                runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog, locationProbe: locationProbe),
+                store: store, disk: disk, log: eventLog, guard: operationGuard, locationProbe: locationProbe)
         }
         self.libraries = libraries; self.sessions = sessions
     }
@@ -79,6 +85,14 @@ final class LiveGameServices: GameServices, Sendable {
     func status(_ id: String) async -> GameStatus {
         guard let game = Self.game(id) else { return .unknown }
         return await library(for: game).status(game)
+    }
+    func requireGameLocationAvailable(_ id: String) async throws {
+        let game = try Self.requireGame(id)
+        try await library(for: game).requireGameLocationAvailable(game)
+    }
+    func locationStatus(_ id: String) async throws -> GameStatus {
+        let game = try Self.requireGame(id)
+        return try await library(for: game).locationStatus(game)
     }
     func checkForUpdate(_ id: String) async throws -> GameStatus {
         let game = try Self.requireGame(id)

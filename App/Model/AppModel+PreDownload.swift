@@ -84,7 +84,7 @@ struct PreDownloadOverlay: Sendable, Equatable {
         guard gameOperation == nil else { show(LauncherError.busy("another game operation is running")); return nil }
         guard launchSlotOwner != id, launchTasks[id] == nil, !liveLaunchGames.contains(id) else { return nil }
         if case .recoveryNeeded = launchStates[id] { return nil }
-        let token = GameOperationToken(id: id, generation: UUID(), isUninstall: deleting, isPreDownload: true)
+        let token = GameOperationToken(id: id, generation: UUID(), isUninstall: deleting, isPreDownload: true, installPath: gameRecords[id]?.installPath)
         gameOperation = token; gameRevisions[id] = token.generation; preDownloadRevisions[id] = token.generation
         gameUpdateCheck[id] = nil
         gameProgress = GameProgress(); dismissError()
@@ -112,6 +112,8 @@ struct PreDownloadOverlay: Sendable, Equatable {
                         throw LauncherError.cancelled
                     }
                 }
+                try await self?.recheckGameLocation(id)
+                self?.gameLocationPauseReasons[id] = nil
                 let stream = if resume { await services.resumePreDownload(id, expectedPlanID: savedID) }
                     else { await services.preDownload(id) }
                 events: for try await event in stream {
@@ -168,6 +170,7 @@ struct PreDownloadOverlay: Sendable, Equatable {
             catch { return (true, .failure(launcherError(error))) }
         }.value
         guard gameOperation == token else { return }
+        if let reason = gameLocationPauseReasons[token.id], !completed { show(reason) }
         switch result {
         case .success(let info):
             preDownloads[token.id] = PreDownloadOverlay(info: info)

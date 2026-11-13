@@ -11,6 +11,41 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
+    @Test func localVolumeStatusUsesCachedBranchWithoutNetwork() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        try f.advertise(2)
+        #expect(await f.library.status(game) == .updateAvailable(from: "1.0", to: "2.0"))
+        let offline = MockCDN(), probe = LibraryLocationProbe()
+        let library = f.restarted(http: offline, locationProbe: probe)
+        #expect(try await library.locationStatus(game) == .updateAvailable(from: "1.0", to: "2.0"))
+        probe.available.withLock { $0 = false }
+        #expect(try await library.locationStatus(game) == .locationUnavailable(f.install))
+        probe.available.withLock { $0 = true }
+        #expect(try await library.locationStatus(game) == .updateAvailable(from: "1.0", to: "2.0"))
+        #expect(offline.requestLog.isEmpty)
+    }
+
+    @Test(arguments: ["update", "verify", "uninstall", "voices", "preDownload"])
+    func missingVolumeGuardsLibraryBeforePlanOrFileMutation(action: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        let original = try await f.store.load(game.id)
+        let probe = LibraryLocationProbe(); probe.available.withLock { $0 = false }
+        let offline = MockCDN(), library = f.restarted(http: offline, locationProbe: probe)
+        await #expect(throws: LauncherError.installVolumeUnavailable) {
+            switch action {
+            case "update": _ = try await libraryCollect(await library.update(game, approved: true))
+            case "verify": _ = try await libraryCollect(await library.verify(game, mode: .full))
+            case "voices": _ = try await libraryCollect(await library.setVoices(game, ["en-us"]))
+            case "preDownload": _ = try await libraryCollect(await library.preDownload(game))
+            default: try await library.uninstall(game)
+            }
+        }
+        #expect(try await f.store.load(game.id) == original)
+        #expect(try await f.store.loadPlan(for: game.id) == nil)
+        #expect(offline.requestLog.isEmpty)
+        try f.assertFiles(1)
+    }
+
     @Test(arguments: ["patch-2", "release-day-patch"])
     func normalUpdateUsesGameAndInstalledVoicePatchRecipes(patchID: String) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
@@ -961,9 +996,9 @@ private struct LibraryFixture: ~Copyable {
         library = GameLibrary(paths: paths, api: DeliveryAPI(http: http), runner: OperationRunner(store: store,
             fetcher: ChunkFetcher(http: http, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: log), store: store, disk: disk, log: log, fileOps: fileOps, purgeable: purgeable)
     }
-    func restarted(http: (any HTTPClient)? = nil, runnerHooks: CrashHooks = .none, operationGuard: (any GameOperationGuard)? = nil) -> GameLibrary {
+    func restarted(http: (any HTTPClient)? = nil, runnerHooks: CrashHooks = .none, operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe()) -> GameLibrary {
         GameLibrary(paths: paths, api: DeliveryAPI(http: http ?? cdn), runner: OperationRunner(store: store,
-            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil, crashHooks: runnerHooks), store: store, disk: disk, log: nil, guard: operationGuard)
+            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil, crashHooks: runnerHooks), store: store, disk: disk, log: nil, guard: operationGuard, locationProbe: locationProbe)
     }
     func installGame() async throws { _ = try await libraryCollect(await library.install(game, voices: ["en-us"], at: install, approved: true)) }
     func seedExisting() throws {
@@ -1663,5 +1698,12 @@ extension GameLibraryTests {
         #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path.hasPrefix("diffs/") || $0.path.contains("api/") })
         #expect(try f.fs.itemType(at: PreDownloadStore.directory) == nil)
         try f.assertFiles(2)
+    }
+}
+
+private final class LibraryLocationProbe: GameLocationProbing, Sendable {
+    let available = Mutex(true)
+    func requireAvailable(at root: URL) throws {
+        guard available.withLock({ $0 }) else { throw LauncherError.installVolumeUnavailable }
     }
 }

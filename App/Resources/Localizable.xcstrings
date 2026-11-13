@@ -6190,6 +6190,88 @@
         }
       }
     },
+    "Connect the drive “%@” to play" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbinde das Laufwerk „%@“, um zu spielen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conecta la unidad «%@» para jugar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connectez le disque « %@ » pour jouer"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hubungkan drive “%@” untuk bermain"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドライブ「%@」を接続してゲームを開始"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임을 시작하려면 “%@” 드라이브를 연결하세요"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conecte a unidade “%@” para jogar"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключите диск «%@», чтобы играть"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เชื่อมต่อไดรฟ์ “%@” เพื่อเล่น"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Під’єднайте диск «%@», щоб грати"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kết nối ổ đĩa “%@” để chơi"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接驱动器“%@”以开始游戏"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連接磁碟機「%@」以開始遊戲"
+          }
+        }
+      }
+    },
     "Continue in Parts" : {
       "localizations" : {
         "de" : {
@@ -23803,6 +23885,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "遊戲在啟動過程中關閉。"
+          }
+        }
+      }
+    },
+    "The game drive is unavailable. Reconnect it, then resume the operation." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Laufwerk mit dem Spiel ist nicht verfügbar. Verbinde es erneut und setze den Vorgang fort."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La unidad del juego no está disponible. Vuelve a conectarla y reanuda la operación."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le disque du jeu est indisponible. Reconnectez-le, puis reprenez l’opération."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drive game tidak tersedia. Hubungkan kembali, lalu lanjutkan operasi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲームのドライブを利用できません。再接続してから操作を再開してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임 드라이브를 사용할 수 없습니다. 다시 연결한 다음 작업을 재개하세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A unidade do jogo está indisponível. Reconecte-a e retome a operação."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Диск с игрой недоступен. Подключите его снова и возобновите операцию."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไดรฟ์เกมไม่พร้อมใช้งาน เชื่อมต่ออีกครั้งแล้วดำเนินการต่อ"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Диск із грою недоступний. Під’єднайте його знову та продовжте операцію."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ổ đĩa chứa trò chơi không khả dụng. Hãy kết nối lại rồi tiếp tục thao tác."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏所在的驱动器不可用。请重新连接后继续操作。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遊戲所在的磁碟機無法使用。請重新連接後繼續操作。"
           }
         }
       }

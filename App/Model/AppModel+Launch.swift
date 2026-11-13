@@ -154,12 +154,17 @@ import RuntimeManager
                 }
                 try await self.flushLaunchSettings()
                 guard let record = self.gameRecords[id] else { throw LauncherError.io("Game is not installed") }
+                try await self.recheckGameLocation(id)
                 for await event in try await services.launch(game: game, record: record) {
                     if Task.isCancelled { return } // Detaches the observer; core supervision survives.
                     await self.handleLaunch(event, id: id)
                 }
                 // .restored may be delivered before the core releases its context.
                 _ = await self.refreshLaunchSession(id)
+            } catch LauncherError.installVolumeUnavailable {
+                self.launchStates[id] = nil
+                self.liveLaunchGames.remove(id)
+                if self.launchSlotOwner == id { self.launchSlotOwner = nil }
             } catch {
                 self.recordLaunchFailure(LaunchFailureInfo(stage: .preflight,
                     message: launcherError(error).userMessage, hasLog: false, unverifiedBuild: false), id: id)

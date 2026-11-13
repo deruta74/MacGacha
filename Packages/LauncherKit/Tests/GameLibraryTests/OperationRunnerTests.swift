@@ -12,6 +12,46 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct OperationRunnerTests {
+    @Test func missingInstallVolumeHasPathFreeTypedFailure() throws {
+        let root = URL(fileURLWithPath: "/Volumes/MacGacha-absent-\(UUID())/Game")
+        do {
+            try requireGameLocationAvailable(root)
+            Issue.record("Missing drive was accepted")
+        } catch let error as LauncherError {
+            #expect(error.logCase == "installVolumeUnavailable")
+            #expect(error.logReason == nil)
+        }
+    }
+
+    @Test func ejectedVolumeDuringStagingPreservesCommittedProgressForResume() async throws {
+        let root = try TempDir(), records = try TempDir(), cdn = MockCDN()
+        let plan = try bridgePlan(), store = GameRecordStore(directory: records.url)
+        bridgeServe(cdn, plan)
+        let runner = OperationRunner(store: store, fetcher: bridgeFetcher(cdn),
+            disk: FixedDiskSpace(bytes: SpaceBudget.margin + 15), log: nil, fileOps: EjectedVolumeOps())
+        do {
+            _ = try await bridgeCollect(await runner.start("genshin", record: bridgeRecord(root.url), plan: plan,
+                kind: .update, target: bridgeBuild("new"), approved: true, managedPaths: Set(plan.files.map(\.path))))
+            Issue.record("Ejected volume completed")
+        } catch let error as LauncherError {
+            #expect(error.logCase == "installVolumeUnavailable")
+        } catch {
+            Issue.record("Expected typed unavailable-volume failure, got \(type(of: error))")
+        }
+        try await store.waitForPipelineDrain()
+        let fs = try ContainedFileSystem(root: root.url)
+        let journal = try OperationJournal.replay(fs: fs, path: SafeRelativePath(".macgacha-staging/\(plan.id)/journal.jsonl"))
+        #expect(journal.committedFiles == [plan.files[0].path])
+        #expect(try await store.load("genshin")?.pending?.planDigest == plan.planDigest)
+        let requestsBeforeResume = cdn.requestLog
+        #expect(requestsBeforeResume.filter { $0.path == "bridge-0" }.count == 1)
+        #expect(requestsBeforeResume.filter { $0.path == "bridge-1" }.count == 1)
+        let resumed = try await bridgeCollect(await bridgeRunner(store, cdn).resume("genshin", approved: true))
+        #expect(resumed.last == .phase(.completed))
+        #expect(cdn.requestLog.map(\.path) == requestsBeforeResume.map(\.path))
+        try await bridgeAssertTree(root.url, plan)
+    }
+
     @Test(.timeLimit(.minutes(1)), arguments: [false, true]) func discardedPipelineRetainsStoreLeaseUntilWorkersJoin(cancelFirstWait: Bool) async throws {
         let root = try TempDir(), records = try TempDir(), cdn = MockCDN(), ops = BridgeBlockedAssembly()
         let plan = try bridgePlan(); bridgeServe(cdn, plan)
@@ -237,7 +277,7 @@ import TestSupport
         record.pending = PendingOperation(kind: .update, planID: plan.id, planDigest: plan.planDigest, target: bridgeBuild("new"))
         try await store.savePlan(plan, for: "genshin"); try await bridgeSave(record, store: store)
         let runner = bridgeRunner(store, cdn)
-        await #expect(throws: LauncherError.io("install location unavailable")) {
+        await #expect(throws: LauncherError.installVolumeUnavailable) {
             _ = try await bridgeCollect(await runner.resume("genshin", approved: true))
         }
         #expect(try await store.load("genshin") == record); #expect(cdn.requestLog.isEmpty)
@@ -891,4 +931,25 @@ private final class CompletionCleanupGate: FileOps {
         }
         try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory)
     }
+}
+
+private struct EjectedVolumeOps: FileOps {
+    private func check(_ descriptor: Int32) throws {
+        var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        if fcntl(descriptor, F_GETPATH, &path) == 0,
+            String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self).hasSuffix("/files/b") {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(ENODEV))
+        }
+    }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws -> Int {
+        try check(descriptor); return try SystemFileOps().write(descriptor, bytes: bytes)
+    }
+    func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer, at offset: Int64) throws -> Int {
+        try check(descriptor); return try SystemFileOps().write(descriptor, bytes: bytes, at: offset)
+    }
+    func synchronize(_ descriptor: Int32, durable: Bool) throws { try SystemFileOps().synchronize(descriptor, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try SystemFileOps().rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws { try SystemFileOps().unlink(name, in: directory, isDirectory: isDirectory) }
 }

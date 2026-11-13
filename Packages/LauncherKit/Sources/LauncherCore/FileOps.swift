@@ -99,7 +99,11 @@ extension LauncherError {
     /// A failed allocation supplies no reliable byte shortfall (quotas may be
     /// lower than free blocks). Preserve a positive shortfall for the pause/UI.
     package static func fileSystemFailure(_ message: String, code: Int32 = errno) -> LauncherError {
-        code == ENOSPC || code == EDQUOT ? .insufficientSpace(required: 1, available: 0) : .io(message)
+        switch code {
+        case ENOSPC, EDQUOT: .insufficientSpace(required: 1, available: 0)
+        case ENODEV, ENXIO, ESTALE: .installVolumeUnavailable
+        default: .io(message)
+        }
     }
 
     /// Foundation/FileOps fault doubles may carry errno as a typed NSError.
@@ -108,8 +112,12 @@ extension LauncherError {
         if error is LauncherError { return error }
         var current = error as NSError
         for _ in 0..<8 {
-            if current.domain == NSPOSIXErrorDomain, current.code == Int(ENOSPC) || current.code == Int(EDQUOT) {
-                return LauncherError.insufficientSpace(required: 1, available: 0)
+            if current.domain == NSPOSIXErrorDomain, let code = Int32(exactly: current.code) {
+                switch code {
+                case ENOSPC, EDQUOT: return LauncherError.insufficientSpace(required: 1, available: 0)
+                case ENODEV, ENXIO, ESTALE: return LauncherError.installVolumeUnavailable
+                default: break
+                }
             }
             if current.domain == NSCocoaErrorDomain, current.code == NSFileWriteOutOfSpaceError {
                 return LauncherError.insufficientSpace(required: 1, available: 0)

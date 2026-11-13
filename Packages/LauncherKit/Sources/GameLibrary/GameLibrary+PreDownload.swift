@@ -22,7 +22,7 @@ extension GameLibrary {
     /// Busy/live games retain their cache until a later guarded refresh.
     public func preDownloadInfo(_ game: GameDefinition, refresh: Bool = true) async throws -> PreDownloadInfo {
         guard let record = try await store.load(game.id), let installed = record.installed, !record.uninstalling else { return .unavailable }
-        try requireGameLocationAvailable(record.installPath)
+        try locationProbe.requireAvailable(at: record.installPath)
         let cache = try PreDownloadStore(fs: ContainedFileSystem(root: record.installPath, expectedRootIdentity: record.installIdentity))
         let saved = try cache.load()
         if !refresh { return try cache.info(saved, installed: installed, edition: game.id) }
@@ -124,7 +124,7 @@ extension GameLibrary {
         let lease = try await store.acquireOperationLease(retainedGameLock: lock)
         guard let record = try await store.load(game.id) else { throw LauncherError.io("game is not installed") }
         try GameRecordRules.check(action, record: record, others: [])
-        try requireGameLocationAvailable(record.installPath)
+        try locationProbe.requireAvailable(at: record.installPath)
         let fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity)
         let cache = try PreDownloadStore(fs: fs)
         try cache.finishDeletion()
