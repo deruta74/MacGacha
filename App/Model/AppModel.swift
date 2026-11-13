@@ -190,6 +190,7 @@ final class AppModel {
     @ObservationIgnored var gameTask: Task<Void, Never>?
     @ObservationIgnored var gameStartupTask: Task<Void, Never>?
     @ObservationIgnored var gameActivationTask: Task<Void, Never>?
+    var gameMoveRecoveryReservation = false
     var gameOperation: GameOperationToken?
     private(set) var languageRestart: UUID?
     func setLanguageRestart(_ value: UUID?) { languageRestart = value }

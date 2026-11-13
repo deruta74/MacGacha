@@ -59,7 +59,7 @@ import GameLibrary
         var operation: Task<Void, Never>?
         if event.isUnmount, let token = active {
             let path = token.installPath ?? gameRecords[token.id]?.installPath
-            if path.map({ Self.volumeEvent(event, affects: $0) }) ?? (event.volume == nil) {
+            if (path.map({ Self.volumeEvent(event, affects: $0) }) ?? (event.volume == nil)) || token.moveDestination.map({ Self.volumeEvent(event, affects: $0) }) == true {
                 operation = pauseForUnavailableVolume(token)
             }
         }
@@ -67,10 +67,28 @@ import GameLibrary
         volumeEventTask = Task { [weak self] in
             await previous?.value
             if event.isUnmount { await operation?.value }
-            for id in affected {
+            var refreshIDs = affected, expectedRevisions = revisions
+            var recovered = Set<String>()
+            if !event.isUnmount, let self, self.languageRestart == nil, !self.updater.isInstallingUpdate {
+                self.gameMoveRecoveryReservation = true
+                defer { self.gameMoveRecoveryReservation = false }
+                // A pre-switch journal can refer to a destination volume that is
+                // absent from the authoritative record. Retry it on any mount.
+                for id in await services.recoverPendingMoves() {
+                    guard self.gameOperation?.id != id else { continue }
+                    recovered.insert(id)
+                    if !refreshIDs.contains(id) {
+                        refreshIDs.append(id)
+                        let revision = UUID()
+                        self.gameRevisions[id] = revision
+                        expectedRevisions[id] = revision
+                    }
+                }
+            }
+            for id in refreshIDs {
                 guard !Task.isCancelled else { return }
                 do {
-                    guard let record = try await services.record(id), Self.volumeEvent(event, affects: record.installPath) else { continue }
+                    guard let record = try await services.record(id), recovered.contains(id) || Self.volumeEvent(event, affects: record.installPath) else { continue }
                     // Broad discovery is safe for uncached records. Cancellation
                     // needs the captured destination or this verified record.
                     if event.isUnmount, let token = active, token.id == id, token.installPath == nil,
@@ -79,7 +97,7 @@ import GameLibrary
                         await consumer?.value
                     }
                     let status = try await services.locationStatus(id)
-                    guard let self, self.gameRevisions[id] == revisions[id] else { continue }
+                    guard let self, self.gameRevisions[id] == expectedRevisions[id] else { continue }
                     self.setGameRecord(id, record)
                     var state = self.games[id] ?? GameState(status: status)
                     state.status = status

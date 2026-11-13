@@ -161,6 +161,84 @@ struct AppModelGamesTests {
         #expect(model.games["genshin"]?.status == .locationUnavailable(path))
     }
 
+    @Test func destinationOnlyRemountRetriesMoveRecoveryAndRefreshesSource() async throws {
+        let gate = GameReadGate(), source = TestVolumeEventSource(), fake = FakeGameServices(moveRecoveryRead: gate)
+        let (model, _, _) = try gameFixture(fake: fake, volumeEvents: source)
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        await model.start()
+        fake.recoveryResult = ["genshin"]
+        source.send(.mounted(URL(fileURLWithPath: "/Volumes/Destination")))
+        await gate.waitUntilEntered()
+        #expect(model.isBusyForUpdates)
+        #expect(model.languageRestartBlocker != nil)
+        #expect(!model.canMoveGame("genshin"))
+        gate.release()
+        await model.volumeEventTask?.value
+        #expect(!model.isBusyForUpdates)
+        #expect(fake.moveRecoveryCount == 1)
+        #expect(fake.locationReads.contains("genshin"))
+        #expect(model.gameRecord("genshin")?.installPath == gameLocation)
+    }
+
+    @Test func ejectingMoveDestinationCancelsItsOperation() async throws {
+        let source = TestVolumeEventSource(), fake = FakeGameServices()
+        let (model, _, _) = try gameFixture(fake: fake, volumeEvents: source)
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        await model.start()
+        model.moveGame("genshin", to: URL(fileURLWithPath: "/Volumes/Destination"))
+        let task = try #require(model.gameTask)
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        source.send(.unmounted(URL(fileURLWithPath: "/Volumes/Destination")))
+        #expect(task.isCancelled)
+        await task.value; await model.volumeEventTask?.value
+        #expect(model.gameLocationPauseReason(for: "genshin") == .installVolumeUnavailable)
+        #expect(model.gameOperation == nil)
+    }
+
+    @Test func moveUsesGameReservationAndRefusesLanguageRestart() async throws {
+        let (model, fake, _) = try gameFixture()
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        await model.start()
+        model.setGameRecord("genshin", try await fake.record("genshin"))
+        model.setGameState("genshin", GameState(status: .installed(tag: "1.0")))
+        #expect(model.canMoveGame("genshin"))
+        model.moveGame("genshin", to: URL(fileURLWithPath: "/tmp/move-model-test"))
+        let task = try #require(model.gameTask)
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        #expect(model.isBusyForUpdates)
+        #expect(model.gameOperation?.isMoving == true)
+        #expect(model.languageRestartBlocker == .unresumableOperation("genshin"))
+        #expect(!model.canMoveGame("genshin"))
+        fake.emit(.phase(.staging))
+        for await phase in Observations({ model.gameMovePhase(for: "genshin") }) {
+            if phase == .copying { break }
+        }
+        fake.emit(.progress(downloaded: 0, totalNetwork: 0, staged: 5, totalStaged: 10))
+        for await state in Observations({ model.games["genshin"] }) {
+            if case .working(_, let fraction, _, _, _) = state?.activity, fraction == 0.5 { break }
+        }
+        for (phase, expected) in [(OperationPhase.verifying, GameMovePhase.verifying), (.committing, .finishing)] {
+            fake.emit(.phase(phase))
+            for await current in Observations({ model.gameMovePhase(for: "genshin") }) {
+                if current == expected { break }
+            }
+        }
+        fake.emit(.phase(.completed)); fake.finish()
+        await task.value
+        #expect(model.gameOperation == nil)
+        #expect(model.gameMovePhase(for: "genshin") == nil)
+        #expect(fake.calls.contains { $0.action == "move" })
+    }
+
+    @Test(arguments: [GameStatus.paused(.update), .uninstallPaused, .notInstalled, .locationUnavailable(gameLocation)])
+    func moveMenuRejectsUnavailableOrPausedGames(status: GameStatus) async throws {
+        let (model, fake, _) = try gameFixture()
+        fake.setStatus(status, for: "genshin")
+        model.setGameRecord("genshin", try await fake.record("genshin"))
+        model.setGameState("genshin", GameState(status: status))
+        #expect(!model.canMoveGame("genshin"))
+    }
+
     @Test(.timeLimit(.minutes(1)), arguments: ["install", "adopt"])
     func unrelatedEjectDoesNotCancelFreshOperationBeforeRecordPublication(action: String) async throws {
         let source = TestVolumeEventSource(), fake = FakeGameServices()
@@ -823,10 +901,11 @@ private final class FakeGameServices: GameServices, Sendable {
     private let snapshotRead: GameReadGate?
     private let idleDrain: GameReadGate?
     private let locationRead: GameReadGate?
+    private let moveRecoveryRead: GameReadGate?
     private let estimateReads: [Set<String>: GameReadGate]
-    init(approvalTerminalRead: GameReadGate? = nil, snapshotRead: GameReadGate? = nil, idleDrain: GameReadGate? = nil, locationRead: GameReadGate? = nil, estimateReads: [Set<String>: GameReadGate] = [:]) {
+    init(approvalTerminalRead: GameReadGate? = nil, snapshotRead: GameReadGate? = nil, idleDrain: GameReadGate? = nil, locationRead: GameReadGate? = nil, moveRecoveryRead: GameReadGate? = nil, estimateReads: [Set<String>: GameReadGate] = [:]) {
         self.approvalTerminalRead = approvalTerminalRead; self.snapshotRead = snapshotRead
-        self.estimateReads = estimateReads; self.idleDrain = idleDrain; self.locationRead = locationRead
+        self.estimateReads = estimateReads; self.idleDrain = idleDrain; self.locationRead = locationRead; self.moveRecoveryRead = moveRecoveryRead
     }
     private struct State: Sendable {
         var statuses: [String: GameStatus] = [:]
@@ -839,6 +918,8 @@ private final class FakeGameServices: GameServices, Sendable {
         var continuation: AsyncThrowingStream<OperationEvent, any Error>.Continuation?
         var active: String?
         var starts = 0, statusReads = 0, terminations = 0
+        var recoveredMoves: [String] = []
+        var moveRecoveries = 0
         var estimates: [GameCall] = []
         var estimateError: LauncherError?
     }
@@ -846,6 +927,15 @@ private final class FakeGameServices: GameServices, Sendable {
     var estimateError: LauncherError? {
         get { state.withLock { $0.estimateError } }
         set { state.withLock { $0.estimateError = newValue } }
+    }
+    var recoveryResult: [String] {
+        get { state.withLock { $0.recoveredMoves } }
+        set { state.withLock { $0.recoveredMoves = newValue } }
+    }
+    var moveRecoveryCount: Int { state.withLock { $0.moveRecoveries } }
+    func recoverPendingMoves() async -> [String] {
+        await moveRecoveryRead?.wait()
+        return state.withLock { $0.moveRecoveries += 1; return $0.recoveredMoves }
     }
     var locationReads: [String] { state.withLock { $0.locationReads } }
     func setLocation(_ path: URL, for id: String) { state.withLock { $0.locations[id] = path } }
@@ -910,6 +1000,9 @@ private final class FakeGameServices: GameServices, Sendable {
     }
     func setVoices(_ id: String, _ voices: Set<String>) async -> AsyncThrowingStream<OperationEvent, any Error> {
         open(GameCall(action: "voices", id: id, voices: voices), kind: .voices)
+    }
+    func move(_ id: String, to folder: URL) async -> GameEventStream {
+        open(GameCall(action: "move", id: id), kind: .repair)
     }
     func uninstall(_ id: String) async throws {
         state.withLock { $0.calls.append(GameCall(action: "uninstall", id: id)); $0.statuses[id] = .notInstalled }

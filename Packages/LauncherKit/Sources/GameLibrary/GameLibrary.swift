@@ -34,7 +34,7 @@ public actor GameLibrary {
     nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.game-library")
     public nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
 
-    private let paths: AppPaths
+    let paths: AppPaths
     let api: DeliveryAPI
     let runner: OperationRunner
     let store: GameRecordStore
@@ -80,6 +80,7 @@ public actor GameLibrary {
                 do {
                     try await operationGuard?.willOperate(on: id)
                     try await store.waitForPipelineDrain()
+                    try await mover.recover(id)
                     let gameLock = try acquireGameLock(id)
                     defer { withExtendedLifetime(gameLock) {} }
                     _ = try await runner.reconcile(id)
@@ -233,6 +234,7 @@ public actor GameLibrary {
         // A different launcher may have launched and died after our guard await.
         // Revalidate durable ownership while no launcher can acquire this game.
         try LaunchMutationBarrier.requireNoJournal(paths: paths, game: game)
+        try LaunchMutationBarrier.requireNoMove(paths: paths, game: game)
         return lock
     }
 
