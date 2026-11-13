@@ -66,6 +66,7 @@ Later versions arrive through **Check for Updates…** in the MacGacha menu, so 
 - **Game Mode.** macOS turns on Game Mode for the games, not for the launcher. Each game runs as its own app with its name and icon, so macOS recognizes it. Confirmed on D3DMetal and DXMT. You can turn it off in Settings.
 - **Per-game settings:** graphics backend, frame limit (Off, 30, 60, 90 or 120), display, Retina mode, DirectX 12 for Zenless Zone Zero and a switch for the compatibility workaround.
 - **Metal HUD.** A switch in each game's settings shows the frame rate, frame time and GPU load over the game. On D3DMetal, Shift-F9 hides or shows it while you play.
+- **Play time.** The line above Play shows how long you have played each game, and the game's menu shows the last session. It counts only time the game was running, stays on your Mac and includes your earlier sessions from MacGacha's log.
 - **MacGacha Wine 11.20.** Our own Wine, built from source with every library it bundles, is the recommended Wine for both DXMT and D3DMetal ([release](https://github.com/deruta74/MacGacha/releases/tag/wine-11.20-macgacha-1.0), with complete sources). Wine and the graphics layer are separate downloads. D3DMetal requires Apple's terms or an import from your own Game Porting Toolkit.
 - **Dependencies window.** Each graphics layer has a Wine Version list with Automatic and every compatible build, so rolling back is one click. The dependency list MacGacha downloads is signed with the project's key.
 - **Automatic dependency updates.** On by default, with a switch in Settings. New recommended versions install in the background beside the one in use and switch over once no game or download is running. Versions you choose by hand stay as they are. The replaced version is removed after a game has run on the new one for at least two minutes and closed normally. If you imported D3DMetal yourself, Wine still updates on its own and a newer D3DMetal is offered instead. Switching to a new Wine build starts a fresh Wine prefix, so settings stored there, such as Star Rail's saved frame rate, start fresh.
@@ -89,8 +90,6 @@ All three games start and play with a community anti-cheat workaround. None of t
 DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin, and it can be changed per game.
 
 **In progress**
-
-- **Play time.** Local accounting and history recovery are ready for each edition. The play-time display is being integrated separately.
 - **Mainland China editions (beta).** A region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and runs past the login screen with our [Wine crypt32 fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 and 崩坏：星穹铁道 still need in-game testing, and login hasn't been tested on any mainland edition. Testers with mainland accounts are welcome.
 - **Star Rail's in-game hotfix restart.** In the one test so far the game came back without its login window. Starting it again from MacGacha logged in normally.
 - **Release day with a pre-download**, which waits for the next game version to be tested end to end.
