@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-0078D4?style=for-the-badge)](README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-555555?style=for-the-badge)](README.ja.md)
 
-> ✨ **[MacGacha 0.3.0](https://github.com/deruta74/MacGacha/releases/tag/v0.3.0) 已发布**：带来自行从源代码构建的 [MacGacha Wine 11.20](https://github.com/deruta74/MacGacha/releases/tag/wine-11.20-macgacha-1.0)、依赖项自动更新、重新设计的依赖项窗口，以及更稳定的下载。已经在使用 0.2.x？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
+> ✨ **[MacGacha 0.3.1](https://github.com/deruta74/MacGacha/releases/tag/v0.3.1) 已发布**：带来 Metal HUD、游玩时长、外置磁盘上的游戏，以及将游戏移到其他文件夹或磁盘。已经在使用 0.3.0？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
 
 面向 Apple Silicon 的原生 macOS 启动器，支持 **《原神》**、**《崩坏：星穹铁道》** 和 **《绝区零》**。它从 HoYoverse 官方服务器安装、更新和校验游戏，管理 Wine / DXMT / D3DMetal 运行环境，并可一键启动各款游戏。
 
