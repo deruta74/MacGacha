@@ -52,7 +52,15 @@ enum PlayTimeBackfill {
             } else {
                 defer { pending[game] = nil }
                 guard case .running(let start, let startID) = pending[game], startID == id else { continue }
-                let seconds = date.timeIntervalSince(start)
+                let seconds: Double
+                if let credited = event.metadata["playSeconds"] {
+                    guard let value = Double(credited) else { continue }
+                    seconds = value
+                } else {
+                    // Older recovery lines contain only discovery time, not an end.
+                    guard event.metadata["outcome"] != "while MacGacha was closed" else { continue }
+                    seconds = date.timeIntervalSince(start)
+                }
                 guard seconds.isFinite, seconds > 0 else { continue }
                 // Stable legacy identity also makes retries after uncertain writes safe.
                 let key = id ?? "backfill-\(game)-\(start.timeIntervalSince1970)-\(date.timeIntervalSince1970)"

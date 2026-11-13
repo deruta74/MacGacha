@@ -13,7 +13,7 @@ struct PlayTimeStoreTests {
         try store.record(sessionID: id, game: "genshin", runningSince: Date(timeIntervalSince1970: 100),
             endedAt: Date(timeIntervalSince1970: 3700), recovered: false)
         try PlayTimeStore(paths: paths).record(sessionID: id, game: "genshin", runningSince: Date(timeIntervalSince1970: 100),
-            endedAt: Date(timeIntervalSince1970: 7300), recovered: true)
+            endedAt: Date(timeIntervalSince1970: 7300), recovered: true, supervisedSeconds: 7200)
         try store.record(sessionID: UUID(), game: "genshin-cn", runningSince: Date(timeIntervalSince1970: 200),
             endedAt: Date(timeIntervalSince1970: 800), recovered: false)
         let summaries = try store.load()
@@ -23,7 +23,7 @@ struct PlayTimeStoreTests {
         #expect(summaries["genshin-cn"]?.totalSeconds == 600)
     }
 
-    @Test func skipsMissingRunningAndNegativeTimeAndBoundsUnknownRecovery() throws {
+    @Test func skipsMissingEvidenceAndNegativeTimeAndCapsUnknownRecovery() throws {
         let temp = try ManagerTemporaryDirectory(), store = PlayTimeStore(paths: AppPaths(root: temp.url))
         for (start, end, recovered) in [(nil, 500.0, false), (100.0, 90.0, false), (100.0, 86_501.0, true)] {
             try store.record(sessionID: UUID(), game: "zzz", runningSince: start.map(Date.init(timeIntervalSince1970:)),
@@ -31,7 +31,7 @@ struct PlayTimeStoreTests {
         }
         #expect(try store.load().isEmpty)
         try store.record(sessionID: UUID(), game: "zzz", runningSince: Date(timeIntervalSince1970: 100),
-            endedAt: Date(timeIntervalSince1970: 86_500), recovered: true)
+            endedAt: Date(timeIntervalSince1970: 86_500), recovered: true, supervisedSeconds: 100_000)
         #expect(try store.load()["zzz"]?.totalSeconds == 86_400)
         // A continuously supervised session can legitimately exceed the recovery bound.
         try store.record(sessionID: UUID(), game: "zzz", runningSince: Date(timeIntervalSince1970: 90_000),
@@ -129,6 +129,19 @@ struct PlayTimeStoreTests {
         try ContainedFileSystem(root: temp.url).writeAtomically(lines, to: SafeRelativePath("Logs/macgacha.log"))
         #expect(try store.backfill()?.sessions == 0)
         #expect(try store.load().isEmpty)
+    }
+
+    @Test(arguments: [0.0, 600.0, 100_000.0])
+    func backfillUsesEndEvidenceDurationInsteadOfDiscoveryTime(seconds: Double) throws {
+        let temp = try ManagerTemporaryDirectory(), store = PlayTimeStore(paths: AppPaths(root: temp.url)), id = UUID()
+        var lines = try eventLine("genshin", "Game running", 1000, sessionID: id)
+        var end = try JSONDecoder().decode(EventLog.Record.self, from: eventLine("genshin", "Session ended", 173_800, sessionID: id))
+        end.metadata["playSeconds"] = String(seconds)
+        end.metadata["outcome"] = "while MacGacha was closed"
+        lines.append(try JSONEncoder().encode(end)); lines.append(10)
+        try ContainedFileSystem(root: temp.url).writeAtomically(lines, to: SafeRelativePath("Logs/macgacha.log"))
+        #expect(try store.backfill()?.sessions == (seconds == 0 ? 0 : 1))
+        #expect(try store.load()["genshin"]?.totalSeconds == (seconds == 0 ? nil : min(seconds, 86_400)))
     }
 
     @Test func outOfOrderHistoryDoesNotCreateOverlappingCredit() throws {

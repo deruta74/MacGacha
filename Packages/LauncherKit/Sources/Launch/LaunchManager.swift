@@ -66,6 +66,8 @@ public actor LaunchManager {
         var lastConfirmedElapsed: Duration = .zero
         var qualificationTask: Task<Void, Never>?
         var runningAnnounced = false
+        var observedGameInProcess = false
+        var lifeObservationRevision: UInt64 = 0
         var endOutcome = "while MacGacha was closed"
         var restoreEntryCount = 0
         var ownedWrapper: ProcessIdentity?
@@ -510,18 +512,13 @@ public actor LaunchManager {
             let timer = AnyLaunchClock(timerClock)
             context.runningTimer = { timer.now }
         }
-        if !processes.isEmpty, context.session.runningSince == nil, context.session.verifiedEndedAt == nil {
-            let readInstant = playTimeInstant
-            let instant = try? await BlockingIO.run { try readInstant() }
-            context.session.runningSince = now()
-            if let instant, instant.bootSessionUUID == context.session.bootSessionUUID,
-                instant.seconds.isFinite, instant.seconds >= 0 {
-                context.session.runningMonotonicSeconds = instant.seconds
-            }
-        }
+        if !processes.isEmpty { await checkpointPlayTimeLife(context) }
         context.session.processes = Array(Set(context.session.processes + processes)).sorted { $0.pid < $1.pid }
         try await persist(context.session)
-        if !processes.isEmpty { await startQualificationMonitor(context) }
+        if !processes.isEmpty {
+            enableRecoveredLog(context)
+            await startQualificationMonitor(context)
+        }
         if !context.runningAnnounced, let process = processes.sorted(by: { $0.pid < $1.pid }).first {
             context.runningAnnounced = true
             note(context, "game process detected: pid \(process.pid)")
@@ -531,20 +528,66 @@ public actor LaunchManager {
         if !processes.isEmpty { try await startFpsInjector(context) }
     }
 
+    private func checkpointPlayTimeLife(_ context: Context) async {
+        context.observedGameInProcess = true
+        guard context.session.verifiedEndedAt == nil else { return }
+        context.lifeObservationRevision &+= 1
+        let revision = context.lifeObservationRevision, date = now(), readInstant = playTimeInstant
+        let instant = try? await BlockingIO.run { try readInstant() }
+        guard contexts[context.session.game] === context, !context.hasEnded,
+            context.session.verifiedEndedAt == nil, context.lifeObservationRevision == revision else { return }
+        let monotonic = instant.flatMap { value in
+            value.bootSessionUUID == context.session.bootSessionUUID && value.seconds.isFinite && value.seconds >= 0 ? value.seconds : nil
+        }
+        if let monotonic, let previous = context.session.lastLifeMonotonicSeconds, monotonic < previous { return }
+        if context.session.runningSince == nil {
+            context.session.runningSince = date
+            context.session.runningMonotonicSeconds = monotonic
+        }
+        context.session.lastLifeAt = date
+        context.session.lastLifeMonotonicSeconds = monotonic
+    }
+
     private func checkpointPlayTimeEnd(_ context: Context) async {
         guard context.session.verifiedEndedAt == nil else { return }
-        let readInstant = playTimeInstant
-        let instant = try? await BlockingIO.run { try readInstant() }
-        context.session.verifiedEndedAt = now()
-        context.session.playTimeEndRecovered = true
-        // Old partial process-local checkpoints cannot recover an unobserved span.
-        context.session.supervisedPlaySeconds = nil
-        if let start = context.session.runningMonotonicSeconds, let instant,
-            instant.bootSessionUUID == context.session.bootSessionUUID,
-            instant.seconds.isFinite, instant.seconds >= start {
-            context.session.supervisedPlaySeconds = instant.seconds - start
-            context.session.playTimeEndRecovered = false
+        let session = context.session, paths = paths, readInstant = playTimeInstant
+        let observed = context.observedGameInProcess
+        let end = now()
+        let seconds: Double?
+        if observed {
+            let instant = try? await BlockingIO.run { try readInstant() }
+            if let start = session.runningMonotonicSeconds, let instant,
+                instant.bootSessionUUID == session.bootSessionUUID,
+                instant.seconds.isFinite, instant.seconds >= start {
+                seconds = instant.seconds - start
+            } else { seconds = nil }
+        } else {
+            let modified = try? await BlockingIO.run {
+                try session.sessionLogURL.flatMap { try SessionLog.lastModificationDate(paths: paths, game: session.game, url: $0) }
+            }
+            var evidence = max(session.supervisedPlaySeconds ?? 0, session.confirmedRunningSeconds ?? 0)
+            if let start = session.runningMonotonicSeconds, let last = session.lastLifeMonotonicSeconds, last >= start {
+                evidence = max(evidence, last - start)
+            } else if let start = session.runningSince, let last = session.lastLifeAt, last <= end {
+                evidence = max(evidence, last.timeIntervalSince(start))
+            }
+            if let start = session.runningSince, let modified, modified <= end {
+                evidence = max(evidence, modified.timeIntervalSince(start))
+            }
+            seconds = min(evidence, PlayTimeStore.recoveryWindowSeconds)
         }
+        context.session.verifiedEndedAt = end
+        context.session.playTimeEndRecovered = !observed
+        context.session.supervisedPlaySeconds = seconds
+    }
+
+    private func enableRecoveredLog(_ context: Context) {
+        guard context.lifecycleLog == nil, let url = context.session.sessionLogURL,
+            url.deletingLastPathComponent().standardizedFileURL == paths.logs.standardizedFileURL,
+            LaunchLogFiles.parseName(url.lastPathComponent)?.game == context.session.game else { return }
+        let log = SessionLifecycleLog(recovering: url, ticker: ClockSessionLogTicker(clock: clock))
+        context.lifecycleLog = log
+        sessionLogWriter.post(.cap(log), bytes: 0)
     }
 
     private func startQualificationMonitor(_ context: Context) async {
@@ -766,7 +809,10 @@ public actor LaunchManager {
         // both finish. A crash cannot replace the interval with a later detection.
         do { try await recordPlayTime(context.session) }
         catch { event("Play time recording deferred", game: context.session.game, level: .warning) }
-        guard context.session.endLogged != true else { return }
+        if context.session.endLogged == true {
+            enableRecoveredLog(context)
+            return
+        }
         var snapshot = context.session
         snapshot.endLogged = true
         snapshot.startupPending = false
@@ -774,10 +820,15 @@ public actor LaunchManager {
         // never produce another end notification on the next recovery attempt.
         try await persist(snapshot)
         context.session.endLogged = true
+        enableRecoveredLog(context)
         let outcome = context.endOutcome
         note(context, outcome == "while MacGacha was closed"
             ? "Session ended while MacGacha was closed" : "session ended: \(outcome)")
-        event("Session ended", game: context.session.game, metadata: ["outcome": outcome, "playID": PlayTimeStore.playID(for: context.session.sessionID)])
+        let seconds = PlayTimeStore.creditedSeconds(runningSince: context.session.runningSince,
+            endedAt: context.session.verifiedEndedAt ?? now(), recovered: context.session.playTimeEndRecovered ?? true,
+            supervisedSeconds: context.session.supervisedPlaySeconds) ?? 0
+        event("Session ended", game: context.session.game, metadata: ["outcome": outcome,
+            "playID": PlayTimeStore.playID(for: context.session.sessionID), "playSeconds": String(seconds)])
     }
 
     private func recordPlayTime(_ session: LaunchSession) async throws {
@@ -823,6 +874,10 @@ public actor LaunchManager {
                 // not discard the running/end observations already made here.
                 persisted.runningSince = persisted.runningSince ?? context.session.runningSince
                 persisted.runningMonotonicSeconds = persisted.runningMonotonicSeconds ?? context.session.runningMonotonicSeconds
+                if let last = context.session.lastLifeAt {
+                    persisted.lastLifeAt = last
+                    persisted.lastLifeMonotonicSeconds = context.session.lastLifeMonotonicSeconds
+                }
                 if persisted.verifiedEndedAt == nil {
                     persisted.verifiedEndedAt = context.session.verifiedEndedAt
                     persisted.playTimeEndRecovered = context.session.playTimeEndRecovered
@@ -912,17 +967,16 @@ public actor LaunchManager {
                 let context = Context(session: snapshot, lock: lock, pin: pin)
                 contexts[game] = context
                 unresolvedStartup.remove(game)
-                if let url = snapshot.sessionLogURL,
-                    url.deletingLastPathComponent().standardizedFileURL == paths.logs.standardizedFileURL,
-                    LaunchLogFiles.parseName(url.lastPathComponent)?.game == game {
-                    let log = SessionLifecycleLog(recovering: url, ticker: ClockSessionLogTicker(clock: clock))
-                    context.lifecycleLog = log
-                    sessionLogWriter.post(.cap(log), bytes: 0)
-                }
+                // Unknown-end log metadata must be captured before recovery writes.
                 do {
                     // Spawning without identities may precede a delayed Wine
                     // wrapper. Only startup's complete absence grace can end it.
                     let present = try await presence(snapshot)
+                    if present.gameRunning {
+                        await checkpointPlayTimeLife(context)
+                        try await persist(context.session)
+                        enableRecoveredLog(context)
+                    }
                     let starting = snapshot.state == .spawning || snapshot.startupPending == true || present.alive
                     if starting {
                         guard let executable = Self.executable(snapshot) else {

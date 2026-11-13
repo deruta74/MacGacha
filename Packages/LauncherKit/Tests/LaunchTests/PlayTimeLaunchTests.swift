@@ -5,9 +5,119 @@ import Synchronization
 import Testing
 @testable import LauncherCore
 import TestSupport
+import RuntimeManager
 @testable import Launch
 
 @Suite(.timeLimit(.minutes(1))) struct PlayTimeLaunchTests {
+    @Test func slowerLifeObservationCannotReplaceNewerEvidence() async throws {
+        let f = try await ManagerFixture.make(logsEnabled: false), paths = f.paths, bundleID = f.bundle.id.rawValue
+        try await BlockingIO.run {
+            try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: "bundle-dxmt", previousID: "old-runtime", replacementID: bundleID)
+        }
+        let gate = BlockingTestGate(), count = Mutex(0), runner = PlayTimeWaitingRunner(), events = ManagerEvents()
+        defer { gate.release(); runner.released.signal() }
+        let manager = f.manager(runner: runner, playTimeInstant: {
+            let elapsed = f.clock.now.offset.components
+            let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+            let call = count.withLock { $0 += 1; return $0 }
+            if call == 2 { gate.block() }
+            return (ManagerFixture.bootSessionUUID, seconds)
+        })
+        let consumer = await f.consume(manager, events: events)
+        await events.waitForRunning()
+        await f.clock.waitForSleep(1, duration: .seconds(5))
+        f.clock.advance(by: .seconds(5))
+        try await gate.entered.wait()
+        runner.released.signal()
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        f.clock.advance(by: .seconds(3))
+        await f.clock.waitForSleep(2, duration: .seconds(3))
+        gate.release()
+        await f.clock.waitForSleep(2, duration: .seconds(5))
+        #expect(try await f.journal()?.lastLifeMonotonicSeconds == 8)
+        f.inspector.update { $0.processes = []; $0.alive = [] }
+        f.clock.advance(by: .seconds(3))
+        await consumer.value
+    }
+
+    @Test func unknownEndUsesActualPersistedLifeCheckpointAndDoesNotDoubleCount() async throws {
+        let f = try await ManagerFixture.make(), paths = f.paths
+        let time = Mutex(Date(timeIntervalSince1970: 1000))
+        let first = f.manager(now: { time.withLock { $0 } }), events = ManagerEvents()
+        let consumer = await f.consume(first, events: events)
+        await events.waitForRunning()
+        await f.clock.waitForSleep(1, duration: .seconds(3))
+        time.withLock { $0 = Date(timeIntervalSince1970: 1600) }
+        f.clock.advance(by: .seconds(600))
+        await f.clock.waitForSleep(2, duration: .seconds(3))
+        let running = try #require(try await f.journal())
+        try await f.end(first)
+        await consumer.value
+        await f.waitForRestore(first)
+        try await BlockingIO.run {
+            try LaunchJournal(paths: paths).write(running)
+            try ContainedFileSystem(root: paths.root).removeFile(at: SafeRelativePath("PlayTime/play-time.json"))
+        }
+        let recoveryClock = ManagerClock()
+        recoveryClock.advance(by: .seconds(172_800))
+        let manager = f.manager(clock: recoveryClock, now: { Date(timeIntervalSince1970: 173_800) })
+        _ = await manager.reattachAll()
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+        try await manager.recoverIfNeeded(game: "starrail")
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+        await manager.flushLogs()
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).backfill()?.sessions } == 0)
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == 600)
+    }
+
+    @Test(arguments: ["none", "log", "replaced", "cap", "checkpointWins", "frozen"])
+    func unknownEndUsesOnlyOwnedLogEvidenceBeforeRecoveryWrites(mode: String) async throws {
+        let f = try await ManagerFixture.make(initialGame: false), paths = f.paths
+        // A future fixture date avoids macOS lowering inode birth time when setting
+        // an mtime earlier than creation, which would correctly invalidate ownership.
+        let origin = 2_100_000_000.0
+        let log: SessionLog? = try await BlockingIO.run { () throws -> SessionLog? in
+            guard mode != "none" else { return nil }
+            let log = try SessionLog.create(paths: paths, game: "starrail", header: [:],
+                now: Date(timeIntervalSince1970: origin), timeZone: TimeZone(secondsFromGMT: 0)!,
+                maxBytes: 4096, ticker: ManagerNoopLogTicker())
+            if mode == "replaced" {
+                try FileManager.default.removeItem(at: log.url)
+                try Data("unrelated".utf8).write(to: log.url)
+            } else {
+                let file = try FileHandle(forWritingTo: log.url)
+                try file.seekToEnd()
+                try file.write(contentsOf: Data(repeating: 65, count: 8192))
+                try file.close()
+            }
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: origin + (mode == "cap" ? 100_000 : 600))], ofItemAtPath: log.url.path)
+            return log
+        }
+        var session = try await f.saveSnapshot(state: .running, processes: [], sessionLogURL: log?.url)
+        session.runningSince = Date(timeIntervalSince1970: origin)
+        session.runningMonotonicSeconds = 0
+        if mode == "checkpointWins" { session.supervisedPlaySeconds = 1200 }
+        if mode == "frozen" {
+            session.verifiedEndedAt = Date(timeIntervalSince1970: origin + 600)
+            session.playTimeEndRecovered = true
+            session.supervisedPlaySeconds = 600
+            session.endLogged = true
+        }
+        let saved = session
+        try await BlockingIO.run { try LaunchJournal(paths: paths).write(saved) }
+        f.clock.advance(by: .seconds(172_800))
+        let manager = f.manager(now: { Date(timeIntervalSince1970: origin + 172_800) })
+        _ = await manager.reattachAll()
+        await manager.flushLogs()
+        let expected: Double? = mode == "none" || mode == "replaced" ? nil : (mode == "cap" ? 86_400 : (mode == "checkpointWins" ? 1200 : 600))
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == expected)
+        if mode == "frozen", let log {
+            let size = try await BlockingIO.run { try FileManager.default.attributesOfItem(atPath: log.url.path)[.size] as? Int }
+            #expect(size == 4096)
+        }
+        withExtendedLifetime(log) {}
+    }
+
     @Test(arguments: [false, true])
     func restartUsesRealRunningSnapshotAndBoundsRebootFallback(rebooted: Bool) async throws {
         let f = try await ManagerFixture.make(), paths = f.paths
@@ -133,7 +243,7 @@ import TestSupport
     }
 
     @Test(arguments: [3600.0, 86_400.0, 86_401.0])
-    func recoveredEndUsesBoundedInjectedDetectionTime(seconds: Double) async throws {
+    func unknownEndWithoutEvidenceDoesNotUseDetectionTime(seconds: Double) async throws {
         let f = try await ManagerFixture.make(initialGame: false)
         var session = try await f.saveSnapshot(state: .running, processes: [])
         session.runningSince = Date(timeIntervalSince1970: 1000)
@@ -141,7 +251,7 @@ import TestSupport
         try await BlockingIO.run { try LaunchJournal(paths: paths).write(saved) }
         _ = await f.manager(now: { Date(timeIntervalSince1970: 1000 + seconds) }).reattachAll()
         let summary = try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"] }
-        #expect(summary?.totalSeconds == (seconds <= 86_400 ? seconds : nil))
+        #expect(summary == nil)
         #expect(try await f.journal() == nil)
     }
 
@@ -190,7 +300,7 @@ import TestSupport
     }
 
     @Test(arguments: ["uncertain", "helper", "live"])
-    func legacyReattachedWatcherWithoutBootInstantUsesBoundedRecovery(mode: String) async throws {
+    func legacyUnknownEndKeepsOnlyItsPersistedDurationEvidence(mode: String) async throws {
         let f = try await ManagerFixture.make(initialGame: mode == "live")
         var session = try await f.saveSnapshot(state: .running, processes: [])
         session.runningSince = Date(timeIntervalSince1970: 0)
@@ -205,7 +315,7 @@ import TestSupport
         f.inspector.update { $0.processes = []; $0.alive = [] }
         f.clock.advance(by: .seconds(3))
         await f.waitForRestore(manager)
-        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == nil)
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == (mode == "live" ? nil : 120))
     }
 
     @Test(arguments: [false, true])
@@ -216,6 +326,7 @@ import TestSupport
         if recovered {
             var session = try await f.saveSnapshot(state: .running, processes: [])
             session.runningSince = Date(timeIntervalSince1970: 2000)
+            session.lastLifeAt = Date(timeIntervalSince1970: 2300)
             let saved = session
             try await BlockingIO.run { try LaunchJournal(paths: paths).write(saved) }
             time.withLock { $0 = Date(timeIntervalSince1970: 2600) }
@@ -234,7 +345,7 @@ import TestSupport
             f.clock.advance(by: .seconds(3))
             await consumer.value
         }
-        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == (recovered ? 600 : 3))
+        #expect(try await BlockingIO.run { try PlayTimeStore(paths: paths).load()["starrail"]?.totalSeconds } == (recovered ? 300 : 3))
         #expect(try await f.journal() == nil)
     }
 

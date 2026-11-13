@@ -53,7 +53,7 @@ import RuntimeManager
         #expect(model.playTime(for: "zzz")?.totalSeconds == 600)
         try await BlockingIO.run {
             try PlayTimeStore(paths: paths).record(sessionID: UUID(), game: "zzz-cn", runningSince: Date(timeIntervalSince1970: 1000),
-                endedAt: Date(timeIntervalSince1970: 1120), recovered: true)
+                endedAt: Date(timeIntervalSince1970: 1120), recovered: true, supervisedSeconds: 120)
         }
         // A finalized session discovered by polling follows the same refresh path.
         _ = await model.refreshLaunchSession("zzz-cn")

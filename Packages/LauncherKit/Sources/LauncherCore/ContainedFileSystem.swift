@@ -1326,6 +1326,11 @@ extension ContainedFileSystem {
             guard fstat(fd, &info) == 0, identity.matches(info) else { throw LauncherError.io("Owned file identity changed") }
             return info.st_size
         }
+        package func modificationDate() throws -> Date {
+            var info = stat()
+            guard fstat(fd, &info) == 0, identity.matches(info) else { throw LauncherError.io("Owned file identity changed") }
+            return Date(timeIntervalSince1970: Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1e9)
+        }
         @discardableResult package func append(_ data: Data) throws -> Int64 {
             let count = try data.withUnsafeBytes { try fs.fileOps.write(fd, bytes: $0) }
             guard count == data.count else { throw LauncherError.io("Short owned-file append") }

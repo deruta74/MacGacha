@@ -28,7 +28,7 @@ public struct PlayTimeStore: Sendable {
     private let fileOps: any FileOps
     private static let file = try! SafeRelativePath("PlayTime/play-time.json")
     private static let maximumBytes = 8 << 20
-    /// Unknown recovery ends are trusted only within one day of the running start.
+    /// Unknown-end evidence and legacy backfill are capped at one day.
     public static let recoveryWindowSeconds: Double = 86_400
 
     public init(paths: AppPaths) { self.init(paths: paths, fileOps: SystemFileOps()) }
@@ -40,17 +40,23 @@ public struct PlayTimeStore: Sendable {
 
     public func record(sessionID: UUID, game: String, runningSince: Date?, endedAt: Date, recovered: Bool, supervisedSeconds: Double? = nil) throws {
         guard GameDefinition.find(game) != nil else { throw LauncherError.journalCorrupt("Invalid play time game") }
-        guard let start = runningSince, start.timeIntervalSinceReferenceDate.isFinite,
-            endedAt.timeIntervalSinceReferenceDate.isFinite else { return }
-        // Old journals have no monotonic checkpoint. Treat them as bounded recovery,
-        // even if an earlier version classified the end as live.
-        let measured = recovered ? nil : supervisedSeconds
-        let seconds = measured ?? endedAt.timeIntervalSince(start)
-        guard seconds.isFinite, seconds > 0,
-            measured != nil || seconds <= Self.recoveryWindowSeconds else { return }
+        guard let start = runningSince, let seconds = Self.creditedSeconds(runningSince: start,
+            endedAt: endedAt, recovered: recovered, supervisedSeconds: supervisedSeconds) else { return }
         try mutate { state, _ in
             _ = Self.add(id: Self.playID(for: sessionID), game: game, start: start, seconds: seconds, to: &state)
         }
+    }
+
+    static func creditedSeconds(runningSince: Date?, endedAt: Date, recovered: Bool, supervisedSeconds: Double?) -> Double? {
+        guard let start = runningSince, start.timeIntervalSinceReferenceDate.isFinite,
+            endedAt.timeIntervalSinceReferenceDate.isFinite else { return nil }
+        // An unknown end is never evidence of play. Its caller must supply a frozen
+        // duration derived from life checkpoints or an owned log's modification time.
+        let seconds = supervisedSeconds ?? (recovered ? 0 : endedAt.timeIntervalSince(start))
+        guard seconds.isFinite, seconds > 0 else { return nil }
+        if recovered { return min(seconds, recoveryWindowSeconds) }
+        guard supervisedSeconds != nil || seconds <= recoveryWindowSeconds else { return nil }
+        return seconds
     }
 
     /// Domain separation prevents reuse as another identifier. The random UUID has
