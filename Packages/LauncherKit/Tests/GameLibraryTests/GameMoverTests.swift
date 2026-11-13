@@ -11,6 +11,43 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameMoverTests {
+    @Test(arguments: [false, true])
+    func ejectDuringCopyRollsBackAfterReconnectAndAllowsFreshMove(sourceEjected: Bool) async throws {
+        let temp = try TempDir(), f = try MoveFixture(root: temp.url)
+        try await f.save()
+        let original = try #require(await f.store.load(f.game.id))
+        try Data("second file".utf8).write(to: f.source.appendingPathComponent("second.bin"))
+        let probe = MoveDriveProbe(), ejected = sourceEjected ? f.source : f.final
+        let mover = GameMover(paths: f.paths, store: f.store, disk: MoveDisk(), locationProbe: probe,
+            sameVolume: { _, _ in false })
+        await #expect(throws: LauncherError.installVolumeUnavailable) {
+            try await mover.move(f.game, to: f.destination) { event in
+                if case .progress(_, _, let copied, _) = event, copied > 0 {
+                    probe.unavailable.withLock { $0 = ejected }
+                }
+            }
+        }
+        #expect(try await f.store.load(f.game.id) == original)
+        #expect(FileManager.default.fileExists(atPath: f.staging.path))
+        probe.unavailable.withLock { $0 = nil }
+        let cdn = MockCDN(), fetcher = ChunkFetcher(http: cdn, retry: RetryPolicy(), sleeper: ContinuousSleeper())
+        let library = GameLibrary(paths: f.paths, api: DeliveryAPI(http: cdn),
+            runner: OperationRunner(store: f.store, fetcher: fetcher, disk: MoveDisk(), log: nil),
+            store: f.store, disk: MoveDisk(), log: nil, locationProbe: probe)
+        #expect(await library.recoverPendingMoves() == [f.game.id])
+        #expect(try await f.store.load(f.game.id) == original)
+        #expect(try await library.locationStatus(f.game) == .installed(tag: "1.0"))
+        #expect(try await f.store.loadPlan(for: f.game.id) == nil)
+        #expect(try await f.store.readState("move-journal.json", for: f.game.id, maxBytes: 65536) == nil)
+        #expect(!FileManager.default.fileExists(atPath: f.staging.path))
+        #expect(!FileManager.default.fileExists(atPath: f.final.path))
+        #expect(try Data(contentsOf: f.source.appendingPathComponent("second.bin")) == Data("second file".utf8))
+        try await f.mover(crossVolume: true).move(f.game, to: f.destination)
+        #expect(try await f.store.load(f.game.id)?.installPath == f.final)
+        #expect(!FileManager.default.fileExists(atPath: f.source.path))
+        #expect(cdn.requestLog.isEmpty)
+    }
+
     @Test func libraryMoveStreamPreservesPhaseOrder() async throws {
         let temp = try TempDir(), f = try MoveFixture(root: temp.url)
         try await f.save()
@@ -382,4 +419,13 @@ private final class MoveRenameObserver: FileOps {
         try base.rename(from: source, in: src, to: destination, in: dst, exclusive: exclusive)
     }
     func unlink(_ name: String, in dir: Int32, isDirectory: Bool) throws { try base.unlink(name, in: dir, isDirectory: isDirectory) }
+}
+
+private final class MoveDriveProbe: GameLocationProbing {
+    let unavailable = Mutex<URL?>(nil)
+    func requireAvailable(at root: URL) throws {
+        if unavailable.withLock({ $0?.standardizedFileURL.path == root.standardizedFileURL.path }) {
+            throw LauncherError.installVolumeUnavailable
+        }
+    }
 }

@@ -1915,6 +1915,170 @@
         }
       }
     },
+    "A drive was disconnected before the move finished cleaning up. Reconnect the drive to finish cleanup." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "驱动器在移动清理完成前断开了连接。请重新连接驱动器以完成清理。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁碟在移動清理完成前中斷了連線。請重新連接磁碟以完成清理。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移動後のクリーンアップが完了する前にドライブが取り外されました。ドライブを再接続してクリーンアップを完了してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이동 후 정리가 완료되기 전에 드라이브 연결이 끊어졌습니다. 정리를 완료하려면 드라이브를 다시 연결하세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Накопитель отключён до завершения очистки после перемещения. Подключите накопитель, чтобы завершить очистку."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Накопичувач від’єднано до завершення очищення після переміщення. Під’єднайте накопичувач, щоб завершити очищення."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Laufwerk wurde getrennt, bevor das Aufräumen nach dem Verschieben abgeschlossen war. Schließe das Laufwerk wieder an, um das Aufräumen abzuschließen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un disque a été déconnecté avant la fin du nettoyage après le déplacement. Reconnectez le disque pour terminer le nettoyage."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se desconectó una unidad antes de finalizar la limpieza tras el traslado. Vuelve a conectar la unidad para terminar la limpieza."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uma unidade foi desconectada antes da conclusão da limpeza após a transferência. Reconecte a unidade para concluir a limpeza."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drive terputus sebelum pembersihan setelah pemindahan selesai. Sambungkan kembali drive untuk menyelesaikan pembersihan."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไดรฟ์ถูกตัดการเชื่อมต่อก่อนการล้างข้อมูลหลังย้ายจะเสร็จสิ้น โปรดเชื่อมต่อไดรฟ์อีกครั้งเพื่อดำเนินการล้างข้อมูลให้เสร็จสิ้น"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ổ đĩa đã bị ngắt kết nối trước khi hoàn tất việc dọn dẹp sau khi di chuyển. Hãy kết nối lại ổ đĩa để hoàn tất việc dọn dẹp."
+          }
+        }
+      }
+    },
+    "A drive was disconnected, so the move stopped. The game stays in its original folder. Reconnect the drive and move it again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "驱动器已断开连接，移动已停止。游戏仍保留在原来的文件夹中。请重新连接驱动器后再次移动游戏。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁碟已中斷連線，移動已停止。遊戲仍保留在原來的資料夾中。請重新連接磁碟後再次移動遊戲。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドライブが取り外されたため、移動を停止しました。ゲームは元のフォルダに残ります。ドライブを再接続してから、もう一度移動してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "드라이브 연결이 끊어져 이동이 중지되었습니다. 게임은 원래 폴더에 그대로 있습니다. 드라이브를 다시 연결한 후 게임을 다시 이동하세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Накопитель отключён, поэтому перемещение остановлено. Игра остаётся в исходной папке. Подключите накопитель и переместите игру ещё раз."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Накопичувач від’єднано, тому переміщення зупинено. Гра залишається в початковій папці. Під’єднайте накопичувач і перемістіть гру ще раз."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Laufwerk wurde getrennt, daher wurde das Verschieben gestoppt. Das Spiel bleibt im ursprünglichen Ordner. Schließe das Laufwerk wieder an und verschiebe das Spiel erneut."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un disque a été déconnecté, ce qui a interrompu le déplacement. Le jeu reste dans son dossier d’origine. Reconnectez le disque et déplacez à nouveau le jeu."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se desconectó una unidad y el traslado se detuvo. El juego permanece en su carpeta original. Vuelve a conectar la unidad y mueve el juego de nuevo."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uma unidade foi desconectada e a transferência foi interrompida. O jogo permanece na pasta original. Reconecte a unidade e mova o jogo novamente."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drive terputus sehingga pemindahan dihentikan. Game tetap berada di folder aslinya. Sambungkan kembali drive dan pindahkan game lagi."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไดรฟ์ถูกตัดการเชื่อมต่อ จึงหยุดการย้าย เกมยังคงอยู่ในโฟลเดอร์เดิม โปรดเชื่อมต่อไดรฟ์อีกครั้งแล้วย้ายเกมใหม่"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ổ đĩa đã bị ngắt kết nối nên quá trình di chuyển đã dừng. Trò chơi vẫn ở thư mục ban đầu. Hãy kết nối lại ổ đĩa và di chuyển trò chơi lần nữa."
+          }
+        }
+      }
+    },
     "A file exceeds the supported size limit. Choose another source." : {
       "localizations" : {
         "de" : {

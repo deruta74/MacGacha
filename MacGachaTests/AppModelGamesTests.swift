@@ -180,19 +180,67 @@ struct AppModelGamesTests {
         #expect(model.gameRecord("genshin")?.installPath == gameLocation)
     }
 
-    @Test func ejectingMoveDestinationCancelsItsOperation() async throws {
-        let source = TestVolumeEventSource(), fake = FakeGameServices()
-        let (model, _, _) = try gameFixture(fake: fake, volumeEvents: source)
+    @Test(.timeLimit(.minutes(1)), arguments: ["source", "destination", "reported"])
+    func ejectedMoveShowsRollbackMessageAndCanStartAgainAfterReconnect(drive: String) async throws {
+        let events = TestVolumeEventSource(), fake = FakeGameServices()
+        let (model, _, _) = try gameFixture(fake: fake, volumeEvents: events)
+        let source = URL(fileURLWithPath: "/Volumes/Source/Game")
+        let destination = URL(fileURLWithPath: "/Volumes/Destination")
+        fake.setLocation(source, for: "genshin")
         fake.setStatus(.installed(tag: "1.0"), for: "genshin")
         await model.start()
-        model.moveGame("genshin", to: URL(fileURLWithPath: "/Volumes/Destination"))
+        model.moveGame("genshin", to: destination)
         let task = try #require(model.gameTask)
         var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
-        source.send(.unmounted(URL(fileURLWithPath: "/Volumes/Destination")))
-        #expect(task.isCancelled)
+        fake.emit(.phase(.staging))
+        for await phase in Observations({ model.gameMovePhase(for: "genshin") }) {
+            if phase == .copying { break }
+        }
+        let ejected = drive == "source" ? source.deletingLastPathComponent() : destination
+        if drive == "reported" { fake.emit(.failed(.installVolumeUnavailable)) }
+        else {
+            if drive == "source" { fake.setStatus(.locationUnavailable(source), for: "genshin") }
+            events.send(.unmounted(ejected))
+            #expect(task.isCancelled)
+        }
         await task.value; await model.volumeEventTask?.value
-        #expect(model.gameLocationPauseReason(for: "genshin") == .installVolumeUnavailable)
+        #expect(model.lastError == String(localized: "A drive was disconnected, so the move stopped. The game stays in its original folder. Reconnect the drive and move it again."))
+        #expect(model.gameLocationPauseReason(for: "genshin") == nil)
         #expect(model.gameOperation == nil)
+        #expect(model.gameRecord("genshin")?.installPath == source)
+        #expect(model.gameRecord("genshin")?.pending == nil)
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        fake.recoveryResult = ["genshin"]
+        events.send(.mounted(ejected))
+        await model.volumeEventTask?.value
+        #expect(model.games["genshin"]?.status == .installed(tag: "1.0"))
+        let state = try #require(model.games["genshin"])
+        #expect(PrimaryAction.resolve(state, runtimesReady: true, rosetta: .installed) == .play)
+        #expect(model.gameLocationPauseReason(for: "genshin") == nil)
+        #expect(model.canMoveGame("genshin"))
+        model.moveGame("genshin", to: destination)
+        let retry = try #require(model.gameTask)
+        _ = await opened.next()
+        fake.emit(.phase(.completed)); fake.finish()
+        await retry.value
+        #expect(fake.calls.filter { $0.action == "move" }.count == 2)
+    }
+
+    @Test func ejectAfterMoveSwitchAsksForCleanupWithoutClaimingOriginalLocation() async throws {
+        let (model, fake, _) = try gameFixture()
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        await model.start()
+        let folder = URL(fileURLWithPath: "/Volumes/Destination")
+        model.moveGame("genshin", to: folder)
+        let task = try #require(model.gameTask)
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        let moved = folder.appendingPathComponent(GameDefinition.all[0].defaultInstallDirectoryName)
+        fake.setLocation(moved, for: "genshin")
+        fake.emit(.failed(.installVolumeUnavailable))
+        await task.value
+        #expect(model.lastError == String(localized: "A drive was disconnected before the move finished cleaning up. Reconnect the drive to finish cleanup."))
+        #expect(model.gameRecord("genshin")?.installPath == moved)
+        #expect(model.gameLocationPauseReason(for: "genshin") == nil)
     }
 
     @Test func moveUsesGameReservationAndRefusesLanguageRestart() async throws {
@@ -273,6 +321,7 @@ struct AppModelGamesTests {
         await operation.value; await model.volumeEventTask?.value
         #expect(model.gameLocationPauseReason(for: "genshin") == .installVolumeUnavailable)
         #expect(model.games["genshin"]?.status == .locationUnavailable(path))
+        #expect(model.lastError == LauncherError.installVolumeUnavailable.userMessage)
     }
 
     @Test func playRechecksUnavailableLocationBeforeCallingLaunchService() async throws {
@@ -1010,7 +1059,7 @@ private final class FakeGameServices: GameServices, Sendable {
     private func open(_ call: GameCall, kind: PendingOperation.Kind) -> AsyncThrowingStream<OperationEvent, any Error> {
         let pair = AsyncThrowingStream<OperationEvent, any Error>.makeStream()
         pair.continuation.onTermination = { [weak self] _ in self?.state.withLock { $0.terminations += 1 } }
-        state.withLock { $0.calls.append(call); $0.active = call.id; $0.statuses[call.id] = .paused(kind); $0.continuation = pair.continuation }
+        state.withLock { $0.calls.append(call); $0.active = call.id; if call.action != "move" { $0.statuses[call.id] = .paused(kind) }; $0.continuation = pair.continuation }
         opened.continuation.yield(())
         if call.action == "install", let approvalTerminalRead {
             let source = SuspendedApprovalEvents(terminal: approvalTerminalRead)

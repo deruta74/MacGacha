@@ -946,6 +946,14 @@ final class AppModel {
         return .idle
     }
 
+    func showMoveVolumeUnavailable(originalFolder: Bool) {
+        if originalFolder {
+            lastError = String(localized: "A drive was disconnected, so the move stopped. The game stays in its original folder. Reconnect the drive and move it again.")
+        } else {
+            lastError = String(localized: "A drive was disconnected before the move finished cleaning up. Reconnect the drive to finish cleanup.")
+        }
+    }
+
     func show(_ error: any Error) {
         let error = launcherError(error)
         if error != .cancelled { lastError = error.userMessage }

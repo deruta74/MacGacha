@@ -325,16 +325,26 @@ private struct GameSnapshot: Sendable {
                 drained = drained || needsDrain
                 guard self.gameOperation == token else { return }
             }
-            if failure == .installVolumeUnavailable { self.gameLocationPauseReasons[id] = .installVolumeUnavailable }
-            if let reason = self.gameLocationPauseReasons[id], !completed { self.show(reason) }
-            else if let failure { self.show(failure) }
+            let moveStoppedByEject = token.isMoving && ejectPause && !completed
+            if token.isMoving {
+                // A move rolls back rather than publishing a resumable plan.
+                // Its transient eject marker must not become a download hint.
+                self.gameLocationPauseReasons[id] = nil
+                if moveStoppedByEject {
+                    self.showMoveVolumeUnavailable(originalFolder: snapshot.record?.installPath == token.installPath)
+                } else if let failure { self.show(failure) }
+            } else {
+                if failure == .installVolumeUnavailable { self.gameLocationPauseReasons[id] = .installVolumeUnavailable }
+                if let reason = self.gameLocationPauseReasons[id], !completed { self.show(reason) }
+                else if let failure { self.show(failure) }
+            }
             let activity: GameActivity?
             if !completed, failure == nil, let approval { activity = .needsApproval(required: approval.required, available: approval.available) }
             else { activity = nil }
             // Publish for the latest observed revision without replacing it.
             // No suspension may separate this publication from releasing the token.
             let finalRevision = snapshotRevision
-            self.applyGame(snapshot, id: id, activity: activity, reportError: failure == nil)
+            self.applyGame(snapshot, id: id, activity: activity, reportError: failure == nil && !moveStoppedByEject)
             if let cacheInfo {
                 self.preDownloadRevisions[id] = UUID()
                 self.preDownloads[id] = PreDownloadOverlay(info: cacheInfo)

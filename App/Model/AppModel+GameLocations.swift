@@ -77,6 +77,7 @@ import GameLibrary
                 for id in await services.recoverPendingMoves() {
                     guard self.gameOperation?.id != id else { continue }
                     recovered.insert(id)
+                    self.gameLocationPauseReasons[id] = nil
                     if !refreshIDs.contains(id) {
                         refreshIDs.append(id)
                         let revision = UUID()
