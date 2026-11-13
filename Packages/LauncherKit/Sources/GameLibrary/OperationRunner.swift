@@ -25,14 +25,16 @@ public actor OperationRunner {
     private let fileOps: any FileOps
     private let maxConcurrentObjects: Int
     private let pipeline: PipelineConfiguration
+    private let locationProbe: any GameLocationProbing
 
     public init(store: GameRecordStore, fetcher: ChunkFetcher, disk: any DiskSpaceProbe, log: EventLog?,
         crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(),
         identityProvider: any FileSystemIdentityProvider = SystemFileSystemIdentityProvider(),
-        maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, pipeline: PipelineConfiguration = .default) {
+        maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, pipeline: PipelineConfiguration = .default,
+        locationProbe: any GameLocationProbing = SystemGameLocationProbe()) {
         self.store = store; self.fetcher = fetcher; self.disk = disk; self.log = log
         self.crashHooks = crashHooks; self.fileOps = fileOps; self.identityProvider = identityProvider
-        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline
+        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline; self.locationProbe = locationProbe
     }
 
     /// managedPaths is the complete target build's path set, including files
@@ -74,6 +76,7 @@ public actor OperationRunner {
             try await store.cleanupOrphanGameDirectory(game)
             return nil
         }
+        try locationProbe.requireAvailable(at: record.installPath)
         if record.uninstalling { return record }
         let fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity, identityProvider: identityProvider)
         try CompletionReceipt.discardInterruptedWrites(fs: fs)
@@ -102,7 +105,7 @@ public actor OperationRunner {
     private func stream(_ game: String, request: RunnerRequest, approved: Bool, lease: GameOperationLease? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = RunnerSession(game: game, request: request, approved: approved, store: store, fetcher: fetcher,
             disk: disk, log: log, hooks: crashHooks, fileOps: fileOps, lease: lease, identityProvider: identityProvider,
-            maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline)
+            maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, locationProbe: locationProbe)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
 }
@@ -137,6 +140,7 @@ private actor RunnerSession {
     private let fileOps: any FileOps
     private let maxConcurrentObjects: Int
     private let pipeline: PipelineConfiguration
+    private let locationProbe: any GameLocationProbing
     private var lease: GameOperationLease?
     private var iterator: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
     private var record: GameRecord?
@@ -147,11 +151,11 @@ private actor RunnerSession {
 
     init(game: String, request: RunnerRequest, approved: Bool, store: GameRecordStore, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe, log: EventLog?, hooks: CrashHooks, fileOps: any FileOps, lease: GameOperationLease?,
-        identityProvider: any FileSystemIdentityProvider, maxConcurrentObjects: Int, pipeline: PipelineConfiguration) {
+        identityProvider: any FileSystemIdentityProvider, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, locationProbe: any GameLocationProbing) {
         self.game = game; self.request = request; self.approved = approved; self.store = store
         self.fetcher = fetcher; self.disk = disk; self.log = log; self.hooks = hooks; self.fileOps = fileOps
         self.lease = lease; self.identityProvider = identityProvider
-        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline
+        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline; self.locationProbe = locationProbe
     }
 
     func next() async throws -> OperationEvent? {
@@ -195,10 +199,16 @@ private actor RunnerSession {
             return event
         } catch {
             let approval = awaitingApprovalFailure
+            var failure: any Error = error
+            if let root = record?.installPath {
+                do { try locationProbe.requireAvailable(at: root) }
+                catch LauncherError.installVolumeUnavailable { failure = LauncherError.installVolumeUnavailable }
+                catch { /* Keep the original operation failure when availability is uncertain. */ }
+            }
             finish()
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
             if approval, case LauncherError.insufficientSpace = error { return nil }
-            throw error
+            throw failure
         }
     }
 
@@ -218,7 +228,7 @@ private actor RunnerSession {
             }
             guard existing?.uninstalling != true, proposed?.uninstalling != true else { throw LauncherError.busy("finish uninstall first") }
             guard existing == nil || existing == proposed else { throw LauncherError.busy("game record changed") }
-            try requireGameLocationAvailable(proposal.root)
+            try locationProbe.requireAvailable(at: proposal.root)
             let others = try await store.records().filter { $0.key != game }.map(\.value)
             try GameRecordRules.checkLocation(proposal.root, others: others, reserved: reserved)
             let fresh = kind == .install && proposed?.installed == nil
@@ -246,7 +256,7 @@ private actor RunnerSession {
             guard let saved = try await store.load(game) else { throw LauncherError.io("no pending operation") }
             try GameRecordRules.check(.resume, record: saved, others: [])
             guard let pending = saved.pending else { throw LauncherError.io("no pending operation") }
-            try requireGameLocationAvailable(saved.installPath)
+            try locationProbe.requireAvailable(at: saved.installPath)
             if let receipt = try CompletionReceipt.load(fs: ContainedFileSystem(root: saved.installPath, expectedRootIdentity: saved.installIdentity, identityProvider: identityProvider), planID: pending.planID) {
                 try GameCompletion.requireMatch(receipt, pending)
                 _ = try await GameCompletion.save(game, record: saved, receipt: receipt, store: store, hooks: hooks, log: log, identityProvider: identityProvider, fileOps: fileOps)
@@ -324,17 +334,5 @@ private enum GameCompletion {
 }
 
 package func requireGameLocationAvailable(_ root: URL) throws {
-    let components = root.pathComponents
-    let folded = components.map { $0.lowercased() }
-    let name: String?
-    if folded.count >= 3, folded[1] == "volumes" { name = components[2] }
-    else if folded.count >= 6, folded[1...4].elementsEqual(["system", "volumes", "data", "volumes"]) { name = components[5] }
-    else { name = nil }
-    if let name {
-        let volume = URL(fileURLWithPath: "/Volumes").appendingPathComponent(name)
-        var info = stat()
-        guard stat(volume.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else {
-            throw LauncherError.io("install location unavailable")
-        }
-    }
+    try SystemGameLocationProbe().requireAvailable(at: root)
 }

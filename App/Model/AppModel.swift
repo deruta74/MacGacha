@@ -184,6 +184,9 @@ final class AppModel {
     @ObservationIgnored let defaults: UserDefaults?
     @ObservationIgnored let purgeableSpace: any PurgeableSpaceProbe
     @ObservationIgnored let gameServices: any GameServices
+    var gameLocationPauseReasons: [String: LauncherError] = [:]
+    @ObservationIgnored var volumeEventTask: Task<Void, Never>?
+    @ObservationIgnored private var volumeObservation: (any Sendable)?
     @ObservationIgnored var gameTask: Task<Void, Never>?
     @ObservationIgnored var gameStartupTask: Task<Void, Never>?
     @ObservationIgnored var gameActivationTask: Task<Void, Never>?
@@ -295,6 +298,7 @@ final class AppModel {
         artServices: [Region: any GameArtProviding] = [:],
         eventsServices: [Region: any GameEventsProviding] = [:],
         gameServices: any GameServices = PreviewGameServices(),
+        volumeEvents: any VolumeEventSource = WorkspaceVolumeEventSource(),
         rosettaProbe: any RosettaProbing = UnknownRosettaProbe(),
         displayProbe: any DisplayProbe = FixedDisplayProbe(),
         displayNames: @escaping @MainActor @Sendable () -> [String: String] = { [:] },
@@ -352,6 +356,7 @@ final class AppModel {
         observeEventsWindowActivation()
         refreshConnectedDisplays()
         screenChangeObservation = ScreenChangeObservation(center: activationCenter, model: self)
+        volumeObservation = volumeEvents.observe { [weak self] event in self?.receiveVolumeEvent(event) }
     }
 
     func setGameState(_ id: String, _ state: GameState) {
@@ -487,6 +492,7 @@ final class AppModel {
         artStartupTask?.cancel(); artRevealTask?.cancel()
         for task in eventsTasks.values { task.cancel() }
         eventsHydrationTask?.cancel(); eventsExpiryTask?.cancel(); eventsWindowTask?.cancel()
+        volumeEventTask?.cancel()
         gameTask?.cancel(); gameStartupTask?.cancel(); gameActivationTask?.cancel()
     }
 

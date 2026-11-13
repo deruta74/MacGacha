@@ -25,6 +25,7 @@ public enum LauncherError: Error, Sendable, Equatable {
     case genshinFpsRiskNotAcknowledged
     case rosettaMissing
     case rosettaInstallerUnavailable
+    case installVolumeUnavailable
     case cancelled
     case journalCorrupt(String)
 }

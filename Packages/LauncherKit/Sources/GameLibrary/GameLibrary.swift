@@ -39,6 +39,7 @@ public actor GameLibrary {
     let runner: OperationRunner
     let store: GameRecordStore
     let disk: any DiskSpaceProbe
+    let locationProbe: any GameLocationProbing
     private let purgeable: any PurgeableSpaceProbe
     let log: EventLog?
     let operationGuard: (any GameOperationGuard)?
@@ -64,7 +65,8 @@ public actor GameLibrary {
     }
 
     public init(paths: AppPaths, api: DeliveryAPI, runner: OperationRunner, store: GameRecordStore,
-        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(), guard operationGuard: (any GameOperationGuard)? = nil) {
+        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(), guard operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe()) {
+        self.locationProbe = locationProbe
         self.paths = paths; self.api = api; self.runner = runner; self.store = store
         self.operationGuard = operationGuard
         self.disk = disk; self.purgeable = purgeable; self.log = log; hooks = crashHooks; self.fileOps = fileOps
@@ -98,15 +100,29 @@ public actor GameLibrary {
         try await readStatus(game, fresh: true)
     }
 
-    private func readStatus(_ game: GameDefinition, fresh: Bool) async throws -> GameStatus {
+    public func requireGameLocationAvailable(_ game: GameDefinition) async throws {
+        guard let record = try await store.load(game.id) else { return }
+        try locationProbe.requireAvailable(at: record.installPath)
+    }
+
+    /// Volume events only read local records and cached branch metadata.
+    public func locationStatus(_ game: GameDefinition) async throws -> GameStatus {
+        try await readStatus(game, fresh: false, localOnly: true)
+    }
+
+    private func readStatus(_ game: GameDefinition, fresh: Bool, localOnly: Bool = false) async throws -> GameStatus {
         guard let record = try await store.load(game.id) else { return .notInstalled }
-        do { try requireGameLocationAvailable(record.installPath) }
+        do { try locationProbe.requireAvailable(at: record.installPath) }
         catch { return .locationUnavailable(record.installPath) }
         if record.uninstalling { return .uninstallPaused }
         if let pending = record.pending { return .paused(pending.kind) }
         guard let installed = record.installed else { return .unknown }
         let latest: GameBranch?
-        if fresh { latest = try await branch(game, cachedFallback: false) }
+        if localOnly {
+            latest = (try? await store.readState("branch.json", for: game.id, maxBytes: 2 << 20))
+                .flatMap { try? JSONDecoder().decode(GameBranch.self, from: $0) }
+                .flatMap { $0.biz == game.biz ? $0 : nil }
+        } else if fresh { latest = try await branch(game, cachedFallback: false) }
         else { latest = try? await branch(game, cachedFallback: true) }
         if let latest, latest.tag != installed.tag { return .updateAvailable(from: installed.tag, to: latest.tag) }
         return .installed(tag: installed.tag)
@@ -153,7 +169,7 @@ public actor GameLibrary {
         try GameRecordRules.check(.uninstall, record: records[game.id], others: others(records, game))
         guard var record = records[game.id] else { throw LauncherError.io("game is not installed") }
         if !record.uninstallFilesRemoved {
-            try requireGameLocationAvailable(record.installPath)
+            try locationProbe.requireAvailable(at: record.installPath)
             try checkLocation(record.installPath, records: records, game: game)
             let fs: ContainedFileSystem?
             do { fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps).pinRootIfPresent() }
@@ -235,7 +251,7 @@ public actor GameLibrary {
         let lease = try await store.acquireOperationLease(retainedGameLock: gameLock)
         let records = try await store.records(); let record = records[game.id]
         try GameRecordRules.check(request.action, record: record, others: others(records, game))
-        if let record { try requireGameLocationAvailable(record.installPath) }
+        if let record { try locationProbe.requireAvailable(at: record.installPath) }
         switch request {
         case .resume(let approved):
             return LibraryPrepared(lease: lease, stream: await runner.resume(game.id, approved: approved, lease: lease))
@@ -457,7 +473,7 @@ public actor GameLibrary {
     }
 
     private func checkNewLocation(_ location: URL, records: [String: GameRecord], game: GameDefinition, empty: Bool) throws {
-        try requireGameLocationAvailable(location)
+        try locationProbe.requireAvailable(at: location)
         try checkLocation(location, records: records, game: game)
         if empty { try GameRecordRules.checkInstallFolder(location) }
     }

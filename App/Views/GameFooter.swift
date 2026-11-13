@@ -222,7 +222,9 @@ struct GameFooter: View {
         case .paused:
             return state.spaceShortage == nil ? String(localized: "Paused") : String(localized: "Paused — Not enough free disk space")
         case .uninstallPaused: return String(localized: "Uninstall didn't finish")
-        case .locationUnavailable: return String(localized: "Install location unavailable — connect the drive it's on")
+        case .locationUnavailable:
+            // The drive name comes from the saved path, so it is known while the drive is away.
+            return model.gameLocationHint(for: game.id) ?? String(localized: "Install location unavailable — connect the drive it's on")
         }
     }
 
@@ -627,7 +629,8 @@ struct GameMenu: View {
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
                 Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
             }
-            if let folder = model.gameRecord(game.id)?.installPath {
+            // Hidden while the drive is away: Finder can't reveal an unmounted folder.
+            if let folder = model.gameLocationURL(for: game.id) {
                 Button("Show in Finder", systemImage: "folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([folder])
                 }

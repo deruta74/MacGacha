@@ -29,6 +29,7 @@ public extension LauncherError {
         case .genshinFpsRiskNotAcknowledged: "genshinFpsRiskNotAcknowledged"
         case .rosettaMissing: "rosettaMissing"
         case .rosettaInstallerUnavailable: "rosettaInstallerUnavailable"
+        case .installVolumeUnavailable: "installVolumeUnavailable"
         case .cancelled: "cancelled"
         case .journalCorrupt: "journalCorrupt"
         }

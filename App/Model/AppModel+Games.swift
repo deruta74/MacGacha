@@ -16,10 +16,17 @@ struct GameOperationToken: Sendable, Equatable {
     var isVerification = false
     var isUninstall = false
     var isPreDownload = false
+    var installPath: URL? = nil
 }
 private enum GameRequest: Sendable {
     case install(Set<String>, URL, Bool), adopt(URL, Set<String>), update, resume(Bool), verify, voices(Set<String>), uninstall
     var isUninstall: Bool { if case .uninstall = self { true } else { false } }
+    var installPath: URL? {
+        switch self {
+        case .install(_, let path, _), .adopt(let path, _): path
+        default: nil
+        }
+    }
     func activity(record: GameRecord?) -> OtherRegionActivity {
         switch self {
         case .verify, .adopt: .verifying
@@ -38,7 +45,11 @@ private struct GameSnapshot: Sendable {
     let record: GameRecord?
     var error: LauncherError? = nil
 }
-@concurrent private func readGame(_ services: any GameServices, id: String) async -> GameSnapshot {
+@concurrent private func readGame(_ services: any GameServices, id: String, draining: Bool = false) async -> GameSnapshot {
+    if draining {
+        do { try await services.waitUntilIdle(id) }
+        catch { return GameSnapshot(status: await services.status(id), record: try? await services.record(id), error: launcherError(error)) }
+    }
     let status = await services.status(id)
     do { return GameSnapshot(status: status, record: try await services.record(id)) }
     catch { return GameSnapshot(status: status, record: nil, error: launcherError(error)) }
@@ -198,11 +209,11 @@ private struct GameSnapshot: Sendable {
         return task
     }
 
-    private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity, isVerification: Bool, isUninstall: Bool) -> GameOperationToken? {
+    private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity, isVerification: Bool, isUninstall: Bool, installPath: URL?) -> GameOperationToken? {
         guard canBeginGameOrRuntimeOperation() else { return nil }
         guard GameDefinition.all.contains(where: { $0.id == id }) else { show(LauncherError.io("Unknown game")); return nil }
         guard gameOperation == nil else { show(LauncherError.busy("another game operation is running")); return nil }
-        let token = GameOperationToken(id: id, generation: UUID(), kind: kind, isVerification: isVerification, isUninstall: isUninstall)
+        let token = GameOperationToken(id: id, generation: UUID(), kind: kind, isVerification: isVerification, isUninstall: isUninstall, installPath: installPath)
         gameOperation = token; gameRevisions[id] = token.generation
         gameProgress = GameProgress()
         dismissError()
@@ -212,7 +223,7 @@ private struct GameSnapshot: Sendable {
 
     @discardableResult private func beginGame(_ id: String, _ request: GameRequest) -> Task<Void, Never>? {
         guard let token = reserveGame(id, activity: request.isUninstall ? .working(.deleting, fraction: nil, bytesPerSecond: nil) : .resolving,
-            kind: request.activity(record: gameRecords[id]), isVerification: { if case .verify = request { true } else { false } }(), isUninstall: request.isUninstall) else { return nil }
+            kind: request.activity(record: gameRecords[id]), isVerification: { if case .verify = request { true } else { false } }(), isUninstall: request.isUninstall, installPath: request.installPath ?? gameRecords[id]?.installPath) else { return nil }
         let services = gameServices, startup = ensureGameStartup()
         let task = Task { [weak self] in
             var approval: (required: Int64, available: Int64)?
@@ -222,6 +233,11 @@ private struct GameSnapshot: Sendable {
                 await startup.value
                 try Task.checkCancellation()
                 if let error = self?.launchStartupError { throw error }
+                switch request {
+                case .update, .resume, .verify, .voices, .uninstall: try await self?.recheckGameLocation(id)
+                case .install, .adopt: break
+                }
+                self?.gameLocationPauseReasons[id] = nil
                 let stream = await gameStream(services, id: id, request: request)
                 events: for try await event in stream {
                     try Task.checkCancellation()
@@ -252,18 +268,41 @@ private struct GameSnapshot: Sendable {
                 else { failure = error }
             }
             guard self?.gameOperation == token else { return }
+            // Retire older location reads before capture, preserving later events.
+            let finalizationRevision = UUID()
+            self?.gameRevisions[id] = finalizationRevision
+            var snapshotRevision: UUID? = finalizationRevision
             // Cancellation may have raced with publication. Read the durable state
             // in an uncancelled task, retaining services rather than the model.
-            let snapshot = await Task.detached { await readGame(services, id: id) }.value
+            let ejectPause = failure == .installVolumeUnavailable || self?.gameLocationPauseReasons[id] == .installVolumeUnavailable
+            var drained = ejectPause
+            var snapshot = await Task.detached { await readGame(services, id: id, draining: ejectPause) }.value
             guard let self, self.gameOperation == token else { return }
-            if let failure { self.show(failure) }
+            let cacheInfo = try? await services.preDownloadInfo(id, refresh: false)
+            guard self.gameOperation == token else { return }
+            // Recheck after every read: a mount may finish its refresh already,
+            // or queue behind this consumer. Late ejects still require drainage.
+            while self.gameRevisions[id] != snapshotRevision ||
+                (!drained && self.gameLocationPauseReasons[id] == .installVolumeUnavailable) {
+                let needsDrain = !drained && self.gameLocationPauseReasons[id] == .installVolumeUnavailable
+                snapshotRevision = self.gameRevisions[id]
+                snapshot = await Task.detached { await readGame(services, id: id, draining: needsDrain) }.value
+                drained = drained || needsDrain
+                guard self.gameOperation == token else { return }
+            }
+            if failure == .installVolumeUnavailable { self.gameLocationPauseReasons[id] = .installVolumeUnavailable }
+            if let reason = self.gameLocationPauseReasons[id], !completed { self.show(reason) }
+            else if let failure { self.show(failure) }
             let activity: GameActivity?
             if !completed, failure == nil, let approval { activity = .needsApproval(required: approval.required, available: approval.available) }
             else { activity = nil }
+            // Publish for the latest observed revision without replacing it.
+            // No suspension may separate this publication from releasing the token.
+            let finalRevision = snapshotRevision
             self.applyGame(snapshot, id: id, activity: activity, reportError: failure == nil)
-            if let info = try? await services.preDownloadInfo(id, refresh: false), self.gameOperation == token {
+            if let cacheInfo {
                 self.preDownloadRevisions[id] = UUID()
-                self.preDownloads[id] = PreDownloadOverlay(info: info)
+                self.preDownloads[id] = PreDownloadOverlay(info: cacheInfo)
             }
             if case .insufficientSpace(let required, let available) = failure, case .paused = snapshot.status {
                 var state = self.games[id] ?? GameState(status: snapshot.status)
@@ -283,7 +322,7 @@ private struct GameSnapshot: Sendable {
                 let location = snapshot.record?.installPath {
                 let probe = self.purgeableSpace
                 let important = try? await BlockingIO.run { probe.importantUsageBytes(at: location) }
-                guard self.gameRevisions[id] == token.generation,
+                guard self.gameRevisions[id] == finalRevision,
                     var state = self.games[id], state.activity == activity, state.spaceShortage == shortage else { return }
                 state.spaceShortage?.purgeable = important.map { max(0, max(0, $0) - max(0, shortage.available)) }
                 self.setGameState(id, state)
