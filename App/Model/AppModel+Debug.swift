@@ -62,6 +62,16 @@ extension AppModel {
             model = preview
         } else { model = debugLaunchPreview(state: name, recoveryNotice: notice, region: region) }
         if notice, let recovery = debugRecoveryNotice(in: region) { model?.recoveryNotices = [recovery] }
+        if let contents = defaults.string(forKey: "MacGachaDebugHUD").flatMap(MetalHUDContents.init(rawValue:)), let model {
+            // Inert in-memory HUD settings for screenshots of the settings sheet.
+            for game in GameDefinition.all {
+                var settings = model.launchSettings(for: game.id)
+                settings.metalHUD = true; settings.metalHUDContents = contents
+                settings.metalHUDElements = [.fps, .frameinterval, .frameintervalgraph, .gputime]
+                settings.metalHUDPosition = .bottomRight; settings.metalHUDSize = .large
+                model.launchSettingsCache[game.id] = settings
+            }
+        }
         if defaults.bool(forKey: "MacGachaDebugPlayTime") {
             // Inert sample totals for screenshots: 42 h in all, last session 1 h 20 min a day ago.
             let json = #"{"totalSeconds":151320,"lastSessionSeconds":4800,"lastPlayed":\#(Date.now.timeIntervalSinceReferenceDate - 86_400)}"#
