@@ -643,6 +643,15 @@ struct GameMenu: View {
                     Button("Export Wish History…", systemImage: "square.and.arrow.up") { gameSheet = .wishExport(game.id) }
                         .disabled(!model.canExportWishHistory(game.id))
                 }
+                if model.offersScreenshots(for: game.id) {
+                    // Looked up when the menu opens: the game creates the folder with the first screenshot.
+                    let folder = model.screenshotsURL(for: game.id)
+                    Button(model.screenshotsMenuTitle, systemImage: "photo.on.rectangle") {
+                        if let folder { NSWorkspace.shared.open(folder) }
+                    }
+                    .disabled(folder == nil)
+                    .help(folder == nil ? model.screenshotsHelp : "")
+                }
             }
             // An active pre-download of this game doesn't hide Move: the model pauses and drains it first.
             if isInstalled, !waitingForApproval, !isLive {

@@ -13,6 +13,7 @@ struct GameSettingsSheet: View {
 
     @State private var showsFpsRisk = false
     @State private var customFpsTarget = false
+    @State private var confirmingPrefixReset = false
 
     private var settings: Binding<LaunchSettings> {
         Binding(
@@ -239,9 +240,36 @@ struct GameSettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Section {
+                    LabeledContent {
+                        if model.prefixResetGame == game.id {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Button(model.prefixResetTitle, role: .destructive) { confirmingPrefixReset = true }
+                                .disabled(model.prefixResetBlocker(for: game.id) != nil)
+                        }
+                    } label: {
+                        Text("Wine prefix")
+                    }
+                } footer: {
+                    Text(model.prefixResetBlocker(for: game.id)?.reason
+                        ?? String(localized: "If the game stopped starting after a change, a fresh prefix often helps."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .formStyle(.grouped)
             .onAppear { customFpsTarget = model.genshinFpsTarget(for: game.id) != 120 }
+            .confirmationDialog(model.prefixResetTitle, isPresented: $confirmingPrefixReset) {
+                Button("Reset", role: .destructive) {
+                    Task {
+                        do { try await model.resetWinePrefix(game.id) }
+                        catch { if launcherError(error) != .cancelled { model.show(error) } }
+                    }
+                }
+            } message: {
+                Text(model.prefixResetConfirmation)
+            }
             .sheet(isPresented: $showsFpsRisk) {
                 FpsRiskSheet(gameName: game.name) {
                     model.acknowledgeGenshinFpsRisk()
