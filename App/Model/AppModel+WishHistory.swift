@@ -60,7 +60,7 @@ import HoYoPlayAPI
             let failure: LauncherError
             if Task.isCancelled || task.isCancelled || error is CancellationError { failure = .cancelled }
             else if let typed = error as? LauncherError,
-                [.wishHistoryNoCachedLink, .wishHistoryLinkExpired, .wishHistoryNetwork, .wishHistoryInvalidData, .wishHistoryUnsupportedFormat, .cancelled].contains(typed) { failure = typed }
+                [.wishHistoryNoCachedLink, .wishHistoryLinkExpired, .wishHistoryNetwork, .wishHistoryInvalidData, .cancelled].contains(typed) { failure = typed }
             else { failure = .wishHistoryNetwork }
             if wishHistoryEnabled, failure != .cancelled { wishHistoryFailure = failure }
             throw failure

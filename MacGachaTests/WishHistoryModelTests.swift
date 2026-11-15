@@ -54,7 +54,7 @@ import Launch
         #expect(model.wishHistoryProgress == nil)
     }
 
-    @Test(arguments: [LauncherError.wishHistoryNoCachedLink, .wishHistoryLinkExpired, .wishHistoryNetwork])
+    @Test(arguments: [LauncherError.wishHistoryNoCachedLink, .wishHistoryLinkExpired, .wishHistoryNetwork, .wishHistoryInvalidData])
     func exportFailuresAreTyped(error: LauncherError) async throws {
         let model = fixture(ModelWishExporter(error: error)); model.wishHistoryEnabled = true
         await #expect(throws: error) { try await model.exportWishHistory("genshin") }

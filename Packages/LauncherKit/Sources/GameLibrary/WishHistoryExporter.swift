@@ -46,7 +46,7 @@ public struct WishHistoryExporter: WishHistoryExporting {
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
             if let error = error as? LauncherError {
                 switch error {
-                case .cancelled, .wishHistoryNoCachedLink, .wishHistoryLinkExpired, .wishHistoryInvalidData, .wishHistoryUnsupportedFormat: throw error
+                case .cancelled, .wishHistoryNoCachedLink, .wishHistoryLinkExpired, .wishHistoryInvalidData: throw error
                 default: break
                 }
             }
@@ -58,7 +58,8 @@ public struct WishHistoryExporter: WishHistoryExporting {
     private func collect(_ request: WishHistoryRequest, link: WishHistoryLink, http: any HTTPClient,
         progress: @escaping @Sendable (WishHistoryProgress) async -> Void) async throws -> WishHistoryExport {
         let language = WishLanguage(request.language, cn: request.game.region == .mainlandChina)
-        var items: [[String: String]] = [], seen: Set<String> = []
+        var items: [[String: String]] = [], beyondItems: [[String: String]] = []
+        var seen: Set<String> = [], beyondSeen: Set<String> = []
         var uid: String?, timezone: Int?, sentRequest = false
         var receivedBytes = 0
         for banner in WishHistoryLink.banners(request.game) {
@@ -67,7 +68,7 @@ public struct WishHistoryExporter: WishHistoryExporting {
                 try Task.checkCancellation()
                 if sentRequest { try await sleep(.milliseconds(300)) }
                 try Task.checkCancellation()
-                await progress(WishHistoryProgress(gameID: request.game.id, banner: banner, page: page, count: items.count))
+                await progress(WishHistoryProgress(gameID: request.game.id, banner: banner, page: page, count: items.count + beyondItems.count))
                 try Task.checkCancellation()
                 let url = link.requestURL(game: request.game, banner: banner, page: page, endID: cursor, language: language.api)
                 sentRequest = true
@@ -84,46 +85,51 @@ public struct WishHistoryExporter: WishHistoryExporting {
                     }
                     throw LauncherError.wishHistoryNetwork
                 }
-                guard let data = response.data, data.list.count <= 20 else { throw LauncherError.wishHistoryInvalidData }
+                guard let data = response.data, data.list.count <= WishHistoryLink.pageSize(request.game, banner: banner) else { throw LauncherError.wishHistoryInvalidData }
                 if data.list.isEmpty { break }
                 let zone = data.region_time_zone ?? Self.timezone(for: data.list[0]["uid"], game: request.game)
                 guard let zone, (-12...14).contains(zone), timezone == nil || timezone == zone else { throw LauncherError.wishHistoryInvalidData }
                 timezone = zone
+                let isBeyond = WishHistoryLink.isBeyond(request.game, banner: banner)
                 for var item in data.list {
                     guard let itemUID = item["uid"], Self.numeric(itemUID), uid == nil || uid == itemUID,
-                        let id = item["id"], Self.numeric(id), id != "0",
-                        let type = item["gacha_type"], WishHistoryLink.banners(request.game).contains(type),
-                        item["time"]?.isEmpty == false, item["item_id"] != nil,
+                        let id = item["id"], Self.numeric(id), id != "0", id.count <= 19,
+                        let time = item["time"], Self.validTime(time), item["item_id"] != nil,
                         item.values.allSatisfy({ $0.utf8.count <= 4_096 }),
-                        item["lang"].map({ $0 == language.uigf }) ?? true,
-                        request.game.family != .starrail || item["gacha_id"] != nil else { throw LauncherError.wishHistoryInvalidData }
+                        !item.keys.contains(where: { $0.lowercased() == "authkey" }),
+                        item["lang"].map({ $0 == language.uigf }) ?? true else { throw LauncherError.wishHistoryInvalidData }
                     uid = itemUID
-                    // v4.0 cannot represent the later collaboration/re-run banner types.
-                    guard request.game.family != .starrail || !["21", "22"].contains(type),
-                        request.game.family != .zzz || !["102", "103"].contains(type) else { throw LauncherError.wishHistoryUnsupportedFormat }
-                    if request.game.family == .genshin { item["uigf_gacha_type"] = type == "400" ? "301" : type }
-                    // Keep API fields, but reject unexpected fields instead of exporting arbitrary payloads.
-                    guard Set(item.keys).isSubset(of: Self.itemFields) else { throw LauncherError.wishHistoryInvalidData }
-                    if seen.insert(id).inserted { items.append(item) }
+                    if isBeyond {
+                        guard Self.validBeyond(item) else { throw LauncherError.wishHistoryInvalidData }
+                        if beyondSeen.insert(id).inserted { beyondItems.append(item) }
+                    } else {
+                        guard let type = item["gacha_type"], WishHistoryLink.banners(request.game).contains(type),
+                            !WishHistoryLink.isBeyond(request.game, banner: type),
+                            request.game.family != .starrail || item["gacha_id"] != nil else { throw LauncherError.wishHistoryInvalidData }
+                        if request.game.family == .genshin { item["uigf_gacha_type"] = type == "400" ? "301" : type }
+                        if seen.insert(id).inserted { items.append(item) }
+                    }
                 }
-                guard items.count <= 100_000, let next = data.list.last?["id"], next != cursor,
+                guard items.count + beyondItems.count <= 100_000, let next = data.list.last?["id"], next != cursor,
                     cursor == "0" || Self.less(next, than: cursor), cursors.insert(next).inserted,
                     page < 10_000 else { throw LauncherError.wishHistoryInvalidData }
                 cursor = next
             }
         }
         try Task.checkCancellation()
-        let account: Account? = uid.map { Account(uid: $0, timezone: timezone!, lang: language.uigf, list: items) }
+        let account: Account? = items.isEmpty ? nil : uid.map { Account(uid: $0, timezone: timezone!, lang: language.uigf, list: items) }
+        let beyondAccount: Account? = beyondItems.isEmpty ? nil : uid.map { Account(uid: $0, timezone: timezone!, lang: language.uigf, list: beyondItems) }
         let family = request.game.family
         let document = Document(info: Info(export_timestamp: Int64(now().timeIntervalSince1970), export_app_version: request.appVersion),
             hk4e: family == .genshin ? account.map { [$0] } ?? [] : nil,
             hkrpg: family == .starrail ? account.map { [$0] } ?? [] : nil,
-            nap: family == .zzz ? account.map { [$0] } ?? [] : nil)
+            nap: family == .zzz ? account.map { [$0] } ?? [] : nil,
+            hk4e_ugc: family == .genshin ? beyondAccount.map { [$0] } ?? [] : nil)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let bytes = try encoder.encode(document)
         guard bytes.count <= 64 << 20 else { throw LauncherError.wishHistoryInvalidData }
         try Task.checkCancellation()
-        return WishHistoryExport(data: bytes, countsByGame: [request.game.id: items.count])
+        return WishHistoryExport(data: bytes, countsByGame: [request.game.id: items.count + beyondItems.count])
     }
 
     private func fetch(_ url: URL, http: any HTTPClient) async throws -> Data {
@@ -151,7 +157,17 @@ public struct WishHistoryExporter: WishHistoryExporting {
         }
     }
 
-    private static let itemFields: Set<String> = ["uid", "id", "item_id", "gacha_type", "gacha_id", "uigf_gacha_type", "op_gacha_type", "name", "count", "time", "lang", "item_type", "rank_type"]
+    private static func validBeyond(_ item: [String: String]) -> Bool {
+        guard let schedule = item["schedule_id"], numeric(schedule),
+            let itemID = item["item_id"], numeric(itemID),
+            let rank = item["rank_type"], numeric(rank),
+            item["item_type"] != nil, item["item_name"] != nil,
+            let type = item["op_gacha_type"], ["1000", "2000", "20011", "20012", "20021", "20022"].contains(type) else { return false }
+        return true
+    }
+    private static func validTime(_ time: String) -> Bool {
+        time.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$"#, options: .regularExpression) != nil
+    }
     private static func numeric(_ value: String) -> Bool { !value.isEmpty && value.utf8.count <= 32 && value.utf8.allSatisfy { (48...57).contains($0) } }
     private static func less(_ value: String, than other: String) -> Bool { value.count == other.count ? value < other : value.count < other.count }
     private static func timezone(for uid: String?, game: GameDefinition) -> Int? {
@@ -165,15 +181,34 @@ public struct WishHistoryExporter: WishHistoryExporting {
         }
     }
     private struct Response: Decodable { let retcode: Int; let message: String?; let data: Page? }
-    private struct Page: Decodable { let list: [[String: String]]; let region_time_zone: Int? }
+    private struct Page: Decodable {
+        let list: [[String: String]]
+        let region_time_zone: Int?
+        private enum CodingKeys: CodingKey { case list, region_time_zone }
+        init(from decoder: any Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            list = try values.decode([[String: WireString]].self, forKey: .list).map { $0.mapValues(\.value) }
+            region_time_zone = try values.decodeIfPresent(Int.self, forKey: .region_time_zone)
+        }
+    }
+    /// Newer endpoints return numeric IDs as JSON integers. Never round them through Double.
+    private struct WireString: Decodable {
+        let value: String
+        init(from decoder: any Decoder) throws {
+            let scalar = try decoder.singleValueContainer()
+            if let string = try? scalar.decode(String.self) { value = string }
+            else if let integer = try? scalar.decode(Int64.self) { value = String(integer) }
+            else { value = String(try scalar.decode(UInt64.self)) }
+        }
+    }
     private struct Info: Encodable {
         let export_timestamp: Int64
         let export_app = "MacGacha"
         let export_app_version: String
-        let version = "v4.0"
+        let version = "v4.2"
     }
     private struct Account: Encodable { let uid: String; let timezone: Int; let lang: String; let list: [[String: String]] }
-    private struct Document: Encodable { let info: Info; let hk4e: [Account]?; let hkrpg: [Account]?; let nap: [Account]? }
+    private struct Document: Encodable { let info: Info; let hk4e: [Account]?; let hkrpg: [Account]?; let nap: [Account]?; let hk4e_ugc: [Account]? }
 }
 
 private struct WishLanguage {

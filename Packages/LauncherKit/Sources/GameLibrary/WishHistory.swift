@@ -51,7 +51,7 @@ struct WishHistoryLink: Sendable, CustomStringConvertible, CustomDebugStringConv
         guard raw.utf8.count <= 16_384, let url = URLComponents(string: raw),
             url.scheme == "https", url.port == nil || url.port == 443,
             url.user == nil, url.password == nil, let items = url.queryItems else { return nil }
-        var apiPaths = [Self.path(game, banner: "1"), Self.path(game, banner: "21")]
+        var apiPaths = Self.banners(game).map { Self.path(game, banner: $0) }
         if game.family == .starrail {
             apiPaths += ["/common/gacha_record/api/getGachaLog", "/common/gacha_record/api/getLdGachaLog"]
         }
@@ -60,7 +60,9 @@ struct WishHistoryLink: Sendable, CustomStringConvertible, CustomDebugStringConv
         let route = game.family == .genshin ? (game.region == .global ? "genshin" : "hk4e") : game.family == .starrail ? "hkrpg" : "nap"
         let event = game.family == .genshin ? "e20190909gacha" : game.family == .starrail ? "e20211215gacha" : "e20230424gacha"
         let prefix = "/\(route)/event/\(event)"
-        let isPage = url.host == pageHost && [prefix, prefix + "/index.html", prefix + "-v2/index.html", prefix + "-v3/index.html"].contains(url.path)
+        let pagePaths = [prefix, prefix + "/index.html", prefix + "-v2/index.html", prefix + "-v3/index.html"]
+            + (game.family == .genshin ? ["/\(route)/event/e20250716gacha/index.html"] : [])
+        let isPage = url.host == pageHost && pagePaths.contains(url.path)
             && items.first(where: { $0.name == "game_biz" })?.value == game.biz
         guard isAPI || isPage else { return nil }
         let names = items.map(\.name)
@@ -79,7 +81,7 @@ struct WishHistoryLink: Sendable, CustomStringConvertible, CustomDebugStringConv
         var url = URLComponents()
         url.scheme = "https"; url.host = Self.host(game); url.path = Self.path(game, banner: banner)
         url.queryItems = credentials + [URLQueryItem(name: "game_biz", value: game.biz),
-            URLQueryItem(name: "size", value: "20"), URLQueryItem(name: "lang", value: language),
+            URLQueryItem(name: "size", value: String(Self.pageSize(game, banner: banner))), URLQueryItem(name: "lang", value: language),
             URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "end_id", value: endID),
             URLQueryItem(name: game.family == .zzz ? "real_gacha_type" : "gacha_type", value: banner)]
         // Foundation leaves '+' literal in a query. Encode it for form-style API decoders.
@@ -92,13 +94,17 @@ struct WishHistoryLink: Sendable, CustomStringConvertible, CustomDebugStringConv
         return "public-operation-\(biz)" + (game.region == .global ? "-sg.hoyoverse.com" : ".mihoyo.com")
     }
     static func path(_ game: GameDefinition, banner: String) -> String {
-        if game.family == .genshin { return "/gacha_info/api/getGachaLog" }
+        if game.family == .genshin { return "/gacha_info/api/" + (isBeyond(game, banner: banner) ? "getBeyondGachaLog" : "getGachaLog") }
         let prefix = game.family == .starrail ? "/common/hkrpg_gacha_record/api/" : "/common/gacha_record/api/"
         return prefix + (game.family == .starrail && ["21", "22"].contains(banner) ? "getLdGachaLog" : "getGachaLog")
     }
+    static func isBeyond(_ game: GameDefinition, banner: String) -> Bool {
+        game.family == .genshin && ["1000", "2000"].contains(banner)
+    }
+    static func pageSize(_ game: GameDefinition, banner: String) -> Int { isBeyond(game, banner: banner) ? 5 : 20 }
     static func banners(_ game: GameDefinition) -> [String] {
         switch game.family {
-        case .genshin: ["100", "200", "301", "302", "400", "500"]
+        case .genshin: ["100", "200", "301", "302", "400", "500", "1000", "2000"]
         case .starrail: ["1", "2", "11", "12", "21", "22"]
         case .zzz: ["1", "2", "3", "5", "102", "103"]
         }

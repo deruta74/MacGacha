@@ -11,7 +11,6 @@ public extension LauncherError {
         case .wishHistoryLinkExpired: "wishHistoryLinkExpired"
         case .wishHistoryNetwork: "wishHistoryNetwork"
         case .wishHistoryInvalidData: "wishHistoryInvalidData"
-        case .wishHistoryUnsupportedFormat: "wishHistoryUnsupportedFormat"
         case .malformedPatch: "malformedPatch"
         case .unsupportedCompressor: "unsupportedCompressor"
         case .unsafePath: "unsafePath"

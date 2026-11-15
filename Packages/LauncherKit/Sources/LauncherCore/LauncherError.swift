@@ -7,7 +7,6 @@ public enum LauncherError: Error, Sendable, Equatable {
     case wishHistoryLinkExpired
     case wishHistoryNetwork
     case wishHistoryInvalidData
-    case wishHistoryUnsupportedFormat
     case malformedPatch
     case unsupportedCompressor
     case unsafePath(String)

@@ -27931,84 +27931,84 @@
         }
       }
     },
-    "The wish history response is invalid or exceeds the supported limits. Please try again later." : {
+    "The wish history response is invalid or too large. Open the history in the game, then try again. If it still fails, update MacGacha." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Die Antwort zum Gebetsverlauf ist ungültig oder überschreitet die unterstützten Grenzen. Versuche es später erneut."
+            "value" : "Die Antwort zum Gebetsverlauf ist ungültig oder zu groß. Öffne den Verlauf im Spiel und versuche es erneut. Falls es weiterhin fehlschlägt, aktualisiere MacGacha."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "La respuesta del historial de deseos no es válida o supera los límites admitidos. Vuelve a intentarlo más tarde."
+            "value" : "La respuesta del historial de deseos no es válida o es demasiado grande. Abre el historial en el juego y vuelve a intentarlo. Si sigue fallando, actualiza MacGacha."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "La réponse de l’historique des vœux est invalide ou dépasse les limites prises en charge. Réessayez plus tard."
+            "value" : "La réponse de l’historique des vœux est invalide ou trop volumineuse. Ouvrez l’historique dans le jeu, puis réessayez. Si le problème persiste, mettez MacGacha à jour."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Respons riwayat permohonan tidak valid atau melebihi batas yang didukung. Coba lagi nanti."
+            "value" : "Respons riwayat permohonan tidak valid atau terlalu besar. Buka riwayat di dalam game, lalu coba lagi. Jika masih gagal, perbarui MacGacha."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "祈願履歴の応答が無効か、対応する上限を超えています。しばらくしてからもう一度お試しください。"
+            "value" : "祈願履歴の応答が無効か、大きすぎます。ゲーム内で履歴を開いてから、もう一度お試しください。それでも失敗する場合はMacGachaを更新してください。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "기원 기록 응답이 잘못되었거나 지원 한도를 초과합니다. 나중에 다시 시도해 주세요."
+            "value" : "기원 기록 응답이 잘못되었거나 너무 큽니다. 게임에서 기록을 연 후 다시 시도해 주세요. 계속 실패하면 MacGacha를 업데이트해 주세요."
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A resposta do histórico de Orações é inválida ou excede os limites aceitos. Tente novamente mais tarde."
+            "value" : "A resposta do histórico de Orações é inválida ou muito grande. Abra o histórico no jogo e tente novamente. Se continuar falhando, atualize o MacGacha."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ответ истории молитв некорректен или превышает допустимые ограничения. Повторите попытку позже."
+            "value" : "Ответ истории молитв некорректен или слишком велик. Откройте историю в игре и повторите попытку. Если ошибка повторится, обновите MacGacha."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ข้อมูลตอบกลับของประวัติการอธิษฐานไม่ถูกต้องหรือเกินขีดจำกัดที่รองรับ โปรดลองอีกครั้งภายหลัง"
+            "value" : "ข้อมูลตอบกลับของประวัติการอธิษฐานไม่ถูกต้องหรือมีขนาดใหญ่เกินไป เปิดประวัติในเกมแล้วลองอีกครั้ง หากยังไม่สำเร็จ ให้อัปเดต MacGacha"
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Відповідь історії молитов некоректна або перевищує допустимі обмеження. Спробуйте пізніше."
+            "value" : "Відповідь історії молитов некоректна або завелика. Відкрийте історію у грі та спробуйте знову. Якщо помилка повториться, оновіть MacGacha."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Phản hồi lịch sử cầu nguyện không hợp lệ hoặc vượt quá giới hạn được hỗ trợ. Vui lòng thử lại sau."
+            "value" : "Phản hồi lịch sử cầu nguyện không hợp lệ hoặc quá lớn. Hãy mở lịch sử trong trò chơi rồi thử lại. Nếu vẫn không thành công, hãy cập nhật MacGacha."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "祈愿历史记录响应无效或超出支持的限制。请稍后重试。"
+            "value" : "祈愿历史记录响应无效或过大。请在游戏中打开历史记录后重试。如果仍然失败，请更新 MacGacha。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "祈願歷史紀錄回應無效或超出支援的限制。請稍後重試。"
+            "value" : "祈願歷史紀錄回應無效或過大。請在遊戲中開啟歷史紀錄後重試。如果仍然失敗，請更新 MacGacha。"
           }
         }
       }
@@ -28749,88 +28749,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此遊戲版本尚未在 MacGacha 上測試"
-          }
-        }
-      }
-    },
-    "This history contains banner types that UIGF v4.0 cannot represent. A newer export format is required." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dieser Verlauf enthält Bannertypen, die UIGF v4.0 nicht darstellen kann. Ein neueres Exportformat ist erforderlich."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Este historial contiene tipos de gachapón que UIGF v4.0 no puede representar. Se requiere un formato de exportación más reciente."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cet historique contient des types de bannières non pris en charge par UIGF v4.0. Un format d’exportation plus récent est nécessaire."
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Riwayat ini berisi jenis banner yang tidak dapat ditampilkan oleh UIGF v4.0. Diperlukan format ekspor yang lebih baru."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "この履歴にはUIGF v4.0で表現できないバナーの種類が含まれています。新しいエクスポート形式が必要です。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 기록에는 UIGF v4.0으로 표현할 수 없는 배너 유형이 포함되어 있습니다. 더 최신 내보내기 형식이 필요합니다."
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Este histórico contém tipos de banner que o UIGF v4.0 não pode representar. É necessário um formato de exportação mais recente."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "История содержит типы баннеров, которые UIGF v4.0 не поддерживает. Требуется более новый формат экспорта."
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ประวัตินี้มีประเภทแบนเนอร์ที่ UIGF v4.0 ไม่รองรับ จำเป็นต้องใช้รูปแบบส่งออกที่ใหม่กว่า"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Історія містить типи банерів, які UIGF v4.0 не підтримує. Потрібен новіший формат експорту."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lịch sử này chứa các loại banner mà UIGF v4.0 không thể biểu diễn. Cần định dạng xuất mới hơn."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此历史记录包含 UIGF v4.0 无法表示的卡池类型。需要使用更新的导出格式。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此歷史紀錄包含 UIGF v4.0 無法表示的卡池類型。需要使用更新的匯出格式。"
           }
         }
       }
