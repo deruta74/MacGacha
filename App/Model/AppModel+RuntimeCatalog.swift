@@ -155,7 +155,7 @@ struct RuntimeInstallContext: Sendable {
             advanceRuntimeSetups()
         } catch { runtimeCatalogMutationID = nil; show(error) }
     }
-    func beginRuntimeCatalogActivation(_ target: RuntimeCatalogSnapshot, id: String) {
+    func beginRuntimeCatalogActivation(_ target: RuntimeCatalogSnapshot, id: String, notificationGameID: String? = nil) {
         guard let catalogAccess else { runtimeCatalogMutationID = nil; return }
         let previous = runtimeCatalog
         catalogMutationTask = Task { [weak self] in
@@ -174,6 +174,7 @@ struct RuntimeInstallContext: Sendable {
                 if let previous {
                     try await self.retainPreviousRuntimeOnAutomaticReturn(from: previous, to: actual, id: id)
                 }
+                if let notificationGameID { self.notify(.dependencySetupFinished, gameID: notificationGameID) }
             } catch {
                 if let publication = error as? RuntimeCatalogPublicationFailure, let actual = publication.persistedSnapshot {
                     self.catalogSelectionGeneration = UUID()
@@ -191,9 +192,12 @@ struct RuntimeInstallContext: Sendable {
         }
     }
     func finishCatalogSetup(_ key: String, succeeded: Bool) {
-        guard let target = catalogActivationTargets.removeValue(forKey: key), let id = runtimeCatalogMutationID else { return }
+        guard let target = catalogActivationTargets.removeValue(forKey: key), let id = runtimeCatalogMutationID else {
+            if succeeded { notify(.dependencySetupFinished, gameID: key) }
+            return
+        }
         let cancelled = cancelledCatalogSetups.remove(key) != nil
-        if succeeded && !cancelled { beginRuntimeCatalogActivation(target, id: id) }
+        if succeeded && !cancelled { beginRuntimeCatalogActivation(target, id: id, notificationGameID: key) }
         else { runtimeCatalogMutationID = nil }
     }
 }
