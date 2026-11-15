@@ -33,6 +33,8 @@ struct GameFooter: View {
     @Binding var panel: Panel?
     @Binding var gameSheet: GameSheet?
     @Binding var animated: Bool
+    /// The slide on screen has its own video, so there is something to switch to.
+    var slideHasVideo = false
     @State private var confirmingParts = false
     @State private var confirmingUninstall = false
     @State private var confirmingPreDownloadDeletion = false
@@ -59,8 +61,13 @@ struct GameFooter: View {
                 if let note = otherRegionNote {
                     OtherRegionNote(text: note.text) { model.region = note.region }
                 }
-                if showsPreDownload {
-                    PreDownloadBar(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
+                if showsPreDownload || playTime != nil {
+                    HStack(spacing: 8) {
+                        if let playTime { PlayTimeCapsule(summary: playTime) }
+                        if showsPreDownload {
+                            PreDownloadBar(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
+                        }
+                    }
                 }
                 HStack(spacing: 8) {
                     // Hovering the progress capsule swaps the hint for the numbers, as HoYoPlay does.
@@ -82,7 +89,7 @@ struct GameFooter: View {
                         .frame(maxWidth: 480, alignment: .trailing)
                 }
                 HStack(spacing: 10) {
-                    if art?.video != nil {
+                    if slideHasVideo {
                         backgroundToggle
                     }
                     if showsMenu {
@@ -157,6 +164,15 @@ struct GameFooter: View {
         }
     }
 
+    /// Play time shows beside an idle installed game only, never over progress or a launch.
+    private var playTime: PlayTimeSummary? {
+        guard launch == nil, let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 else { return nil }
+        switch state.status {
+        case .installed, .updateAvailable: return state.activity == nil ? summary : nil
+        default: return nil
+        }
+    }
+
     /// The pre-download sits beside an installed game, never over another operation's progress.
     private var showsPreDownload: Bool {
         if case .working = state.activity { return false }
@@ -213,7 +229,7 @@ struct GameFooter: View {
         case .checking: return String(localized: "Checking for updates…")
         case .upToDate:
             if case .installed(let tag) = state.status {
-                return withPlayTime(String(localized: "Version \(tag) · Up to date", comment: "Game status after a manual update check; the argument is the game version"))
+                return String(localized: "Version \(tag) · Up to date", comment: "Game status after a manual update check; the argument is the game version")
             }
         case .failed(let error):
             return String(localized: "Couldn't check for updates: \(error.userMessage)", comment: "Manual game update check failed; the argument is the reason")
@@ -222,9 +238,9 @@ struct GameFooter: View {
         switch state.status {
         case .unknown: return String(localized: "Checking for updates…")
         case .notInstalled: return String(localized: "Not installed")
-        case .installed(let tag): return withPlayTime(String(localized: "Version \(tag) · Installed", comment: "Game status; the argument is the game version"))
+        case .installed(let tag): return String(localized: "Version \(tag) · Installed", comment: "Game status; the argument is the game version")
         case .updateAvailable(let from, let to):
-            return withPlayTime(String(localized: "Version \(from) · Version \(to) is available", comment: "Game status: installed version, then the newer one"))
+            return String(localized: "Version \(from) · Version \(to) is available", comment: "Game status: installed version, then the newer one")
         case .paused:
             return state.spaceShortage == nil ? String(localized: "Paused") : String(localized: "Paused — Not enough free disk space")
         case .uninstallPaused: return String(localized: "Uninstall didn't finish")
@@ -232,12 +248,6 @@ struct GameFooter: View {
             // The drive name comes from the saved path, so it is known while the drive is away.
             return model.gameLocationHint(for: game.id) ?? String(localized: "Install location unavailable — connect the drive it's on")
         }
-    }
-
-    /// Play time rides on the quiet idle line instead of adding another row over the art.
-    private func withPlayTime(_ line: String) -> String {
-        guard let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 else { return line }
-        return StatusText.joined(line, TimeText.played(summary.totalSeconds))
     }
 
     /// Something the last launch couldn't apply. It stays until Play is pressed again.
@@ -626,11 +636,6 @@ struct GameMenu: View {
             if case .recoveryNeeded = model.launchState(for: game.id) {
                 Button("Try Restoring Again", systemImage: "arrow.clockwise") { model.retryRecovery(game.id) }
             }
-            if let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 {
-                Section(TimeText.played(summary.totalSeconds)) {
-                    Text(TimeText.lastSession(summary))
-                }
-            }
             if isInstalled {
                 Button("Game Settings…", systemImage: "slider.horizontal.3") { gameSheet = .settings(game.id) }
             }
@@ -673,7 +678,7 @@ struct GameMenu: View {
             Button("Uninstall…", systemImage: "trash", role: .destructive) { confirmingUninstall = true }
                 .disabled(model.isGameOperationRunning || isLive)
         } label: {
-            Image(systemName: "ellipsis")
+            Image(systemName: "line.3.horizontal")
                 .font(.title3)
                 .frame(width: 44, height: 44)
         }
@@ -747,12 +752,15 @@ enum TimeText {
     }
 
     /// Total play time: hours and minutes under ten hours, whole hours after that.
-    static func played(_ seconds: Double) -> String {
+    static func duration(_ seconds: Double) -> String {
         let minutes = Int64(max(0, seconds) / 60)
-        let duration = Duration.seconds(minutes * 60)
         let units: Set<Duration.UnitsFormatStyle.Unit> = minutes >= 600 ? [.hours] : [.hours, .minutes]
-        let text = duration.formatted(.units(allowed: units, width: .abbreviated, maximumUnitCount: 2, fractionalPart: .hide(rounded: .down)))
-        return String(localized: "Played \(text)", comment: "Total play time, e.g. Played 42 hr")
+        return Duration.seconds(minutes * 60)
+            .formatted(.units(allowed: units, width: .abbreviated, maximumUnitCount: 2, fractionalPart: .hide(rounded: .down)))
+    }
+
+    static func played(_ seconds: Double) -> String {
+        String(localized: "Played \(duration(seconds))", comment: "Total play time, e.g. Played 42 hr")
     }
 
     /// The last session for the game menu, e.g. "Last played yesterday for 1 hr 20 min".
@@ -799,5 +807,24 @@ struct OtherRegionNote: View {
         .buttonStyle(.glass)
         .controlSize(.small)
         .foregroundStyle(.white)
+    }
+}
+
+/// Total play time above Play. Hovering shows the last session.
+private struct PlayTimeCapsule: View {
+    let summary: PlayTimeSummary
+
+    var body: some View {
+        Label(TimeText.duration(summary.totalSeconds), systemImage: "clock")
+            .font(.callout)
+            .monospacedDigit()
+            .padding(.horizontal, 14)
+            .frame(height: 32)
+            .glassEffect(.regular, in: .capsule)
+            .foregroundStyle(.white)
+            .help(TimeText.lastSession(summary))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: TimeText.played(summary.totalSeconds)))
+            .accessibilityHint(Text(verbatim: TimeText.lastSession(summary)))
     }
 }

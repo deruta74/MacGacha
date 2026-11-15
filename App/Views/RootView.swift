@@ -89,7 +89,8 @@ struct RootView: View {
                     .padding(.bottom, 12)
                     .frame(maxHeight: .infinity)
                 GameFooter(game: game, art: model.gameArt[game.id], highlights: shownSlide?.highlights,
-                    images: images, panel: $panel, gameSheet: $gameSheet, animated: animated)
+                    images: images, panel: $panel, gameSheet: $gameSheet, animated: animated,
+                    slideHasVideo: shownSlide?.video != nil)
                     // A fresh footer per game, so a confirmation opened for one game can't act on another.
                     .id(game.id)
                     .padding(24)
