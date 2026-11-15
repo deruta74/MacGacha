@@ -31,6 +31,7 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
 @MainActor extension AppModel {
     var languageRestartBlocker: LanguageRestartBlocker? {
         if storageCleanupInProgress { return .runtimeWork }
+        if let id = prefixResetGame { return .unresumableOperation(id) }
         if gameMoveRecoveryReservation { return .unresumableOperation("move-recovery") }
         if let id = launchSlotOwner { return .game(id) }
         if let id = launchStates.keys.sorted().first(where: {

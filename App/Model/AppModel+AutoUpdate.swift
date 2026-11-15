@@ -10,7 +10,7 @@ import DownloadEngine
     func scheduleDependencyAutoUpdates(retry: Bool = false) {
         if retry { dependencyAutoUpdateSuppressed = [] }
         guard autoUpdateDependencies || dependencyHasRetainedVersions else { return }
-        guard !storageCleanupInProgress, !isStarting, catalogAccess != nil, runtimeCatalog != nil,
+        guard !storageCleanupInProgress, prefixResetGame == nil, !isStarting, catalogAccess != nil, runtimeCatalog != nil,
             !runtimeCatalogUnavailable, dependencyAutoUpdateTask == nil else { return }
         let generation = UUID(); dependencyAutoUpdateGeneration = generation
         dependencyAutoUpdateReservation = true

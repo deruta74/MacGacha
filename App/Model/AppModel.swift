@@ -200,6 +200,8 @@ final class AppModel {
     @ObservationIgnored var gameTask: Task<Void, Never>?
     @ObservationIgnored var gameStartupTask: Task<Void, Never>?
     @ObservationIgnored var gameActivationTask: Task<Void, Never>?
+    var prefixResetGame: String?
+    @ObservationIgnored let prefixResetter: any WinePrefixResetting
     var gameMoveRecoveryReservation = false
     var gameOperation: GameOperationToken?
     private(set) var languageRestart: UUID?
@@ -351,10 +353,12 @@ final class AppModel {
         updater: any AppUpdating = InertAppUpdater(), artClock: any Clock<Duration> = ContinuousClock(),
         relaunch: @escaping @MainActor ([String]) async throws -> Void = { _ in },
         terminateAfterLanguageRestart: @escaping @MainActor () -> Void = {},
-        launchArguments: [String] = ProcessInfo.processInfo.arguments) {
+        launchArguments: [String] = ProcessInfo.processInfo.arguments,
+        prefixResetter: (any WinePrefixResetting)? = nil) {
         self.wishHistoryExporter = wishHistoryExporter
         self.storageService = storageService ?? StorageInventory(paths: paths)
         self.storageCacheDirectory = storageCacheDirectory
+        self.prefixResetter = prefixResetter ?? WinePrefixResetter(paths: paths)
         self.relaunch = relaunch; self.terminateAfterLanguageRestart = terminateAfterLanguageRestart
         self.launchArguments = launchArguments
         self.artClock = artClock
