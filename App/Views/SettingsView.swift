@@ -67,6 +67,22 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Picker("Download speed", selection: Binding(
+                    get: { model.downloadSpeedLimit },
+                    set: { value in
+                        do { try model.setDownloadSpeedLimit(value) } catch { model.show(error) }
+                    }
+                )) {
+                    ForEach(AppModel.downloadSpeedLimitOptions, id: \.self) { limit in
+                        Text(Self.speedLimitName(limit)).tag(limit)
+                    }
+                }
+            } footer: {
+                Text("Limits game downloads, updates and pre-downloads, so other apps on your network stay fast. Changes apply to running downloads right away.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Notifications", isOn: Binding(
                     get: { model.notificationsEnabled },
                     set: { model.notificationsEnabled = $0 }
@@ -162,6 +178,12 @@ struct SettingsView: View {
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.setInstallRoot(url) }
         }
+    }
+
+    private static func speedLimitName(_ limit: Int64?) -> String {
+        guard let limit else { return String(localized: "Unlimited", comment: "Download speed limit: no limit") }
+        let rate = ByteCountFormatter.string(fromByteCount: limit, countStyle: .decimal)
+        return String(localized: "\(rate)/s", comment: "Download speed, e.g. 47 MB/s")
     }
 }
 

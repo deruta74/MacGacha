@@ -9648,6 +9648,88 @@
         }
       }
     },
+    "Download speed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download-Geschwindigkeit"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Velocidad de descarga"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vitesse de téléchargement"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kecepatan unduhan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロード速度"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 속도"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Velocidade de download"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Скорость загрузки"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ความเร็วดาวน์โหลด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Швидкість завантаження"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tốc độ tải xuống"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载速度"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載速度"
+          }
+        }
+      }
+    },
     "Downloading" : {
       "localizations" : {
         "de" : {
@@ -16655,6 +16737,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "讓《崩壞：星穹鐵道》能在 Wine 下啟動。可以在遊戲設定中關閉。"
+          }
+        }
+      }
+    },
+    "Limits game downloads, updates and pre-downloads, so other apps on your network stay fast. Changes apply to running downloads right away." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Begrenzt Downloads, Updates und Vorab-Downloads von Spielen, damit andere Apps im Netzwerk schnell bleiben. Änderungen gelten sofort für laufende Downloads."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Limita las descargas, actualizaciones y predescargas de juegos para que otras apps de tu red sigan siendo rápidas. Los cambios se aplican de inmediato a las descargas en curso."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Limite les téléchargements, mises à jour et pré-téléchargements des jeux pour que les autres apps du réseau restent rapides. Les changements s'appliquent aussitôt aux téléchargements en cours."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Membatasi unduhan, pembaruan, dan pra-unduhan game agar app lain di jaringan tetap cepat. Perubahan langsung berlaku untuk unduhan yang sedang berjalan."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲームのダウンロード、アップデート、事前ダウンロードの速度を制限し、ネットワーク上のほかのアプリを快適に保ちます。変更は実行中のダウンロードにすぐ反映されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임 다운로드, 업데이트 및 사전 다운로드 속도를 제한해 네트워크의 다른 앱이 느려지지 않게 합니다. 변경 사항은 진행 중인 다운로드에 바로 적용됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Limita downloads, atualizações e pré-downloads de jogos para que outros apps da rede continuem rápidos. As alterações valem imediatamente para os downloads em andamento."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ограничивает загрузку игр, обновлений и предзагрузок, чтобы другим приложениям в сети хватало скорости. Изменение сразу применяется к идущим загрузкам."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "จำกัดความเร็วการดาวน์โหลด อัปเดต และดาวน์โหลดล่วงหน้าของเกม เพื่อให้แอปอื่นในเครือข่ายยังเร็วอยู่ การเปลี่ยนแปลงมีผลกับการดาวน์โหลดที่กำลังทำงานทันที"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обмежує завантаження ігор, оновлень і попередніх завантажень, щоб іншим застосункам у мережі вистачало швидкості. Зміна одразу застосовується до поточних завантажень."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giới hạn tốc độ tải xuống, cập nhật và tải trước của trò chơi để các ứng dụng khác trong mạng vẫn nhanh. Thay đổi áp dụng ngay cho các lượt tải đang chạy."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "限制游戏下载、更新和预下载的速度，让网络中的其他应用保持流畅。更改会立即作用于正在进行的下载。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "限制遊戲下載、更新和預先下載的速度，讓網路中的其他 App 保持順暢。變更會立即套用到進行中的下載。"
           }
         }
       }
@@ -31715,6 +31879,89 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未知執行環境"
+          }
+        }
+      }
+    },
+    "Unlimited" : {
+      "comment" : "Download speed limit: no limit",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unbegrenzt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin límite"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Illimitée"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tanpa batas"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "制限なし"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제한 없음"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sem limite"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Без ограничений"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไม่จำกัด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Без обмежень"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không giới hạn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不限"
           }
         }
       }
