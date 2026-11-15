@@ -8,6 +8,80 @@ import TestSupport
 @testable import Launch
 
 @Suite struct LaunchSettingsTests {
+    @Test func metalHUDOptionsAlwaysEncodeLegacyDefaults() throws {
+        let settings = try JSONDecoder().decode(LaunchSettings.self, from: Data(#"{"metalHUD":true}"#.utf8))
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        #expect(encoded["metalHUDContents"] as? String == "standard")
+        #expect(encoded["metalHUDElements"] as? [String] == ["fps", "frameinterval", "gputime"])
+        #expect(encoded["metalHUDPosition"] as? String == "topright")
+        #expect(encoded["metalHUDSize"] as? String == "standard")
+    }
+
+    @Test(arguments: MetalHUDContents.allCases, MetalHUDPosition.allCases)
+    func metalHUDOptionsRoundTrip(contents: MetalHUDContents, position: MetalHUDPosition) throws {
+        for size in MetalHUDSize.allCases {
+            var settings = LaunchSettings.defaults(for: "genshin")
+            settings.metalHUDContents = contents
+            settings.metalHUDElements = MetalHUDElement.allCases
+            settings.metalHUDPosition = position
+            settings.metalHUDSize = size
+            #expect(try JSONDecoder().decode(LaunchSettings.self, from: JSONEncoder().encode(settings)) == settings)
+        }
+    }
+
+    @Test func unknownMetalHUDValuesUseDefaultsAndDropUnknownElements() throws {
+        let data = Data(#"{"metalHUD":true,"metalHUDContents":"future","metalHUDPosition":"elsewhere","metalHUDSize":"huge","metalHUDElements":["fps","future","gputime","fps"]}"#.utf8)
+        let settings = try JSONDecoder().decode(LaunchSettings.self, from: data)
+        #expect(settings.metalHUDContents == .standard)
+        #expect(settings.metalHUDPosition == .topRight)
+        #expect(settings.metalHUDSize == .standard)
+        #expect(settings.metalHUDElements == [.fps, .gputime, .fps])
+        #expect(settings.metalHUD)
+    }
+
+    @Test func customRequiresAtLeastOneKnownElement() throws {
+        var settings = LaunchSettings.defaults(for: "genshin")
+        settings.metalHUDElements = []
+        try settings.validate()
+        settings.metalHUDContents = .custom
+        #expect(throws: LauncherError.self) { try settings.validate() }
+        #expect(throws: LauncherError.self) {
+            try JSONDecoder().decode(LaunchSettings.self, from: Data(#"{"metalHUDContents":"custom","metalHUDElements":["future"]}"#.utf8))
+        }
+        settings.metalHUDElements = [.fps, .fps]
+        try settings.validate()
+    }
+
+    @Test func metalHUDElementsHaveStableLibMTLHudOrder() throws {
+        let names = ["device", "rosetta", "layersize", "memory", "refreshrate", "thermal", "gamemode",
+            "fps", "fpsgraph", "frameinterval", "frameintervalgraph", "gputime", "presentdelay"]
+        #expect(MetalHUDElement.allCases.map(\.rawValue) == names)
+        for element in MetalHUDElement.allCases {
+            #expect(try JSONDecoder().decode(MetalHUDElement.self, from: JSONEncoder().encode(element)) == element)
+        }
+        #expect(MetalHUDContents.custom.elementString(custom: MetalHUDElement.allCases.reversed()
+            + [.fps, .device]) == names.joined(separator: ","))
+    }
+
+    @Test func sessionSettingsDumpIncludesHUDOptions() {
+        var settings = LaunchSettings.defaults(for: "genshin")
+        settings.metalHUDContents = .custom
+        settings.metalHUDElements = [.fps, .thermal]
+        settings.metalHUDPosition = .bottomRight
+        settings.metalHUDSize = .large
+        let dump = String(describing: settings)
+        for field in ["metalHUDContents", "custom", "metalHUDElements", "fps", "thermal",
+            "metalHUDPosition", "bottomRight", "metalHUDSize", "large"] {
+            #expect(dump.contains(field))
+        }
+    }
+
+    @Test func metalHUDSizesExposeExactScaleStrings() {
+        #expect(MetalHUDSize.small.scaleString == "0.15")
+        #expect(MetalHUDSize.standard.scaleString == nil)
+        #expect(MetalHUDSize.large.scaleString == "0.3")
+    }
+
     @Test func legacySettingsDecodeWithMetalHUDOff() throws {
         let data = Data(#"{"backend":"dxmt","retina":true,"frameLimit":90,"directX12":false,"compatibilityPatches":false,"unlockFPS":true,"unlockTarget":120,"surroundSound":true}"#.utf8)
         let settings = try JSONDecoder().decode(LaunchSettings.self, from: data)
@@ -18,7 +92,12 @@ import TestSupport
     }
 
     @Test(arguments: GameDefinition.all.map(\.id)) func metalHUDDefaultsOff(game: String) {
-        #expect(!LaunchSettings.defaults(for: game).metalHUD)
+        let settings = LaunchSettings.defaults(for: game)
+        #expect(!settings.metalHUD)
+        #expect(settings.metalHUDContents == .standard)
+        #expect(settings.metalHUDElements == [.fps, .frameinterval, .gputime])
+        #expect(settings.metalHUDPosition == .topRight)
+        #expect(settings.metalHUDSize == .standard)
     }
 
     @Test(arguments: [false, true]) func metalHUDAlwaysEncodesAndRoundTrips(enabled: Bool) throws {

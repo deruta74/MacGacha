@@ -119,7 +119,14 @@ public enum LaunchResolver {
         var environment = baseEnvironment.filter { basics.contains($0.key) || $0.key.hasPrefix("LC_") }
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         environment["WINEPREFIX"] = prefix.path
-        if settings.metalHUD { environment["MTL_HUD_ENABLED"] = "1" }
+        if settings.metalHUD {
+            environment["MTL_HUD_ENABLED"] = "1"
+            environment["MTL_HUD_ELEMENTS"] = settings.metalHUDContents.elementString(custom: settings.metalHUDElements)
+            if settings.metalHUDPosition != .topRight {
+                environment["MTL_HUD_ALIGNMENT"] = settings.metalHUDPosition.rawValue
+            }
+            environment["MTL_HUD_SCALE"] = settings.metalHUDSize.scaleString
+        }
         if let helper {
             environment["WINELOADER"] = helper.loader.path
             // ntdll's default server search derives bin from lib, whereas this

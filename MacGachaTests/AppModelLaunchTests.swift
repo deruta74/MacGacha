@@ -21,6 +21,10 @@ struct AppModelLaunchTests {
         #expect(!model.metalHUD(for: game))
         var otherSettings = model.launchSettings(for: game)
         otherSettings.backend = .dxmt; otherSettings.retina = true
+        otherSettings.metalHUDContents = .custom
+        otherSettings.metalHUDElements = [.thermal, .fps, .memory]
+        otherSettings.metalHUDPosition = .bottomLeft
+        otherSettings.metalHUDSize = .large
         try model.saveLaunchSettings(otherSettings, for: game)
         try model.setMetalHUD(true, for: game)
         #expect(model.metalHUD(for: game))
@@ -29,7 +33,9 @@ struct AppModelLaunchTests {
         await next.reattachOnStart()
         var expected = otherSettings; expected.metalHUD = true
         #expect(next.launchSettings(for: game) == expected)
-        for other in GameDefinition.all where other.id != game { #expect(!next.metalHUD(for: other.id)) }
+        for other in GameDefinition.all where other.id != game {
+            #expect(next.launchSettings(for: other.id) == .defaults(for: other.id))
+        }
         try next.setMetalHUD(false, for: game)
         try await next.flushLaunchSettings()
         #expect(!next.metalHUD(for: game))

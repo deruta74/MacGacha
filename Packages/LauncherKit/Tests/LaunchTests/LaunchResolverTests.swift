@@ -29,6 +29,45 @@ func metalHUDEnvironmentIsExplicitForEveryEdition(backend: RuntimeBackend, enabl
     }
 }
 
+@Test(arguments: [RuntimeBackend.dxmt, .d3dmetal], [false, true])
+func metalHUDOptionsResolveExactly(backend: RuntimeBackend, enabled: Bool) throws {
+    let positions: [(MetalHUDPosition, String?)] = [
+        (.topLeft, "topleft"), (.topCenter, "topcenter"), (.topRight, nil),
+        (.centerLeft, "centerleft"), (.centered, "centered"), (.centerRight, "centerright"),
+        (.bottomLeft, "bottomleft"), (.bottomCenter, "bottomcenter"), (.bottomRight, "bottomright")]
+    let sizes: [(MetalHUDSize, String?)] = [(.small, "0.15"), (.standard, nil), (.large, "0.3")]
+    let contents: [(MetalHUDContents, String?)] = [(.standard, nil), (.fpsOnly, "fps"),
+        (.full, "device,layersize,memory,refreshrate,thermal,gamemode,fps,frameinterval,frameintervalgraph,gputime,presentdelay"),
+        (.custom, "device,rosetta,fps,fpsgraph,gputime,presentdelay")]
+    let inherited = ["MTL_HUD_ENABLED": "inherited", "MTL_HUD_ELEMENTS": "inherited",
+        "MTL_HUD_ALIGNMENT": "inherited", "MTL_HUD_SCALE": "inherited", "MTL_HUD_UNKNOWN": "inherited"]
+    for game in GameDefinition.all.map(\.id) {
+        for (content, elements) in contents {
+            for (position, alignment) in positions {
+                for (size, scale) in sizes {
+                    var settings = LaunchSettings.defaults(for: game)
+                    settings.backend = backend
+                    settings.compatibilityPatches = false
+                    settings.metalHUD = enabled
+                    settings.metalHUDContents = content
+                    settings.metalHUDElements = [.presentdelay, .fpsgraph, .fps, .rosetta, .gputime, .device, .fps]
+                    settings.metalHUDPosition = position
+                    settings.metalHUDSize = size
+                    var expected: [String: String] = [:]
+                    if enabled {
+                        expected["MTL_HUD_ENABLED"] = "1"
+                        expected["MTL_HUD_ELEMENTS"] = elements
+                        expected["MTL_HUD_ALIGNMENT"] = alignment
+                        expected["MTL_HUD_SCALE"] = scale
+                    }
+                    let resolved = try resolve(game, settings: settings, base: inherited)
+                    #expect(resolved.environment.filter { $0.key.hasPrefix("MTL_HUD_") } == expected)
+                }
+            }
+        }
+    }
+}
+
 @Test func genshinDefaultsD3DMetal() throws {
     let value = try resolve("genshin")
     #expect(value.executable == wine)
