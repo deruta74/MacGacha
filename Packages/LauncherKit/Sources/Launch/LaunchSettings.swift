@@ -4,6 +4,52 @@ import Foundation
 import LauncherCore
 import RuntimeManager
 
+public enum MetalHUDContents: String, Codable, CaseIterable, Sendable {
+    case standard, fpsOnly, full, custom
+
+    public func elementString(custom: [MetalHUDElement]) -> String? {
+        let elements: [MetalHUDElement]
+        switch self {
+        case .standard: return nil
+        case .fpsOnly: elements = [.fps]
+        case .full: elements = MetalHUDElement.allCases.filter { $0 != .fpsgraph && $0 != .rosetta }
+        case .custom:
+            let selected = Set(custom)
+            elements = MetalHUDElement.allCases.filter { selected.contains($0) }
+        }
+        return elements.map(\.rawValue).joined(separator: ",")
+    }
+}
+
+public enum MetalHUDElement: String, Codable, CaseIterable, Sendable {
+    case device, rosetta, layersize, memory, refreshrate, thermal, gamemode
+    case fps, fpsgraph, frameinterval, frameintervalgraph, gputime, presentdelay
+}
+
+public enum MetalHUDPosition: String, Codable, CaseIterable, Sendable {
+    case topLeft = "topleft"
+    case topCenter = "topcenter"
+    case topRight = "topright"
+    case centerLeft = "centerleft"
+    case centered
+    case centerRight = "centerright"
+    case bottomLeft = "bottomleft"
+    case bottomCenter = "bottomcenter"
+    case bottomRight = "bottomright"
+}
+
+public enum MetalHUDSize: String, Codable, CaseIterable, Sendable {
+    case small, standard, large
+
+    public var scaleString: String? {
+        switch self {
+        case .small: "0.15"
+        case .standard: nil
+        case .large: "0.3"
+        }
+    }
+}
+
 public struct LaunchSettings: Codable, Equatable, Sendable {
     public var backend: RuntimeBackend
     public var retina: Bool
@@ -13,15 +59,23 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
     public var display: DisplayChoice?
     public var surroundSound: Bool
     public var metalHUD: Bool
+    public var metalHUDContents: MetalHUDContents
+    public var metalHUDElements: [MetalHUDElement]
+    public var metalHUDPosition: MetalHUDPosition
+    public var metalHUDSize: MetalHUDSize
     public var unlockFPS: Bool
     public var unlockTarget: Int
 
     public init(backend: RuntimeBackend, retina: Bool, frameLimit: Int?, directX12: Bool, compatibilityPatches: Bool, display: DisplayChoice? = nil,
-        unlockFPS: Bool = false, unlockTarget: Int = 120, surroundSound: Bool = false, metalHUD: Bool = false) {
+        unlockFPS: Bool = false, unlockTarget: Int = 120, surroundSound: Bool = false, metalHUD: Bool = false,
+        metalHUDContents: MetalHUDContents = .standard, metalHUDElements: [MetalHUDElement] = [.fps, .frameinterval, .gputime],
+        metalHUDPosition: MetalHUDPosition = .topRight, metalHUDSize: MetalHUDSize = .standard) {
         self.backend = backend; self.retina = retina; self.frameLimit = frameLimit
         self.directX12 = directX12; self.compatibilityPatches = compatibilityPatches; self.display = display
         self.unlockFPS = unlockFPS; self.unlockTarget = unlockTarget; self.surroundSound = surroundSound
         self.metalHUD = metalHUD
+        self.metalHUDContents = metalHUDContents; self.metalHUDElements = metalHUDElements
+        self.metalHUDPosition = metalHUDPosition; self.metalHUDSize = metalHUDSize
     }
 
     public static func defaults(for game: String) -> Self {
@@ -29,7 +83,8 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
             directX12: GameDefinition.find(game)?.family == .zzz, compatibilityPatches: true)
     }
 
-    private enum CodingKeys: CodingKey { case backend, retina, frameLimit, directX12, compatibilityPatches, display, unlockFPS, unlockTarget, surroundSound, metalHUD }
+    private enum CodingKeys: CodingKey { case backend, retina, frameLimit, directX12, compatibilityPatches, display, unlockFPS, unlockTarget, surroundSound, metalHUD,
+        metalHUDContents, metalHUDElements, metalHUDPosition, metalHUDSize }
     // The store supplies the game so absent fields get that game's defaults.
     // A standalone decoder uses the shared defaults (60 FPS, DirectX 12 off).
     static let gameKey = CodingUserInfoKey(rawValue: "MacGacha.launchSettings.game")!
@@ -44,6 +99,16 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         display = try c.decodeIfPresent(DisplayChoice.self, forKey: .display)
         surroundSound = try c.decodeIfPresent(Bool.self, forKey: .surroundSound) ?? false
         metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
+        // Unknown HUD names in hand-edited files do not discard unrelated settings.
+        metalHUDContents = MetalHUDContents(rawValue: try c.decodeIfPresent(String.self, forKey: .metalHUDContents) ?? "") ?? defaults.metalHUDContents
+        // Hand-edited or newer files may repeat or name unknown elements. Keep the
+        // first of each known one, and fall back to the defaults rather than an empty set.
+        var seen = Set<MetalHUDElement>()
+        let elements = try c.decodeIfPresent([String].self, forKey: .metalHUDElements)?
+            .compactMap(MetalHUDElement.init(rawValue:)).filter { seen.insert($0).inserted } ?? []
+        metalHUDElements = elements.isEmpty ? defaults.metalHUDElements : elements
+        metalHUDPosition = MetalHUDPosition(rawValue: try c.decodeIfPresent(String.self, forKey: .metalHUDPosition) ?? "") ?? defaults.metalHUDPosition
+        metalHUDSize = MetalHUDSize(rawValue: try c.decodeIfPresent(String.self, forKey: .metalHUDSize) ?? "") ?? defaults.metalHUDSize
         unlockFPS = try c.decodeIfPresent(Bool.self, forKey: .unlockFPS) ?? defaults.unlockFPS
         unlockTarget = try c.decodeIfPresent(Int.self, forKey: .unlockTarget) ?? defaults.unlockTarget
         try validate(for: decoder.userInfo[Self.gameKey] as? String)
@@ -58,11 +123,18 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         try c.encodeIfPresent(display, forKey: .display)
         try c.encode(surroundSound, forKey: .surroundSound)
         try c.encode(metalHUD, forKey: .metalHUD)
+        try c.encode(metalHUDContents, forKey: .metalHUDContents)
+        try c.encode(metalHUDElements, forKey: .metalHUDElements)
+        try c.encode(metalHUDPosition, forKey: .metalHUDPosition)
+        try c.encode(metalHUDSize, forKey: .metalHUDSize)
         try c.encode(unlockFPS, forKey: .unlockFPS); try c.encode(unlockTarget, forKey: .unlockTarget)
     }
 
     public func validate(for game: String? = nil) throws {
         try display?.validate()
+        if metalHUDContents == .custom, metalHUDElements.isEmpty {
+            throw LauncherError.io("Custom Metal HUD must contain at least one element")
+        }
         if let frameLimit, ![30, 60, 90, 120].contains(frameLimit) {
             throw LauncherError.io("Frame limit must be Off, 30, 60, 90 or 120")
         }

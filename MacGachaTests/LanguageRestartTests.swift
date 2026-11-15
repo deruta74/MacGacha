@@ -40,9 +40,16 @@ import GameLibrary
                 try f.model.setMetalHUD(true, for: "genshin")
             }
             #expect(!f.model.metalHUD(for: "genshin"))
-            #expect(throws: LauncherError.self) {
-                try f.model.saveLaunchSettings(f.model.launchSettings(for: "genshin"), for: "genshin")
+            let original = f.model.launchSettings(for: "genshin")
+            var changed = original
+            changed.metalHUDContents = .custom
+            changed.metalHUDElements = [.memory, .fps]
+            changed.metalHUDPosition = .bottomCenter
+            changed.metalHUDSize = .small
+            #expect(throws: LauncherError.busy("Application language restart is in progress")) {
+                try f.model.saveLaunchSettings(changed, for: "genshin")
             }
+            #expect(f.model.launchSettings(for: "genshin") == original)
             f.model.sessionLogsEnabled = false
             f.model.gameModeEnabled = false
             #expect(f.model.gameModeEnabled)
