@@ -267,6 +267,12 @@ final class AppModel {
     var durableGlobalLaunchSettings = GlobalLaunchSettings()
     var launchSettingsCache: [String: LaunchSettings] = [:]
     var globalLaunchSettings = GlobalLaunchSettings()
+    var wishHistoryExportingGame: String?
+    var wishHistoryProgress: WishHistoryProgress?
+    var wishHistoryFailure: LauncherError?
+    @ObservationIgnored let wishHistoryExporter: any WishHistoryExporting
+    @ObservationIgnored var wishHistoryTask: Task<WishHistoryExport, any Error>?
+    @ObservationIgnored var wishHistoryGeneration: UUID?
     var knownEndedLaunchGames: Set<String> = []
     var liveLaunchGames: Set<String> = []
     /// Includes preparation and file-only recovery, even after verified game end.
@@ -311,6 +317,7 @@ final class AppModel {
         purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(),
         launchServices: any LaunchServices = PreviewLaunchServices(),
         launchPreferences: (any LaunchPreferencesPersistence)? = nil,
+        wishHistoryExporter: any WishHistoryExporting = WishHistoryExporter(),
         launchWindows: LaunchWindowCoordinator = LaunchWindowCoordinator(),
         launchSleep: @escaping @Sendable () async throws -> Void = { try await ContinuousClock().sleep(for: .milliseconds(500)) },
         recoverySleep: @escaping @Sendable (Duration) async throws -> Void = { try await ContinuousClock().sleep(for: $0) },
@@ -321,6 +328,7 @@ final class AppModel {
         relaunch: @escaping @MainActor ([String]) async throws -> Void = { _ in },
         terminateAfterLanguageRestart: @escaping @MainActor () -> Void = {},
         launchArguments: [String] = ProcessInfo.processInfo.arguments) {
+        self.wishHistoryExporter = wishHistoryExporter
         self.relaunch = relaunch; self.terminateAfterLanguageRestart = terminateAfterLanguageRestart
         self.launchArguments = launchArguments
         self.artClock = artClock
@@ -444,7 +452,7 @@ final class AppModel {
         return AppModel(paths: paths, services: runtimeServices, catalogAccess: catalog,
             artServices: art, eventsServices: events, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
             rosettaProbe: SystemRosettaProbe(), displayProbe: SystemDisplayProbe(),
-            displayNames: { ScreenDisplayNames.current() }, launchServices: launch, updater: SparkleUpdaterService(), relaunch: { arguments in
+            displayNames: { ScreenDisplayNames.current() }, launchServices: launch, wishHistoryExporter: WishHistoryExporter(log: log), updater: SparkleUpdaterService(), relaunch: { arguments in
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.createsNewApplicationInstance = true; configuration.arguments = arguments
                 _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
