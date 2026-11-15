@@ -21,7 +21,7 @@ import LauncherCore
     }
     @Test func oldBaselineRejectsRevision3() throws {
         let baseline = try JSONDecoder().decode(RuntimeManifest.self, from: fixture("manifest-0.2.6"))
-        let catalog = try JSONDecoder().decode(RuntimeCatalog.self, from: Data(contentsOf: root.appendingPathComponent("RuntimeCatalog/runtime-catalog.json")))
+        let catalog = try JSONDecoder().decode(RuntimeCatalog.self, from: fixture("catalog-r3"))
         #expect(throws: (any Error).self) { try RuntimeCatalogContract(baseline).validate(catalog) }
     }
     @Test func serviceWithOldBaselineKeepsRevision2AndSelectionsAfterRejectingRevision3() async throws {
@@ -33,18 +33,18 @@ import LauncherCore
         let old = try SafeIdentifier("dxmt-wine11.0cx-dxmt0.80")
         let pinned = try await service.selectBundle(id: old, pinned: true, installedBundleIDs: [old])
         let saved = bytes.withLock { $0 }
-        let newer = try Data(contentsOf: root.appendingPathComponent("RuntimeCatalog/runtime-catalog.json"))
+        let newer = try fixture("catalog-r3")
         await #expect(throws: (any Error).self) { try await service.accept(metadata: newer) }
         #expect(bytes.withLock { $0 } == saved)
         let reopened = RuntimeCatalogService(baseline: baseline, store: store)
         #expect(try await reopened.snapshot().catalog.revision == 2)
         #expect(try await reopened.snapshot().selections == pinned.selections)
     }
-    @Test func newBaselineAcceptsRevision3() async throws {
+    @Test func newBaselineAcceptsRevisionFour() async throws {
         let baseline = try RuntimeManifest.load(from: root.appendingPathComponent("App/Resources/runtime-manifest.json"))
         let service = RuntimeCatalogService(baseline: baseline)
         let catalog = try await service.accept(metadata: Data(contentsOf: root.appendingPathComponent("RuntimeCatalog/runtime-catalog.json")))
-        #expect(catalog.catalog.revision == 3)
+        #expect(catalog.catalog.revision == 4)
         #expect(catalog.recommendedBundle(for: .d3dmetal)?.components.count == 2)
     }
 }

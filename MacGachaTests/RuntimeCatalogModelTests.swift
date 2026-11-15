@@ -394,6 +394,8 @@ import RuntimeManager
     }
 }
 
+private final class CatalogModelResources {}
+
 private struct CatalogModelFixture: Sendable {
     let paths: AppPaths
     let baseline: RuntimeManifest
@@ -403,7 +405,9 @@ private struct CatalogModelFixture: Sendable {
     let model: AppModel
     @MainActor static func make() async throws -> Self {
         let paths = AppPaths(root: FileManager.default.temporaryDirectory.appendingPathComponent("catalog-model-\(UUID().uuidString)"))
-        let baseline = try await BundledRuntimeManifest.load()
+        // This helper-revision scenario retains the historical Wine 11.20 ABI.
+        let resource = try #require(Bundle(for: CatalogModelResources.self).url(forResource: "runtime-catalog-r3", withExtension: "json"))
+        let baseline = try JSONDecoder().decode(RuntimeCatalog.self, from: Data(contentsOf: resource)).manifest
         let old = try #require(baseline.components.first { $0.id.rawValue == SurroundAudio.componentID })
         var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])
         object["id"] = "surround-audio-wine-11.20-4"; object["version"] = "wine-11.20-4"

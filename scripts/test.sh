@@ -2,6 +2,7 @@
 set -euo pipefail
 
 derived_data_path="${MACGACHA_DERIVED_DATA_PATH:-.build/xcode}"
+xcode_project="${MACGACHA_XCODE_PROJECT_DIR:-.}/MacGacha.xcodeproj"
 
 scripts/check-headers.sh
 python3 -I scripts/check-strings.py --self-check
@@ -10,6 +11,8 @@ python3 -I scripts/check-genshin-fps.py --self-check
 python3 -I scripts/test-surround-audio.py
 python3 -I scripts/test-runtime-catalog.py
 python3 -I scripts/test-wine-build.py
+python3 -I scripts/test-wine-source-preparation.py
+python3 -I scripts/test-prepare-wine-release.py
 python3 -I scripts/test-wine-dependencies.py
 python3 -I scripts/test-wine-dependency-build.py
 python3 -I scripts/test-finalize-source-wine.py
@@ -18,7 +21,7 @@ xcrun swift -warnings-as-errors scripts/verify-sparkle-signature.swift --self-ch
 swift test --package-path Packages/LauncherKit
 scripts/bootstrap.sh
 xcodebuild \
-  -project MacGacha.xcodeproj \
+  -project "$xcode_project" \
   -scheme MacGacha \
   -configuration Debug \
   -destination 'platform=macOS,arch=arm64' \
@@ -26,7 +29,7 @@ xcodebuild \
   test
 python3 scripts/check-strings.py "$derived_data_path"
 xcodebuild \
-  -project MacGacha.xcodeproj \
+  -project "$xcode_project" \
   -scheme MacGacha \
   -configuration Release \
   -destination 'platform=macOS,arch=arm64' \

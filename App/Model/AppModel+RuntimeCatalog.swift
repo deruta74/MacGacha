@@ -77,6 +77,25 @@ struct RuntimeInstallContext: Sendable {
         guard let bundle = effectiveRuntimeManifest?.defaultBundle(for: backend) else { return nil }
         return runtimeCatalog?.profile(for: bundle.id)?.rawValue ?? bundle.id.rawValue
     }
+    /// Automatic selections preserve saved opt-ins even when the destination
+    /// profile has no Surround binding, which makes helper pins inapplicable.
+    func runtimeSelectionPreservesSurround(from current: RuntimeCatalogSnapshot, to target: RuntimeCatalogSnapshot) -> Bool {
+        GameDefinition.all.allSatisfy { game in
+            let settings = launchSettings(for: game.id)
+            guard settings.surroundSound, let previous = current.selectedBundle(for: settings.backend),
+                SurroundAudio.applies(game: game.id, backend: settings.backend,
+                    bundleID: current.profile(for: previous.id)?.rawValue) else { return true }
+            guard let next = target.selectedBundle(for: settings.backend) else { return false }
+            return SurroundAudio.applies(game: game.id, backend: settings.backend,
+                bundleID: target.profile(for: next.id)?.rawValue) && target.helper(kind: .surroundAudio, for: next.id) != nil
+        }
+    }
+    func automaticRuntimeSelections(for update: RuntimeAutomaticUpdate, in current: RuntimeCatalogSnapshot) throws -> RuntimeCatalogSelections {
+        let selections = try update.selections(in: current)
+        let target = try current.replacingSelections(selections)
+        guard runtimeSelectionPreservesSurround(from: current, to: target) else { throw LauncherError.cancelled }
+        return selections
+    }
     func captureRuntimeInstallContext(_ id: String, manifest captured: RuntimeManifest? = nil) {
         if captured == nil, runtimeInstallContexts[id] != nil { return }
         guard let captured = captured ?? manifest else { return }
@@ -155,7 +174,8 @@ struct RuntimeInstallContext: Sendable {
             advanceRuntimeSetups()
         } catch { runtimeCatalogMutationID = nil; show(error) }
     }
-    func beginRuntimeCatalogActivation(_ target: RuntimeCatalogSnapshot, id: String, notificationGameID: String? = nil) {
+    func beginRuntimeCatalogActivation(_ target: RuntimeCatalogSnapshot, id: String, preservingSurround: Bool = false,
+        notificationGameID: String? = nil) {
         guard let catalogAccess else { runtimeCatalogMutationID = nil; return }
         let previous = runtimeCatalog
         catalogMutationTask = Task { [weak self] in
@@ -166,7 +186,22 @@ struct RuntimeInstallContext: Sendable {
             }
             do {
                 try await self.cancelAutomaticCleanupForPinnedSelection(target, id: id)
-                let actual = try await catalogAccess.activate(target.selections)
+                if preservingSurround, let previous,
+                    !self.runtimeSelectionPreservesSurround(from: previous, to: target) { return }
+                let actual: RuntimeCatalogSnapshot
+                do { actual = try await catalogAccess.activate(target.selections) }
+                catch {
+                    guard preservingSurround, let previous,
+                        !self.runtimeSelectionPreservesSurround(from: previous, to: target) else { throw error }
+                    actual = try await Task.detached { try await catalogAccess.snapshot() }.value
+                }
+                if preservingSurround, let previous,
+                    !self.runtimeSelectionPreservesSurround(from: previous, to: actual) {
+                    let selections = previous.selections
+                    let restored = try await Task.detached { try await catalogAccess.activate(selections) }.value
+                    self.applyRuntimeCatalog(restored)
+                    return
+                }
                 self.catalogSelectionGeneration = UUID()
                 self.applyRuntimeCatalog(actual)
                 self.clearResolvedDependencyOffers()
@@ -197,7 +232,10 @@ struct RuntimeInstallContext: Sendable {
             return
         }
         let cancelled = cancelledCatalogSetups.remove(key) != nil
-        if succeeded && !cancelled { beginRuntimeCatalogActivation(target, id: id, notificationGameID: key) }
+        if succeeded && !cancelled {
+            beginRuntimeCatalogActivation(target, id: id, preservingSurround: GameDefinition.find(key) != nil,
+                notificationGameID: key)
+        }
         else { runtimeCatalogMutationID = nil }
     }
 }

@@ -12,6 +12,18 @@ import TestSupport
 
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["MACGACHA_RUNTIME_FIXTURES"] != nil))
 struct LaunchIntegrationTests {
+    @Test(.timeLimit(.minutes(5)), arguments: ["d3dmetal", "dxmt"])
+    func sourceWine1122CleanLaunch(backend: String) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let bundle = backend == "dxmt" ? "dxmt-wine11.22mg1.0-dxmt0.80" : "d3dmetal-wine11.22mg1.0-gptk4.0b3"
+        try await withProbeTestRoot(root: root, setup: {
+            try await installLaunchProbeRuntime(backend: backend, root: $0, bundleID: bundle)
+        }) { configuration in
+            try await cleanLaunch(configuration)
+        }
+        print("Wine 11.22 \(backend): isolated manager launch, D3D11 0xb000 and checked teardown PASS")
+    }
+
     @Test(.timeLimit(.minutes(30)), arguments: ["d3dmetal", "dxmt"])
     func realLaunchAndCrashRecovery(backend: String) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -49,12 +61,13 @@ private let restoreSteps = LaunchFileStep.restoreSteps + [.beforeClaimWrite, .af
 private let originalDLL = Data("integration original vulkan DLL".utf8)
 private let replacementDLL = Data("integration replacement vulkan DLL".utf8)
 
-func installLaunchProbeRuntime(backend: String, root: URL) async throws -> ProbeLaunchConfiguration {
+func installLaunchProbeRuntime(backend: String, root: URL, bundleID: String? = nil) async throws -> ProbeLaunchConfiguration {
     let fixtures = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["MACGACHA_RUNTIME_FIXTURES"]))
     let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let manifest = try RuntimeManifest.load(from: repository.appendingPathComponent("App/Resources/runtime-manifest.json"))
-    let definition = try #require(manifest.bundles.first { $0.id.rawValue == (backend == "dxmt" ? "dxmt-wine11.0-dxmt0.80" : "d3dmetal-wine11.20-gptk4.0b3") })
+    let selectedID = bundleID ?? (backend == "dxmt" ? "dxmt-wine11.0-dxmt0.80" : "d3dmetal-wine11.20-gptk4.0b3")
+    let definition = try #require(manifest.bundles.first { $0.id.rawValue == selectedID })
     let paths = AppPaths(root: root.appendingPathComponent("store"))
     let store = RuntimeStore(paths: paths), consent = ConsentStore(url: paths.consent, root: paths.root)
     for component in manifest.components where definition.components.contains(component.id) && component.consent != nil {

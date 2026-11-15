@@ -84,6 +84,17 @@ class CatalogPublicationTests(unittest.TestCase):
         next_catalog["revision"] += 1
         module.validate(next_catalog, self.baseline, self.catalog)
 
+    def test_wine1122_upgrade_preserves_published_history_and_rejects_foreign_abi_helpers(self):
+        previous = json.loads((ROOT / 'Packages/LauncherKit/Tests/RuntimeManagerTests/Fixtures/catalog-r3.json').read_text())
+        module.validate(self.catalog, self.baseline, previous)
+        for kind in ['crypt32Fix', 'surroundAudio']:
+            candidate = copy.deepcopy(self.catalog)
+            identity = candidate['recommendedHelpers'][kind]
+            binding = next(b for b in candidate['helperBindings'] if b['componentID'] == identity)
+            binding['profileIDs'].append('d3dmetal-wine11.22mg1.0-gptk4.0b3')
+            with self.assertRaisesRegex(ValueError, 'ABI-specific'):
+                module.validate(candidate, self.baseline)
+
     def test_rejects_identity_reuse_and_unknown_profile(self):
         for mutate in [lambda c: c["manifest"]["components"][0].update(size=1),
                        lambda c: c["bundleBindings"][0].update(profileID="unknown"),

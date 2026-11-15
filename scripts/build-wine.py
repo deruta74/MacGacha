@@ -200,9 +200,44 @@ def prepare_source_dependencies(dependencies, work):
     return libraries
 
 
-def prepare(lock, cache, work, bison, dependencies=None):
-    extract(cache / 'wine-source.tar.gz', work / 'source-archive')
+def prepare_wine_source(lock, cache, work, inputs=INPUTS):
+    source_name = lock.get('sourceArchive', 'wine-source.tar.gz')
+    source_input = next(i for i in lock['inputs'] if i['name'] == source_name)
+    verify(cache / source_name, source_input['sha256'])
+    compatibility = lock.get('compatibility')
+    if compatibility:
+        support = next(i for i in lock['inputs'] if i['name'] == compatibility['archive'])
+        verify(cache / support['name'], support['sha256'])
+        verify(inputs / compatibility['patch'], compatibility['sha256'])
+        verify(inputs / compatibility['resultManifest'], compatibility['resultManifestSha256'])
+        expected = json.loads((inputs / compatibility['resultManifest']).read_text())
+    extract(cache / source_name, work / 'source-archive')
     source, = (work / 'source-archive').iterdir()
+    if compatibility:
+        # Import build glue only. Runtime code is carried by the reviewed delta,
+        # so old fork implementations cannot replace new upstream code silently.
+        extract(cache / support['name'], work / 'build-support')
+        support_root, = (work / 'build-support').iterdir()
+        (source / 'scripts').mkdir(exist_ok=True)
+        for name in compatibility['scripts']:
+            if Path(name).name != name: raise ValueError('unsafe build support name')
+            shutil.copy2(support_root / 'scripts' / name, source / 'scripts' / name)
+        before = inventory(source)
+        with (inputs / compatibility['patch']).open('rb') as stream:
+            subprocess.run(['/usr/bin/patch', '--batch', '--fuzz=0', '-p1', '-d', source],
+                           stdin=stream, check=True)
+        for name, digest in expected.items():
+            path = source / name
+            if not inside(path, source): raise ValueError('unsafe compatibility result path')
+            verify(path, digest)
+        after = inventory(source)
+        changed = {name for name in before.keys() | after.keys() if before.get(name) != after.get(name)}
+        if changed != set(expected): raise ValueError('compatibility source inventory mismatch')
+    return source
+
+
+def prepare(lock, cache, work, bison, dependencies=None):
+    source = prepare_wine_source(lock, cache, work)
     extract(cache / 'llvm-mingw.tar.xz', work / 'mingw-archive')
     mingw, = (work / 'mingw-archive').iterdir()
     extract(cache / 'pkgconf.tar.xz', work / 'pkgconf-archive')
@@ -254,7 +289,7 @@ def prepare(lock, cache, work, bison, dependencies=None):
 
 
 def local_inputs():
-    files = [ROOT / 'scripts' / n for n in ['build-wine.py', 'check-wine.py', 'test-wine-build.py', 'test-dock-icon.py', 'build-wine-dependencies.py', 'test-wine-dependency-build.py']]
+    files = [ROOT / 'scripts' / n for n in ['build-wine.py', 'check-wine.py', 'test-wine-build.py', 'test-dock-icon.py', 'build-wine-dependencies.py', 'test-wine-dependency-build.py', 'test-wine-source-preparation.py', 'test-wine-surface-queue.py']]
     files += [ROOT / 'LICENSE', ROOT / 'NOTICE']
     files += [p for directory in ['compat/wine', 'compat/dock-icon'] for p in (ROOT / directory).rglob('*') if p.is_file()]
     return {p.relative_to(ROOT).as_posix(): sha(p) for p in sorted(files)}
@@ -319,7 +354,8 @@ def build(lock, cache, output, bison, dependencies=None):
     (runtime / 'bin/wine').rename(runtime / 'bin/wine.real')
     shutil.copy2(INPUTS / 'wine-wrapper.sh', runtime / 'bin/wine'); (runtime / 'bin/wine').chmod(0o755)
     for name in ['COPYING.LIB', 'AUTHORS', 'NOTICES.md']: shutil.copy2(source / name, runtime / name)
-    shutil.copy2(INPUTS / ('SOURCE-NOTICE.md' if dependencies else 'NOTICE.md'), runtime / 'MACGACHA-NOTICE.md')
+    if lock.get('compatibility'): shutil.copy2(source / 'LICENSE.MIT', runtime / 'FORK-LICENSE.MIT')
+    shutil.copy2(INPUTS / lock.get('notice', 'SOURCE-NOTICE.md' if dependencies else 'NOTICE.md'), runtime / 'MACGACHA-NOTICE.md')
     run(['/usr/bin/lipo', '-verify_arch', 'arm64', runtime / 'bin/wineserver'])
     for name in ['bin/wine.real', 'lib/wine/x86_64-unix/ntdll.so', 'lib/wine/x86_64-unix/winemac.so']:
         run(['/usr/bin/lipo', '-verify_arch', 'x86_64', runtime / name])
@@ -344,11 +380,15 @@ def build(lock, cache, output, bison, dependencies=None):
     archive(runtime, output / (lock['version'] + '.tar.xz'))
     # Corresponding build inputs are retained alongside the binary; never include private evidence.
     inputs = output / 'source-inputs'; inputs.mkdir()
-    shutil.copy2(cache / 'wine-source.tar.gz', inputs / 'wine-source.tar.gz')
+    source_name = lock.get('sourceArchive', 'wine-source.tar.gz')
+    shutil.copy2(cache / source_name, inputs / source_name)
+    if lock.get('compatibility'):
+        support = lock['compatibility']['archive']
+        shutil.copy2(cache / support, inputs / support)
     shutil.copytree(INPUTS, inputs / 'compat/wine')
     shutil.copytree(ROOT / 'compat/dock-icon', inputs / 'compat/dock-icon')
     (inputs / 'scripts').mkdir()
-    for name in ['build-wine.py', 'test-wine-build.py', 'test-dock-icon.py', 'check-wine.py', 'build-wine-dependencies.py', 'test-wine-dependency-build.py']:
+    for name in ['build-wine.py', 'test-wine-build.py', 'test-dock-icon.py', 'check-wine.py', 'build-wine-dependencies.py', 'test-wine-dependency-build.py', 'test-wine-source-preparation.py', 'test-wine-surface-queue.py']:
         shutil.copy2(ROOT / 'scripts' / name, inputs / 'scripts' / name)
     for name in ['LICENSE', 'NOTICE']:
         shutil.copy2(ROOT / name, inputs / name)
@@ -368,8 +408,11 @@ def main():
     parser.add_argument('--fetch-only', action='store_true')
     parser.add_argument('--bison', type=Path, default=Path('/opt/homebrew/opt/bison/bin/bison'))
     parser.add_argument('--dependencies', type=Path, help='Verified source-built SDK; selects source-runtime.lock.json')
+    parser.add_argument('--runtime-lock', type=Path, help='Source runtime lock (requires --dependencies)')
     args = parser.parse_args()
-    lock = json.loads((INPUTS / ('source-runtime.lock.json' if args.dependencies else 'inputs.lock.json')).read_text())
+    if args.runtime_lock and not args.dependencies: parser.error('--runtime-lock requires --dependencies')
+    lock_path = args.runtime_lock or INPUTS / ('source-runtime.lock.json' if args.dependencies else 'inputs.lock.json')
+    lock = json.loads(lock_path.read_text())
     fetch(lock, args.cache.resolve(), args.offline)
     if not args.fetch_only: build(lock, args.cache.resolve(), args.output.absolute(), args.bison.resolve(), args.dependencies.resolve() if args.dependencies else None)
 
