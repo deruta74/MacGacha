@@ -129,6 +129,8 @@ struct RootView: View {
                 VoicePacksSheet(game: Self.game(id))
             case .settings(let id):
                 GameSettingsSheet(game: Self.game(id))
+            case .wishExport(let id):
+                WishExportSheet(game: Self.game(id))
             case .setup(let id):
                 RuntimeSetupSheet(game: Self.game(id)) { panel = .dependencies }
             case .rosetta(let id):
@@ -177,6 +179,7 @@ struct RootView: View {
         case "settings": gameSheet = .settings(selectedID)
         case "setup": gameSheet = .setup(selectedID)
         case "rosetta": gameSheet = .rosetta(selectedID)
+        case "wishExport": gameSheet = .wishExport(selectedID)
         default: break
         }
     }

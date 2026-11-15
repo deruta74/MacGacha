@@ -67,6 +67,18 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Wish history export", isOn: Binding(
+                    get: { model.wishHistoryEnabled },
+                    set: { model.wishHistoryEnabled = $0 }
+                ))
+            } footer: {
+                Text(model.wishHistoryEnabled
+                    ? model.wishHistoryExplanation
+                    : String(localized: "Adds Export Wish History… to each game's menu. While off, MacGacha doesn't read the history link or contact HoYoverse for it."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Animated backgrounds", isOn: Binding(
                     get: { animatedBackgrounds },
                     set: { animatedBackgrounds = $0; animatedChosen = true }

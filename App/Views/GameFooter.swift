@@ -9,7 +9,7 @@ import SwiftUI
 
 /// Sheets that act on one game, opened from its footer.
 enum GameSheet: Identifiable, Hashable {
-    case install(String), voices(String), settings(String), setup(String), rosetta(String)
+    case install(String), voices(String), settings(String), setup(String), rosetta(String), wishExport(String)
 
     var id: String {
         switch self {
@@ -18,6 +18,7 @@ enum GameSheet: Identifiable, Hashable {
         case .settings(let game): "settings-\(game)"
         case .setup(let game): "setup-\(game)"
         case .rosetta(let game): "rosetta-\(game)"
+        case .wishExport(let game): "wish-export-\(game)"
         }
     }
 }
@@ -638,6 +639,10 @@ struct GameMenu: View {
                     .disabled(model.gameUpdateCheck[game.id] == .checking)
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
                 Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
+                if model.wishHistoryEnabled {
+                    Button("Export Wish History…", systemImage: "square.and.arrow.up") { gameSheet = .wishExport(game.id) }
+                        .disabled(!model.canExportWishHistory(game.id))
+                }
             }
             // An active pre-download of this game doesn't hide Move: the model pauses and drains it first.
             if isInstalled, !waitingForApproval, !isLive {
