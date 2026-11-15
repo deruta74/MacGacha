@@ -33,6 +33,7 @@ import LauncherCore
     }
 
     func canBeginGameOrRuntimeOperation(allowingCatalogID: String? = nil) -> Bool {
+        guard !storageCleanupInProgress else { return false }
         guard !gameMoveRecoveryReservation else { return false }
         let capturedSetupItem = allowingCatalogID.map { id in
             catalogActivationTargets.keys.contains { key in
@@ -50,7 +51,7 @@ import LauncherCore
 
     /// Reservations outlive UI progress and keep draining or recovering work safe.
     var isBusyForUpdates: Bool {
-        dependencyAutoUpdateReservation || runtimeCatalogMutationID != nil || languageRestart != nil || gameMoveRecoveryReservation || isStarting || launchSlotOwner != nil || liveSessionGameName != nil ||
+        storageCleanupInProgress || dependencyAutoUpdateReservation || runtimeCatalogMutationID != nil || languageRestart != nil || gameMoveRecoveryReservation || isStarting || launchSlotOwner != nil || liveSessionGameName != nil ||
             launchStates.values.contains { if case .recoveryNeeded = $0 { true } else { false } } ||
             isGameOperationRunning || isRuntimeOperationRunning || consentRequest != nil || importState != nil ||
             runtimeSetupProgress.values.contains { if case .installing = $0 { true } else { false } }

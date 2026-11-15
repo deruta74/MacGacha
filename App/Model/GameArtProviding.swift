@@ -6,9 +6,11 @@ protocol GameArtProviding: Sendable {
     func cached() -> [String: GameArt]
     func loadCached() async -> [String: GameArt]
     func refresh() async -> [String: GameArt]
+    func invalidateStorageCache() async
 }
 
 extension GameArtProviding {
+    func invalidateStorageCache() async {}
     func loadCached() async -> [String: GameArt] { cached() }
 }
 
