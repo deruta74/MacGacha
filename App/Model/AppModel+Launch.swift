@@ -50,11 +50,17 @@ import RuntimeManager
     }
 
     func setGlobalLaunchPreference(_ key: WritableKeyPath<GlobalLaunchSettings, Bool>, to value: Bool) {
+        var settings = globalLaunchSettings
+        settings[keyPath: key] = value
+        do { try saveGlobalLaunchSettings(settings) }
+        catch { show(error) }
+    }
+
+    func saveGlobalLaunchSettings(_ settings: GlobalLaunchSettings) throws {
         // No settings writes may enter behind the restart's final flush.
-        guard languageRestart == nil else { show(LauncherError.busy("Application language restart is in progress")); return }
-        let preferences = launchPreferences
-        globalLaunchSettings[keyPath: key] = value
-        let settings = globalLaunchSettings, revision = UUID()
+        guard languageRestart == nil else { throw LauncherError.busy("Application language restart is in progress") }
+        let preferences = launchPreferences, revision = UUID()
+        globalLaunchSettings = settings
         launchSettingsRevision = revision; launchSettingsRevisions["global"] = revision
         enqueueSettingsWrite(key: "global") { try preferences.saveGlobal(settings) } didCommit: { [weak self] in
             self?.durableGlobalLaunchSettings = settings

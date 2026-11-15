@@ -6,6 +6,7 @@ import LauncherCore
 
 /// Create once and share; call invalidate() when done.
 public struct URLSessionHTTPClient: HTTPClient {
+    private var rateLimiter: DownloadRateLimiter?
     private let sessions: [URLSession]
     private let requestTimeout: TimeInterval
     private var timerFactory: @Sendable () -> any HTTPRequestTimer = { DispatchHTTPRequestTimer() }
@@ -46,6 +47,11 @@ public struct URLSessionHTTPClient: HTTPClient {
         requestTimeout = configuration.timeoutIntervalForRequest
         lifecycle = HTTPSessionLifecycle(); self.highWaterMark = highWaterMark; self.lowWaterMark = lowWaterMark
         bufferObserver = nil; self.redirectPolicy = redirectPolicy
+    }
+
+    /// Copies retain the same bucket, including across independent session pools.
+    public func limitingBodyReads(using limiter: DownloadRateLimiter) -> Self {
+        var copy = self; copy.rateLimiter = limiter; return copy
     }
 
     public func invalidate() {
@@ -104,7 +110,13 @@ public struct URLSessionHTTPClient: HTTPClient {
             task.delegate = delegate
             delegate.attach(task)
         }
-        let body = HTTPBody(next: { try await delegate.next() }, onCancel: { delegate.cancel() })
+        let body: HTTPBody
+        if let rateLimiter {
+            let reader = RateLimitedHTTPReader(limiter: rateLimiter, next: { try await delegate.next() })
+            body = HTTPBody(next: { try await reader.next() }, onCancel: { delegate.cancel() })
+        } else {
+            body = HTTPBody(next: { try await delegate.next() }, onCancel: { delegate.cancel() })
+        }
         let head = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { delegate.start($0) }
         } onCancel: {

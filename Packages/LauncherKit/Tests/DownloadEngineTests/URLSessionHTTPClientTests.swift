@@ -9,6 +9,43 @@ import LauncherCore
 
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct URLSessionHTTPClientTests {
+    @Test func sharedLimitPacesGetAndPostBodiesWithoutLosingBytes() async throws {
+        let first = HTTPFixture(.response(200, ["Content-Length": "25"], [Data(repeating: 1, count: 25)]))
+        let second = HTTPFixture(.response(200, ["Content-Length": "10"], [Data(repeating: 2, count: 10)]))
+        defer { first.close(); second.close() }
+        let clock = RateClock(), bucket = DownloadRateLimiter(bytesPerSecond: 100, clock: clock)
+        let a = first.client.limitingBodyReads(using: bucket), b = second.client.limitingBodyReads(using: bucket)
+        let (_, bodyA) = try await a.get(first.url, byteRangeFrom: nil)
+        let (_, bodyB) = try await b.post(second.url)
+        var readerA = bodyA.makeAsyncIterator(), readerB = bodyB.makeAsyncIterator()
+        #expect(try await readerA.next() == Data(repeating: 1, count: 10))
+        let readB = Task { try await readerB.next() }
+        var waits = clock.waits.makeAsyncIterator()
+        let wait = try #require(await waits.next())
+        clock.advance(to: wait.deadline); wait.resume.signal()
+        #expect(try await readB.value == Data(repeating: 2, count: 10))
+        bucket.setBytesPerSecond(nil)
+        #expect(try await readerA.next() == Data(repeating: 1, count: 15))
+        #expect(try await readerA.next() == nil)
+    }
+
+    @Test func cancellingRateLimitedBodyCancelsItsNativeTransfer() async throws {
+        let fixture = HTTPFixture(.controlledResponse(1000))
+        defer { fixture.close() }
+        let clock = RateClock(), bucket = DownloadRateLimiter(bytesPerSecond: 100, clock: clock)
+        let client = fixture.client.limitingBodyReads(using: bucket)
+        let (_, body) = try await client.get(fixture.url, byteRangeFrom: nil)
+        var reader = body.makeAsyncIterator()
+        fixture.control.send(Data(repeating: 1, count: 25))
+        #expect(try await reader.next()?.count == 10)
+        let read = Task { try await reader.next() }
+        var waits = clock.waits.makeAsyncIterator()
+        _ = try #require(await waits.next())
+        read.cancel()
+        await #expect(throws: LauncherError.cancelled) { try await read.value }
+        try await fixture.control.didStop.wait()
+    }
+
     @Test func destinationPolicyRejectsInitialRequestBeforeContact() async throws {
         let fixture = HTTPFixture(.response(200, [:], []))
         defer { fixture.close() }
