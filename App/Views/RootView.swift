@@ -155,6 +155,12 @@ struct RootView: View {
         }
         // A sheet belongs to one game; once its region is hidden it must not act on it.
         .onChange(of: model.region) { gameSheet = nil }
+        // Clicking a notification selects its game. The model has already switched the region.
+        .onChange(of: model.notificationSelection) { _, selection in
+            guard let selection else { return }
+            panel = nil
+            selectedID = selection.gameID
+        }
         #if DEBUG
         .onAppear(perform: applyDebugLaunchArguments)
         #endif
