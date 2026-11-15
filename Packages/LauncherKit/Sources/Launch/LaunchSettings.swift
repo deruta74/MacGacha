@@ -101,8 +101,12 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
         // Unknown HUD names in hand-edited files do not discard unrelated settings.
         metalHUDContents = MetalHUDContents(rawValue: try c.decodeIfPresent(String.self, forKey: .metalHUDContents) ?? "") ?? defaults.metalHUDContents
-        metalHUDElements = try c.decodeIfPresent([String].self, forKey: .metalHUDElements)
-            .map { $0.compactMap(MetalHUDElement.init(rawValue:)) } ?? defaults.metalHUDElements
+        // Hand-edited or newer files may repeat or name unknown elements. Keep the
+        // first of each known one, and fall back to the defaults rather than an empty set.
+        var seen = Set<MetalHUDElement>()
+        let elements = try c.decodeIfPresent([String].self, forKey: .metalHUDElements)?
+            .compactMap(MetalHUDElement.init(rawValue:)).filter { seen.insert($0).inserted } ?? []
+        metalHUDElements = elements.isEmpty ? defaults.metalHUDElements : elements
         metalHUDPosition = MetalHUDPosition(rawValue: try c.decodeIfPresent(String.self, forKey: .metalHUDPosition) ?? "") ?? defaults.metalHUDPosition
         metalHUDSize = MetalHUDSize(rawValue: try c.decodeIfPresent(String.self, forKey: .metalHUDSize) ?? "") ?? defaults.metalHUDSize
         unlockFPS = try c.decodeIfPresent(Bool.self, forKey: .unlockFPS) ?? defaults.unlockFPS

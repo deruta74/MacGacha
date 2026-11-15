@@ -35,7 +35,7 @@ import TestSupport
         #expect(settings.metalHUDContents == .standard)
         #expect(settings.metalHUDPosition == .topRight)
         #expect(settings.metalHUDSize == .standard)
-        #expect(settings.metalHUDElements == [.fps, .gputime, .fps])
+        #expect(settings.metalHUDElements == [.fps, .gputime])
         #expect(settings.metalHUD)
     }
 
@@ -45,11 +45,21 @@ import TestSupport
         try settings.validate()
         settings.metalHUDContents = .custom
         #expect(throws: LauncherError.self) { try settings.validate() }
-        #expect(throws: LauncherError.self) {
-            try JSONDecoder().decode(LaunchSettings.self, from: Data(#"{"metalHUDContents":"custom","metalHUDElements":["future"]}"#.utf8))
-        }
         settings.metalHUDElements = [.fps, .fps]
         try settings.validate()
+    }
+
+    @Test(arguments: [#"[]"#, #"["future"]"#, #"["fps","fps"]"#])
+    func decodedElementsAreDistinctAndNeverEmpty(elements: String) throws {
+        // Custom must stay reachable and editable: duplicates would defeat the
+        // last-element guard, and an empty list would make Custom invalid.
+        for contents in ["standard", "custom"] {
+            let json = #"{"metalHUDContents":"\#(contents)","metalHUDElements":\#(elements)}"#
+            let settings = try JSONDecoder().decode(LaunchSettings.self, from: Data(json.utf8))
+            #expect(Set(settings.metalHUDElements).count == settings.metalHUDElements.count)
+            #expect(!settings.metalHUDElements.isEmpty)
+            try settings.validate()
+        }
     }
 
     @Test func metalHUDElementsHaveStableLibMTLHudOrder() throws {
