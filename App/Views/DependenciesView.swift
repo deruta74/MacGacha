@@ -232,6 +232,7 @@ private struct DependencyCard: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.canUseRuntimeVersion(newer.id))
                     .help(String(localized: "Switch to \(DependencyText.name(newer))"))
+                // Wine-choice cards pin through the Wine Version list, so their menu only removes.
                 ActiveMenu(row: current, offersPin: !offersWineChoice, remove: { removing = current })
             case .ready(let current):
                 switch autoUpdate {
@@ -287,12 +288,8 @@ private struct AutoUpdateNote: View {
         case .waitingToActivate(let id):
             note("\(name(id)) is ready. MacGacha switches to it when no game or download is running.", symbol: "clock")
         case .keepingPrevious(let id):
-            if wineChoice {
-                note("\(name(id)) will be removed after the first game session on the new version. To keep it, choose it under Wine Version.",
-                     symbol: "clock.arrow.circlepath")
-            } else {
-                note("\(name(id)) will be removed after the first game session on the new version.", symbol: "clock.arrow.circlepath")
-            }
+            // The Wine Version list below already offers keeping it, so the note stays one line.
+            note("\(name(id)) will be removed after the first game session on the new version.", symbol: "clock.arrow.circlepath")
         case .graphicsUpdateOffered, .graphicsUpdateDeclined:
             // These get their own row under the header, with the buttons that answer them.
             EmptyView()
@@ -402,7 +399,8 @@ private struct ActiveVersionLine: View {
         let using = String(localized: "Using \(DependencyText.name(row))")
         Label {
             if wineChoice {
-                Text(StatusText.joined(using, pinned ? String(localized: "Wine chosen by you") : String(localized: "Wine chosen automatically")))
+                // Automatic or a chosen version is already shown on the Wine Version row below.
+                Text(using)
             } else {
                 // A helper has no name beyond its version, so the line is the version itself.
                 Text(DependencyText.joined((row.summary == nil ? [] : [using]) + DependencyText.installed(row, showsVersion: true)))
@@ -438,10 +436,8 @@ private struct ActiveMenu: View {
             Button("Remove…", systemImage: "trash", role: .destructive, action: remove)
                 .disabled(!model.canRemoveRuntime(row.id))
         } label: {
-            Label("More", systemImage: "ellipsis")
-                .labelStyle(.iconOnly)
+            Text("Options")
         }
-        .menuIndicator(.hidden)
         .fixedSize()
         .help("More actions")
     }

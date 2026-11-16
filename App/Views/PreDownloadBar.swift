@@ -21,19 +21,9 @@ struct PreDownloadBar: View {
             switch overlay.state {
             case .unavailable:
                 EmptyView()
-            case .available(let version, let bytes):
-                Button {
-                    model.startPreDownload(game.id)
-                } label: {
-                    Label(String(localized: "Pre-download \(version) · \(bytes.formatted(.byteCount(style: .file)))",
-                        comment: "Footer button; the next game version and its download size"),
-                        systemImage: "arrow.down.circle")
-                        .font(.callout)
-                        .monospacedDigit()
-                        .padding(.horizontal, 4)
-                }
-                .buttonStyle(.glass)
-                .disabled(blocked)
+            case .available:
+                // Offered as a capsule beside Play, the way HoYoPlay places it.
+                EmptyView()
             case .downloading(let progress):
                 transfer(label: String(localized: "Pre-downloading \(version)…",
                         comment: "Footer pre-download progress; the argument is the next game version"),
@@ -115,5 +105,60 @@ struct PreDownloadBar: View {
         .padding(.vertical, 6)
         .frame(minHeight: 40)
         .glassEffect(.regular, in: .capsule)
+    }
+}
+
+/// The pre-download offer: a round icon beside Play, as in HoYoPlay. The first offer
+/// explains itself once in a popover, then the tooltip carries the version and size.
+struct PreDownloadButton: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage("preDownloadHintSeen") private var hintSeen = false
+    @State private var showingHint = false
+    let game: LauncherGame
+    let gameIsLive: Bool
+
+    var body: some View {
+        if case .available(let version, let bytes) = model.preDownloadState(for: game.id).state {
+            let size = bytes.formatted(.byteCount(style: .file))
+            let label = String(localized: "Pre-download \(version) · \(size)",
+                comment: "Footer button; the next game version and its download size")
+            Button {
+                hintSeen = true
+                model.startPreDownload(game.id)
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .foregroundStyle(.white)
+            .disabled(model.isGameOperationRunning || gameIsLive || model.gameRecord(game.id)?.pending != nil)
+            .help(label)
+            .accessibilityLabel(Text(verbatim: label))
+            .popover(isPresented: $showingHint, arrowEdge: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Pre-download \(version) is available", comment: "One-time hint over the pre-download button")
+                        .font(.headline)
+                    Text("Download \(size) before the update is released. The installed version stays playable, and on release day the update installs from these files.",
+                        comment: "One-time hint over the pre-download button; the argument is the download size")
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Spacer()
+                        Button("OK") { showingHint = false }
+                            .keyboardShortcut(.defaultAction)
+                    }
+                }
+                .padding(16)
+                .frame(width: 300)
+            }
+            .onChange(of: showingHint) { _, showing in if !showing { hintSeen = true } }
+            .task {
+                // Let the footer settle first, so the popover points at the button's final place.
+                try? await Task.sleep(for: .seconds(1))
+                if !hintSeen { showingHint = true }
+            }
+            .transition(.opacity)
+        }
     }
 }
