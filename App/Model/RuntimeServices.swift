@@ -298,7 +298,7 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
         let fs = try ContainedFileSystem(root: paths.root)
         let runtimes = try relativePath(paths.runtimes)
         try fs.createDirectory(at: runtimes)
-        let lock = try InstallLock(fs: fs, path: SafeRelativePath("\(runtimes)/.lock"), retries: InstallLock.shortWaitRetries)
+        let lock = try InstallLock(fs: fs, path: SafeRelativePath("\(runtimes)/.lock"))
         return try withExtendedLifetime(lock) { try body() }
     }
 

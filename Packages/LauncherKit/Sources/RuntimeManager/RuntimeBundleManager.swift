@@ -7,13 +7,12 @@ import DownloadEngine
 /// One OS-backed lease covers component acquisition, assembly, publication and cleanup.
 final class RuntimeStoreLease: Sendable {
     let lock: InstallLock
-    init(store: RuntimeStore) throws {
+    /// `retries` is only for read-only inspection: mutations still refuse a held lock at once.
+    init(store: RuntimeStore, retries: Int = 0) throws {
         let fs = try ContainedFileSystem(root: store.paths.root)
         let path = try RuntimeJSONFile.relativePath(store.paths.runtimes, root: store.paths.root)
         try fs.createDirectory(at: path)
-        // Inspection, sweeps and publication hold this lock only briefly. Another process
-        // or task holding it at launch must not make installed runtimes look missing.
-        lock = try InstallLock(fs: fs, path: SafeRelativePath("\(path)/.lock"), retries: InstallLock.shortWaitRetries)
+        lock = try InstallLock(fs: fs, path: SafeRelativePath("\(path)/.lock"), retries: retries)
     }
 }
 
@@ -78,7 +77,9 @@ public struct RuntimeBundleManager: Sendable {
 
     public func installed(_ bundle: RuntimeBundle) async throws -> InstalledRuntimeBundle? {
         try await BlockingIO.run {
-            let lease = try RuntimeStoreLease(store: store)
+            // Another task holding the store briefly at launch must not make installed
+            // runtimes look missing, so this read-only check waits about 10 s first.
+            let lease = try RuntimeStoreLease(store: store, retries: InstallLock.shortWaitRetries)
             defer { withExtendedLifetime(lease) {} }
             return try inspect(bundle)
         }
