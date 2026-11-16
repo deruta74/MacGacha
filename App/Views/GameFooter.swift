@@ -99,15 +99,15 @@ struct GameFooter: View {
                         .frame(maxWidth: 480, alignment: .trailing)
                 }
                 HStack(spacing: 10) {
-                    if showsPreDownload {
-                        PreDownloadButton(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
-                    }
                     if slideHasVideo {
                         backgroundToggle
                     }
                     if showsMenu {
                         GameMenu(game: game, state: state, gameSheet: $gameSheet, confirmingUninstall: $confirmingUninstall,
                             confirmingPreDownloadDeletion: $confirmingPreDownloadDeletion)
+                    }
+                    if showsPreDownload {
+                        PreDownloadButton(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
                     }
                     PrimaryActionButton(game: game, action: action, state: state, panel: $panel,
                         gameSheet: $gameSheet, confirmingParts: $confirmingParts, confirmingUninstall: $confirmingUninstall,
