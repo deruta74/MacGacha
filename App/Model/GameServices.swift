@@ -10,6 +10,7 @@ import GameLibrary
 typealias GameEventStream = AsyncThrowingStream<OperationEvent, any Error>
 
 protocol GameServices: Sendable {
+    func setDownloadSpeedLimit(_ bytesPerSecond: Int64?)
     func start() async
     func recoverPendingMoves() async -> [String]
     func waitUntilIdle(_ id: String) async throws
@@ -36,6 +37,7 @@ protocol GameServices: Sendable {
 
 /// Existing fakes and previews opt out without touching delivery or disk.
 extension GameServices {
+    func setDownloadSpeedLimit(_ bytesPerSecond: Int64?) {}
     func recoverPendingMoves() async -> [String] { [] }
     func move(_ id: String, to folder: URL) async -> GameEventStream {
         GameEventStream { $0.finish(throwing: LauncherError.busy("Moving is unavailable")) }
@@ -54,22 +56,24 @@ extension GameServices {
 /// Construction does no filesystem work. All core work runs on service/core
 /// executors, and API requests and chunk transfers share one host-policy client per region.
 final class LiveGameServices: GameServices, Sendable {
+    private let downloadRateLimiter: DownloadRateLimiter
     private let libraries: [Region: GameLibrary]
     private let store: GameRecordStore
     private let log: EventLog
     private let sessions: [Region: DeliveryHTTPSession]
 
     init(paths: AppPaths = .standard(), http: (any HTTPClient)? = nil,
+        downloadRateLimiter: DownloadRateLimiter = DownloadRateLimiter(),
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), retry: RetryPolicy = RetryPolicy(),
         sleeper: any Sleeper = ContinuousSleeper(), log: EventLog? = nil,
         guard operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe()) {
         let store = GameRecordStore(directory: paths.games), eventLog = log ?? EventLog(directory: paths.logs)
-        self.store = store; self.log = eventLog
+        self.store = store; self.log = eventLog; self.downloadRateLimiter = downloadRateLimiter
         var libraries: [Region: GameLibrary] = [:], sessions: [Region: DeliveryHTTPSession] = [:]
         for region in Region.allCases {
             let client: any HTTPClient
             if let http { client = http }
-            else { let owned = DeliveryHTTPSession(region: region); sessions[region] = owned; client = owned.client }
+            else { let owned = DeliveryHTTPSession(region: region, rateLimiter: downloadRateLimiter); sessions[region] = owned; client = owned.client }
             let fetcher = ChunkFetcher(http: client, retry: retry, sleeper: sleeper)
             libraries[region] = GameLibrary(paths: paths, api: DeliveryAPI(http: client, region: region),
                 runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog, locationProbe: locationProbe),
@@ -77,6 +81,7 @@ final class LiveGameServices: GameServices, Sendable {
         }
         self.libraries = libraries; self.sessions = sessions
     }
+    func setDownloadSpeedLimit(_ bytesPerSecond: Int64?) { downloadRateLimiter.setBytesPerSecond(bytesPerSecond) }
     private func library(for game: GameDefinition) -> GameLibrary { libraries[game.region]! }
 
     func start() async { await libraries[.global]!.start() }
@@ -202,7 +207,9 @@ final class LiveGameServices: GameServices, Sendable {
 
 private final class DeliveryHTTPSession: Sendable {
     let client: URLSessionHTTPClient
-    init(region: Region) { client = DeliveryHostPolicy.makeHTTPClient(region: region) }
+    init(region: Region, rateLimiter: DownloadRateLimiter) {
+        client = DeliveryHostPolicy.makeHTTPClient(region: region, rateLimiter: rateLimiter)
+    }
     deinit { client.invalidate() }
 }
 private func logGameFailure(_ error: LauncherError, id: String, log: EventLog) async {

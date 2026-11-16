@@ -17,13 +17,15 @@ public enum DeliveryHostPolicy {
     }
 
     /// Create once and share with the delivery API and ChunkFetcher; invalidate when done.
-    public static func makeHTTPClient(region: Region = .global, sessionCount: Int = 8) -> URLSessionHTTPClient {
+    public static func makeHTTPClient(region: Region = .global, sessionCount: Int = 8,
+        rateLimiter: DownloadRateLimiter? = nil) -> URLSessionHTTPClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         precondition(sessionCount > 0)
         configuration.httpMaximumConnectionsPerHost = SpaceBudget.defaultMaxConcurrentObjects
-        return URLSessionHTTPClient(configuration: configuration, sessionCount: sessionCount,
+        let client = URLSessionHTTPClient(configuration: configuration, sessionCount: sessionCount,
             highWaterMark: 4 << 20, lowWaterMark: 1 << 20, redirectPolicy: { allows($0, region: region) })
+        return rateLimiter.map { client.limitingReception(using: $0) } ?? client
     }
 }
 

@@ -275,7 +275,9 @@ final class AppModel {
     var durableLaunchSettings: [String: LaunchSettings] = [:]
     var durableGlobalLaunchSettings = GlobalLaunchSettings()
     var launchSettingsCache: [String: LaunchSettings] = [:]
-    var globalLaunchSettings = GlobalLaunchSettings()
+    var globalLaunchSettings = GlobalLaunchSettings() {
+        didSet { gameServices.setDownloadSpeedLimit(globalLaunchSettings.downloadSpeedLimit) }
+    }
     var wishHistoryExportingGame: String?
     var wishHistoryProgress: WishHistoryProgress?
     var wishHistoryFailure: LauncherError?

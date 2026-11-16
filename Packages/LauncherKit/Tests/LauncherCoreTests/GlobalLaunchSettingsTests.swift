@@ -17,6 +17,22 @@ import TestSupport
             #expect(try store.load() == settings)
         }
     }
+
+    @Test func downloadLimitDefaultsAndRoundTripsInBytesPerSecond() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), store = GlobalLaunchSettingsStore(paths: AppPaths(root: temp.url))
+            for json in ["{}", #"{"downloadSpeedLimit":null}"#] {
+                #expect(try JSONDecoder().decode(GlobalLaunchSettings.self, from: Data(json.utf8)).downloadSpeedLimit == nil)
+            }
+            var settings = GlobalLaunchSettings()
+            settings.downloadSpeedLimit = 25_000_000
+            try store.save(settings)
+            #expect(try store.load() == settings)
+            settings.downloadSpeedLimit = nil
+            try store.save(settings)
+            #expect(try store.load().downloadSpeedLimit == nil)
+        }
+    }
     @Test func dependencyUpdatesDefaultOnAndPersistAlongsideOtherGlobalSettings() async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), store = GlobalLaunchSettingsStore(paths: AppPaths(root: temp.url))

@@ -9,6 +9,157 @@ import LauncherCore
 
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct URLSessionHTTPClientTests {
+    @Test func transitionWaitsForTheNativeEffectDrainerAcknowledgment() async throws {
+        let entered = TestEvent(), release = DispatchSemaphore(value: 0), timedOut = Mutex(false)
+        defer { release.signal() }
+        let first = HTTPFixture(.controlledResponse(10000), highWaterMark: 1024, lowWaterMark: 256)
+        let second = HTTPFixture(.response(200, ["Content-Length": "10"], [Data(repeating: 2, count: 10)]))
+        defer { first.close(); second.close() }
+        let bucket = DownloadRateLimiter(clock: RateClock())
+        let a = first.client.limitingReception(using: bucket).observingTaskTransitions { _, state in
+            if state == .suspended {
+                // Only the native data callback's buffer suspension enters this
+                // branch. This never blocks a cooperative executor thread.
+                entered.signal()
+                if release.wait(timeout: .now() + 60) == .timedOut { timedOut.withLock { $0 = true } }
+            }
+        }
+        let b = second.client.limitingReception(using: bucket)
+        let (_, bodyA) = try await a.get(first.url, byteRangeFrom: nil)
+        defer { withExtendedLifetime(bodyA) {} }
+        first.control.send(Data(repeating: 1, count: 1024))
+        try await entered.wait()
+        bucket.setBytesPerSecond(5_000_000)
+        let barrier = bucket.isTransitioning
+        #expect(barrier)
+        guard barrier else { return }
+        let response = Task { try await b.get(second.url, byteRangeFrom: nil) }
+        defer { response.cancel() }
+        while bucket.pendingAcquisitions != 1 { try Task.checkCancellation(); await Task.yield() }
+        #expect(bucket.isTransitioning)
+        #expect(!bucket.isReceiving)
+        release.signal()
+        let (_, bodyB) = try await response.value
+        var count = 0; for try await bytes in bodyB { count += bytes.count }
+        #expect(count == 10 && !timedOut.withLock { $0 })
+    }
+
+    @Test func cancellingActiveReceptionImmediatelyAdmitsTheNextStream() async throws {
+        let first = HTTPFixture(.controlledResponse(1000))
+        let second = HTTPFixture(.response(200, ["Content-Length": "10"], [Data(repeating: 2, count: 10)]))
+        defer { first.close(); second.close() }
+        let bucket = DownloadRateLimiter(bytesPerSecond: 5_000_000, clock: RateClock())
+        let a = first.client.limitingReception(using: bucket), b = second.client.limitingReception(using: bucket)
+        let (_, bodyA) = try await a.get(first.url, byteRangeFrom: nil)
+        let next = Task { try await b.get(second.url, byteRangeFrom: nil) }
+        defer { next.cancel() }
+        while bucket.pendingAcquisitions != 1 { try Task.checkCancellation(); await Task.yield() }
+        var reader = bodyA.makeAsyncIterator()
+        let cancelled = Task { try await reader.next() }
+        cancelled.cancel()
+        await #expect(throws: LauncherError.cancelled) { try await cancelled.value }
+        let (_, bodyB) = try await next.value
+        var received = Data(); for try await bytes in bodyB { received.append(bytes) }
+        #expect(received.count == 10)
+    }
+
+    @Test func slowReceiverYieldsItsTurnAndRetainsItsRealIdleDeadline() async throws {
+        let timer = ManualHTTPRequestTimer(), resumed = TestEvent(), resumes = Mutex(0)
+        let first = HTTPFixture(.controlledResponse(1000), timeout: 15, timer: timer)
+        let second = HTTPFixture(.response(200, ["Content-Length": "10"], [Data(repeating: 2, count: 10)]))
+        defer { first.close(); second.close() }
+        let clock = RateClock(), bucket = DownloadRateLimiter(bytesPerSecond: 5_000_000, clock: clock)
+        let a = first.client.limitingReception(using: bucket).observingTaskTransitions { _, state in
+            if state == .running {
+                let count = resumes.withLock { $0 += 1; return $0 }
+                if count == 2 { resumed.signal() }
+            }
+        }
+        let b = second.client.limitingReception(using: bucket)
+        let (_, bodyA) = try await a.get(first.url, byteRangeFrom: nil)
+        timer.advance(by: 6)
+        let response = Task { try await b.get(second.url, byteRangeFrom: nil) }
+        defer { response.cancel() }
+        while bucket.pendingAcquisitions != 1 { try Task.checkCancellation(); await Task.yield() }
+        var waits = clock.waits.makeAsyncIterator()
+        let slice = try #require(await waits.next())
+        clock.advance(to: slice.deadline, wakingSleepers: true)
+        let (_, bodyB) = try await response.value
+        var received = Data(); for try await bytes in bodyB { received.append(bytes) }
+        #expect(received.count == 10)
+        try await resumed.wait()
+        #expect(timer.deadline == 15) // Six active seconds were not erased by pacing.
+        timer.advance(by: 10)
+        var reader = bodyA.makeAsyncIterator()
+        await #expect(throws: LauncherError.transport("HTTP request timed out")) { try await reader.next() }
+    }
+
+    @Test func limitedReceptionPausesNativeProducerAndItsIdleDeadlineBeforeConsumption() async throws {
+        let timer = ManualHTTPRequestTimer(), callback = TestEvent(), native = Mutex<URLSessionTask?>(nil)
+        let fixture = HTTPFixture(.controlledResponse(1000), timeout: 15, timer: timer)
+        defer { fixture.close() }
+        let clock = RateClock(), bucket = DownloadRateLimiter(bytesPerSecond: 100, clock: clock)
+        let client = fixture.client.limitingReception(using: bucket)
+            .observingTaskTransitions { task, _ in native.withLock { $0 = task } }
+            .observingDataCallbacks { _, _ in callback.signal() }
+        let (_, body) = try await client.get(fixture.url, byteRangeFrom: nil)
+        fixture.control.send(Data(repeating: 1, count: 25))
+        try await callback.wait()
+        #expect(native.withLock { $0?.state } == .suspended)
+        #expect(timer.deadline == nil)
+        timer.advance(by: 3600)
+        #expect(!timer.cancelled)
+        bucket.setBytesPerSecond(nil)
+        var reader = body.makeAsyncIterator()
+        #expect(try await reader.next() == Data(repeating: 1, count: 25))
+        #expect(timer.deadline == timer.now + 15)
+        timer.advance(by: 14)
+        #expect(!timer.cancelled)
+        timer.advance(by: 2)
+        await #expect(throws: LauncherError.transport("HTTP request timed out")) { try await reader.next() }
+    }
+
+    @Test func sharedLimitPacesGetAndPostReceptionWithoutLosingBytes() async throws {
+        let first = HTTPFixture(.controlledResponse(25))
+        let second = HTTPFixture(.controlledResponse(10))
+        defer { first.close(); second.close() }
+        let clock = RateClock(), bucket = DownloadRateLimiter(bytesPerSecond: 100, clock: clock)
+        let a = first.client.limitingReception(using: bucket), b = second.client.limitingReception(using: bucket)
+        let (_, bodyA) = try await a.get(first.url, byteRangeFrom: nil)
+        first.control.send(Data(repeating: 1, count: 25))
+        var waits = clock.waits.makeAsyncIterator()
+        _ = try #require(await waits.next())
+        let post = Task { try await b.post(second.url) }
+        defer { post.cancel() }
+        while bucket.pendingAcquisitions != 2 { try Task.checkCancellation(); await Task.yield() }
+        bucket.setBytesPerSecond(nil)
+        let (_, bodyB) = try await post.value
+        second.control.send(Data(repeating: 2, count: 10)); second.control.finish()
+        first.control.finish()
+        var bytesA = Data(), bytesB = Data()
+        for try await piece in bodyA { bytesA.append(piece) }
+        for try await piece in bodyB { bytesB.append(piece) }
+        #expect(bytesA == Data(repeating: 1, count: 25))
+        #expect(bytesB == Data(repeating: 2, count: 10))
+    }
+
+    @Test func cancellingRateLimitedBodyCancelsItsNativeTransfer() async throws {
+        let fixture = HTTPFixture(.controlledResponse(1000))
+        defer { fixture.close() }
+        let clock = RateClock(), bucket = DownloadRateLimiter(bytesPerSecond: 100, clock: clock)
+        let client = fixture.client.limitingReception(using: bucket)
+        let (_, body) = try await client.get(fixture.url, byteRangeFrom: nil)
+        var reader = body.makeAsyncIterator()
+        fixture.control.send(Data(repeating: 1, count: 25))
+        #expect(try await reader.next()?.count == 25)
+        let read = Task { try await reader.next() }
+        var waits = clock.waits.makeAsyncIterator()
+        _ = try #require(await waits.next())
+        read.cancel()
+        await #expect(throws: LauncherError.cancelled) { try await read.value }
+        try await fixture.control.didStop.wait()
+    }
+
     @Test func destinationPolicyRejectsInitialRequestBeforeContact() async throws {
         let fixture = HTTPFixture(.response(200, [:], []))
         defer { fixture.close() }
@@ -371,18 +522,26 @@ struct URLSessionHTTPClientTests {
     @Test(.timeLimit(.minutes(1)))
     func requestIdleTimeoutResetsOnDataAndIgnoresStaleCallbacksAfterCompletion() async throws {
         let timer = ManualHTTPRequestTimer(), metrics = HTTPBufferMetrics()
+        let callbackFinished = TestEvent()
         let fixture = HTTPFixture(.controlledResponse(2), timeout: 15, timer: timer,
             bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
         defer { fixture.close() }
-        let (_, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+        let client = fixture.client.observingDataCallbacks { _, _ in callbackFinished.signal() }
+        let (_, body) = try await client.get(fixture.url, byteRangeFrom: nil)
         timer.advance(by: 14)
         fixture.control.send(Data([1]))
-        _ = try await metrics.waitForSnapshot { $0.received == 1 }
+        // The buffer observer precedes native reception accounting, which can
+        // also refresh the idle deadline. Finish both before advancing time.
+        try await callbackFinished.wait()
         timer.advance(by: 2) // Old deadline expired, but the received byte refreshed it.
         #expect(timer.deadline == 29 && !timer.cancelled)
         fixture.control.send(Data([2])); fixture.control.finish()
+        _ = try await metrics.waitForSnapshot { $0.received == 2 }
         var received = Data(); for try await data in body { received.append(data) }
         #expect(received == Data([1, 2]) && timer.cancelled)
+        // Stream exhaustion can precede the final buffer observation when
+        // another thread is still draining completion effects.
+        _ = try await metrics.waitForSnapshot { $0.bytes == 0 }
         timer.advance(by: 3600)
         #expect(metrics.snapshot.bytes == 0)
     }

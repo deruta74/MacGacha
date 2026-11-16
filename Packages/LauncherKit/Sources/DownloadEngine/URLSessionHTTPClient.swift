@@ -6,11 +6,12 @@ import LauncherCore
 
 /// Create once and share; call invalidate() when done.
 public struct URLSessionHTTPClient: HTTPClient {
+    private var rateLimiter: DownloadRateLimiter?
     private let sessions: [URLSession]
     private let requestTimeout: TimeInterval
     private var timerFactory: @Sendable () -> any HTTPRequestTimer = { DispatchHTTPRequestTimer() }
     private var taskTransitionObserver: (@Sendable (URLSessionTask, URLSessionTask.State) -> Void)?
-    private var callbackObserver: (@Sendable (Int, Duration) -> Void)?
+    private var callbackObserver: (@Sendable (URLSessionTask, Int, Duration) -> Void)?
     private let lifecycle: HTTPSessionLifecycle
     private let highWaterMark: Int
     private let lowWaterMark: Int
@@ -46,6 +47,12 @@ public struct URLSessionHTTPClient: HTTPClient {
         requestTimeout = configuration.timeoutIntervalForRequest
         lifecycle = HTTPSessionLifecycle(); self.highWaterMark = highWaterMark; self.lowWaterMark = lowWaterMark
         bufferObserver = nil; self.redirectPolicy = redirectPolicy
+    }
+
+    /// Copies share producer admission across independent session pools. An
+    /// unlimited bucket retains ordinary concurrent, watermarked reception.
+    public func limitingReception(using limiter: DownloadRateLimiter) -> Self {
+        var copy = self; copy.rateLimiter = limiter; return copy
     }
 
     public func invalidate() {
@@ -95,7 +102,7 @@ public struct URLSessionHTTPClient: HTTPClient {
         if let offset { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
         let delegate = HTTPStreamDelegate(highWaterMark: highWaterMark, lowWaterMark: lowWaterMark,
             bufferObserver: bufferObserver, lifecycle: lifecycle, redirectPolicy: redirectPolicy, callbackObserver: callbackObserver,
-            requestTimeout: requestTimeout, timer: timerFactory(), taskTransitionObserver: taskTransitionObserver)
+            requestTimeout: requestTimeout, timer: timerFactory(), taskTransitionObserver: taskTransitionObserver, rateLimiter: rateLimiter)
         try lifecycle.invalidated.withLock { invalidated in
             guard !invalidated else { throw LauncherError.cancelled }
             let index = lifecycle.cursor.withLock { cursor in let index = cursor; cursor = (cursor + 1) % sessions.count; return index }
@@ -126,6 +133,10 @@ public struct URLSessionHTTPClient: HTTPClient {
     /// Opt-in transport profiling, propagated into native callbacks (which do
     /// not inherit task-local context). Normal clients leave it unset.
     package func observingDataCallbacks(_ observer: @escaping @Sendable (Int, Duration) -> Void) -> Self {
+        observingDataCallbacks { _, bytes, duration in observer(bytes, duration) }
+    }
+
+    package func observingDataCallbacks(_ observer: @escaping @Sendable (URLSessionTask, Int, Duration) -> Void) -> Self {
         var copy = self; copy.callbackObserver = observer; return copy
     }
 }
@@ -141,6 +152,13 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         case suspend(URLSessionDataTask)
         case cancel(URLSessionDataTask)
         case observe(bytes: Int, suspended: Bool)
+        case cancelRateWait(Task<Void, Never>)
+        case incrementalDelivery(URLSessionDataTask, Bool)
+        case acknowledgeTransition(UUID, observer: UUID)
+        case releaseReception(UUID)
+        case removeRateObserver(UUID)
+        case accountReception(URLSessionTask?, reservation: UUID?, epoch: UUID?)
+        case resetReceptionBaseline(URLSessionTask?, epoch: UUID)
     }
 
     private struct State {
@@ -150,7 +168,22 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         var pieces: [Data?] = []
         var readIndex = 0
         var bufferedBytes = 0
-        var suspended = false
+        var suspended = true // URLSession tasks start suspended.
+        var started = false
+        var bufferPaused = false
+        var ratePaused = false
+        var rateLimited = false
+        var receptionEpoch: UUID?
+        var callbackBytes: Int64 = 0
+        var accountedReception: Int64 = 0
+        var rateAllowance = 0
+        var rateReceiver: UUID?
+        var rateGeneration: UUID?
+        var rateWait: Task<Void, Never>?
+        var rateLease: Task<Void, Never>?
+        var rateLeaseGeneration: UUID?
+        var idleRemaining: TimeInterval?
+        var rateObservation: UUID?
         var finished = false
         var idleDeadline: TimeInterval?
         var terminalError: LauncherError?
@@ -165,16 +198,18 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
     private let bufferObserver: (@Sendable (Int, Bool) -> Void)?
     private let lifecycle: HTTPSessionLifecycle
     private let redirectPolicy: @Sendable (URL) -> Bool
-    private let callbackObserver: (@Sendable (Int, Duration) -> Void)?
+    private let callbackObserver: (@Sendable (URLSessionTask, Int, Duration) -> Void)?
     private let requestTimeout: TimeInterval
     private let taskTransitionObserver: (@Sendable (URLSessionTask, URLSessionTask.State) -> Void)?
     private let timer: any HTTPRequestTimer
+    private let rateLimiter: DownloadRateLimiter?
 
     init(highWaterMark: Int, lowWaterMark: Int, bufferObserver: (@Sendable (Int, Bool) -> Void)?,
         lifecycle: HTTPSessionLifecycle, redirectPolicy: @escaping @Sendable (URL) -> Bool,
-        callbackObserver: (@Sendable (Int, Duration) -> Void)?, requestTimeout: TimeInterval,
+        callbackObserver: (@Sendable (URLSessionTask, Int, Duration) -> Void)?, requestTimeout: TimeInterval,
         timer: any HTTPRequestTimer,
-        taskTransitionObserver: (@Sendable (URLSessionTask, URLSessionTask.State) -> Void)?) {
+        taskTransitionObserver: (@Sendable (URLSessionTask, URLSessionTask.State) -> Void)?, rateLimiter: DownloadRateLimiter?) {
+        self.rateLimiter = rateLimiter
         self.taskTransitionObserver = taskTransitionObserver
         self.highWaterMark = highWaterMark
         self.lowWaterMark = lowWaterMark
@@ -187,6 +222,19 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
         timer.setHandler { [weak self] in
             self?.finish(.transport("HTTP request timed out"), cancelTask: true, onlyIfIdle: true)
         }
+        if let rateLimiter {
+            let observation = UUID()
+            state.withLock { $0.rateObservation = observation }
+            rateLimiter.observeChanges(id: observation) { [weak self, weak rateLimiter] transition in
+                if let self { self.rateLimitChanged(transition: transition, observation: observation) }
+                else { rateLimiter?.acknowledgeTransition(transition, observer: observation) }
+            }
+            rateLimitChanged()
+        }
+    }
+
+    deinit {
+        if let observation = state.withLock({ $0.rateObservation }) { rateLimiter?.removeObserver(observation) }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -198,17 +246,21 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
     }
 
     func attach(_ task: URLSessionDataTask) {
-        state.withLock { $0.task = task }
+        state.withLock { state in
+            state.task = task
+            if rateLimiter != nil { state.effects.append(.incrementalDelivery(task, state.rateLimited)) }
+        }
     }
 
     func start(_ continuation: CheckedContinuation<HTTPResponseHead, any Error>) {
         let error: LauncherError? = state.withLock { state in
-            guard !state.finished, let task = state.task else {
+            guard !state.finished, state.task != nil else {
                 return state.terminalError ?? .transport("HTTP request already finished")
             }
             state.head = continuation
-            restartIdleTimer(&state)
-            state.effects.append(.resume(task))
+            state.started = true
+            requestRateAllowance(&state)
+            updateSuspension(&state)
             return nil
         }
         performEffects()
@@ -236,10 +288,10 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
                         state.pieces.removeFirst(state.readIndex)
                         state.readIndex = 0
                     }
-                    if state.suspended && state.bufferedBytes <= lowWaterMark {
-                        state.suspended = false
-                        restartIdleTimer(&state)
-                        if let task = state.task { state.effects.append(.resume(task)) }
+                    if state.bufferPaused && state.bufferedBytes <= lowWaterMark {
+                        state.bufferPaused = false
+                        requestRateAllowance(&state)
+                        updateSuspension(&state)
                     }
                     return .success(data)
                 }
@@ -270,23 +322,49 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
             receivedActivity(&state)
             let continuation = state.head
             state.head = nil
+            requestRateAllowance(&state)
+            updateSuspension(&state)
             return continuation
         }
         guard let continuation else {
             completionHandler(.cancel)
             return
         }
+        performEffects()
         continuation.resume(returning: HTTPResponseHead(response))
         completionHandler(.allow)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         let started = callbackObserver.map { _ in ContinuousClock.now }
-        defer { if let started { callbackObserver?(data.count, started.duration(to: .now)) } }
+        defer { if let started { callbackObserver?(dataTask, data.count, started.duration(to: .now)) } }
         guard !data.isEmpty else { return }
         let waiter = state.withLock { state -> CheckedContinuation<Data?, any Error>? in
-            guard !state.finished else { return nil }
-            defer { observe(&state) }
+            let receiver = state.rateReceiver
+            state.rateReceiver = nil
+            state.callbackBytes += Int64(data.count)
+            // Catch a live enable before its observer reaches this delegate.
+            let epoch = rateLimiter?.receptionEpoch
+            let newEpoch = epoch != nil && state.receptionEpoch != epoch
+            if newEpoch {
+                state.receptionEpoch = epoch; state.rateLimited = true
+                if let task = state.task { state.effects.append(.incrementalDelivery(task, true)) }
+            }
+            state.rateAllowance = 0
+            if let lease = state.rateLease { state.effects.append(.cancelRateWait(lease)) }
+            state.rateLease = nil; state.rateLeaseGeneration = nil
+            guard !state.finished else {
+                state.effects.append(.accountReception(dataTask, reservation: receiver, epoch: state.receptionEpoch))
+                return nil
+            }
+            defer {
+                requestRateAllowance(&state)
+                updateSuspension(&state)
+                observe(&state)
+                if newEpoch, let epoch { state.effects.append(.resetReceptionBaseline(dataTask, epoch: epoch)) }
+                state.effects.append(.accountReception(dataTask, reservation: receiver, epoch: state.receptionEpoch))
+                if let receiver { state.effects.append(.releaseReception(receiver)) }
+            }
             receivedActivity(&state)
             if let waiter = state.waiter {
                 state.waiter = nil
@@ -296,20 +374,146 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
             // Waiting here would block every task sharing this session's delegate queue.
             state.pieces.append(data)
             state.bufferedBytes += data.count
-            if state.bufferedBytes >= highWaterMark && !state.suspended {
-                state.suspended = true
-                state.idleDeadline = nil
-                timer.schedule(at: nil)
-                if let task = state.task { state.effects.append(.suspend(task)) }
-            }
+            if state.bufferedBytes >= highWaterMark { state.bufferPaused = true }
             return nil
         }
         performEffects()
         waiter?.resume(returning: data)
     }
 
+    private func rateLimitChanged(transition: UUID? = nil, observation: UUID? = nil) {
+        state.withLock { state in
+            defer {
+                if let transition, let observation { state.effects.append(.acknowledgeTransition(transition, observer: observation)) }
+            }
+            guard !state.finished, let rateLimiter else { return }
+            let epoch = rateLimiter.receptionEpoch
+            let limited = epoch != nil, newEpoch = epoch != nil && state.receptionEpoch != epoch
+            state.receptionEpoch = epoch
+            if state.rateLimited != limited, let task = state.task { state.effects.append(.incrementalDelivery(task, limited)) }
+            state.rateLimited = limited
+            if !state.rateLimited {
+                if let wait = state.rateWait { state.effects.append(.cancelRateWait(wait)) }
+                state.rateWait = nil; state.rateGeneration = nil
+                if let lease = state.rateLease { state.effects.append(.cancelRateWait(lease)) }
+                state.rateLease = nil; state.rateLeaseGeneration = nil
+                state.effects.append(.accountReception(state.task, reservation: state.rateReceiver, epoch: state.receptionEpoch))
+                state.rateAllowance = 0; state.rateReceiver = nil; state.ratePaused = false
+            } else {
+                requestRateAllowance(&state)
+            }
+            updateSuspension(&state)
+            if newEpoch, let epoch { state.effects.append(.resetReceptionBaseline(state.task, epoch: epoch)) }
+        }
+        performEffects()
+    }
+
+    private func requestRateAllowance(_ state: inout State) {
+        guard state.started, !state.finished, state.rateLimited, state.rateAllowance == 0 else { return }
+        state.ratePaused = true
+        guard !state.bufferPaused, state.rateWait == nil, let rateLimiter else { return }
+        let generation = UUID()
+        let owner = generation
+        state.rateGeneration = generation
+        state.rateWait = Task { [weak self, rateLimiter] in
+            do {
+                let allowance = try await rateLimiter.acquire(upTo: 64 << 10, receptionOwner: owner)
+                guard let self else {
+                    rateLimiter.settle(reception: owner, received: 0); rateLimiter.releaseReception(owner); return
+                }
+                self.admitReception(allowance, generation: generation)
+            } catch {
+                self?.rateWaitFailed(generation: generation)
+            }
+        }
+    }
+
+    private func rateWaitFailed(generation: UUID) {
+        let active = state.withLock { !$0.finished && $0.rateGeneration == generation }
+        if active { finish(.transport("Download pacing failed"), cancelTask: true) }
+    }
+
+    private func admitReception(_ allowance: Int, generation: UUID) {
+        let adopted = state.withLock { state in
+            guard !state.finished, state.rateLimited, state.rateGeneration == generation else { return false }
+            state.rateWait = nil; state.rateGeneration = nil
+            state.rateAllowance = allowance; state.rateReceiver = generation; state.ratePaused = false
+            let lease = UUID()
+            state.rateLeaseGeneration = lease
+            if let rateLimiter {
+                state.rateLease = Task { [weak self, rateLimiter] in
+                    do { try await rateLimiter.waitForReceptionSlice(); self?.endReceptionSlice(lease) }
+                    catch { }
+                }
+            }
+            updateSuspension(&state)
+            return true
+        }
+        if !adopted {
+            rateLimiter?.settle(reception: generation, received: 0)
+            rateLimiter?.releaseReception(generation)
+        }
+        performEffects()
+    }
+
+    private func endReceptionSlice(_ generation: UUID) {
+        state.withLock { state in
+            guard !state.finished, state.rateLeaseGeneration == generation else { return }
+            let receiver = state.rateReceiver
+            state.rateAllowance = 0; state.rateReceiver = nil
+            state.rateLease = nil; state.rateLeaseGeneration = nil
+            requestRateAllowance(&state)
+            updateSuspension(&state)
+            state.effects.append(.accountReception(state.task, reservation: receiver, epoch: state.receptionEpoch))
+            if let receiver { state.effects.append(.releaseReception(receiver)) }
+        }
+        performEffects()
+    }
+
+    private func accountReception(_ task: URLSessionTask?, reservation: UUID?, epoch: UUID?) {
+        let received = state.withLock { state in
+            let observed = max(state.callbackBytes, task?.countOfBytesReceived ?? 0)
+            let received = max(0, observed - state.accountedReception)
+            state.accountedReception = observed
+            if received > 0, !state.finished { receivedActivity(&state) }
+            return Int(clamping: received)
+        }
+        rateLimiter?.settle(reception: reservation, received: received, epoch: epoch)
+    }
+
+    private func resetReceptionBaseline(_ task: URLSessionTask?, epoch: UUID) {
+        state.withLock { state in
+            guard state.receptionEpoch == epoch, rateLimiter?.receptionEpoch == epoch else { return }
+            state.accountedReception = max(state.callbackBytes, task?.countOfBytesReceived ?? 0)
+        }
+    }
+
+    private func updateSuspension(_ state: inout State) {
+        guard state.started, !state.finished, let task = state.task else { return }
+        let suspended = state.bufferPaused || state.ratePaused
+        if suspended {
+            if state.ratePaused, !state.bufferPaused, let deadline = state.idleDeadline {
+                state.idleRemaining = max(0, deadline - timer.now)
+            }
+            state.idleDeadline = nil
+            timer.schedule(at: nil)
+        }
+        guard state.suspended != suspended else { return }
+        state.suspended = suspended
+        if suspended { state.effects.append(.suspend(task)) }
+        else {
+            if let remaining = state.idleRemaining {
+                state.idleRemaining = nil
+                state.idleDeadline = timer.now + remaining
+                timer.schedule(at: state.idleDeadline)
+            } else { restartIdleTimer(&state) }
+            state.effects.append(.resume(task))
+        }
+    }
+
     private func receivedActivity(_ state: inout State) {
         if !state.suspended { state.idleDeadline = timer.now + requestTimeout }
+        else if state.ratePaused { state.idleRemaining = requestTimeout }
     }
 
     private func restartIdleTimer(_ state: inout State) {
@@ -350,6 +554,13 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
                     task.suspend()
                     taskTransitionObserver?(task, .suspended)
                 case .cancel(let task): task.cancel()
+                case .cancelRateWait(let task): task.cancel()
+                case .incrementalDelivery(let task, let enabled): task.prefersIncrementalDelivery = enabled
+                case .acknowledgeTransition(let transition, let observer): rateLimiter?.acknowledgeTransition(transition, observer: observer)
+                case .releaseReception(let owner): rateLimiter?.releaseReception(owner)
+                case .removeRateObserver(let observer): rateLimiter?.removeObserver(observer)
+                case .accountReception(let task, let reservation, let epoch): accountReception(task, reservation: reservation, epoch: epoch)
+                case .resetReceptionBaseline(let task, let epoch): resetReceptionBaseline(task, epoch: epoch)
                 case .observe(let bytes, let suspended): bufferObserver?(bytes, suspended)
                 }
             }
@@ -390,7 +601,14 @@ private final class HTTPStreamDelegate: NSObject, URLSessionDataDelegate {
                 state.bufferedBytes = 0
             }
             let completed = state
+            if let wait = state.rateWait { state.effects.append(.cancelRateWait(wait)) }
+            if let lease = state.rateLease { state.effects.append(.cancelRateWait(lease)) }
+            state.rateLease = nil; state.rateLeaseGeneration = nil
+            state.rateAllowance = 0; state.rateReceiver = nil; state.rateWait = nil; state.rateGeneration = nil; state.rateObservation = nil
             if cancelTask, let task = state.task { state.effects.append(.cancel(task)) }
+            state.effects.append(.accountReception(state.task, reservation: completed.rateReceiver, epoch: state.receptionEpoch))
+            if let receiver = completed.rateReceiver { state.effects.append(.releaseReception(receiver)) }
+            if let observer = completed.rateObservation { state.effects.append(.removeRateObserver(observer)) }
             state.task = nil
             state.head = nil
             state.waiter = nil
