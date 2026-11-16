@@ -113,11 +113,14 @@ generic helper compatibility and exclusion of the 11.20 ABI overlays.
 
 crypt32 remains scoped to the original Wine 11.20 profiles. The 11.22 bundles
 use Wine's upstream implementation and do not require that component.
-The existing Surround module remains qualified only for Wine 11.20. A separate
-11.22 rebuild and audio qualification are required. Automatic updates retain
-an eligible saved Surround selection on 11.20, including settings changed while
-staging or activating. Existing manual bundle pins and explicit manual version
-selection remain available. No permanent pin is added automatically.
+The historical Surround modules remain scoped to Wine 11.20. The separate
+`surround-audio-wine-11.22-1` module is now built and paired with the 11.22
+D3DMetal profile. Automatic updates stage the installed unpinned helper with
+Wine, verify both receipts and activate both selections together. Helper pins
+remain authoritative. Explicit rollback pairs the compatible legacy helper,
+including when only the helper needs installation. Failures and cancellation
+retain the previous selection. Device and game audio quality still require
+live acceptance.
 
 ### Reproduction and local integration checks
 
@@ -182,3 +185,35 @@ on both backends, CN Genshin/ZZZ startup without the crypt32 component,
 long-session stability, actual Game Mode/cursor behavior and audio quality
 remain separate live acceptance. No runtime, catalog or app release is
 published by this work.
+
+
+### Surround 11.22 follow-up
+
+The Unix-only patch retains the original gate, endpoint rules, multichannel
+handling, spatial routing and channel-preserving stereo fallback. Both shared
+spatial headers are byte-identical to the 11.20 patch. Wine 11.22's stock mixer
+and delayed stock start remain on the stock path, with spatial cleanup on both
+failure and release. No Wine entry point or audio device was opened.
+
+Two fresh offline builds with networking denied produced identical modules and
+ZIPs from the official Wine archive plus the exact MacGacha compatibility delta.
+Compiler, SDK and dependency pins remain unchanged.
+
+- ZIP: `/tmp/macgacha-surround-1122/build-c/surround-audio-wine-11.22-1.zip`
+- Independent rebuild: `/tmp/macgacha-surround-1122/build-d/surround-audio-wine-11.22-1.zip`
+- ZIP SHA-256: `749ff445d88eea75453a1fc0c4f7d62d4318fa1033138c2afee1930c3ac50a04`
+- ZIP bytes: 250,245. Extracted regular bytes: 950,498 in 21 entries.
+- Module SHA-256: `7ce6e1037456df68d8a4e8422e94c2702a667bbfb2bdaa9012398e737aec699b`
+
+The native fake-AudioUnit matrix, strict export/import/dependency checks,
+synthetic dyld load and gated ComponentInstaller installation/removal pass.
+Unsigned catalog r4 and the app baseline recommend the new ABI-specific helper,
+preserving every historical descriptor and binding. Paired update, cancellation,
+rollback, startup adoption, per-game setup and recovery/session-pin checks cover
+the new profile. See `../surround-audio/wine-11.22/BUILD.md` for reproduction.
+The final full `scripts/test.sh` run passed with **1529 package tests**, **354
+app tests**, both native audio harness variants, policy/string checks and a
+Release build. No Swift source warnings were emitted. The complete log is
+`/tmp/macgacha-surround1122-verified.log`. Generated project and derived data
+remained outside Documents.
+No workflow, publication, real game or real-device audio check was performed.

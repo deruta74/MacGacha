@@ -144,14 +144,14 @@ import RuntimeManager
     let model: AppModel
     let services: FakeRuntimeServices
     let old = "d3dmetal-wine11.20mg1.0-gptk4.0b3"
-    let new = "d3dmetal-wine11.22mg1.0-gptk4.0b3"
+    let new = "d3dmetal-future-without-surround"
 
     static func make(storeFactory: ((AppPaths) -> RuntimeCatalogStore)? = nil) async throws -> Self {
         let resources = Bundle(for: SurroundUpgradeResources.self)
         let bytes = try Data(contentsOf: #require(resources.url(forResource: "runtime-catalog-r3", withExtension: "json")))
         let previous = try JSONDecoder().decode(RuntimeCatalog.self, from: bytes)
         let template = try #require(previous.manifest.bundles.first { $0.id.rawValue == "d3dmetal-wine11.20mg1.0-gptk4.0b3" })
-        let target = try RuntimeBundle(id: SafeIdentifier("d3dmetal-wine11.22mg1.0-gptk4.0b3"), displayName: "Wine test candidate",
+        let target = try RuntimeBundle(id: SafeIdentifier("d3dmetal-future-without-surround"), displayName: "Wine test candidate",
             backend: .d3dmetal, components: template.components, environment: template.environment)
         // Only the profile changes. No foreign Wine ABI is claimed for the 11.20 helper.
         let baseline = try RuntimeManifest(components: previous.manifest.components,

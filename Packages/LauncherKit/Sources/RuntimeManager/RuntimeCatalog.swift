@@ -86,7 +86,7 @@ public struct RuntimeCatalog: Codable, Sendable {
             let profiles = manifest.bundles.filter { bundle in
                 switch component.kind {
                 case .crypt32Fix: return (component.id.rawValue == Crypt32Fix.componentID ? Crypt32Fix.bundleIDs : [Crypt32Fix.bundleID]).contains(bundle.id.rawValue)
-                case .surroundAudio: return (component.id.rawValue == SurroundAudio.componentID ? SurroundAudio.bundleIDs : [SurroundAudio.bundleID]).contains(bundle.id.rawValue)
+                case .surroundAudio: return SurroundAudio.profiles(for: component.id.rawValue).contains(bundle.id.rawValue)
                 default: return true
                 }
             }.map(\.id)
@@ -124,6 +124,26 @@ public struct RuntimeCatalogSnapshot: Sendable {
     /// activation. Installing and committing this plan remain separate actions.
     public func replacingSelections(_ selections: RuntimeCatalogSelections) throws -> RuntimeCatalogSnapshot {
         try RuntimeCatalogSnapshot(catalog: catalog, selections: selections, contract: contract)
+    }
+    /// Pair a bundle with compatible unpinned helpers in one validated selection.
+    /// A helper pin is never silently replaced, including during rollback.
+    public func selectingBundle(id: SafeIdentifier, pinned: Bool) throws -> RuntimeCatalogSnapshot {
+        guard let bundle = catalog.manifest.bundles.first(where: { $0.id == id }), let profile = profile(for: id) else {
+            throw catalogError("Unknown selected bundle")
+        }
+        var selections = selections
+        selections.bundles[bundle.backend] = .init(id: id, pinned: pinned)
+        let bindings = catalog.helperBindings + compiledHelperBindings
+        for (kind, selected) in selections.helpers {
+            let compatible = catalog.manifest.components.filter { component in
+                component.kind == kind && bindings.contains { $0.componentID == component.id && $0.profileIDs.contains(profile) }
+            }
+            guard !compatible.isEmpty, !compatible.contains(where: { $0.id == selected.id }) else { continue }
+            guard !selected.pinned else { throw catalogError("Pinned helper is incompatible with bundle") }
+            let target = compatible.first { $0.id == catalog.recommendedHelpers[kind] } ?? compatible[0]
+            selections.helpers[kind] = .init(id: target.id)
+        }
+        return try replacingSelections(selections)
     }
     public var recommendedSelections: RuntimeCatalogSelections {
         RuntimeCatalogSelections(bundles: catalog.recommendedBundles.mapValues { RuntimeCatalogSelection(id: $0) },

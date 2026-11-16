@@ -34,7 +34,7 @@ import LauncherCore
         let candidates = RuntimeAutomaticUpdate.candidates(in: legacy, installedBundleIDs: [old.id], installedComponentIDs: [])
         let bundleUpdate = try #require(candidates.first { $0.backend == .d3dmetal })
         let target = try bundleUpdate.selections(in: legacy)
-        #expect(target.helpers[.surroundAudio]?.id.rawValue == SurroundAudio.componentID)
+        #expect(target.helpers[.surroundAudio]?.id.rawValue == SurroundAudio.wine1122ComponentID)
         #expect(target.helpers[.crypt32Fix]?.id.rawValue == Crypt32Fix.componentID)
         #expect(candidates.count == 1)
     }

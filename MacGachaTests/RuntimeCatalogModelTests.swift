@@ -416,7 +416,7 @@ private struct CatalogModelFixture: Sendable {
         var recommended = base.recommendedHelpers; recommended[.surroundAudio] = revision3.id
         let catalog = RuntimeCatalog(revision: 1, manifest: try RuntimeManifest(components: baseline.components + [revision3], bundles: baseline.bundles),
             bundleBindings: base.bundleBindings,
-            helperBindings: base.helperBindings + [.init(componentID: revision3.id, profileIDs: try SurroundAudio.bundleIDs.sorted().map(SafeIdentifier.init))],
+            helperBindings: base.helperBindings + [.init(componentID: revision3.id, profileIDs: try SurroundAudio.profiles(for: SurroundAudio.componentID).sorted().map(SafeIdentifier.init))],
             recommendedBundles: base.recommendedBundles, recommendedHelpers: recommended)
         let metadata = try JSONEncoder().encode(catalog), services = FakeRuntimeServices()
         services.state.withLock { $0.accepted = true }

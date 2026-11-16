@@ -138,7 +138,7 @@ struct RuntimeInstallContext: Sendable {
         var selections = current.selections
         let value = RuntimeCatalogSelection(id: try SafeIdentifier(id), pinned: pinned ?? !runtimeIsRecommended(id))
         if let bundle = current.catalog.manifest.bundles.first(where: { $0.id.rawValue == id }) {
-            selections.bundles[bundle.backend] = value
+            return try current.selectingBundle(id: bundle.id, pinned: value.pinned)
         } else if let helper = current.catalog.manifest.components.first(where: { $0.id.rawValue == id }),
             selections.helpers[helper.kind] != nil { selections.helpers[helper.kind] = value }
         else { throw LauncherError.io("Unknown runtime selection") }
@@ -157,18 +157,26 @@ struct RuntimeInstallContext: Sendable {
         guard canChangeRuntimeCatalog, canBeginGameOrRuntimeOperation() else { return }
         do {
             let target = try runtimeVersionTarget(id, pinned: pinned)
-            captureRuntimeInstallContext(id, manifest: target.catalog.manifest)
+            let helpers = target.selections.helpers.filter { runtimeCatalog?.selections.helpers[$0.key]?.id != $0.value.id }
+                .values.map { $0.id.rawValue }.sorted()
+            let ids = [id] + helpers.filter { $0 != id }
+            for id in ids { captureRuntimeInstallContext(id, manifest: target.catalog.manifest) }
             runtimeCatalogMutationID = id; catalogSelectionGeneration = UUID()
-            if case .installed = runtimeSetupItemState(id) {
+            let missing = ids.filter { if case .installed = runtimeSetupItemState($0) { false } else { true } }
+            if missing.isEmpty {
                 beginRuntimeCatalogActivation(target, id: id)
                 return
             }
-            guard let context = runtimeInstallContexts[id] else { throw LauncherError.io("Unknown runtime installation") }
-            let components = context.bundle.map { bundle in context.manifest.components.filter { bundle.components.contains($0.id) } } ?? [context.component]
+            let requirements = try missing.map { id -> RuntimeSetupRequirement in
+                guard let context = runtimeInstallContexts[id] else { throw LauncherError.io("Unknown runtime installation") }
+                let components = context.bundle.map { bundle in context.manifest.components.filter { bundle.components.contains($0.id) } } ?? [context.component]
+                return RuntimeSetupRequirement(item: .init(id: id,
+                    name: context.bundle?.displayName ?? Self.kindName(context.component.kind), size: RuntimeSetupPlan.total(components.map(\.size))),
+                    components: components)
+            }
             let key = "catalog-" + id
-            let plan = RuntimeSetupPlan(gameID: key, items: [.init(id: id,
-                name: context.bundle?.displayName ?? Self.kindName(context.component.kind), size: RuntimeSetupPlan.total(components.map(\.size)))],
-                needsAppleTerms: components.contains { $0.consent != nil && runtimeConsentAccepted[$0.id.rawValue] != true })
+            let plan = RuntimeSetupPlan(gameID: key, items: requirements.map(\.item),
+                needsAppleTerms: requirements.flatMap(\.components).contains { $0.consent != nil && runtimeConsentAccepted[$0.id.rawValue] != true })
             catalogActivationTargets[key] = target
             runtimeSetupChains[key] = RuntimeSetupChain(plan: plan)
             advanceRuntimeSetups()
@@ -220,7 +228,7 @@ struct RuntimeInstallContext: Sendable {
         }
     }
     func revokeCatalogSetupActivation(_ id: String) {
-        guard runtimeCatalogMutationID == id else { return }
+        guard runtimeCatalogMutationID != nil else { return }
         for key in catalogActivationTargets.keys {
             guard runtimeSetupChains[key]?.plan.items.contains(where: { $0.id == id }) == true else { continue }
             cancelledCatalogSetups.insert(key)

@@ -67,8 +67,9 @@ import DownloadEngine
     }
 
     func dependencyComponents(_ update: RuntimeAutomaticUpdate, in snapshot: RuntimeCatalogSnapshot) -> [RuntimeComponent] {
+        let helpers = Set(update.helperUpdates.map(\.targetID))
         if let bundle = snapshot.catalog.manifest.bundles.first(where: { $0.id == update.targetID }) {
-            return snapshot.catalog.manifest.components.filter { bundle.components.contains($0.id) }
+            return snapshot.catalog.manifest.components.filter { bundle.components.contains($0.id) || helpers.contains($0.id) }
         }
         return snapshot.catalog.manifest.components.filter { $0.id == update.targetID }
     }
@@ -122,6 +123,10 @@ import DownloadEngine
                 try await BlockingIO.run {
                     try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: update.familyID,
                         previousID: update.previousID.rawValue, replacementID: update.targetID.rawValue)
+                    for helper in update.helperUpdates {
+                        try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: helper.familyID,
+                            previousID: helper.previousID.rawValue, replacementID: helper.targetID.rawValue)
+                    }
                 }
                 dependencyHasRetainedVersions = true
                 let actual: RuntimeCatalogSnapshot
@@ -154,7 +159,7 @@ import DownloadEngine
                 throw error
             }
         } catch {
-            if let staged { try? await staged.discard() }
+            if let staged { await Task.detached { try? await staged.discard() }.value }
             dependencyWorking[id] = nil
             if !Task.isCancelled, launcherError(error) != .cancelled { setDependencyUpdateError(launcherError(error), for: id) }
             postDependencyUpdate("Automatic install failed", update: update)
@@ -165,6 +170,7 @@ import DownloadEngine
     }
 
     func dependencyUpdateIsInstalled(_ update: RuntimeAutomaticUpdate) -> Bool {
+        guard update.helperUpdates.allSatisfy({ dependencyUpdateIsInstalled($0) }) else { return false }
         if update.backend != nil { return installedBundles[update.targetID.rawValue] != nil }
         return installed.contains { "\($0.kind.idPrefix)-\($0.version)" == update.targetID.rawValue }
     }

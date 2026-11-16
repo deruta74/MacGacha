@@ -9,6 +9,7 @@ python3 -I scripts/check-strings.py --self-check
 python3 -I scripts/make-appcast.py --self-check
 python3 -I scripts/check-genshin-fps.py --self-check
 python3 -I scripts/test-surround-audio.py
+python3 -I scripts/test-surround-audio.py --wine-1122
 python3 -I scripts/test-runtime-catalog.py
 python3 -I scripts/test-wine-build.py
 python3 -I scripts/test-wine-source-preparation.py

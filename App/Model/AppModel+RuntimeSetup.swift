@@ -75,15 +75,15 @@ enum RuntimeSetupItemState {
         var settings = launchSettings(for: gameID)
         // Launch ignores an unconfirmed Genshin unlock, so setup must not ask for its helper.
         if GenshinFps.applies(to: gameID) && !genshinFpsRiskAcknowledged { settings.unlockFPS = false }
-        let required = LaunchResolver.requiredComponents(recipe: recipe, settings: settings,
-            runtimeBundleID: runtimeProfile(for: settings.backend))
+        let profile = dependencySetupTarget(for: gameID)?.profile(for: bundle.id)?.rawValue ?? runtimeProfile(for: settings.backend)
+        let required = LaunchResolver.requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: profile)
         // Keep the ABI-specific Wine correction beside its bundle, before optional wrappers.
         let scoped: Set<ComponentKind> = [.crypt32Fix, .surroundAudio, .genshinFps]
         let kinds = required.filter { scoped.contains($0) } + required.filter { !scoped.contains($0) }
         for kind in kinds {
             guard let component = manifest.components.first(where: {
                 $0.kind == kind && (kind != .crypt32Fix || runtimeCatalog != nil || $0.id.rawValue == Crypt32Fix.componentID)
-                    && (kind != .surroundAudio || runtimeCatalog != nil || $0.id.rawValue == SurroundAudio.componentID)
+                    && (kind != .surroundAudio || runtimeCatalog != nil || $0.id.rawValue == SurroundAudio.recommendedComponentID(for: profile))
                     && (kind != .genshinFps || runtimeCatalog != nil || $0.id.rawValue == GenshinFps.componentID)
             }) else { return nil }
             if !installed.contains(where: { $0.kind == kind && $0.version == component.version.rawValue }) {

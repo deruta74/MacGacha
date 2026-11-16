@@ -57,10 +57,11 @@ import LauncherCore
             #expect(snapshot.helper(kind: kind, for: bundle.id) != nil)
         }
         #expect(snapshot.helper(kind: .crypt32Fix, for: bundle.id) == nil)
-        #expect(snapshot.helper(kind: .surroundAudio, for: bundle.id) == nil)
+        #expect(snapshot.helper(kind: .surroundAudio, for: bundle.id)?.id.rawValue == (backend == .d3dmetal ? SurroundAudio.wine1122ComponentID : nil))
         for game in GameDefinition.all {
             #expect(!Crypt32Fix.applies(game: game.id, backend: backend, bundleID: bundle.id.rawValue))
-            #expect(!SurroundAudio.applies(game: game.id, backend: backend, bundleID: bundle.id.rawValue))
+            #expect(SurroundAudio.applies(game: game.id, backend: backend, bundleID: bundle.id.rawValue) ==
+                (backend == .d3dmetal && (game.family == .genshin || game.family == .zzz)))
         }
     }
 }

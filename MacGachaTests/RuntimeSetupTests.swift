@@ -93,24 +93,25 @@ import Launch
             model.launchSettingsCache[game] = settings
             let bundle = try #require(manifest.defaultBundle(for: backend))
             #expect(bundle.components.contains(try SafeIdentifier(historicalWine ? "wine-11.20-macgacha-1.0" : "wine-11.22-macgacha-1.0")))
-            let eligible = historicalWine && backend == .d3dmetal && ["genshin", "genshin-cn", "zzz", "zzz-cn"].contains(game)
+            let eligible = backend == .d3dmetal && ["genshin", "genshin-cn", "zzz", "zzz-cn"].contains(game)
+            let componentID = historicalWine ? SurroundAudio.componentID : SurroundAudio.wine1122ComponentID
             #expect(model.offersSurround(for: game) == eligible)
             let ids = try #require(model.runtimeSetupPlan(for: game)).items.map(\.id)
-            #expect(ids.contains(SurroundAudio.componentID) == eligible)
-            for id in ids where id != SurroundAudio.componentID { try publish(id, fake: fake, manifest: manifest) }
+            #expect(ids.contains(componentID) == eligible)
+            for id in ids where id != componentID { try publish(id, fake: fake, manifest: manifest) }
             await model.refreshRuntimes()
             #expect(model.missingComponents(for: game) == eligible)
             if eligible {
-                #expect(model.runtimeSetupPlan(for: game)?.items.map(\.id) == [SurroundAudio.componentID])
+                #expect(model.runtimeSetupPlan(for: game)?.items.map(\.id) == [componentID])
                 var events = fake.installEvents.stream.makeAsyncIterator()
                 model.installRecommended(for: game)
-                #expect(await events.next() == SurroundAudio.componentID)
-                try complete(SurroundAudio.componentID, fake: fake, manifest: manifest)
+                #expect(await events.next() == componentID)
+                try complete(componentID, fake: fake, manifest: manifest)
                 try await setupWait { model.runtimeSetupProgress.isEmpty }
                 #expect(!model.missingComponents(for: game))
             }
             settings.surroundSound = false; model.launchSettingsCache[game] = settings
-            #expect(!model.runtimeSetupRequirements(for: game)!.contains { $0.item.id == SurroundAudio.componentID })
+            #expect(!model.runtimeSetupRequirements(for: game)!.contains { $0.item.id == componentID })
         }
     }
 

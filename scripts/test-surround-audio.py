@@ -3,6 +3,7 @@
 # MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 """Run the native surround regression harness without Wine or audio devices."""
 from pathlib import Path
+import argparse
 import re
 import subprocess
 import tempfile
@@ -11,7 +12,10 @@ import tempfile
 def main():
     repository = Path(__file__).resolve().parent.parent
     inputs = repository / "compat/surround-audio"
-    patch = (inputs / "winecoreaudio-surround.patch").read_text()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--wine-1122', action='store_true')
+    args = parser.parse_args()
+    patch = (inputs / ("wine-11.22/winecoreaudio-surround.patch" if args.wine_1122 else "winecoreaudio-surround.patch")).read_text()
     with tempfile.TemporaryDirectory(prefix="macgacha-surround-tests-") as temporary:
         scratch = Path(temporary)
         for name in ("macgacha-surround.h", "macgacha-spatial.h"):

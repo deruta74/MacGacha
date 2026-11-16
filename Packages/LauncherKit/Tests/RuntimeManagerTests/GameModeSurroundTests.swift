@@ -9,6 +9,33 @@ import Launch
 private struct AudioRegistration: GameModeRegistering { func register(_ app: URL) throws {} }
 
 @Suite(.timeLimit(.minutes(1))) struct GameModeSurroundTests {
+    @Test func wine1122OverlayUsesItsOwnModuleAndPin() async throws {
+        let f = try BundleFixture(), installed = try await gameModeTestBundle(f)
+        let bundle = InstalledRuntimeBundle(id: try SafeIdentifier(SurroundAudio.wine1122BundleID), root: installed.root,
+            wineBinary: installed.wineBinary, digest: installed.digest, source: installed.source)
+        let fs = try ContainedFileSystem(root: f.store.paths.root)
+        let source = try RuntimeJSONFile.relativePath(bundle.root, root: f.store.paths.root)
+        let stock = try SafeRelativePath("\(source)/lib/wine/x86_64-unix/winecoreaudio.so")
+        try fs.writeAtomically(gameModeMachO() + Data("stock1122".utf8), to: stock)
+        let component = try SafeRelativePath("Runtimes/surroundAudio/wine-11.22-1")
+        let module = try SafeRelativePath("\(component)/\(SurroundAudio.modulePath)")
+        try fs.writeAtomically(gameModeMachO() + Data("spatial1122".utf8), to: module)
+        let record = try InstalledComponent(kind: .surroundAudio, version: "wine-11.22-1", installedAt: .now, source: .download)
+        try fs.writeAtomically(JSONEncoder().encode(record), to: SafeRelativePath("\(component)/.macgacha-component.json"))
+        let manager = GameModeHelper(paths: f.store.paths, icons: try FixedGameModeIcon(), registration: AudioRegistration())
+        let ids = f.bundle.components.map(\.rawValue) + [SurroundAudio.wine1122ComponentID]
+        let helper = try await manager.prepare(bundle: bundle, game: GameDefinition.find("genshin-cn")!, componentIDs: ids,
+            options: GameModeOptions(gameModeEnabled: false, surroundModule: module.resolved(against: f.store.paths.root)))
+        try await manager.validate(helper, bundle: bundle)
+        let root = try RuntimeJSONFile.relativePath(helper.root, root: f.store.paths.root)
+        #expect(try fs.regularFileIdentity(at: SafeRelativePath("\(root)/MacOS/winecoreaudio.so")) == fs.regularFileIdentity(at: module))
+        let pin = try RuntimePin.pin(paths: f.store.paths, componentIDs: ids)
+        #expect(throws: (any Error).self) { try f.store.remove(record) }
+        _ = try RuntimeStore.componentLocks(paths: f.store.paths, componentIDs: [SurroundAudio.componentID], mode: .exclusive)
+        withExtendedLifetime(pin) {}
+        #expect(try fs.readFile(at: stock, maxBytes: 1024) == gameModeMachO() + Data("stock1122".utf8))
+    }
+
     @Test(arguments: ["genshin", "genshin-cn", "zzz", "zzz-cn"], [false, true])
     func overlayIsPrivateVerifiedAndIndependentOfGameMode(gameID: String, gameMode: Bool) async throws {
         let f = try BundleFixture(), installed = try await gameModeTestBundle(f)

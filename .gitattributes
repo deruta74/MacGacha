@@ -8,3 +8,4 @@ Packages/LauncherKit/Tests/SophonTests/Fixtures/HDiffUpstream/*.hdiff binary
 
 # Unified diff context must preserve the pinned Wine source whitespace.
 compat/wine/wine-11.22-compat.patch -text -whitespace
+compat/surround-audio/wine-11.22/winecoreaudio-surround.patch -text -whitespace

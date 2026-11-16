@@ -9,6 +9,34 @@ import Diagnostics
 struct DependencyStagingHandle: Sendable {
     let publish: @Sendable () async throws -> Void
     let discard: @Sendable () async throws -> Void
+
+    /// All receipts are prepared before any selection can change. A partial
+    /// publication leaves immutable installations available for retry.
+    static func staging(_ update: RuntimeAutomaticUpdate,
+        stage: @Sendable (RuntimeAutomaticUpdate) async throws -> Self) async throws -> Self {
+        var handles: [Self] = []
+        do {
+            for item in [update] + update.helperUpdates {
+                try Task.checkCancellation()
+                handles.append(try await stage(item))
+            }
+            try Task.checkCancellation()
+        } catch {
+            let cleanup = handles
+            await Task.detached { for handle in cleanup { try? await handle.discard() } }.value
+            throw error
+        }
+        let prepared = handles
+        return Self(publish: {
+            for handle in prepared { try Task.checkCancellation(); try await handle.publish() }
+        }, discard: {
+            var failure: (any Error)?
+            for handle in prepared {
+                do { try await handle.discard() } catch { if failure == nil { failure = error } }
+            }
+            if let failure { throw failure }
+        })
+    }
 }
 
 protocol RuntimeServices: Sendable {
@@ -54,6 +82,12 @@ extension RuntimeServices {
 /// Expensive entry points explicitly leave the caller's actor; constructing services does no disk I/O.
 final class LiveRuntimeServices: RuntimeServices, Sendable {
     func stageDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle {
+        try await DependencyStagingHandle.staging(update) { item in
+            try await self.stageSingleDependency(item, manifest: manifest, importedFrom: item.backend == nil ? nil : importedFrom, progress: progress)
+        }
+    }
+    private func stageSingleDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
         progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle {
         let manager = bundleManager(manifest)
         let staged: RuntimeStagedUpdate
