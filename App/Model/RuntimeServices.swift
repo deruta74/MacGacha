@@ -81,6 +81,15 @@ extension RuntimeServices {
 /// Core adapters own error logging, including errors thrown while pulling an install.
 /// Expensive entry points explicitly leave the caller's actor; constructing services does no disk I/O.
 final class LiveRuntimeServices: RuntimeServices, Sendable {
+    static func debugArchiveDirectoryURL(arguments: [String]) -> URL? {
+        #if DEBUG
+        guard let index = arguments.firstIndex(of: "-MacGachaDebugArchiveDirectory"),
+            arguments.indices.contains(index + 1), arguments[index + 1].hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: arguments[index + 1])
+        #else
+        return nil
+        #endif
+    }
     func stageDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
         progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle {
         try await DependencyStagingHandle.staging(update) { item in
@@ -107,7 +116,8 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
     private let session: OwnedHTTPSession?
 
     init(paths: AppPaths = .standard(), http: (any HTTPClient)? = nil,
-        retry: RetryPolicy = RetryPolicy(), sleeper: any Sleeper = ContinuousSleeper(), log: EventLog? = nil) {
+        retry: RetryPolicy = RetryPolicy(), sleeper: any Sleeper = ContinuousSleeper(), log: EventLog? = nil,
+        arguments: [String] = ProcessInfo.processInfo.arguments) {
         self.paths = paths
         let store = RuntimeStore(paths: paths)
         let consent = ConsentStore(url: paths.consent, root: paths.root)
@@ -118,7 +128,8 @@ final class LiveRuntimeServices: RuntimeServices, Sendable {
         let fetcher = ChunkFetcher(http: client, retry: retry, sleeper: sleeper)
         self.fetcher = fetcher
         self.installer = ComponentInstaller(store: store, consent: consent, fetcher: fetcher,
-            extractor: ArchiveExtractor(runner: SystemProcessRunner()), disk: SystemDiskSpaceProbe())
+            extractor: ArchiveExtractor(runner: SystemProcessRunner()), disk: SystemDiskSpaceProbe(),
+            debugArchiveDirectory: Self.debugArchiveDirectoryURL(arguments: arguments))
         self.eventLog = log ?? EventLog(directory: paths.logs)
     }
 

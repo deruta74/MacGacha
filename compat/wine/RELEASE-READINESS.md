@@ -146,13 +146,14 @@ r4 copy is separate from the unsigned repository source and uses no release
 private key. The exact owner-run command is:
 
 ```sh
-env CFFIXED_USER_HOME=/tmp/macgacha-1122/debug/home /tmp/macgacha-dd-wine1122-debug/Build/Products/Debug/MacGacha.app/Contents/MacOS/MacGacha -MacGachaDebugCatalog /tmp/macgacha-1122/debug/runtime-catalog.json
+env CFFIXED_USER_HOME=/tmp/macgacha-1122/debug/home /tmp/macgacha-dd-wine1122-debug/Build/Products/Debug/MacGacha.app/Contents/MacOS/MacGacha -MacGachaDebugCatalog /tmp/macgacha-1122/debug/runtime-catalog.json -MacGachaDebugArchiveDirectory /tmp/macgacha-1122/archives
 ```
 
 The command uses an isolated temporary home for application data. Foundation's home-directory resolution was verified separately without launching the app.
 The application has not been launched by this task. The debug catalog tests
-metadata and selection presentation. Its GitHub archive URL becomes usable
-only after separate publication. Synthetic launch tests use verified local
+metadata and selection presentation. Its GitHub archive URLs become usable
+only after separate publication. The Debug archive directory below supplies
+verified local files for pre-publication qualification. Synthetic launch tests use verified local
 archives through the real component installer and manager instead.
 
 ### Combined repository validation
@@ -217,3 +218,48 @@ Release build. No Swift source warnings were emitted. The complete log is
 `/tmp/macgacha-surround1122-verified.log`. Generated project and derived data
 remained outside Documents.
 No workflow, publication, real game or real-device audio check was performed.
+
+
+### Debug archives for pre-publication qualification
+
+`-MacGachaDebugArchiveDirectory /absolute/dir` is accepted only in Debug.
+Runtime component installation and automatic staging select a regular file
+whose name exactly matches the descriptor URL's last path component. The file
+is captured once per installation and streamed in bounded chunks through the
+ordinary download size and SHA-256 checks. Missing regular files use the normal
+network path. A local mismatch fails without selecting another file or falling
+back to the network. Pipeline verification retries rewind the captured file.
+Consent, catalog signatures, extraction rules and component pins remain enforced.
+Release builds compile out the argument parser and local archive implementation.
+
+The isolated Debug app has been rebuilt at
+`/tmp/macgacha-dd-wine1122-debug/Build/Products/Debug/MacGacha.app` with the
+existing local test public key. Its signed catalog at
+`/tmp/macgacha-1122/debug/runtime-catalog.json` is byte-identical to the current
+unsigned r4 source, including the separate Wine 11.22 Surround component.
+The detached signature was verified with that local public key. No release
+signing key is used.
+
+The prepared `/tmp/macgacha-1122/archives` directory contains every new r4
+runtime archive relative to the immutable r3 fixture, under its release name:
+
+| Archive | Bytes | SHA-256 |
+|---|---:|---|
+| `wine-11.22-macgacha-1.0.tar.xz` | 91,950,420 | `4daf157d0438c014ce3d9175cdf846f36ddc7f2b3514d4180ff3602b31591423` |
+| `surround-audio-wine-11.22-1.zip` | 250,245 | `749ff445d88eea75453a1fc0c4f7d62d4318fa1033138c2afee1930c3ac50a04` |
+
+Both copies were verified against their r4 descriptors. Existing r3 archives
+continue to use their normal published URLs when absent from this directory.
+The exact launch command is the combined Debug-catalog command above.
+It has not been executed. The prepared app has not been launched and no game
+has run. Application execution was limited to `xcodebuild test` hosts.
+No real application data, release assets or publication state was changed.
+
+The final full `scripts/test.sh` run passed with 1533 package tests, 356 app
+tests, policy/string checks, a Release build and zero Swift source warnings.
+The strict cooperative-pool DownloadEngine run passed 302 tests. The Debug
+argument marker is present in the isolated Debug binary and absent from the
+Release binaries. The local catalog signature and the embedded test public
+key were verified without launching the prepared app. The full test log is
+`/tmp/macgacha-debug-archives-verified.log`, with strict-pool events in
+`/tmp/debug-archives-strict.jsonl`.
