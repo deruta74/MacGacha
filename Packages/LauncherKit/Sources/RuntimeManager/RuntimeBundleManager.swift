@@ -11,7 +11,9 @@ final class RuntimeStoreLease: Sendable {
         let fs = try ContainedFileSystem(root: store.paths.root)
         let path = try RuntimeJSONFile.relativePath(store.paths.runtimes, root: store.paths.root)
         try fs.createDirectory(at: path)
-        lock = try InstallLock(fs: fs, path: SafeRelativePath("\(path)/.lock"))
+        // Inspection, sweeps and publication hold this lock only briefly. Another process
+        // or task holding it at launch must not make installed runtimes look missing.
+        lock = try InstallLock(fs: fs, path: SafeRelativePath("\(path)/.lock"), retries: InstallLock.shortWaitRetries)
     }
 }
 
