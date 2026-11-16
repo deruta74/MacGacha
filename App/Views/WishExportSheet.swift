@@ -15,6 +15,7 @@ struct WishExportSheet: View {
     @State private var result: WishHistoryExport?
     @State private var failure: String?
     @State private var saved = false
+    @State private var saveFailed = false
     @State private var choosingDestination = false
 
     var body: some View {
@@ -23,6 +24,9 @@ struct WishExportSheet: View {
             Group {
                 if let failure {
                     Label(failure, systemImage: "exclamationmark.triangle.fill")
+                        .symbolRenderingMode(.multicolor)
+                } else if saveFailed {
+                    Label("The file couldn't be saved there. Choose another place and try again.", systemImage: "exclamationmark.triangle.fill")
                         .symbolRenderingMode(.multicolor)
                 } else if let result {
                     Text(saved
@@ -57,7 +61,11 @@ struct WishExportSheet: View {
                         .keyboardShortcut(.defaultAction)
                         .fileExporter(isPresented: $choosingDestination, document: UIGFDocument(data: result.data),
                             contentType: .json, defaultFilename: result.suggestedFilename) { outcome in
-                            if case .failure(let error) = outcome { failure = error.localizedDescription } else { saved = true }
+                            // The system error can name the chosen folder, so only a fixed message is shown.
+                            switch outcome {
+                            case .success: saveFailed = false; saved = true
+                            case .failure: saveFailed = true
+                            }
                         }
                 } else {
                     Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
