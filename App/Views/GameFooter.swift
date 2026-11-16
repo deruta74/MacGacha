@@ -99,6 +99,9 @@ struct GameFooter: View {
                         .frame(maxWidth: 480, alignment: .trailing)
                 }
                 HStack(spacing: 10) {
+                    if showsPreDownload {
+                        PreDownloadButton(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
+                    }
                     if slideHasVideo {
                         backgroundToggle
                     }

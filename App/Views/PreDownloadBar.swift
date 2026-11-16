@@ -21,19 +21,9 @@ struct PreDownloadBar: View {
             switch overlay.state {
             case .unavailable:
                 EmptyView()
-            case .available(let version, let bytes):
-                Button {
-                    model.startPreDownload(game.id)
-                } label: {
-                    Label(String(localized: "Pre-download \(version) · \(bytes.formatted(.byteCount(style: .file)))",
-                        comment: "Footer button; the next game version and its download size"),
-                        systemImage: "arrow.down.circle")
-                        .font(.callout)
-                        .monospacedDigit()
-                        .padding(.horizontal, 4)
-                }
-                .buttonStyle(.glass)
-                .disabled(blocked)
+            case .available:
+                // Offered as a capsule beside Play, the way HoYoPlay places it.
+                EmptyView()
             case .downloading(let progress):
                 transfer(label: String(localized: "Pre-downloading \(version)…",
                         comment: "Footer pre-download progress; the argument is the next game version"),
@@ -115,5 +105,33 @@ struct PreDownloadBar: View {
         .padding(.vertical, 6)
         .frame(minHeight: 40)
         .glassEffect(.regular, in: .capsule)
+    }
+}
+
+/// The pre-download offer, sized and shaped like the buttons beside Play.
+struct PreDownloadButton: View {
+    @Environment(AppModel.self) private var model
+    let game: LauncherGame
+    let gameIsLive: Bool
+
+    var body: some View {
+        if case .available(let version, let bytes) = model.preDownloadState(for: game.id).state {
+            Button {
+                model.startPreDownload(game.id)
+            } label: {
+                Label(String(localized: "Pre-download \(version) · \(bytes.formatted(.byteCount(style: .file)))",
+                    comment: "Footer button; the next game version and its download size"),
+                    systemImage: "arrow.down.circle")
+                    .font(.callout.weight(.medium))
+                    .monospacedDigit()
+                    .padding(.horizontal, 10)
+                    .frame(height: 44)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.capsule)
+            .foregroundStyle(.white)
+            .disabled(model.isGameOperationRunning || gameIsLive || model.gameRecord(game.id)?.pending != nil)
+            .transition(.opacity)
+        }
     }
 }
