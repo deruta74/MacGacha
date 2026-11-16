@@ -11,6 +11,12 @@ struct SettingsView: View {
     @AppStorage("animatedBackgroundsChosen") private var animatedChosen = false
     @State private var language = InterfaceLanguageSettings()
 
+    /// Settings windows aren't resizable, so pick a height that leaves room for the menu bar and Dock.
+    private static var windowHeight: CGFloat {
+        let visible = NSScreen.main?.visibleFrame.height ?? 800
+        return max(360, min(720, visible - 80))
+    }
+
     var body: some View {
         Form {
             Section {
@@ -173,8 +179,9 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refreshNotificationAuthorization() }
         }
-        .frame(width: 520)
-        .fixedSize(horizontal: false, vertical: true)
+        // The form scrolls. Sizing the window to all of its content made it taller
+        // than smaller screens, hiding the last sections below the Dock.
+        .frame(width: 520, height: Self.windowHeight)
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.setInstallRoot(url) }
         }
