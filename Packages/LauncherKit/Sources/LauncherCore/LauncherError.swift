@@ -3,6 +3,10 @@
 import Foundation
 
 public enum LauncherError: Error, Sendable, Equatable {
+    case wishHistoryNoCachedLink
+    case wishHistoryLinkExpired
+    case wishHistoryNetwork
+    case wishHistoryInvalidData
     case malformedPatch
     case unsupportedCompressor
     case unsafePath(String)

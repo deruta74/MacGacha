@@ -7,6 +7,10 @@ extension LauncherError {
     /// Associated payloads never appear in alerts or row labels; logs use approved structured fields only.
     var userMessage: String {
         switch self {
+        case .wishHistoryNoCachedLink: String(localized: "No wish history link was found. Open the wish history in the game once, then try again.")
+        case .wishHistoryLinkExpired: String(localized: "The wish history link has expired. Open the wish history in the game once, then try again.")
+        case .wishHistoryNetwork: String(localized: "Wish history could not be downloaded. Check your connection and try again.")
+        case .wishHistoryInvalidData: String(localized: "The wish history response is invalid or too large. Open the history in the game, then try again. If it still fails, update MacGacha.")
         case .unsafePath: String(localized: "The selected files contain an unsafe path or link. Choose another source.")
         case .invalidDigest: String(localized: "The download information is invalid. Try again after updating MacGacha.")
         case .sizeMismatch, .digestMismatch, .malformedPatch, .unsupportedCompressor: String(localized: "The downloaded files failed verification. Please try again.")

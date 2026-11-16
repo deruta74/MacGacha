@@ -116,7 +116,7 @@ public struct DiagnosticBundle: Sendable {
             case .processFailed(let executable, let code, let stderr):
                 throw LauncherError.processFailed(executable: Redactor.redact(executable), exitCode: code,
                     stderrTail: Redactor.redact(stderr))
-            case .malformedPatch, .unsupportedCompressor, .gameEditionMismatch, .gameEditionUnknown, .gameDistributionUnsupported, .rosettaMissing, .rosettaInstallerUnavailable, .languageRestartFailed, .genshinFpsRiskNotAcknowledged: throw error
+            case .wishHistoryNoCachedLink, .wishHistoryLinkExpired, .wishHistoryNetwork, .wishHistoryInvalidData, .malformedPatch, .unsupportedCompressor, .gameEditionMismatch, .gameEditionUnknown, .gameDistributionUnsupported, .rosettaMissing, .rosettaInstallerUnavailable, .languageRestartFailed, .genshinFpsRiskNotAcknowledged: throw error
             case .installVolumeUnavailable: throw LauncherError.installVolumeUnavailable
             case .cancelled: throw LauncherError.cancelled
             case .journalCorrupt(let message): throw LauncherError.journalCorrupt(Redactor.redact(message))

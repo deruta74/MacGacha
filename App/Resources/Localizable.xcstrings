@@ -2817,6 +2817,88 @@
         }
       }
     },
+    "Adds Export Wish History… to each game's menu. While off, MacGacha doesn't read the history link or contact HoYoverse for it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fügt jedem Spielmenü „Gebetsverlauf exportieren …“ hinzu. Solange es aus ist, liest MacGacha den Verlaufslink nicht und kontaktiert HoYoverse dafür nicht."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añade «Exportar historial de gachapón…» al menú de cada juego. Mientras esté desactivado, MacGacha no lee el enlace del historial ni contacta con HoYoverse para obtenerlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajoute « Exporter l'historique des vœux… » au menu de chaque jeu. Désactivé, MacGacha ne lit pas le lien de l'historique et ne contacte pas HoYoverse pour cela."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Menambahkan “Ekspor Riwayat Permohonan…” ke menu setiap game. Saat nonaktif, MacGacha tidak membaca tautan riwayat dan tidak menghubungi HoYoverse untuk itu."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "各ゲームのメニューに「祈願履歴をエクスポート…」を追加します。オフの間、MacGachaは履歴リンクを読み取らず、そのためにHoYoverseへ接続することもありません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "각 게임 메뉴에 '기원 기록 내보내기…'를 추가합니다. 꺼져 있으면 MacGacha는 기록 링크를 읽지 않으며 이를 위해 HoYoverse에 연결하지도 않습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adiciona “Exportar histórico de orações…” ao menu de cada jogo. Enquanto estiver desativado, o MacGacha não lê o link do histórico nem contata a HoYoverse para isso."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавляет «Экспорт истории молитв…» в меню каждой игры. Пока выключено, MacGacha не читает ссылку на историю и не обращается за ней к HoYoverse."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เพิ่ม “ส่งออกประวัติการอธิษฐาน…” ในเมนูของแต่ละเกม ขณะปิดอยู่ MacGacha จะไม่อ่านลิงก์ประวัติและไม่ติดต่อ HoYoverse เพื่อขอข้อมูลนี้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Додає «Експорт історії молитов…» до меню кожної гри. Поки вимкнено, MacGacha не читає посилання на історію і не звертається по неї до HoYoverse."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thêm “Xuất lịch sử cầu nguyện…” vào menu của mỗi trò chơi. Khi tắt, MacGacha không đọc liên kết lịch sử và không kết nối HoYoverse để lấy nó."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在每个游戏的菜单中添加“导出祈愿记录…”。关闭时，MacGacha 不会读取记录链接，也不会为此连接 HoYoverse。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在每個遊戲的選單中加入「匯出祈願紀錄⋯」。關閉時，MacGacha 不會讀取紀錄連結，也不會為此連線 HoYoverse。"
+          }
+        }
+      }
+    },
     "After you turn it on, this warning won't appear again. You can turn the unlock off at any time in the game's settings." : {
       "localizations" : {
         "de" : {
@@ -9649,6 +9731,89 @@
         }
       }
     },
+    "Downloading… Records so far: %lld" : {
+      "comment" : "Wish history export progress; the argument is a count",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird geladen … Bisherige Einträge: %lld"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descargando… Registros hasta ahora: %lld"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Téléchargement… Entrées jusqu'ici : %lld"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mengunduh… Catatan sejauh ini: %lld"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロード中…取得済みの記録：%lld"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 중… 지금까지 기록: %lld"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Baixando… Registros até agora: %lld"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузка… Записей пока: %lld"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "กำลังดาวน์โหลด… บันทึกจนถึงตอนนี้: %lld"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Завантаження… Записів поки: %lld"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đang tải xuống… Số bản ghi đến nay: %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载…已获取记录：%lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下載⋯已取得紀錄：%lld"
+          }
+        }
+      }
+    },
     "Each game uses the graphics layer chosen in its settings. MacGacha picks a tested Wine version for it." : {
       "comment" : "Dependencies category",
       "localizations" : {
@@ -10140,6 +10305,170 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯出診斷包…"
+          }
+        }
+      }
+    },
+    "Export Wish History" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gebetsverlauf exportieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar historial de gachapón"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exporter l'historique des vœux"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ekspor Riwayat Permohonan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願履歴をエクスポート"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기원 기록 내보내기"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar histórico de orações"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Экспорт истории молитв"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ส่งออกประวัติการอธิษฐาน"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Експорт історії молитов"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xuất lịch sử cầu nguyện"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出祈愿记录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯出祈願紀錄"
+          }
+        }
+      }
+    },
+    "Export Wish History…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gebetsverlauf exportieren …"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar historial de gachapón…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exporter l'historique des vœux…"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ekspor Riwayat Permohonan…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願履歴をエクスポート…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기원 기록 내보내기…"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar histórico de orações…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Экспорт истории молитв…"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ส่งออกประวัติการอธิษฐาน…"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Експорт історії молитов…"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xuất lịch sử cầu nguyện…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出祈愿记录…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯出祈願紀錄⋯"
           }
         }
       }
@@ -16658,6 +16987,88 @@
         }
       }
     },
+    "Looking for the history link…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verlaufslink wird gesucht …"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buscando el enlace del historial…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recherche du lien de l'historique…"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mencari tautan riwayat…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "履歴リンクを探しています…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기록 링크를 찾는 중…"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Procurando o link do histórico…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поиск ссылки на историю…"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "กำลังค้นหาลิงก์ประวัติ…"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Пошук посилання на історію…"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đang tìm liên kết lịch sử…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查找记录链接…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在尋找紀錄連結⋯"
+          }
+        }
+      }
+    },
     "MacGacha" : {
       "localizations" : {
         "de" : {
@@ -17475,6 +17886,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "MacGacha 會向遊戲載入一個小型輔助程式，它只會提高幀率上限，不會更改遊戲檔案或遊戲中的其他任何內容。"
+          }
+        }
+      }
+    },
+    "MacGacha reads the history link cached when you open wish history in the game, then downloads your history from HoYoverse. The link is private and is never logged." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha liest den Link, den das Spiel beim Öffnen des Gebetsverlaufs zwischenspeichert, und lädt deinen Verlauf von HoYoverse herunter. Der Link ist privat und wird nie protokolliert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha lee el enlace guardado en caché al abrir el historial de deseos en el juego y descarga tu historial de HoYoverse. El enlace es privado y nunca se registra."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha lit le lien mis en cache à l’ouverture de l’historique des vœux dans le jeu, puis télécharge votre historique depuis HoYoverse. Ce lien est privé et n’est jamais consigné."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha membaca tautan yang disimpan dalam cache saat Anda membuka riwayat permohonan di game, lalu mengunduh riwayat Anda dari HoYoverse. Tautan ini bersifat pribadi dan tidak pernah dicatat dalam log."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGachaはゲーム内で祈願履歴を開いた際にキャッシュされたリンクを読み取り、HoYoverseから履歴をダウンロードします。このリンクは非公開で、ログには記録されません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha는 게임에서 기원 기록을 열 때 캐시된 링크를 읽고 HoYoverse에서 기록을 다운로드합니다. 이 링크는 비공개이며 로그에 기록되지 않습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O MacGacha lê o link armazenado em cache ao abrir o histórico de Orações no jogo e baixa seu histórico da HoYoverse. O link é privado e nunca é registrado em logs."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha читает ссылку, сохранённую в кэше при открытии истории молитв в игре, и скачивает историю с серверов HoYoverse. Ссылка конфиденциальна и никогда не записывается в журналы."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha อ่านลิงก์ที่แคชไว้เมื่อคุณเปิดประวัติการอธิษฐานในเกม แล้วดาวน์โหลดประวัติจาก HoYoverse ลิงก์นี้เป็นข้อมูลส่วนตัวและจะไม่ถูกบันทึกในล็อก"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha читає посилання, збережене в кеші під час відкриття історії молитов у грі, і завантажує історію з серверів HoYoverse. Посилання конфіденційне й ніколи не записується в журнали."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha đọc liên kết được lưu trong bộ nhớ đệm khi bạn mở lịch sử cầu nguyện trong trò chơi, rồi tải lịch sử từ HoYoverse. Liên kết này là riêng tư và không bao giờ được ghi nhật ký."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 会读取你在游戏中打开祈愿历史记录时缓存的链接，然后从 HoYoverse 下载历史记录。该链接属于隐私信息，绝不会写入日志。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 會讀取你在遊戲中開啟祈願歷史紀錄時快取的連結，然後從 HoYoverse 下載歷史紀錄。此連結屬於隱私資訊，絕不會寫入日誌。"
           }
         }
       }
@@ -18543,6 +19036,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "尚無事件"
+          }
+        }
+      }
+    },
+    "No wish history link was found. Open the wish history in the game once, then try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein Link zum Gebetsverlauf gefunden. Öffne den Verlauf einmal im Spiel und versuche es erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se encontró ningún enlace al historial de deseos. Abre el historial una vez en el juego y vuelve a intentarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun lien vers l’historique des vœux n’a été trouvé. Ouvrez l’historique une fois dans le jeu, puis réessayez."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tautan riwayat permohonan tidak ditemukan. Buka riwayat sekali di dalam game, lalu coba lagi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願履歴のリンクが見つかりません。ゲーム内で履歴を一度開いてから、もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기원 기록 링크를 찾을 수 없습니다. 게임에서 기록을 한 번 연 후 다시 시도해 주세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi encontrado um link para o histórico de Orações. Abra o histórico uma vez no jogo e tente novamente."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ссылка на историю молитв не найдена. Откройте историю один раз в игре и повторите попытку."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไม่พบลิงก์ประวัติการอธิษฐาน เปิดประวัติในเกมหนึ่งครั้งแล้วลองอีกครั้ง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Посилання на історію молитов не знайдено. Відкрийте історію один раз у грі та спробуйте знову."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không tìm thấy liên kết lịch sử cầu nguyện. Hãy mở lịch sử một lần trong trò chơi rồi thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未找到祈愿历史记录链接。请先在游戏中打开一次历史记录，然后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到祈願歷史紀錄連結。請先在遊戲中開啟一次歷史紀錄，然後重試。"
           }
         }
       }
@@ -20937,6 +21512,89 @@
         }
       }
     },
+    "Records downloaded: %lld. Choose where to save the file." : {
+      "comment" : "The argument is a count of wish history records",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geladene Einträge: %lld. Wähle, wo die Datei gespeichert werden soll."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registros descargados: %lld. Elige dónde guardar el archivo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entrées téléchargées : %lld. Choisissez où enregistrer le fichier."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Catatan terunduh: %lld. Pilih lokasi untuk menyimpan file."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロードした記録：%lld。ファイルの保存先を選んでください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드한 기록: %lld. 파일을 저장할 위치를 선택하세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registros baixados: %lld. Escolha onde salvar o arquivo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загружено записей: %lld. Выберите, куда сохранить файл."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ดาวน์โหลดบันทึกแล้ว: %lld เลือกตำแหน่งที่จะบันทึกไฟล์"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Завантажено записів: %lld. Виберіть, куди зберегти файл."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã tải bản ghi: %lld. Chọn nơi lưu tệp."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下载记录：%lld。请选择文件的保存位置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下載紀錄：%lld。請選擇檔案的儲存位置。"
+          }
+        }
+      }
+    },
     "Refresh" : {
       "localizations" : {
         "de" : {
@@ -22911,6 +23569,171 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "儲存工作階段日誌"
+          }
+        }
+      }
+    },
+    "Saved. Records: %lld" : {
+      "comment" : "After saving the wish history; the argument is a count",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gespeichert. Einträge: %lld"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardado. Registros: %lld"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistré. Entrées : %lld"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tersimpan. Catatan: %lld"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存しました。記録：%lld"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장했습니다. 기록: %lld"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salvo. Registros: %lld"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сохранено. Записей: %lld"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "บันทึกแล้ว จำนวนบันทึก: %lld"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Збережено. Записів: %lld"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã lưu. Số bản ghi: %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存。记录：%lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已儲存。紀錄：%lld"
+          }
+        }
+      }
+    },
+    "Save…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sichern …"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardar…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistrer…"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simpan…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장…"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salvar…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сохранить…"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "บันทึก…"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Зберегти…"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lưu…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存⋯"
           }
         }
       }
@@ -26287,6 +27110,170 @@
         }
       }
     },
+    "The file couldn't be saved there. Choose another place and try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Datei konnte dort nicht gesichert werden. Wähle einen anderen Ort und versuche es erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo guardar el archivo ahí. Elige otro lugar e inténtalo de nuevo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible d'enregistrer le fichier à cet endroit. Choisissez-en un autre et réessayez."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File tidak dapat disimpan di sana. Pilih tempat lain lalu coba lagi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "その場所にファイルを保存できませんでした。別の場所を選んでもう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "해당 위치에 파일을 저장할 수 없습니다. 다른 위치를 선택한 후 다시 시도하세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível salvar o arquivo nesse local. Escolha outro e tente novamente."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось сохранить файл в это место. Выберите другое и попробуйте снова."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "บันทึกไฟล์ไว้ที่นั่นไม่ได้ เลือกที่อื่นแล้วลองอีกครั้ง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не вдалося зберегти файл у це місце. Виберіть інше і спробуйте знову."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể lưu tệp vào đó. Hãy chọn nơi khác rồi thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法将文件保存到该位置。请选择其他位置后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法將檔案儲存到該位置。請選擇其他位置後再試一次。"
+          }
+        }
+      }
+    },
+    "The file uses the UIGF format, which wish trackers such as paimon.moe and starrailstation import. It stays on this Mac until you share it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Datei hat das UIGF-Format, das Tracker wie paimon.moe und starrailstation importieren. Sie bleibt auf diesem Mac, bis du sie teilst."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El archivo usa el formato UIGF, que importan rastreadores como paimon.moe y starrailstation. Se queda en este Mac hasta que lo compartas."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le fichier utilise le format UIGF, que des outils de suivi comme paimon.moe et starrailstation importent. Il reste sur ce Mac jusqu'à ce que vous le partagiez."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File menggunakan format UIGF yang dapat diimpor oleh pelacak seperti paimon.moe dan starrailstation. File tetap di Mac ini sampai kamu membagikannya."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルはUIGF形式で、paimon.moeやstarrailstationなどのガチャ記録ツールで読み込めます。共有しない限り、このMacから出ることはありません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일은 UIGF 형식이며 paimon.moe, starrailstation 같은 기원 기록 도구에서 가져올 수 있습니다. 직접 공유하기 전까지 이 Mac에만 남아 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O arquivo usa o formato UIGF, que rastreadores como paimon.moe e starrailstation importam. Ele fica neste Mac até você compartilhá-lo."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Файл в формате UIGF, его импортируют трекеры молитв, например paimon.moe и starrailstation. Он остаётся на этом Mac, пока вы сами им не поделитесь."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไฟล์ใช้รูปแบบ UIGF ซึ่งเครื่องมือติดตามอย่าง paimon.moe และ starrailstation นำเข้าได้ ไฟล์จะอยู่บน Mac เครื่องนี้จนกว่าคุณจะแชร์"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Файл у форматі UIGF, його імпортують трекери молитов, наприклад paimon.moe і starrailstation. Він залишається на цьому Mac, доки ви самі ним не поділитеся."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tệp dùng định dạng UIGF mà các công cụ theo dõi như paimon.moe và starrailstation có thể nhập. Tệp chỉ ở trên máy Mac này cho đến khi bạn chia sẻ."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件采用 UIGF 格式，paimon.moe、starrailstation 等抽卡记录工具均可导入。在你分享之前，它只保存在这台 Mac 上。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案採用 UIGF 格式，paimon.moe、starrailstation 等抽卡紀錄工具皆可匯入。在你分享之前，它只會留在這台 Mac 上。"
+          }
+        }
+      }
+    },
     "The folder %@ and everything in it will be removed." : {
       "comment" : "The argument is the game's folder",
       "localizations" : {
@@ -27681,6 +28668,170 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新版本發布後，更新時會重新下載這些檔案。"
+          }
+        }
+      }
+    },
+    "The wish history link has expired. Open the wish history in the game once, then try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Link zum Gebetsverlauf ist abgelaufen. Öffne den Verlauf einmal im Spiel und versuche es erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El enlace al historial de deseos ha caducado. Abre el historial una vez en el juego y vuelve a intentarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le lien vers l’historique des vœux a expiré. Ouvrez l’historique une fois dans le jeu, puis réessayez."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tautan riwayat permohonan telah kedaluwarsa. Buka riwayat sekali di dalam game, lalu coba lagi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願履歴のリンクの有効期限が切れています。ゲーム内で履歴を一度開いてから、もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기원 기록 링크가 만료되었습니다. 게임에서 기록을 한 번 연 후 다시 시도해 주세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O link para o histórico de Orações expirou. Abra o histórico uma vez no jogo e tente novamente."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Срок действия ссылки на историю молитв истёк. Откройте историю один раз в игре и повторите попытку."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ลิงก์ประวัติการอธิษฐานหมดอายุแล้ว เปิดประวัติในเกมหนึ่งครั้งแล้วลองอีกครั้ง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Термін дії посилання на історію молитов минув. Відкрийте історію один раз у грі та спробуйте знову."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Liên kết lịch sử cầu nguyện đã hết hạn. Hãy mở lịch sử một lần trong trò chơi rồi thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈愿历史记录链接已过期。请先在游戏中打开一次历史记录，然后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願歷史紀錄連結已過期。請先在遊戲中開啟一次歷史紀錄，然後重試。"
+          }
+        }
+      }
+    },
+    "The wish history response is invalid or too large. Open the history in the game, then try again. If it still fails, update MacGacha." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Antwort zum Gebetsverlauf ist ungültig oder zu groß. Öffne den Verlauf im Spiel und versuche es erneut. Falls es weiterhin fehlschlägt, aktualisiere MacGacha."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La respuesta del historial de deseos no es válida o es demasiado grande. Abre el historial en el juego y vuelve a intentarlo. Si sigue fallando, actualiza MacGacha."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La réponse de l’historique des vœux est invalide ou trop volumineuse. Ouvrez l’historique dans le jeu, puis réessayez. Si le problème persiste, mettez MacGacha à jour."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Respons riwayat permohonan tidak valid atau terlalu besar. Buka riwayat di dalam game, lalu coba lagi. Jika masih gagal, perbarui MacGacha."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願履歴の応答が無効か、大きすぎます。ゲーム内で履歴を開いてから、もう一度お試しください。それでも失敗する場合はMacGachaを更新してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기원 기록 응답이 잘못되었거나 너무 큽니다. 게임에서 기록을 연 후 다시 시도해 주세요. 계속 실패하면 MacGacha를 업데이트해 주세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A resposta do histórico de Orações é inválida ou muito grande. Abra o histórico no jogo e tente novamente. Se continuar falhando, atualize o MacGacha."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ответ истории молитв некорректен или слишком велик. Откройте историю в игре и повторите попытку. Если ошибка повторится, обновите MacGacha."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ข้อมูลตอบกลับของประวัติการอธิษฐานไม่ถูกต้องหรือมีขนาดใหญ่เกินไป เปิดประวัติในเกมแล้วลองอีกครั้ง หากยังไม่สำเร็จ ให้อัปเดต MacGacha"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Відповідь історії молитов некоректна або завелика. Відкрийте історію у грі та спробуйте знову. Якщо помилка повториться, оновіть MacGacha."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phản hồi lịch sử cầu nguyện không hợp lệ hoặc quá lớn. Hãy mở lịch sử trong trò chơi rồi thử lại. Nếu vẫn không thành công, hãy cập nhật MacGacha."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈愿历史记录响应无效或过大。请在游戏中打开历史记录后重试。如果仍然失败，请更新 MacGacha。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願歷史紀錄回應無效或過大。請在遊戲中開啟歷史紀錄後重試。如果仍然失敗，請更新 MacGacha。"
           }
         }
       }
@@ -33047,6 +34198,170 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wine 與 DXMT，讓 DirectX 11 遊戲在 Metal 上執行。"
+          }
+        }
+      }
+    },
+    "Wish history could not be downloaded. Check your connection and try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Gebetsverlauf konnte nicht heruntergeladen werden. Prüfe deine Verbindung und versuche es erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo descargar el historial de deseos. Comprueba tu conexión y vuelve a intentarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de télécharger l’historique des vœux. Vérifiez votre connexion et réessayez."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Riwayat permohonan tidak dapat diunduh. Periksa koneksi Anda dan coba lagi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願履歴をダウンロードできませんでした。接続を確認して、もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기원 기록을 다운로드하지 못했습니다. 연결을 확인한 후 다시 시도해 주세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível baixar o histórico de Orações. Verifique sua conexão e tente novamente."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось скачать историю молитв. Проверьте подключение и повторите попытку."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ดาวน์โหลดประวัติการอธิษฐานไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не вдалося завантажити історію молитов. Перевірте з’єднання та спробуйте знову."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể tải lịch sử cầu nguyện. Hãy kiểm tra kết nối rồi thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法下载祈愿历史记录。请检查网络连接后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法下載祈願歷史紀錄。請檢查網路連線後重試。"
+          }
+        }
+      }
+    },
+    "Wish history export" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gebetsverlauf exportieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar historial de gachapón"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export de l'historique des vœux"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ekspor riwayat Permohonan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願履歴のエクスポート"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기원 기록 내보내기"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar histórico de orações"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Экспорт истории молитв"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ส่งออกประวัติการอธิษฐาน"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Експорт історії молитов"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xuất lịch sử cầu nguyện"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈愿记录导出"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "祈願紀錄匯出"
           }
         }
       }

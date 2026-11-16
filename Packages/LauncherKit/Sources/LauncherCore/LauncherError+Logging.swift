@@ -7,6 +7,10 @@ public extension LauncherError {
     /// Stable, path-free case names shared by operational logs.
     var logCase: String {
         switch self {
+        case .wishHistoryNoCachedLink: "wishHistoryNoCachedLink"
+        case .wishHistoryLinkExpired: "wishHistoryLinkExpired"
+        case .wishHistoryNetwork: "wishHistoryNetwork"
+        case .wishHistoryInvalidData: "wishHistoryInvalidData"
         case .malformedPatch: "malformedPatch"
         case .unsupportedCompressor: "unsupportedCompressor"
         case .unsafePath: "unsafePath"
