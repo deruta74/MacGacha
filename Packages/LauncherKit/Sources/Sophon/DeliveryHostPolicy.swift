@@ -25,7 +25,7 @@ public enum DeliveryHostPolicy {
         configuration.httpMaximumConnectionsPerHost = SpaceBudget.defaultMaxConcurrentObjects
         let client = URLSessionHTTPClient(configuration: configuration, sessionCount: sessionCount,
             highWaterMark: 4 << 20, lowWaterMark: 1 << 20, redirectPolicy: { allows($0, region: region) })
-        return rateLimiter.map { client.limitingBodyReads(using: $0) } ?? client
+        return rateLimiter.map { client.limitingReception(using: $0) } ?? client
     }
 }
 
