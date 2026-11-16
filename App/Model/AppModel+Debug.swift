@@ -72,6 +72,16 @@ extension AppModel {
                 model.launchSettingsCache[game.id] = settings
             }
         }
+        if defaults.bool(forKey: "MacGachaDebugStorage"), let model {
+            // Inert sample sizes for screenshots of the Storage panel; cleanup candidates come only from a real inventory.
+            let gb: Int64 = 1_000_000_000
+            model.storage = StorageSnapshot(editions: [
+                EditionStorage(id: "genshin", game: .available(98 * gb), prefixes: .available(gb * 12 / 10), preDownload: .available(84 * gb / 10)),
+                EditionStorage(id: "starrail", game: .available(71 * gb), prefixes: .available(gb * 9 / 10), preDownload: .available(0)),
+                EditionStorage(id: "zzz", game: .unavailable, prefixes: .available(gb * 11 / 10), preDownload: .available(0)),
+            ], runtimes: .available(46 * gb / 10), logs: .available(120_000_000), artCache: .available(310_000_000),
+                eventsCache: .available(2_000_000), candidates: [])
+        }
         if defaults.bool(forKey: "MacGachaDebugPlayTime") {
             // Inert sample totals for screenshots: 42 h in all, last session 1 h 20 min a day ago.
             let json = #"{"totalSeconds":151320,"lastSessionSeconds":4800,"lastPlayed":\#(Date.now.timeIntervalSinceReferenceDate - 86_400)}"#

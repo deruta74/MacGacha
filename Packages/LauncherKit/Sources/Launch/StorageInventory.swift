@@ -16,6 +16,9 @@ public struct EditionStorage: Equatable, Sendable, Identifiable {
     public let game: StorageSize
     public let prefixes: StorageSize
     public let preDownload: StorageSize
+    public init(id: String, game: StorageSize, prefixes: StorageSize, preDownload: StorageSize) {
+        self.id = id; self.game = game; self.prefixes = prefixes; self.preDownload = preDownload
+    }
 }
 
 public struct StorageCleanupCandidate: Equatable, Sendable, Identifiable {
@@ -42,6 +45,11 @@ public struct StorageSnapshot: Equatable, Sendable {
     public let artCache: StorageSize
     public let eventsCache: StorageSize
     public let candidates: [StorageCleanupCandidate]
+    public init(editions: [EditionStorage], runtimes: StorageSize, logs: StorageSize, artCache: StorageSize,
+        eventsCache: StorageSize, candidates: [StorageCleanupCandidate]) {
+        self.editions = editions; self.runtimes = runtimes; self.logs = logs
+        self.artCache = artCache; self.eventsCache = eventsCache; self.candidates = candidates
+    }
 }
 
 public struct StorageContext: Sendable {

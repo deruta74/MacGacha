@@ -6,7 +6,7 @@ import LauncherCore
 import SwiftUI
 
 enum Panel: String, Identifiable {
-    case dependencies, diagnostics
+    case dependencies, storage, diagnostics
     var id: Self { self }
 }
 
@@ -245,6 +245,7 @@ private struct PanelSheet: View {
             Group {
                 switch panel {
                 case .dependencies: DependenciesView()
+                case .storage: StorageView()
                 case .diagnostics: DiagnosticsView()
                 }
             }
@@ -255,7 +256,7 @@ private struct PanelSheet: View {
             }
         }
         .modifier(RuntimeFlowSheets(active: true))
-        .frame(minWidth: 620, idealWidth: 680, minHeight: 320, idealHeight: panel == .dependencies ? 560 : 380)
+        .frame(minWidth: 620, idealWidth: 680, minHeight: 320, idealHeight: panel == .diagnostics ? 380 : 560)
     }
 }
 
