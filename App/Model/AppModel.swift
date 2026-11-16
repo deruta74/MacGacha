@@ -131,6 +131,7 @@ final class AppModel {
     var notificationAuthorization: GameNotificationAuthorization = .notDetermined
     var notificationSelection: GameNotificationSelection?
     @ObservationIgnored let notifications: any GameNotificationCenter
+    @ObservationIgnored let notificationHistory: any GameNotificationHistoryAccess
     @ObservationIgnored let notificationIsFrontmost: @MainActor () -> Bool
     @ObservationIgnored let notificationReveal: @MainActor () -> Void
     @ObservationIgnored let notificationSettings: @MainActor () -> Void
@@ -330,6 +331,7 @@ final class AppModel {
         launchSleep: @escaping @Sendable () async throws -> Void = { try await ContinuousClock().sleep(for: .milliseconds(500)) },
         recoverySleep: @escaping @Sendable (Duration) async throws -> Void = { try await ContinuousClock().sleep(for: $0) },
         notifications: any GameNotificationCenter = EmptyGameNotificationCenter(),
+        notificationHistory: (any GameNotificationHistoryAccess)? = nil,
         notificationIsFrontmost: @escaping @MainActor () -> Bool = { NSApp?.isActive ?? true },
         notificationReveal: @escaping @MainActor () -> Void = {},
         notificationSettings: @escaping @MainActor () -> Void = {},
@@ -346,6 +348,7 @@ final class AppModel {
         self.artClock = artClock
         self.updater = updater
         self.notifications = notifications
+        self.notificationHistory = notificationHistory ?? LiveGameNotificationHistory(store: GameNotificationHistory(paths: paths))
         self.notificationIsFrontmost = notificationIsFrontmost
         self.notificationReveal = notificationReveal
         self.notificationSettings = notificationSettings

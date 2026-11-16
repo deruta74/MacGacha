@@ -4,6 +4,7 @@ import Foundation
 import Testing
 import LauncherCore
 import RuntimeManager
+import GameLibrary
 @testable import MacGacha
 
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor
@@ -104,6 +105,7 @@ struct AppModelNotificationTests {
         restarted.notify(.updateAvailable, gameID: "genshin", version: "2.0")
         restarted.notify(.preDownloadAvailable, gameID: "genshin", version: "2.0")
         restarted.notify(.updateAvailable, gameID: "genshin-cn", version: "2.0")
+        offer(restarted, kind: .updateAvailable, version: "3.0")
         restarted.notify(.updateAvailable, gameID: "genshin", version: "3.0")
         await restarted.notificationTask?.value
         #expect(center.delivered.count == 4)
@@ -199,11 +201,139 @@ struct AppModelNotificationTests {
         #expect(center.delivered.map(\.kind) == (fails ? [] : [.dependencySetupFinished]))
     }
 
-    private func fixture(_ center: TestGameNotificationCenter, activity: NotificationTestActivity = NotificationTestActivity(), root: URL? = nil) throws -> AppModel {
-        AppModel(paths: AppPaths(root: root ?? URL(fileURLWithPath: "/tmp/macgacha-inert-notifications-\(UUID())")),
+    @Test(arguments: [GameNotificationKind.updateAvailable, .preDownloadAvailable],
+        ["completed", "newerOffer", "began", "withdrawn", "otherEdition", "installedRecord", "operation"])
+    func authorizationWaitRejectsObsoleteAvailability(kind: GameNotificationKind, change: String) async throws {
+        let root = URL(fileURLWithPath: "/tmp/macgacha-notification-obsolete-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let center = TestGameNotificationCenter(), model = try fixture(center, root: root)
+        let entered = AsyncStream<Void>.makeStream(), release = AsyncStream<Void>.makeStream()
+        center.requestPermission = {
+            entered.continuation.yield(())
+            var iterator = release.stream.makeAsyncIterator(); _ = await iterator.next()
+        }
+        offer(model, kind: kind)
+        model.notify(kind, gameID: "genshin", version: "2.0")
+        var iterator = entered.stream.makeAsyncIterator(); _ = await iterator.next()
+        if change == "installedRecord" {
+            model.setGameRecord("genshin", GameRecord(installPath: root.appendingPathComponent("Game"),
+                ownership: .created, executable: try SafeRelativePath("Game.exe"),
+                installed: InstalledBuild(tag: "3.0", buildID: "completed", categories: [], voices: []),
+                installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: 1)))
+        } else if change == "operation" {
+            model.gameOperation = GameOperationToken(id: "genshin", generation: UUID())
+        } else if kind == .updateAvailable {
+            switch change {
+            case "completed": model.setGameState("genshin", GameState(status: .installed(tag: "2.0")))
+            case "newerOffer": offer(model, kind: kind, version: "3.0")
+            case "began": model.setGameState("genshin", GameState(status: .updateAvailable(from: "1.0", to: "2.0"), activity: .resolving))
+            case "otherEdition":
+                model.setGameState("genshin", GameState(status: .notInstalled))
+                offer(model, kind: kind, gameID: "genshin-cn")
+            default: model.setGameState("genshin", GameState(status: .installed(tag: "1.0")))
+            }
+        } else {
+            switch change {
+            case "completed": model.preDownloads["genshin"] = PreDownloadOverlay(info: .init(state: .ready, version: "2.0"))
+            case "newerOffer": offer(model, kind: kind, version: "3.0")
+            case "began": model.preDownloads["genshin"]?.state = .downloading(PreDownloadProgress())
+            case "otherEdition":
+                model.preDownloads["genshin"] = PreDownloadOverlay()
+                offer(model, kind: kind, gameID: "genshin-cn")
+            default: model.preDownloads["genshin"] = PreDownloadOverlay()
+            }
+        }
+        release.continuation.yield(()); release.continuation.finish()
+        await model.notificationTask?.value
+        #expect(center.delivered.isEmpty)
+        // An obsolete event must not consume the same version's future eligibility.
+        model.setGameRecord("genshin", nil); model.gameOperation = nil
+        offer(model, kind: kind)
+        model.notify(kind, gameID: "genshin", version: "2.0")
+        await model.notificationTask?.value
+        #expect(center.delivered.map(\.kind) == [kind])
+    }
+
+    @Test(arguments: [GameNotificationKind.updateAvailable, .preDownloadAvailable])
+    func queuedAvailabilityRechecksAfterPreviousDelivery(kind: GameNotificationKind) async throws {
+        let root = URL(fileURLWithPath: "/tmp/macgacha-notification-queued-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let center = TestGameNotificationCenter(), model = try fixture(center, root: root)
+        let entered = AsyncStream<Void>.makeStream(), release = AsyncStream<Void>.makeStream()
+        center.beforeDelivery = { _ in
+            entered.continuation.yield(())
+            var iterator = release.stream.makeAsyncIterator(); _ = await iterator.next()
+        }
+        model.notify(.installFinished, gameID: "zzz")
+        var iterator = entered.stream.makeAsyncIterator(); _ = await iterator.next()
+        offer(model, kind: kind)
+        model.notify(kind, gameID: "genshin", version: "2.0")
+        model.setGameState("genshin", GameState(status: .notInstalled))
+        model.preDownloads["genshin"] = PreDownloadOverlay()
+        release.continuation.yield(()); release.continuation.finish()
+        await model.notificationTask?.value
+        #expect(center.delivered.map(\.kind) == [.installFinished])
+    }
+
+    @Test(arguments: [GameNotificationKind.updateAvailable, .preDownloadAvailable],
+        [SuspendedNotificationHistory.Point.read, .claim])
+    func historyWaitRevalidatesAvailabilityAndReleasesObsoleteClaims(kind: GameNotificationKind, point: SuspendedNotificationHistory.Point) async throws {
+        let root = URL(fileURLWithPath: "/tmp/macgacha-notification-history-wait-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = SuspendedNotificationHistory(paths: AppPaths(root: root), point: point)
+        let center = TestGameNotificationCenter()
+        center.authorization = .allowed
+        let model = try fixture(center, root: root, history: history)
+        offer(model, kind: kind)
+        model.notify(kind, gameID: "genshin", version: "2.0")
+        var entered = history.entered.stream.makeAsyncIterator(); _ = await entered.next()
+        offer(model, kind: kind, version: "3.0")
+        history.releaseGate.continuation.yield(()); history.releaseGate.continuation.finish()
+        await model.notificationTask?.value
+        #expect(center.delivered.isEmpty)
+        let receipt = GameNotificationHistory.Marker(gameID: "genshin", version: "2.0", kind: kind)
+        #expect(try await !history.contains(receipt))
+        offer(model, kind: kind)
+        model.notify(kind, gameID: "genshin", version: "2.0")
+        await model.notificationTask?.value
+        #expect(center.delivered.map(\.kind) == [kind])
+    }
+
+    @Test func regionSwitchDoesNotInvalidateAnUnchangedEditionOffer() async throws {
+        let root = URL(fileURLWithPath: "/tmp/macgacha-notification-region-wait-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = SuspendedNotificationHistory(paths: AppPaths(root: root), point: .claim)
+        let center = TestGameNotificationCenter()
+        center.authorization = .allowed
+        let model = try fixture(center, root: root, history: history)
+        model.notify(.updateAvailable, gameID: "genshin", version: "2.0")
+        var entered = history.entered.stream.makeAsyncIterator(); _ = await entered.next()
+        model.region = .mainlandChina
+        history.releaseGate.continuation.yield(()); history.releaseGate.continuation.finish()
+        await model.notificationTask?.value
+        #expect(center.delivered.map(\.gameID) == ["genshin"])
+        #expect(model.region == .mainlandChina)
+    }
+
+    private func offer(_ model: AppModel, kind: GameNotificationKind, gameID: String = "genshin", version: String = "2.0") {
+        if kind == .updateAvailable {
+            model.setGameState(gameID, GameState(status: .updateAvailable(from: "1.0", to: version)))
+        } else {
+            model.setGameState(gameID, GameState(status: .installed(tag: "1.0")))
+            model.preDownloads[gameID] = PreDownloadOverlay(info: .init(state: .available, version: version))
+        }
+    }
+
+    private func fixture(_ center: TestGameNotificationCenter, activity: NotificationTestActivity = NotificationTestActivity(), root: URL? = nil, history: (any GameNotificationHistoryAccess)? = nil) throws -> AppModel {
+        let model = AppModel(paths: AppPaths(root: root ?? URL(fileURLWithPath: "/tmp/macgacha-inert-notifications-\(UUID())")),
             manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(), defaults: nil,
-            notifications: center, notificationIsFrontmost: { activity.frontmost },
+            notifications: center, notificationHistory: history, notificationIsFrontmost: { activity.frontmost },
             notificationReveal: { activity.reveals += 1 }, notificationSettings: { activity.settingsOpened += 1 })
+        for id in ["genshin", "genshin-cn"] {
+            offer(model, kind: .updateAvailable, gameID: id)
+            model.preDownloads[id] = PreDownloadOverlay(info: .init(state: .available, version: "2.0"))
+        }
+        return model
     }
 }
 
@@ -221,6 +351,7 @@ struct AppModelNotificationTests {
     var delivered: [GameNotification] = []
     var failDelivery = false
     var requestPermission: (() async -> Void)?
+    var beforeDelivery: ((GameNotification) async -> Void)?
     func authorizationState() async -> GameNotificationAuthorization { authorization }
     func requestAuthorization() async throws -> Bool {
         requests += 1
@@ -229,6 +360,7 @@ struct AppModelNotificationTests {
         return grant
     }
     func deliver(_ notification: GameNotification) async throws {
+        await beforeDelivery?(notification)
         if failDelivery { throw LauncherError.io("Private /path must never be sent") }
         delivered.append(notification)
     }
@@ -249,5 +381,33 @@ private actor NotificationCatalogAccess: RuntimeCatalogAccess {
         _ = await iterator.next()
         if fails { throw LauncherError.io("Activation failed") }
         return value
+    }
+}
+
+actor SuspendedNotificationHistory: GameNotificationHistoryAccess {
+    enum Point: Sendable { case read, claim }
+    let entered = AsyncStream<Void>.makeStream()
+    let releaseGate = AsyncStream<Void>.makeStream()
+    private let store: GameNotificationHistory
+    private let point: Point
+    init(paths: AppPaths, point: Point) { store = GameNotificationHistory(paths: paths); self.point = point }
+    func contains(_ marker: GameNotificationHistory.Marker) async throws -> Bool {
+        if point == .read { await wait() }
+        let store = self.store
+        return try await BlockingIO.run { try store.contains(marker) }
+    }
+    func claim(_ marker: GameNotificationHistory.Marker) async throws -> Bool {
+        let store = self.store
+        let result = try await BlockingIO.run { try store.claim(marker) }
+        if result && point == .claim { await wait() }
+        return result
+    }
+    func release(_ marker: GameNotificationHistory.Marker) async throws {
+        let store = self.store
+        try await BlockingIO.run { try store.release(marker) }
+    }
+    private func wait() async {
+        entered.continuation.yield(())
+        var iterator = releaseGate.stream.makeAsyncIterator(); _ = await iterator.next()
     }
 }

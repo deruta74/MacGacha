@@ -37,6 +37,7 @@ import GameLibrary
         let model = AppModel(paths: AppPaths(root: root), manifest: try RuntimeManifest(components: []),
             services: PreviewRuntimeServices(), defaults: nil, gameServices: service,
             launchPreferences: PreDownloadModelPreferences(), notifications: center, notificationIsFrontmost: { false })
+        model.setGameState("genshin", GameState(status: .installed(tag: "1.0")))
         await model.refreshPreDownloads(in: .global)
         await model.notificationTask?.value
         #expect(center.delivered.map(\.kind) == [.preDownloadAvailable])
