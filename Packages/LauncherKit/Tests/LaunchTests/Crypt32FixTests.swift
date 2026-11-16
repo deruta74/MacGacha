@@ -53,7 +53,7 @@ import TestSupport
         let component = URL(fileURLWithPath: "/Components/crypt32-fix")
         let roots: [ComponentKind: URL] = [.crypt32Fix: component, .steamShim: URL(fileURLWithPath: "/Components/steam"),
             .jadeite: URL(fileURLWithPath: "/Components/jadeite")]
-        for bundle in [Crypt32Fix.bundleID, "d3dmetal-wine11.21-gptk4.0b3"] {
+        for bundle in [Crypt32Fix.bundleID, "d3dmetal-wine11.21-gptk4.0b3", "d3dmetal-wine11.22mg1.0-gptk4.0b3"] {
             let value = try LaunchResolver.resolve(recipe: recipe, settings: settings,
                 installRoot: URL(fileURLWithPath: "/Games/game"), prefix: URL(fileURLWithPath: "/Prefixes/game"),
                 wineBinary: URL(fileURLWithPath: "/Runtimes/bin/wine"), proxyPort: 1234, componentRoots: roots,

@@ -9,7 +9,7 @@ public struct ComponentInstaller: Sendable {
     func relocated(to store: RuntimeStore) -> ComponentInstaller {
         if let fetcher, let extractor {
             return ComponentInstaller(store: store, consent: consent, fetcher: fetcher, extractor: extractor,
-                disk: disk, fileOps: fileOps, failurePoint: failurePoint)
+                disk: disk, fileOps: fileOps, failurePoint: failurePoint, debugArchiveDirectory: debugArchiveDirectory)
         }
         return ComponentInstaller(store: store, consent: consent, disk: disk, fileOps: fileOps, failurePoint: failurePoint)
     }
@@ -23,12 +23,18 @@ public struct ComponentInstaller: Sendable {
     private let disk: any DiskSpaceProbe
     private let fileOps: any FileOps
     private let failurePoint: @Sendable (PublishPoint) throws -> Void
+    private let debugArchiveDirectory: URL?
 
     public init(store: RuntimeStore, consent: ConsentStore, fetcher: ChunkFetcher,
         extractor: ArchiveExtractor, disk: any DiskSpaceProbe, fileOps: any FileOps = SystemFileOps(),
-        failurePoint: @escaping @Sendable (PublishPoint) throws -> Void = { _ in }) {
+        failurePoint: @escaping @Sendable (PublishPoint) throws -> Void = { _ in }, debugArchiveDirectory: URL? = nil) {
         self.store = store; self.consent = consent; self.fetcher = fetcher
         self.extractor = extractor; self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
+        #if DEBUG
+        self.debugArchiveDirectory = debugArchiveDirectory
+        #else
+        self.debugArchiveDirectory = nil
+        #endif
     }
 
     /// Import-only construction: no HTTP client or archive extractor is created.
@@ -37,11 +43,13 @@ public struct ComponentInstaller: Sendable {
         failurePoint: @escaping @Sendable (PublishPoint) throws -> Void = { _ in }) {
         self.store = store; self.consent = consent; self.fetcher = nil; self.extractor = nil
         self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
+        self.debugArchiveDirectory = nil
     }
 
     func install(_ component: RuntimeComponent, lease: RuntimeStoreLease, pins: RuntimeRemovalLease) -> ComponentInstallStream {
         ComponentInstallStream(session: ComponentInstallSession(component: component, candidate: nil, store: store, consent: consent,
-            fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint, lease: lease, pins: pins))
+            fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint,
+            debugArchiveDirectory: debugArchiveDirectory, lease: lease, pins: pins))
     }
 
     /// Pull-driven: dropping the stream releases the store lock; cancelling its consumer
@@ -49,7 +57,7 @@ public struct ComponentInstaller: Sendable {
     /// An import manifest requires a candidate; downloads require no candidate.
     public func install(_ component: RuntimeComponent, from candidate: GPTKCandidate? = nil) -> ComponentInstallStream {
         let session = ComponentInstallSession(component: component, candidate: candidate, store: store, consent: consent,
-            fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint)
+            fetcher: fetcher, extractor: extractor, disk: disk, fileOps: fileOps, failurePoint: failurePoint, debugArchiveDirectory: debugArchiveDirectory)
         return ComponentInstallStream(session: session)
     }
 }
@@ -92,6 +100,7 @@ fileprivate actor ComponentInstallSession {
     private let disk: any DiskSpaceProbe
     private let fileOps: any FileOps
     private let failurePoint: @Sendable (ComponentInstaller.PublishPoint) throws -> Void
+    private let debugArchiveDirectory: URL?
     private var step = Step.start
     private var fs: ContainedFileSystem?
     private var lock: InstallLock?
@@ -105,10 +114,12 @@ fileprivate actor ComponentInstallSession {
 
     init(component: RuntimeComponent, candidate: GPTKCandidate?, store: RuntimeStore, consent: ConsentStore, fetcher: ChunkFetcher?,
         extractor: ArchiveExtractor?, disk: any DiskSpaceProbe, fileOps: any FileOps,
-        failurePoint: @escaping @Sendable (ComponentInstaller.PublishPoint) throws -> Void, lease: RuntimeStoreLease? = nil, pins: RuntimeRemovalLease? = nil) {
+        failurePoint: @escaping @Sendable (ComponentInstaller.PublishPoint) throws -> Void, debugArchiveDirectory: URL?,
+        lease: RuntimeStoreLease? = nil, pins: RuntimeRemovalLease? = nil) {
         self.lease = lease; self.pins = pins
         self.component = component; self.candidate = candidate; self.store = store; self.consent = consent; self.fetcher = fetcher
         self.extractor = extractor; self.disk = disk; self.fileOps = fileOps; self.failurePoint = failurePoint
+        self.debugArchiveDirectory = debugArchiveDirectory
     }
 
     func next() async throws -> OperationEvent? {
@@ -187,7 +198,15 @@ fileprivate actor ComponentInstallSession {
                         extents: [Extent(source: .chunk(id: object.id), fileOffset: 0, length: size, digest: digest)])
                 ])
                 let root = try fs.directoryURL(at: downloads)
-                download = try InstallOperation(plan: plan, installRoot: root, fetcher: fetcher, disk: disk, fileOps: fileOps).run().makeAsyncIterator()
+                let archiveFetcher: ChunkFetcher
+                #if DEBUG
+                archiveFetcher = try debugArchiveDirectory.flatMap {
+                    try DebugRuntimeArchiveClient.fetcher(directory: $0, archiveURL: url)
+                } ?? fetcher
+                #else
+                archiveFetcher = fetcher
+                #endif
+                download = try InstallOperation(plan: plan, installRoot: root, fetcher: archiveFetcher, disk: disk, fileOps: fileOps).run().makeAsyncIterator()
                 step = .download
                 return .phase(.staging)
             case .download:

@@ -222,7 +222,8 @@ struct AppModelLaunchTests {
 
     @Test func missingCNWineFixBlocksPlayAndClearsAfterInstallation() async throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
-        let manifest = try await BundledRuntimeManifest.load()
+        let resource = try #require(Bundle(for: LaunchModelResources.self).url(forResource: "runtime-catalog-r3", withExtension: "json"))
+        let manifest = try JSONDecoder().decode(RuntimeCatalog.self, from: Data(contentsOf: resource)).manifest
         let bundle = try #require(manifest.defaultBundle(for: .d3dmetal))
         let fix = try #require(manifest.components.first { $0.id.rawValue == Crypt32Fix.componentID })
         let runtimes = PreviewRuntimeServices()
@@ -240,6 +241,25 @@ struct AppModelLaunchTests {
         #expect(!model.missingComponents(for: "zzz-cn"))
         #expect(PrimaryAction.resolve(GameState(status: .installed(tag: "1")), runtimesReady: true,
             missingComponents: model.missingComponents(for: "zzz-cn")) == .play)
+        try await model.flushLaunchSettings()
+    }
+
+    @Test(arguments: ["genshin-cn", "zzz-cn"])
+    func currentCNWineAllowsPlayWithoutLegacyWineFix(game: String) async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        let manifest = try await BundledRuntimeManifest.load()
+        let bundle = try #require(manifest.defaultBundle(for: .d3dmetal))
+        let runtimes = PreviewRuntimeServices()
+        for try await _ in runtimes.install(bundle, manifest: manifest, from: nil) {}
+        let model = AppModel(paths: fixture.paths, manifest: manifest, services: runtimes, defaults: nil, launchServices: fixture.services)
+        await model.reattachOnStart()
+        await model.refreshRuntimes()
+        var settings = model.launchSettings(for: game); settings.compatibilityPatches = false
+        try model.saveLaunchSettings(settings, for: game)
+        #expect(!model.installed.contains { $0.kind == .crypt32Fix })
+        #expect(!model.missingComponents(for: game))
+        #expect(PrimaryAction.resolve(GameState(status: .installed(tag: "1")), runtimesReady: true,
+            missingComponents: model.missingComponents(for: game)) == .play)
         try await model.flushLaunchSettings()
     }
 
@@ -384,6 +404,8 @@ struct AppModelLaunchTests {
         #expect(fixture.model.launchSettings(for: "zzz") == .defaults(for: "zzz"))
     }
 }
+
+private final class LaunchModelResources {}
 
 @MainActor private struct LaunchModelFixture {
     let paths: AppPaths

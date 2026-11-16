@@ -4,12 +4,20 @@ name: Wine candidate (manual build)
 on:
   workflow_dispatch:
     inputs:
+      wine_version:
+        description: Source Wine release to qualify
+        type: choice
+        options: ['11.22', '11.20']
+        default: '11.22'
       prepare_draft_release:
-        description: Attach verified Wine 1.0 and complete sources to a draft prerelease
+        description: Attach the selected verified Wine 1.0 and complete sources to a draft prerelease
         type: boolean
         default: false
 permissions:
   contents: read
+env:
+  WINE_VERSION: ${{ inputs.wine_version || '11.22' }}
+  WINE_SOURCE_LOCK: ${{ inputs.wine_version == '11.20' && 'compat/wine/source-runtime.lock.json' || 'compat/wine/source-runtime-11.22.lock.json' }}
 jobs:
   build:
     runs-on: xcode-27
@@ -24,25 +32,30 @@ jobs:
         run: |
           python3 -I scripts/test-prepare-wine-release.py
           python3 -I scripts/test-wine-build.py
+          python3 -I scripts/test-wine-source-preparation.py
           python3 -I scripts/test-wine-dependencies.py
           python3 -I scripts/test-wine-dependency-build.py
           python3 -I scripts/test-finalize-source-wine.py
       - name: Fetch checksum-pinned inputs
         run: |
           python3 -I scripts/build-wine-dependencies.py "$RUNNER_TEMP/deps-a" --cache "$RUNNER_TEMP/deps-cache" --fetch-only
-          python3 -I scripts/build-wine.py "$RUNNER_TEMP/wine-a" --dependencies "$RUNNER_TEMP/deps-a" --cache "$RUNNER_TEMP/wine-cache" --fetch-only
+          python3 -I scripts/build-wine.py "$RUNNER_TEMP/wine-a" --dependencies "$RUNNER_TEMP/deps-a" --runtime-lock "$WINE_SOURCE_LOCK" --cache "$RUNNER_TEMP/wine-cache" --fetch-only
       - name: Build twice offline and compare packages
         run: |
           set -euo pipefail
           profile='(version 1) (allow default) (deny network*) (deny file-read* (subpath "/opt/homebrew")) (deny file-write* (subpath "/opt/homebrew"))'
           for suffix in a b; do
             sandbox-exec -p "$profile" python3 -I scripts/build-wine-dependencies.py "$RUNNER_TEMP/deps-$suffix" --cache "$RUNNER_TEMP/deps-cache" --offline
-            sandbox-exec -p "$profile" python3 -I scripts/build-wine.py "$RUNNER_TEMP/wine-$suffix" --dependencies "$RUNNER_TEMP/deps-$suffix" --cache "$RUNNER_TEMP/wine-cache" --offline --bison "$RUNNER_TEMP/deps-$suffix/tools/bin/bison"
+            sandbox-exec -p "$profile" python3 -I scripts/build-wine.py "$RUNNER_TEMP/wine-$suffix" --dependencies "$RUNNER_TEMP/deps-$suffix" --runtime-lock "$WINE_SOURCE_LOCK" --cache "$RUNNER_TEMP/wine-cache" --offline --bison "$RUNNER_TEMP/deps-$suffix/tools/bin/bison"
             python3 -I scripts/finalize-source-wine.py "$RUNNER_TEMP/wine-$suffix" "$RUNNER_TEMP/wine-final-$suffix"
           done
-          cmp "$RUNNER_TEMP/wine-final-a/11.20-macgacha1-preview4.tar.xz" "$RUNNER_TEMP/wine-final-b/11.20-macgacha1-preview4.tar.xz"
+          candidate_version=$(python3 -c 'import json, os; print(json.load(open(os.environ["WINE_SOURCE_LOCK"]))["version"])')
+          cmp "$RUNNER_TEMP/wine-final-a/$candidate_version.tar.xz" "$RUNNER_TEMP/wine-final-b/$candidate_version.tar.xz"
       - name: Probe the unpacked candidate
         run: python3 -I scripts/check-wine.py "$RUNNER_TEMP/wine-final-a" "$RUNNER_TEMP/wine-probe" --deny-read "$RUNNER_TEMP/deps-a" --deny-read "$RUNNER_TEMP/deps-b"
+      - name: Check the Wine 11.22 IOSurface queue
+        if: env.WINE_VERSION == '11.22'
+        run: python3 -I scripts/test-wine-surface-queue.py "$RUNNER_TEMP/wine-a/work/source-archive/wine-11.22" --sanitize-address
       # Evidence is public in this public repository. Do not distribute binaries
       # or source bundles from this qualification workflow.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -59,16 +72,18 @@ jobs:
           retention-days: 14
       - name: Prepare verified Wine 1.0 release assets
         if: inputs.prepare_draft_release
-        run: python3 -I scripts/prepare-wine-release.py "$RUNNER_TEMP/wine-final-a" "$RUNNER_TEMP/wine-release"
+        run: python3 -I scripts/prepare-wine-release.py "$RUNNER_TEMP/wine-final-a" "$RUNNER_TEMP/wine-release" --release "wine-${WINE_VERSION}-macgacha-1.0"
       - name: Attach binary and complete sources to a draft prerelease
         if: inputs.prepare_draft_release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag=wine-11.20-macgacha-1.0
+          tag="wine-${WINE_VERSION}-macgacha-1.0"
+          notes=compat/wine/SOURCE-NOTICE.md
+          if [[ "$WINE_VERSION" == 11.22 ]]; then notes=compat/wine/SOURCE-NOTICE-11.22.md; fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --draft --prerelease --latest=false --title 'MacGacha Wine 11.20 — Version 1.0' --target "$GITHUB_SHA" --notes-file compat/wine/SOURCE-NOTICE.md
+            gh release create "$tag" --draft --prerelease --latest=false --title "MacGacha Wine ${WINE_VERSION} — Version 1.0" --target "$GITHUB_SHA" --notes-file "$notes"
           fi
           [[ $(gh release view "$tag" --json isDraft --jq .isDraft) == true ]] || {
             echo 'Refusing to change a published release' >&2

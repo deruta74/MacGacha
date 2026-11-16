@@ -39,7 +39,9 @@ import DownloadEngine
                     let candidates = RuntimeAutomaticUpdate.candidates(in: current,
                         installedBundleIDs: Set(self.installedBundles.keys.compactMap { try? SafeIdentifier($0) }),
                         installedComponentIDs: installedIDs)
-                    guard let update = candidates.first(where: { !attempted.contains($0.familyID) }) else { break }
+                    guard let update = candidates.first(where: {
+                        !attempted.contains($0.familyID) && (try? self.automaticRuntimeSelections(for: $0, in: current)) != nil
+                    }) else { break }
                     attempted.insert(update.familyID)
                     if self.installedBundles[update.previousID.rawValue]?.source == .importFromGPTK,
                         let version = update.changedGraphicsVersion(in: current, importedFramework: self.installedBundles[update.previousID.rawValue]?.importedFramework, isImported: true) {
@@ -57,7 +59,7 @@ import DownloadEngine
                     }
                     try Task.checkCancellation()
                     guard self.autoUpdateDependencies, let current = self.runtimeCatalog,
-                        (try? update.selections(in: current)) != nil else { continue }
+                        (try? self.automaticRuntimeSelections(for: update, in: current)) != nil else { continue }
                     try await self.installDependencyUpdate(update, snapshot: current)
                 }
             } catch { /* A failed settings write or cancellation never changes selection. */ }
@@ -65,8 +67,9 @@ import DownloadEngine
     }
 
     func dependencyComponents(_ update: RuntimeAutomaticUpdate, in snapshot: RuntimeCatalogSnapshot) -> [RuntimeComponent] {
+        let helpers = Set(update.helperUpdates.map(\.targetID))
         if let bundle = snapshot.catalog.manifest.bundles.first(where: { $0.id == update.targetID }) {
-            return snapshot.catalog.manifest.components.filter { bundle.components.contains($0.id) }
+            return snapshot.catalog.manifest.components.filter { bundle.components.contains($0.id) || helpers.contains($0.id) }
         }
         return snapshot.catalog.manifest.components.filter { $0.id == update.targetID }
     }
@@ -103,7 +106,8 @@ import DownloadEngine
             try await waitForDependencyActivation()
             try Task.checkCancellation()
             guard autoUpdateDependencies, let current = runtimeCatalog, let catalogAccess, let staged else { throw LauncherError.cancelled }
-            let selections = try update.selections(in: current)
+            let selections = try automaticRuntimeSelections(for: update, in: current)
+            let intended = try current.replacingSelections(selections)
             runtimeCatalogMutationID = id; catalogSelectionGeneration = UUID()
             defer { runtimeCatalogMutationID = nil; catalogSelectionGeneration = UUID() }
             do {
@@ -111,6 +115,7 @@ import DownloadEngine
                 let previousInstalled = update.backend != nil ? installedBundles[update.previousID.rawValue] != nil
                     : installed.contains { "\($0.kind.idPrefix)-\($0.version)" == update.previousID.rawValue }
                 guard previousInstalled else { throw LauncherError.busy("Automatic source is no longer installed") }
+                _ = try automaticRuntimeSelections(for: update, in: current)
                 try await staged.publish()
                 try await scanAndApply()
                 guard dependencyUpdateIsInstalled(update) else { throw LauncherError.io("Automatic runtime receipt is missing") }
@@ -118,17 +123,22 @@ import DownloadEngine
                 try await BlockingIO.run {
                     try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: update.familyID,
                         previousID: update.previousID.rawValue, replacementID: update.targetID.rawValue)
+                    for helper in update.helperUpdates {
+                        try RuntimeAutomaticUpdateStore(paths: paths).retain(familyID: helper.familyID,
+                            previousID: helper.previousID.rawValue, replacementID: helper.targetID.rawValue)
+                    }
                 }
                 dependencyHasRetainedVersions = true
                 let actual: RuntimeCatalogSnapshot
+                _ = try automaticRuntimeSelections(for: update, in: current)
                 do { actual = try await catalogAccess.activate(selections) }
                 catch {
-                    guard Task.isCancelled || !autoUpdateDependencies else { throw error }
+                    guard Task.isCancelled || !autoUpdateDependencies || !runtimeSelectionPreservesSurround(from: current, to: intended) else { throw error }
                     // Replacement may have succeeded before persistence reported
                     // failure. Reconcile while retaining the activation reservation.
                     actual = try await Task.detached { try await catalogAccess.snapshot() }.value
                 }
-                if Task.isCancelled || !autoUpdateDependencies {
+                if Task.isCancelled || !autoUpdateDependencies || !runtimeSelectionPreservesSurround(from: current, to: actual) {
                     var previous = actual.selections
                     if let backend = update.backend { previous.bundles[backend] = current.selections.bundles[backend] }
                     for (kind, intended) in selections.helpers where current.selections.helpers[kind] != intended {
@@ -149,7 +159,7 @@ import DownloadEngine
                 throw error
             }
         } catch {
-            if let staged { try? await staged.discard() }
+            if let staged { await Task.detached { try? await staged.discard() }.value }
             dependencyWorking[id] = nil
             if !Task.isCancelled, launcherError(error) != .cancelled { setDependencyUpdateError(launcherError(error), for: id) }
             postDependencyUpdate("Automatic install failed", update: update)
@@ -160,6 +170,7 @@ import DownloadEngine
     }
 
     func dependencyUpdateIsInstalled(_ update: RuntimeAutomaticUpdate) -> Bool {
+        guard update.helperUpdates.allSatisfy({ dependencyUpdateIsInstalled($0) }) else { return false }
         if update.backend != nil { return installedBundles[update.targetID.rawValue] != nil }
         return installed.contains { "\($0.kind.idPrefix)-\($0.version)" == update.targetID.rawValue }
     }
@@ -186,7 +197,7 @@ import DownloadEngine
     func dependencySetupTarget(for gameID: String) -> RuntimeCatalogSnapshot? {
         guard autoUpdateDependencies, let current = runtimeCatalog,
             let update = dependencyConsentTargets[launchSettings(for: gameID).backend],
-            let selections = try? update.selections(in: current) else { return nil }
+            let selections = try? automaticRuntimeSelections(for: update, in: current) else { return nil }
         return try? current.replacingSelections(selections)
     }
 

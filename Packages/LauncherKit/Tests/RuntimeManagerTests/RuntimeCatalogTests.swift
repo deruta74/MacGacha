@@ -11,8 +11,8 @@ import TestSupport
     @Test func newBaselineRecommendsBothMacGachaWineBundles() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let manifest = try RuntimeManifest.load(from: root.appendingPathComponent("App/Resources/runtime-manifest.json"))
-        #expect(manifest.defaultBundle(for: .dxmt)?.id.rawValue == "dxmt-wine11.20mg1.0-dxmt0.80")
-        #expect(manifest.defaultBundle(for: .d3dmetal)?.id.rawValue == "d3dmetal-wine11.20mg1.0-gptk4.0b3")
+        #expect(manifest.defaultBundle(for: .dxmt)?.id.rawValue == "dxmt-wine11.22mg1.0-dxmt0.80")
+        #expect(manifest.defaultBundle(for: .d3dmetal)?.id.rawValue == "d3dmetal-wine11.22mg1.0-gptk4.0b3")
         #expect(manifest.defaultBundle(for: .d3dmetal)?.components.count == 2)
     }
     @Test func pinnedOldD3DMetalWithNewHelpersIsValidSelection() async throws {

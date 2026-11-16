@@ -34,7 +34,13 @@ import LauncherCore
 
     func canBeginGameOrRuntimeOperation(allowingCatalogID: String? = nil) -> Bool {
         guard !gameMoveRecoveryReservation else { return false }
-        guard runtimeCatalogMutationID == nil || runtimeCatalogMutationID == allowingCatalogID else { return false }
+        let capturedSetupItem = allowingCatalogID.map { id in
+            catalogActivationTargets.keys.contains { key in
+                guard let chain = runtimeSetupChains[key] else { return false }
+                return chain.plan.items[chain.index].id == id
+            }
+        } ?? false
+        guard runtimeCatalogMutationID == nil || runtimeCatalogMutationID == allowingCatalogID || capturedSetupItem else { return false }
         guard languageRestart == nil, !updater.isInstallingUpdate else {
             show(LauncherError.busy("Application update is installing"))
             return false

@@ -594,11 +594,20 @@ final class AppModel {
                 let target = try runtimeVersionTarget(id, pinned: false)
                 captureRuntimeInstallContext(id, manifest: target.catalog.manifest)
                 guard let context = runtimeInstallContexts[id], context.component.kind == .d3dmetal else { return }
+                let helpers = target.selections.helpers.filter { runtimeCatalog?.selections.helpers[$0.key]?.id != $0.value.id }
+                    .values.map { $0.id.rawValue }.sorted()
+                var items: [RuntimeSetupPlan.Item] = [.init(id: id, name: context.bundle?.displayName ?? Self.kindName(context.component.kind), size: nil)]
+                for helperID in helpers {
+                    captureRuntimeInstallContext(helperID, manifest: target.catalog.manifest)
+                    if case .installed = runtimeSetupItemState(helperID) { continue }
+                    guard let helper = runtimeInstallContexts[helperID]?.component else { throw LauncherError.io("Unknown runtime installation") }
+                    items.append(.init(id: helperID, name: Self.kindName(helper.kind), size: helper.size))
+                }
                 let key = "catalog-" + id
                 runtimeCatalogMutationID = id; catalogSelectionGeneration = UUID()
                 catalogActivationTargets[key] = target
                 runtimeSetupChains[key] = RuntimeSetupChain(plan: RuntimeSetupPlan(gameID: key,
-                    items: [.init(id: id, name: context.bundle?.displayName ?? Self.kindName(context.component.kind), size: nil)], needsAppleTerms: true), attempted: true)
+                    items: items, needsAppleTerms: true), attempted: true)
             } catch { show(error); return }
         }
         request(id, mode: .importGPTK)

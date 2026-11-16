@@ -6,8 +6,19 @@ import LauncherCore
 /// launch integration opts in through a verified per-game runtime helper.
 public enum SurroundAudio {
     public static let bundleID = "d3dmetal-wine11.20-gptk4.0b3"
-    public static let bundleIDs: Set<String> = [bundleID, "d3dmetal-wine11.20mg1.0-gptk4.0b3"]
+    public static let wine1122BundleID = "d3dmetal-wine11.22mg1.0-gptk4.0b3"
+    public static let bundleIDs: Set<String> = [bundleID, "d3dmetal-wine11.20mg1.0-gptk4.0b3", wine1122BundleID]
     public static let componentID = "surround-audio-wine-11.20-3"
+    public static let wine1122ComponentID = "surround-audio-wine-11.22-1"
+    public static func recommendedComponentID(for bundleID: String?) -> String? {
+        guard let bundleID, bundleIDs.contains(bundleID) else { return nil }
+        return bundleID == wine1122BundleID ? wine1122ComponentID : componentID
+    }
+    public static func profiles(for componentID: String) -> Set<String> {
+        if componentID == wine1122ComponentID { return [wine1122BundleID] }
+        if componentID == Self.componentID { return bundleIDs.subtracting([wine1122BundleID]) }
+        return [bundleID]
+    }
     public static func applies(game: String, backend: RuntimeBackend, bundleID: String?) -> Bool {
         guard backend == .d3dmetal, bundleID.map(Self.bundleIDs.contains) == true, let family = GameDefinition.find(game)?.family else { return false }
         return family == .genshin || family == .zzz

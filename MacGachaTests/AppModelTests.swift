@@ -385,7 +385,11 @@ struct AppModelTests {
         let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: url))
         #expect(manifest.schemaVersion == 3)
-        #expect(manifest.components.count == 13)
+        #expect(manifest.components.count == 15)
+        let wine = try #require(manifest.components.first { $0.id.rawValue == "wine-11.22-macgacha-1.0" })
+        #expect(wine.license.name == "LGPL-2.1-or-later" && wine.license.redistributable)
+        #expect(wine.size == 91_950_420 && wine.installedSize == 620_124_132)
+        #expect(wine.sha256?.hex == "4daf157d0438c014ce3d9175cdf846f36ddc7f2b3514d4180ff3602b31591423")
         let fps = try #require(manifest.components.first { $0.id.rawValue == GenshinFps.componentID })
         #expect(fps.kind == .genshinFps && fps.archive == .zip)
         #expect(fps.license.name == "GPL-3.0-only" && fps.license.redistributable && fps.consent == nil)
@@ -395,7 +399,7 @@ struct AppModelTests {
         #expect(fps.url?.absoluteString == "https://github.com/deruta74/MacGacha/releases/download/genshin-fps-unlock-2/genshin-fps-unlock-2.zip")
         #expect(manifest.bundles.allSatisfy { !$0.components.contains(fps.id) })
         let surroundHistory = manifest.components.filter { $0.kind == .surroundAudio }
-        #expect(surroundHistory.map(\.id.rawValue) == [SurroundAudio.componentID, "surround-audio-wine-11.20-2", "surround-audio-wine-11.20-1"])
+        #expect(surroundHistory.map(\.id.rawValue) == [SurroundAudio.wine1122ComponentID, SurroundAudio.componentID, "surround-audio-wine-11.20-2", "surround-audio-wine-11.20-1"])
         let surround = try #require(manifest.components.first { $0.id.rawValue == SurroundAudio.componentID })
         #expect(surround.kind == .surroundAudio && surround.archive == .zip)
         #expect(surround.license.name == "LGPL-2.1-or-later" && surround.license.redistributable)
@@ -419,7 +423,7 @@ struct AppModelTests {
         let model = AppModel(paths: testPaths(), manifest: manifest, services: PreviewRuntimeServices(), defaults: nil)
         await model.start()
         #expect(model.rows.map(\.id) == manifest.bundles.map { $0.id.rawValue } + manifest.components.filter { [.jadeite, .steamShim, .crypt32Fix, .surroundAudio, .genshinFps].contains($0.kind) }.map { $0.id.rawValue })
-        #expect(manifest.bundles.first?.id.rawValue == "dxmt-wine11.20mg1.0-dxmt0.80")
+        #expect(manifest.bundles.first?.id.rawValue == "dxmt-wine11.22mg1.0-dxmt0.80")
         #expect(model.rows.contains { $0.id == "dxmt-wine11.0-dxmt0.80" })
         let dxmt = manifest.bundles[0].id.rawValue
         model.install(dxmt)
@@ -582,6 +586,12 @@ private func eventually(_ condition: () -> Bool, timeout: Duration = .seconds(5)
 
 final class FakeRuntimeServices: RuntimeServices, Sendable {
     func stageDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle {
+        try await DependencyStagingHandle.staging(update) { item in
+            try await self.stageSingleDependency(item, manifest: manifest, importedFrom: item.backend == nil ? nil : importedFrom, progress: progress)
+        }
+    }
+    private func stageSingleDependency(_ update: RuntimeAutomaticUpdate, manifest: RuntimeManifest, importedFrom: RuntimeBundle?,
         progress: @escaping @Sendable (OperationEvent) -> Void) async throws -> DependencyStagingHandle {
         let stream: RuntimeInstallStream
         if let bundle = manifest.bundles.first(where: { $0.id == update.targetID }) {

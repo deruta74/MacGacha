@@ -65,8 +65,9 @@ import Synchronization
     static func make(pinned: Bool = false, rosettaProbe: any RosettaProbing = UnknownRosettaProbe(), installHelpers: Bool = true, storeFactory: ((AppPaths) -> RuntimeCatalogStore)? = nil) async throws -> Self {
         let resources = Bundle(for: BundleUpgradeResources.self)
         let oldManifest = try RuntimeManifest.load(from: #require(resources.url(forResource: "manifest-0.2.6", withExtension: "json")))
-        let baseline = try await BundledRuntimeManifest.load()
-        let metadata = try Data(contentsOf: #require(resources.url(forResource: "runtime-catalog", withExtension: "json")))
+        let metadata = try Data(contentsOf: #require(resources.url(forResource: "runtime-catalog-r3", withExtension: "json")))
+        // Exercise the immutable 11.20 promotion even after the app baseline advances.
+        let baseline = try JSONDecoder().decode(RuntimeCatalog.self, from: metadata).manifest
         let paths = AppPaths(root: FileManager.default.temporaryDirectory.appendingPathComponent("bundle-upgrade-\(UUID().uuidString)"))
         let store = storeFactory?(paths) ?? RuntimeCatalogStore(root: paths.root)
         let service = RuntimeCatalogService(baseline: oldManifest, store: store)

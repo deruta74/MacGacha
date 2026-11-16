@@ -35,10 +35,8 @@ import Launch
         #expect(plan.gameID == configuration.game)
         #expect(plan.items.first?.id == bundle.id.rawValue)
         #expect(plan.items.first?.name == bundle.displayName)
+        #expect(bundle.components.contains(try SafeIdentifier("wine-11.22-macgacha-1.0")))
         var expected = [bundle.id.rawValue]
-        if configuration.backend == .d3dmetal && ["genshin-cn", "zzz-cn"].contains(configuration.game) {
-            expected.append(Crypt32Fix.componentID)
-        }
         if configuration.patches {
             let recipe = try #require(Recipes.recipe(for: configuration.game))
             let wrapper: ComponentKind = recipe.wrapper == .jadeite ? .jadeite : .steamShim
@@ -52,10 +50,11 @@ import Launch
 
     @Test(arguments: ["genshin-cn", "zzz-cn"], [true, false])
     func cnWineCorrectionFollowsBundleEvenWithoutGamePatches(game: String, patches: Bool) throws {
-        let (model, _, manifest) = try fixture(game, backend: .d3dmetal, patches: patches)
+        let (model, _, manifest) = try fixture(game, backend: .d3dmetal, patches: patches, historicalWine: true)
         let plan = try #require(model.runtimeSetupPlan(for: game))
         let component = try #require(manifest.components.first { $0.id.rawValue == Crypt32Fix.componentID })
-        #expect(plan.items[1] == RuntimeSetupPlan.Item(id: component.id.rawValue,
+        let correction = try #require(plan.items.dropFirst().first)
+        #expect(correction == RuntimeSetupPlan.Item(id: component.id.rawValue,
             name: String(localized: "Wine crypt32 fix", comment: "Runtime component name"), size: component.size))
         #expect(model.missingComponents(for: game))
     }
@@ -69,7 +68,7 @@ import Launch
 
     @Test(arguments: ["genshin-cn", "zzz-cn"], [RuntimeBackend.dxmt, .d3dmetal])
     func installedWineCorrectionIsOmittedAndDxmtNeverNeedsIt(game: String, backend: RuntimeBackend) async throws {
-        let (model, fake, manifest) = try fixture(game, backend: backend, patches: false)
+        let (model, fake, manifest) = try fixture(game, backend: backend, patches: false, historicalWine: true)
         let bundle = try #require(manifest.defaultBundle(for: backend))
         try publish(bundle.id.rawValue, fake: fake, manifest: manifest)
         await model.refreshRuntimes()
@@ -88,28 +87,32 @@ import Launch
 
     @Test(arguments: GameDefinition.all.map(\.id), [RuntimeBackend.dxmt, .d3dmetal])
     func surroundSetupOnlyWhenEnabledAndEligible(game: String, backend: RuntimeBackend) async throws {
-        let (model, fake, manifest) = try fixture(game, backend: backend, patches: false)
-        var settings = model.launchSettings(for: game); settings.surroundSound = true
-        model.launchSettingsCache[game] = settings
-        let bundle = try #require(manifest.defaultBundle(for: backend))
-        let eligible = LaunchResolver.offersSurroundSound(game, backend: backend, runtimeBundleID: bundle.id.rawValue)
-        #expect(model.offersSurround(for: game) == eligible)
-        let ids = try #require(model.runtimeSetupPlan(for: game)).items.map(\.id)
-        #expect(ids.contains(SurroundAudio.componentID) == eligible)
-        for id in ids where id != SurroundAudio.componentID { try publish(id, fake: fake, manifest: manifest) }
-        await model.refreshRuntimes()
-        #expect(model.missingComponents(for: game) == eligible)
-        if eligible {
-            #expect(model.runtimeSetupPlan(for: game)?.items.map(\.id) == [SurroundAudio.componentID])
-            var events = fake.installEvents.stream.makeAsyncIterator()
-            model.installRecommended(for: game)
-            #expect(await events.next() == SurroundAudio.componentID)
-            try complete(SurroundAudio.componentID, fake: fake, manifest: manifest)
-            try await setupWait { model.runtimeSetupProgress.isEmpty }
-            #expect(!model.missingComponents(for: game))
+        for historicalWine in [false, true] {
+            let (model, fake, manifest) = try fixture(game, backend: backend, patches: false, historicalWine: historicalWine)
+            var settings = model.launchSettings(for: game); settings.surroundSound = true
+            model.launchSettingsCache[game] = settings
+            let bundle = try #require(manifest.defaultBundle(for: backend))
+            #expect(bundle.components.contains(try SafeIdentifier(historicalWine ? "wine-11.20-macgacha-1.0" : "wine-11.22-macgacha-1.0")))
+            let eligible = backend == .d3dmetal && ["genshin", "genshin-cn", "zzz", "zzz-cn"].contains(game)
+            let componentID = historicalWine ? SurroundAudio.componentID : SurroundAudio.wine1122ComponentID
+            #expect(model.offersSurround(for: game) == eligible)
+            let ids = try #require(model.runtimeSetupPlan(for: game)).items.map(\.id)
+            #expect(ids.contains(componentID) == eligible)
+            for id in ids where id != componentID { try publish(id, fake: fake, manifest: manifest) }
+            await model.refreshRuntimes()
+            #expect(model.missingComponents(for: game) == eligible)
+            if eligible {
+                #expect(model.runtimeSetupPlan(for: game)?.items.map(\.id) == [componentID])
+                var events = fake.installEvents.stream.makeAsyncIterator()
+                model.installRecommended(for: game)
+                #expect(await events.next() == componentID)
+                try complete(componentID, fake: fake, manifest: manifest)
+                try await setupWait { model.runtimeSetupProgress.isEmpty }
+                #expect(!model.missingComponents(for: game))
+            }
+            settings.surroundSound = false; model.launchSettingsCache[game] = settings
+            #expect(!model.runtimeSetupRequirements(for: game)!.contains { $0.item.id == componentID })
         }
-        settings.surroundSound = false; model.launchSettingsCache[game] = settings
-        #expect(!model.runtimeSetupRequirements(for: game)!.contains { $0.item.id == SurroundAudio.componentID })
     }
 
     @Test func totalsRequireEveryKnownSizeAndDoNotOverflow() {
@@ -360,9 +363,17 @@ import Launch
         #expect(model.runtimeSetupPlan(for: "starrail")?.items.isEmpty == false)
     }
 
-    private func fixture(_ game: String, backend: RuntimeBackend = .dxmt, patches: Bool = true, notifications: any GameNotificationCenter = EmptyGameNotificationCenter()) throws -> (AppModel, FakeRuntimeServices, RuntimeManifest) {
-        let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
-        let manifest = try RuntimeManifest.load(from: url), fake = FakeRuntimeServices()
+    private func fixture(_ game: String, backend: RuntimeBackend = .dxmt, patches: Bool = true,
+        historicalWine: Bool = false, notifications: any GameNotificationCenter = EmptyGameNotificationCenter()) throws -> (AppModel, FakeRuntimeServices, RuntimeManifest) {
+        let manifest: RuntimeManifest
+        if historicalWine {
+            let url = try #require(Bundle(for: RuntimeSetupResources.self).url(forResource: "runtime-catalog-r3", withExtension: "json"))
+            manifest = try JSONDecoder().decode(RuntimeCatalog.self, from: Data(contentsOf: url)).manifest
+        } else {
+            let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
+            manifest = try RuntimeManifest.load(from: url)
+        }
+        let fake = FakeRuntimeServices()
         let model = AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/Setup")), manifest: manifest,
             services: fake, defaults: nil, notifications: notifications, notificationIsFrontmost: { false })
         for definition in GameDefinition.all {
@@ -404,6 +415,8 @@ struct SetupCase: Sendable {
 private enum SetupRestartOutcome: Equatable {
     case installed(String?), stopped
 }
+
+private final class RuntimeSetupResources {}
 
 @MainActor private func setupWait(_ condition: @escaping @MainActor () -> Bool) async throws {
     while !condition() {

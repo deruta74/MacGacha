@@ -20,6 +20,17 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class CatalogPublicationTests(unittest.TestCase):
+    def test_surround_abi_scopes_cannot_cross_wine_versions(self):
+        for identity, wrong_profile in [
+            ("surround-audio-wine-11.22-1", "d3dmetal-wine11.20mg1.0-gptk4.0b3"),
+            ("surround-audio-wine-11.20-3", "d3dmetal-wine11.22mg1.0-gptk4.0b3"),
+            ("crypt32-fix-wine-11.20-2", "d3dmetal-wine11.22mg1.0-gptk4.0b3"),
+        ]:
+            candidate = copy.deepcopy(self.catalog)
+            binding = next(b for b in candidate["helperBindings"] if b["componentID"] == identity)
+            binding["profileIDs"] = [wrong_profile]
+            with self.assertRaises(ValueError): module.validate(candidate, self.baseline)
+
     def test_draft_upload_race_never_replaces_assets(self):
         spec = importlib.util.spec_from_file_location("upload", ROOT / "scripts/upload-immutable-release.py")
         upload = importlib.util.module_from_spec(spec)
@@ -83,6 +94,17 @@ class CatalogPublicationTests(unittest.TestCase):
         next_catalog = copy.deepcopy(self.catalog)
         next_catalog["revision"] += 1
         module.validate(next_catalog, self.baseline, self.catalog)
+
+    def test_wine1122_upgrade_preserves_published_history_and_rejects_foreign_abi_helpers(self):
+        previous = json.loads((ROOT / 'Packages/LauncherKit/Tests/RuntimeManagerTests/Fixtures/catalog-r3.json').read_text())
+        module.validate(self.catalog, self.baseline, previous)
+        for kind in ['crypt32Fix', 'surroundAudio']:
+            candidate = copy.deepcopy(self.catalog)
+            identity = previous['recommendedHelpers'][kind]
+            binding = next(b for b in candidate['helperBindings'] if b['componentID'] == identity)
+            binding['profileIDs'].append('d3dmetal-wine11.22mg1.0-gptk4.0b3')
+            with self.assertRaisesRegex(ValueError, 'ABI-specific'):
+                module.validate(candidate, self.baseline)
 
     def test_rejects_identity_reuse_and_unknown_profile(self):
         for mutate in [lambda c: c["manifest"]["components"][0].update(size=1),

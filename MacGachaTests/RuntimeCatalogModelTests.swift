@@ -394,6 +394,8 @@ import RuntimeManager
     }
 }
 
+private final class CatalogModelResources {}
+
 private struct CatalogModelFixture: Sendable {
     let paths: AppPaths
     let baseline: RuntimeManifest
@@ -403,7 +405,9 @@ private struct CatalogModelFixture: Sendable {
     let model: AppModel
     @MainActor static func make() async throws -> Self {
         let paths = AppPaths(root: FileManager.default.temporaryDirectory.appendingPathComponent("catalog-model-\(UUID().uuidString)"))
-        let baseline = try await BundledRuntimeManifest.load()
+        // This helper-revision scenario retains the historical Wine 11.20 ABI.
+        let resource = try #require(Bundle(for: CatalogModelResources.self).url(forResource: "runtime-catalog-r3", withExtension: "json"))
+        let baseline = try JSONDecoder().decode(RuntimeCatalog.self, from: Data(contentsOf: resource)).manifest
         let old = try #require(baseline.components.first { $0.id.rawValue == SurroundAudio.componentID })
         var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])
         object["id"] = "surround-audio-wine-11.20-4"; object["version"] = "wine-11.20-4"
@@ -412,7 +416,7 @@ private struct CatalogModelFixture: Sendable {
         var recommended = base.recommendedHelpers; recommended[.surroundAudio] = revision3.id
         let catalog = RuntimeCatalog(revision: 1, manifest: try RuntimeManifest(components: baseline.components + [revision3], bundles: baseline.bundles),
             bundleBindings: base.bundleBindings,
-            helperBindings: base.helperBindings + [.init(componentID: revision3.id, profileIDs: try SurroundAudio.bundleIDs.sorted().map(SafeIdentifier.init))],
+            helperBindings: base.helperBindings + [.init(componentID: revision3.id, profileIDs: try SurroundAudio.profiles(for: SurroundAudio.componentID).sorted().map(SafeIdentifier.init))],
             recommendedBundles: base.recommendedBundles, recommendedHelpers: recommended)
         let metadata = try JSONEncoder().encode(catalog), services = FakeRuntimeServices()
         services.state.withLock { $0.accepted = true }

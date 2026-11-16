@@ -63,7 +63,8 @@ enum RuntimeSetupItemState {
         #if DEBUG
         if debugLaunchRuntimesReady { return [] }
         #endif
-        guard GameDefinition.find(gameID) != nil, let manifest = dependencySetupTarget(for: gameID)?.manifest ?? effectiveRuntimeManifest,
+        let setupTarget = dependencySetupTarget(for: gameID)
+        guard GameDefinition.find(gameID) != nil, let manifest = setupTarget?.manifest ?? effectiveRuntimeManifest,
             let bundle = manifest.defaultBundle(for: launchSettings(for: gameID).backend) else { return nil }
         var result: [RuntimeSetupRequirement] = []
         if installedBundles[bundle.id.rawValue] == nil {
@@ -75,15 +76,23 @@ enum RuntimeSetupItemState {
         var settings = launchSettings(for: gameID)
         // Launch ignores an unconfirmed Genshin unlock, so setup must not ask for its helper.
         if GenshinFps.applies(to: gameID) && !genshinFpsRiskAcknowledged { settings.unlockFPS = false }
-        let required = LaunchResolver.requiredComponents(recipe: recipe, settings: settings,
-            runtimeBundleID: runtimeProfile(for: settings.backend))
+        let profile = setupTarget?.profile(for: bundle.id)?.rawValue ?? runtimeProfile(for: settings.backend)
+        var required = LaunchResolver.requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: profile)
+        // Activation also changes installed paired helpers used by other games.
+        // Absent optional preferences remain outside the installation plan.
+        if setupTarget != nil, let update = dependencyConsentTargets[settings.backend] {
+            for helper in update.helperUpdates {
+                guard let kind = helper.kind else { return nil }
+                if !required.contains(kind) { required.append(kind) }
+            }
+        }
         // Keep the ABI-specific Wine correction beside its bundle, before optional wrappers.
         let scoped: Set<ComponentKind> = [.crypt32Fix, .surroundAudio, .genshinFps]
         let kinds = required.filter { scoped.contains($0) } + required.filter { !scoped.contains($0) }
         for kind in kinds {
             guard let component = manifest.components.first(where: {
                 $0.kind == kind && (kind != .crypt32Fix || runtimeCatalog != nil || $0.id.rawValue == Crypt32Fix.componentID)
-                    && (kind != .surroundAudio || runtimeCatalog != nil || $0.id.rawValue == SurroundAudio.componentID)
+                    && (kind != .surroundAudio || runtimeCatalog != nil || $0.id.rawValue == SurroundAudio.recommendedComponentID(for: profile))
                     && (kind != .genshinFps || runtimeCatalog != nil || $0.id.rawValue == GenshinFps.componentID)
             }) else { return nil }
             if !installed.contains(where: { $0.kind == kind && $0.version == component.version.rawValue }) {

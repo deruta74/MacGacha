@@ -137,12 +137,10 @@ public actor RuntimeCatalogService {
         await acquire(); defer { release() }
         try Task.checkCancellation()
         let previous = try await loaded()
-        guard installedBundleIDs.contains(id), let bundle = previous.catalog.manifest.bundles.first(where: { $0.id == id }) else {
+        guard installedBundleIDs.contains(id) else {
             throw catalogError("Selected bundle is not verified installed")
         }
-        var selections = previous.selections
-        selections.bundles[bundle.backend] = RuntimeCatalogSelection(id: id, pinned: pinned)
-        return try await publish(RuntimeCatalogSnapshot(catalog: previous.catalog, selections: selections, contract: contract))
+        return try await publish(previous.selectingBundle(id: id, pinned: pinned))
     }
 
     @discardableResult public func selectHelper(id: SafeIdentifier, pinned: Bool,
@@ -211,7 +209,8 @@ public actor RuntimeCatalogService {
         for backend in selections.bundles.keys {
             if let recommended = selections.bundles[backend], !installedBundleIDs.contains(recommended.id),
                 let working = contract.baseline.manifest.bundles.first(where: { $0.backend == backend && installedBundleIDs.contains($0.id) }) {
-                selections.bundles[backend] = RuntimeCatalogSelection(id: working.id)
+                let current = try RuntimeCatalogSnapshot(catalog: contract.baseline, selections: selections, contract: contract)
+                selections = try current.selectingBundle(id: working.id, pinned: false).selections
             }
         }
         for kind in selections.helpers.keys {

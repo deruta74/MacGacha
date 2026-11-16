@@ -26,15 +26,17 @@ private final class SurroundHelper: GameModeProviding, Sendable {
 }
 
 @Suite(.timeLimit(.minutes(1))) struct SurroundLaunchTests {
-    @Test func reattachmentKeepsCapturedAudioHelperAndRebuildsPins() async throws {
+    @Test(arguments: [SurroundAudio.bundleID, SurroundAudio.wine1122BundleID])
+    func reattachmentKeepsCapturedAudioHelperAndRebuildsPins(bundleID: String) async throws {
         let f = try await ManagerFixture.make(), game = GameDefinition.find("genshin")!
+        let componentID = try #require(SurroundAudio.recommendedComponentID(for: bundleID))
         let helper = f.paths.runtimes.appendingPathComponent("GameMode/audio/genshin/genshin.app/Contents")
         try await BlockingIO.run {
             var settings = LaunchSettings.defaults(for: game.id); settings.surroundSound = true
             let session = LaunchSession(sessionID: UUID(), game: game.id, installRoot: f.installRoot,
                 installIdentity: try ContainedFileSystem(root: f.installRoot).rootIdentity(), prefix: f.prefix,
-                bundleID: SurroundAudio.bundleID, runtimeDigest: f.bundle.digest, wineBinary: helper.appendingPathComponent("MacOS/wine-wrapper"),
-                wineserver: helper.appendingPathComponent("bin/wineserver"), componentIDs: ["wine-a", SurroundAudio.componentID],
+                bundleID: bundleID, runtimeDigest: f.bundle.digest, wineBinary: helper.appendingPathComponent("MacOS/wine-wrapper"),
+                wineserver: helper.appendingPathComponent("bin/wineserver"), componentIDs: ["wine-a", componentID],
                 recipeVersion: 1, settings: settings, state: .running, processes: [f.gameProcess.identity], gameExecutable: try SafeRelativePath("StarRail.exe"),
                 bootSessionUUID: ManagerFixture.bootSessionUUID, sessionStartTime: ManagerFixture.sessionStartTime)
             try LaunchJournal(paths: f.paths).write(session)
@@ -44,13 +46,13 @@ private final class SurroundHelper: GameModeProviding, Sendable {
         let provider = SurroundHelper(paths: f.paths, failure: "prepare"), manager = f.manager(gameMode: provider)
         #expect(await manager.reattachAll().count == 1)
         #expect(provider.requests.withLock { $0.isEmpty })
-        #expect(throws: (any Error).self) { _ = try RuntimeStore.componentLocks(paths: f.paths, componentIDs: [SurroundAudio.componentID], mode: .exclusive) }
+        #expect(throws: (any Error).self) { _ = try RuntimeStore.componentLocks(paths: f.paths, componentIDs: [componentID], mode: .exclusive) }
         let journal = try #require(try await BlockingIO.run { try LaunchJournal(paths: f.paths).read(game: game.id) })
         #expect(journal.wineBinary == helper.appendingPathComponent("MacOS/wine-wrapper"))
         #expect(journal.settings.surroundSound)
         try await f.end(manager)
         await manager.waitForSupervision(game: game.id)
-        _ = try RuntimeStore.componentLocks(paths: f.paths, componentIDs: [SurroundAudio.componentID], mode: .exclusive)
+        _ = try RuntimeStore.componentLocks(paths: f.paths, componentIDs: [componentID], mode: .exclusive)
     }
 
     @Test(arguments: [false, true], ["none", "prepare", "validate", "overlay", "missingComponent"])

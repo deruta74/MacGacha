@@ -13,6 +13,36 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WineReleaseTests(unittest.TestCase):
+    def test_wine1122_mapping_never_relabels_historical_release_or_accepts_paths(self):
+        spec = importlib.util.spec_from_file_location('release', ROOT / 'scripts/prepare-wine-release.py')
+        release = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(release)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); candidate = root / 'candidate'; candidate.mkdir()
+            runtime = candidate / 'wine'; (runtime / 'bin').mkdir(parents=True)
+            (runtime / 'bin/wine').write_text('wrapper')
+            (runtime / 'bin/wine.real').write_bytes(b'loader')
+            sources = candidate / 'source-inputs'; sources.mkdir()
+            (sources / 'upstream.tar.xz').write_bytes(b'official source')
+            receipt = dict(version='11.22-candidate', entries=release.build.inventory(runtime),
+                           sourceInputEntries=release.build.inventory(sources))
+            (candidate / 'receipt.json').write_text(json.dumps(receipt))
+            archive = candidate / '11.22-candidate.tar.xz'
+            release.build.archive(runtime, archive)
+            expected = release.build.sha(archive)
+            name = 'wine-11.22-macgacha-1.0'
+            release.prepare(candidate, root / 'release', expected, name=name)
+            self.assertEqual((root / 'release' / (name + '.tar.xz')).read_bytes(), archive.read_bytes())
+            self.assertFalse((root / 'release/wine-11.20-macgacha-1.0.tar.xz').exists())
+            with tarfile.open(root / 'release' / (name + '-sources.tar.xz')) as source_archive:
+                mapping = json.load(source_archive.extractfile('sources/RELEASE-MAPPING.json'))
+                self.assertEqual(mapping['release'], name)
+                self.assertEqual(mapping['sha256'], expected)
+            for bad in ['../wine', '/tmp/wine', 'wine-11.22/escape']:
+                with self.assertRaises(ValueError):
+                    release.prepare(candidate, root / 'bad', expected, name=bad)
+                self.assertFalse((root / 'bad').exists())
+
     def test_maps_qualified_bytes_and_retains_complete_sources(self):
         spec = importlib.util.spec_from_file_location('release', ROOT / 'scripts/prepare-wine-release.py')
         release = importlib.util.module_from_spec(spec)

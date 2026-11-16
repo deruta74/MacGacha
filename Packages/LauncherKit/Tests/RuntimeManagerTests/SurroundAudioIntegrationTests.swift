@@ -7,16 +7,27 @@ import DownloadEngine
 import RuntimeManager
 import TestSupport
 
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["MACGACHA_SURROUND_AUDIO_BUILD"] != nil))
 struct SurroundAudioIntegrationTests {
-    @Test(.timeLimit(.minutes(3))) func verifiesInstallsAndLoadsBuiltModuleWithoutWine() async throws {
-        let built = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["MACGACHA_SURROUND_AUDIO_BUILD"]))
+    @Test(.timeLimit(.minutes(3)), .enabled(if: ProcessInfo.processInfo.environment["MACGACHA_SURROUND_AUDIO_BUILD"] != nil))
+    func verifiesInstallsAndLoadsBuiltModuleWithoutWine() async throws {
+        try await verify(variable: "MACGACHA_SURROUND_AUDIO_BUILD", id: SurroundAudio.componentID,
+            archive: "surround-audio-wine-11.20-2.zip", checker: "check-surround-audio.py")
+    }
+
+    @Test(.timeLimit(.minutes(3)), .enabled(if: ProcessInfo.processInfo.environment["MACGACHA_SURROUND_AUDIO_1122_BUILD"] != nil))
+    func verifiesInstallsAndLoads1122ModuleWithoutWine() async throws {
+        try await verify(variable: "MACGACHA_SURROUND_AUDIO_1122_BUILD", id: SurroundAudio.wine1122ComponentID,
+            archive: "surround-audio-wine-11.22-1.zip", checker: "check-surround-audio-1122.py")
+    }
+
+    private func verify(variable: String, id: String, archive: String, checker: String) async throws {
+        let built = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment[variable]))
         var repository = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { repository.deleteLastPathComponent() }
         let manifest = try RuntimeManifest.load(from: repository.appendingPathComponent("App/Resources/runtime-manifest.json"))
-        let component = try #require(manifest.components.first { $0.id.rawValue == SurroundAudio.componentID })
+        let component = try #require(manifest.components.first { $0.id.rawValue == id })
         let buildFS = try ContainedFileSystem(root: built)
-        let bytes = try buildFS.readFile(at: SafeRelativePath("surround-audio-wine-11.20-2.zip"),
+        let bytes = try buildFS.readFile(at: SafeRelativePath(archive),
             maxBytes: Int(try #require(component.size)))
         var hash = StreamingHasher(.sha256); hash.update(bytes)
         #expect(Int64(bytes.count) == component.size && hash.finalize() == component.sha256)
@@ -33,7 +44,7 @@ struct SurroundAudioIntegrationTests {
         // This script checks exports and dlopen with abort-only ntdll stubs.
         // It never loads ntdll or invokes a Wine entry point, game or audio device.
         let result = try await SystemProcessRunner().run(URL(fileURLWithPath: "/usr/bin/python3"),
-            arguments: ["-I", repository.appendingPathComponent("scripts/check-surround-audio.py").path, built.path],
+            arguments: ["-I", repository.appendingPathComponent("scripts/\(checker)").path, built.path],
             environment: [:], currentDirectory: nil)
         #expect(result.exitCode == 0, "\(String(decoding: result.stdout + result.stderr, as: UTF8.self))")
         try store.remove(try #require(store.installed().first))

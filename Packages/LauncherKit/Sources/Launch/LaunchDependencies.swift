@@ -67,7 +67,7 @@ public struct LiveLaunchRuntimes: LaunchRuntimeProviding {
                 if let current {
                     guard current.helper(kind: component.kind, for: definition.id)?.id == component.id else { continue }
                 } else if ![ComponentKind.jadeite, .steamShim].contains(component.kind) &&
-                    ![Crypt32Fix.componentID, SurroundAudio.componentID, GenshinFps.componentID].contains(component.id.rawValue) { continue }
+                    ![Crypt32Fix.componentID, SurroundAudio.recommendedComponentID(for: definition.id.rawValue), GenshinFps.componentID].contains(component.id.rawValue) { continue }
                 if records.contains(where: { $0.kind == component.kind && $0.version == component.version.rawValue }) {
                     roots[component.kind] = store.installURL(for: component); ids[component.kind] = component.id.rawValue
                 }
