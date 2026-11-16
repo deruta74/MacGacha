@@ -8,6 +8,7 @@ import SwiftUI
 struct StorageView: View {
     @Environment(AppModel.self) private var model
     @State private var confirming: StorageCleanupCandidate?
+    @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -88,8 +89,9 @@ struct StorageView: View {
             #if DEBUG
             if UserDefaults.standard.bool(forKey: "MacGachaDebugStorage") { return }
             #endif
-            refresh()
+            await scan()
         }
+        .onDisappear { refreshTask?.cancel() }
         .confirmationDialog(confirming.map(title) ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
             presenting: confirming) { candidate in
             Button("Remove \(ByteSize.text(candidate.bytes))", role: .destructive) {
@@ -103,11 +105,16 @@ struct StorageView: View {
         }
     }
 
+    /// The walk can take a while on big drives, so a manual refresh replaces the previous one
+    /// and closing the panel stops it instead of leaving it running in the background.
     private func refresh() {
-        Task {
-            do { try await model.refreshStorage() }
-            catch { if launcherError(error) != .cancelled { model.show(error) } }
-        }
+        refreshTask?.cancel()
+        refreshTask = Task { await scan() }
+    }
+
+    private func scan() async {
+        do { try await model.refreshStorage() }
+        catch { if launcherError(error) != .cancelled { model.show(error) } }
     }
 
     /// Editions with nothing on disk would only add rows of zeros.
