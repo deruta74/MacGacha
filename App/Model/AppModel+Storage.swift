@@ -35,9 +35,19 @@ import Launch
     }
 
     func cleanUp(_ candidate: StorageCleanupCandidate) async throws {
-        guard !isBusyForUpdates, canBeginGameOrRuntimeOperation(),
-            storage?.candidates.contains(candidate) == true else { throw LauncherError.busy("Storage cleanup unavailable") }
-        if let id = candidate.runtimeID {
+        try await cleanUp([candidate])
+    }
+
+    /// Removes the given items from the current inventory under one reservation and one
+    /// final inventory refresh. Each item is still validated freshly before removal. An item
+    /// that an earlier removal already took away (a component of a removed bundle) is skipped,
+    /// a failed item doesn't stop the rest, and the first failure is thrown at the end.
+    /// Cancellation stops before the next item.
+    func cleanUp(_ candidates: [StorageCleanupCandidate]) async throws {
+        guard !candidates.isEmpty, !isBusyForUpdates, canBeginGameOrRuntimeOperation(),
+            let listed = storage?.candidates, candidates.allSatisfy(listed.contains)
+        else { throw LauncherError.busy("Storage cleanup unavailable") }
+        for id in candidates.compactMap(\.runtimeID) {
             guard canRemoveRuntime(id) else { throw LauncherError.busy("Runtime removal unavailable") }
         }
         // Publish before the first await, through deletion, provider invalidation
@@ -46,7 +56,7 @@ import Launch
         storageRefreshGeneration = UUID(); isRefreshingStorage = false
         defer { storageCleanupInProgress = false; scheduleDependencyAutoUpdates() }
         let context = storageContext
-        if candidate.kind == .inactiveRegionCache {
+        if candidates.contains(where: { $0.kind == .inactiveRegionCache }) {
             // Existing providers own their network/disk tasks. Join every reader
             // before deleting and prevent new hydration/refresh while reserved.
             for task in artTasks.values { await task.value }
@@ -54,33 +64,46 @@ import Launch
             for task in eventsTasks.values { await task.value }
             await eventsHydrationTask?.value
         }
-        try Task.checkCancellation()
         var failure: (any Error)?
-        do {
-            if let id = candidate.runtimeID {
-                try await persistRuntimeCatalogSelection()
-                try await storageService.validateRuntimeCandidate(candidate, context: storageContext)
-                if let manifest = effectiveRuntimeManifest, let bundle = manifest.bundles.first(where: { $0.id.rawValue == id }) {
-                    try await services.remove(bundle, manifest: manifest)
-                } else if let component = installed.first(where: { "\($0.kind.idPrefix)-\($0.version)" == id }) {
-                    try await services.remove(component)
-                } else { throw LauncherError.busy("Runtime is no longer installed") }
-                try await scanAndApply()
-            } else {
-                try await storageService.cleanUp(candidate, context: context)
+        var freed: Int64 = 0
+        for candidate in candidates {
+            do {
+                try Task.checkCancellation()
+            } catch { failure = failure ?? LauncherError.cancelled; break }
+            do {
+                if let id = candidate.runtimeID {
+                    let isBundle = effectiveRuntimeManifest?.bundles.contains { $0.id.rawValue == id } == true
+                    let component = installed.first { "\($0.kind.idPrefix)-\($0.version)" == id }
+                    // Removing a bundle may already have taken one of the listed components.
+                    if candidates.count > 1, !isBundle, component == nil { continue }
+                    try await persistRuntimeCatalogSelection()
+                    try await storageService.validateRuntimeCandidate(candidate, context: storageContext)
+                    if let manifest = effectiveRuntimeManifest, let bundle = manifest.bundles.first(where: { $0.id.rawValue == id }) {
+                        try await services.remove(bundle, manifest: manifest)
+                    } else if let component {
+                        try await services.remove(component)
+                    } else { throw LauncherError.busy("Runtime is no longer installed") }
+                    try await scanAndApply()
+                } else {
+                    try await storageService.cleanUp(candidate, context: context)
+                }
+                freed += candidate.bytes
+            } catch {
+                failure = failure ?? error
+                if launcherError(error) == .cancelled { break }
             }
-        } catch { failure = error }
-        // Deletion can fail or be cancelled after removing a subset of a cache.
-        // Release stale provider URLs even in that case, then reconcile totals.
-        if let inactive = candidate.region {
-            await artServices[inactive]?.invalidateStorageCache()
-            await eventsServices[inactive]?.invalidateStorageCache()
-            applyArt([:], in: inactive); applyEvents([:], in: inactive)
-            artHydrationTasks[inactive] = nil
+            // Deletion can fail or be cancelled after removing a subset of a cache.
+            // Release stale provider URLs even in that case, then reconcile totals.
+            if let inactive = candidate.region {
+                await artServices[inactive]?.invalidateStorageCache()
+                await eventsServices[inactive]?.invalidateStorageCache()
+                applyArt([:], in: inactive); applyEvents([:], in: inactive)
+                artHydrationTasks[inactive] = nil
+            }
         }
-        if failure == nil {
+        if freed > 0 {
             let log = EventLog(directory: paths.logs)
-            log.post(.info, "storage", "Storage cleanup completed", metadata: ["bytes": String(candidate.bytes)])
+            log.post(.info, "storage", "Storage cleanup completed", metadata: ["bytes": String(freed)])
         }
         do { try await refreshStorage() }
         catch { if failure == nil { throw error } }
