@@ -10140,6 +10140,89 @@
         }
       }
     },
+    "Download %@ before the update is released. The installed version stays playable, and on release day the update installs from these files." : {
+      "comment" : "One-time hint over the pre-download button; the argument is the download size",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lade %@ herunter, bevor das Update erscheint. Die installierte Version bleibt spielbar, und am Erscheinungstag wird das Update aus diesen Dateien installiert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descarga %@ antes de que salga la actualización. La versión instalada sigue siendo jugable y, el día del lanzamiento, la actualización se instala con estos archivos."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Téléchargez %@ avant la sortie de la mise à jour. La version installée reste jouable, et le jour de la sortie la mise à jour s’installe à partir de ces fichiers."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unduh %@ sebelum pembaruan dirilis. Versi yang terpasang tetap bisa dimainkan, dan pada hari rilis pembaruan dipasang dari file ini."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップデートの公開前に %@ をダウンロードします。インストール済みのバージョンはそのまま遊べ、公開日にはこのファイルからアップデートがインストールされます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "업데이트가 공개되기 전에 %@를 미리 내려받습니다. 설치된 버전은 계속 플레이할 수 있으며, 공개일에는 이 파일로 업데이트가 설치됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Baixe %@ antes do lançamento da atualização. A versão instalada continua jogável e, no dia do lançamento, a atualização é instalada a partir desses arquivos."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузите %@ до выхода обновления. Установленная версия остаётся доступной для игры, а в день выхода обновление установится из этих файлов."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ดาวน์โหลด %@ ก่อนที่อัปเดตจะเปิดให้บริการ เวอร์ชันที่ติดตั้งไว้ยังเล่นได้ตามปกติ และในวันที่อัปเดตออกจะติดตั้งจากไฟล์เหล่านี้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Завантажте %@ до виходу оновлення. Встановлена версія залишається доступною для гри, а в день виходу оновлення встановиться з цих файлів."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tải %@ trước khi bản cập nhật phát hành. Phiên bản đã cài vẫn chơi được bình thường, và vào ngày phát hành bản cập nhật sẽ được cài từ các tệp này."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在更新发布前下载 %@。已安装的版本仍可正常游玩，更新发布当天将使用这些文件安装。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在更新發布前下載 %@。已安裝的版本仍可正常遊玩，更新發布當天將使用這些檔案安裝。"
+          }
+        }
+      }
+    },
     "Download speed" : {
       "localizations" : {
         "de" : {
@@ -23387,6 +23470,89 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "預先下載"
+          }
+        }
+      }
+    },
+    "Pre-download %@ is available" : {
+      "comment" : "One-time hint over the pre-download button",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorab-Download von %@ verfügbar"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Predescarga de la versión %@ disponible"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pré-téléchargement de la version %@ disponible"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pra-unduh %@ tersedia"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ の事前ダウンロードが利用可能"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 사전 다운로드 가능"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pré-download da versão %@ disponível"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Доступна предзагрузка %@"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ดาวน์โหลดล่วงหน้า %@ ได้แล้ว"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Доступне попереднє завантаження %@"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Có thể tải trước %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 版本可进行预下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 版本可進行預先下載"
           }
         }
       }
