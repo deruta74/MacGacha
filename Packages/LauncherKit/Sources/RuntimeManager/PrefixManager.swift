@@ -5,10 +5,10 @@ import LauncherCore
 import DownloadEngine
 
 public struct PrefixManager: Sendable {
-    private let paths: AppPaths
+    let paths: AppPaths
     private let runner: any ProcessRunner
-    private let inspector: any ProcessInspector
-    private let serverProbe: WineServerProbe
+    let inspector: any ProcessInspector
+    let serverProbe: WineServerProbe
 /// Storage cleanup owns the edition's session lock and this prefix's sibling
 /// preparation lock. Confirm kernel process/server idleness before removing it.
 package func removeStoragePrefix(at path: SafeRelativePath) throws {
@@ -70,6 +70,7 @@ package func removeStoragePrefix(at path: SafeRelativePath) throws {
             let fs = try ContainedFileSystem(root: paths.root)
             let lock = try await Self.acquireLock(fs: fs, prefix: prefix)
             defer { withExtendedLifetime(lock) {} }
+            try sweepRetiredPrefix(for: prefix, fs: fs)
             try fs.createDirectory(at: prefix)
             // Validate every Prefixes ancestor immediately before crossing the process boundary.
             _ = try fs.directoryURL(at: prefix)

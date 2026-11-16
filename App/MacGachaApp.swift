@@ -48,6 +48,7 @@ struct MacGachaApp: App {
 /// Confirmation presentation belongs to the app's view layer. Scheduling it
 /// after returning terminateLater also supports a synchronous default hook.
 @MainActor final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
+    weak var dockModel: AppModel?
     var retryRecoveries: () -> Void = {}
     var liveGameName: () -> String? = { nil }
     var catalogPublication: () -> Task<Void, Never>? = { nil }
@@ -57,6 +58,7 @@ struct MacGachaApp: App {
     var replyToTermination: (Bool) -> Void = { NSApp.reply(toApplicationShouldTerminate: $0) }
 
     func bind(_ model: AppModel) {
+        dockModel = model
         retryRecoveries = { [weak model] in model?.retryRecoveriesOnActivation() }
         liveGameName = { [weak model] in model?.liveSessionGameName }
         catalogPublication = { [weak model] in model?.catalogMutationTask }

@@ -107,7 +107,7 @@ struct RuntimeInstallContext: Sendable {
         runtimeInstallContexts[id] = RuntimeInstallContext(component: component, bundle: bundle, manifest: captured)
     }
     var canChangeRuntimeCatalog: Bool {
-        !storageCleanupInProgress && !isStarting && !runtimeCatalogUnavailable && runtimeCatalogMutationID == nil &&
+        !storageCleanupInProgress && prefixResetGame == nil && !isStarting && !runtimeCatalogUnavailable && runtimeCatalogMutationID == nil &&
             launchSlotOwner == nil && liveLaunchGames.isEmpty && launchStartupError == nil &&
             !launchStates.values.contains { if case .recoveryNeeded = $0 { true } else { false } } &&
             !isRuntimeOperationRunning && !isGameOperationRunning && consentRequest == nil && importState == nil &&
@@ -131,7 +131,7 @@ struct RuntimeInstallContext: Sendable {
     func canRemoveRuntime(_ id: String) -> Bool {
         // Keep the preference and pin when an idle user confirms removal. A
         // later Set Up reinstalls that exact version instead of switching it.
-        !dependencyAutoUpdateReservation && (catalogAccess == nil || canChangeRuntimeCatalog)
+        prefixResetGame == nil && !dependencyAutoUpdateReservation && (catalogAccess == nil || canChangeRuntimeCatalog)
     }
     func runtimeVersionTarget(_ id: String, pinned: Bool? = nil) throws -> RuntimeCatalogSnapshot {
         guard let current = runtimeCatalog else { throw LauncherError.io("Runtime catalog unavailable") }

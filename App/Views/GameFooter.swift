@@ -649,6 +649,16 @@ struct GameMenu: View {
                 Button("Move…", systemImage: "folder.badge.gearshape") { choosingMoveFolder = true }
                     .disabled(!model.canMoveGame(game.id))
             }
+            // Read-only, so it stays available while the game runs or another game downloads.
+            if isInstalled, model.offersScreenshots(for: game.id) {
+                // Looked up when the menu opens: the game creates the folder with the first screenshot.
+                let folder = model.screenshotsURL(for: game.id)
+                Button(model.screenshotsMenuTitle, systemImage: "photo.on.rectangle") {
+                    if let folder { NSWorkspace.shared.open(folder) }
+                }
+                .disabled(folder == nil)
+                .help(folder == nil ? model.screenshotsHelp : "")
+            }
             // Hidden while the drive is away: Finder can't reveal an unmounted folder.
             if let folder = model.gameLocationURL(for: game.id) {
                 Button("Show in Finder", systemImage: "folder") {

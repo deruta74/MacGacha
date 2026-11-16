@@ -33,6 +33,11 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
         }
     }
     public var dataDirectoryName: String { String(executableName.dropLast(4)) + "_Data" }
+    /// In-game camera output, relative to the installation root in both regions.
+    public var screenshotsPath: SafeRelativePath {
+        // Fixed registry literals are validated once at their use boundary.
+        try! SafeRelativePath(family == .starrail ? "StarRail_Data/ScreenShots" : "ScreenShot")
+    }
     /// Folder names are edition identities, independent of the interface language.
     public var defaultInstallDirectoryName: String {
         switch (family, region) {
