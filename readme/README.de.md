@@ -16,7 +16,7 @@ Ein nativer macOS-Launcher für **Genshin Impact**, **Honkai: Star Rail** und **
 
 Code und Dokumentation in diesem Repository können mithilfe großer Sprachmodelle (LLMs) und KI-Agenten geschrieben oder geändert werden. Die Software wird unter der [GPL-3.0-Lizenz](../LICENSE) im vorliegenden Zustand und ohne Gewährleistung bereitgestellt.
 
-Genshin Impact und Zenless Zone Zero verwenden für Global und Festlandchina ein Windows-11-Profil in Wine. Bestehende Präfixe werden vor dem Start automatisch aktualisiert. Die Startkorrektur wurde mit Global Genshin 7.2 unter DXMT und D3DMetal sowie Global ZZZ 3.3 unter D3DMetal geprüft. Das Spielen der chinesischen Versionen ist noch nicht verifiziert.
+Genshin Impact und Zenless Zone Zero verwenden für Global und Festlandchina ein Windows-11-Profil in Wine. Bestehende Präfixe werden vor dem Start automatisch aktualisiert. Die Startkorrektur wurde mit Global Genshin 7.2 unter DXMT und D3DMetal sowie Global ZZZ 3.3 unter D3DMetal geprüft. Ein Tester hat Genshin 7.2 aus Festlandchina mit D3DMetal und einem Festlandkonto gespielt. Das Spielen von ZZZ aus Festlandchina ist noch nicht verifiziert.
 
 ## Installation
 
@@ -93,7 +93,7 @@ DXMT funktioniert mit jedem Spiel und bleibt als Open-Source-Alternative verfüg
 
 **In Arbeit**
 
-- **Versionen für Festlandchina (Beta).** Ein Regionsschalter in den Einstellungen zeigt 原神, 崩坏：星穹铁道 und 绝区零 mit eigenen Installationen, Präfixen und Einstellungen. 绝区零 lässt sich von den miHoYo-Servern installieren und läuft mit unserem [Wine-crypt32-Fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1) über den Anmeldebildschirm hinaus. 原神 und 崩坏：星穹铁道 müssen noch im Spiel getestet werden. Die Anmeldung wurde bei keiner Festlandchina-Version geprüft. Tester mit entsprechenden Konten sind willkommen.
+- **Versionen für Festlandchina (Beta).** Ein Regionsschalter in den Einstellungen zeigt 原神, 崩坏：星穹铁道 und 绝区零 mit eigenen Installationen, Präfixen und Einstellungen. 绝区零 lässt sich von den miHoYo-Servern installieren und läuft mit unserem [Wine-crypt32-Fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1) über den Anmeldebildschirm hinaus. Ein Tester hat sich in 原神 7.2 mit D3DMetal angemeldet und gespielt. 崩坏：星穹铁道 muss noch im Spiel getestet werden, und die Anmeldung in 绝区零 wurde nicht geprüft. Tester mit entsprechenden Konten sind willkommen.
 - **Neustart nach einem Hotfix innerhalb von Star Rail.** Im bislang einzigen Test startete das Spiel ohne sein Anmeldefenster neu. Nach einem erneuten Start über MacGacha funktionierte die Anmeldung wie gewohnt.
 - **Veröffentlichungstag mit vorzeitigem Herunterladen**, der noch mit der nächsten Spielversion von Anfang bis Ende getestet werden muss.
 

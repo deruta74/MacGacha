@@ -16,7 +16,7 @@ A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenl
 
 Code and documentation in this repository may be written or modified with assistance from large language models (LLMs) and AI agents. The software is provided under the [GPL-3.0 license](LICENSE), as is, without warranty.
 
-Genshin Impact and Zenless Zone Zero use a Windows 11 Wine profile for Global and Mainland China. Existing prefixes are updated automatically before launch. This startup fix has been verified in Global Genshin 7.2 with DXMT and D3DMetal, and Global ZZZ 3.3 with D3DMetal. Mainland China gameplay remains unverified.
+Genshin Impact and Zenless Zone Zero use a Windows 11 Wine profile for Global and Mainland China. Existing prefixes are updated automatically before launch. This startup fix has been verified in Global Genshin 7.2 with DXMT and D3DMetal, and Global ZZZ 3.3 with D3DMetal. A tester played Mainland China Genshin 7.2 with D3DMetal on a mainland account. Mainland China ZZZ gameplay remains unverified.
 
 ## Install
 
@@ -91,7 +91,7 @@ All three games start and play with a community anti-cheat workaround. None of t
 DXMT works for every game and stays available as the open-source alternative. The 60 fps cap fixes uneven frame pacing in Star Rail and Genshin, and it can be changed per game.
 
 **In progress**
-- **Mainland China editions (beta).** A region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and runs past the login screen with our [Wine crypt32 fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 and 崩坏：星穹铁道 still need in-game testing, and login hasn't been tested on any mainland edition. Testers with mainland accounts are welcome.
+- **Mainland China editions (beta).** A region switch in Settings shows 原神, 崩坏：星穹铁道 and 绝区零 with their own installs, prefixes and settings. 绝区零 installs from the miHoYo servers and runs past the login screen with our [Wine crypt32 fix](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). A tester logged in and played 原神 7.2 with D3DMetal. 崩坏：星穹铁道 still needs in-game testing, and login on 绝区零 hasn't been tested. Testers with mainland accounts are welcome.
 - **Star Rail's in-game hotfix restart.** In the one test so far the game came back without its login window. Starting it again from MacGacha logged in normally.
 - **Release day with a pre-download**, which waits for the next game version to be tested end to end.
 
