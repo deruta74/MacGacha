@@ -16,7 +16,7 @@ Un lanceur macOS natif pour **Genshin Impact**, **Honkai: Star Rail** et **Zenle
 
 Le code et la documentation de ce dépôt peuvent être rédigés ou modifiés avec l’aide de grands modèles de langage (LLM) et d’agents d’IA. Le logiciel est fourni sous [licence GPL-3.0](../LICENSE), en l’état, sans garantie.
 
-Genshin Impact et Zenless Zone Zero utilisent un profil Windows 11 dans Wine pour Global et la Chine continentale. Les préfixes existants sont mis à jour automatiquement avant le lancement. Ce correctif a été vérifié avec Global Genshin 7.2 sous DXMT et D3DMetal, et Global ZZZ 3.3 sous D3DMetal. Le fonctionnement en jeu des versions chinoises reste à vérifier.
+Genshin Impact et Zenless Zone Zero utilisent un profil Windows 11 dans Wine pour Global et la Chine continentale. Les préfixes existants sont mis à jour automatiquement avant le lancement. Ce correctif a été vérifié avec Global Genshin 7.2 sous DXMT et D3DMetal, et Global ZZZ 3.3 sous D3DMetal. Un testeur a joué à Genshin 7.2 de Chine continentale avec D3DMetal et un compte de cette région. Le fonctionnement en jeu de ZZZ pour la Chine continentale reste à vérifier.
 
 ## Installation
 
@@ -93,7 +93,7 @@ DXMT fonctionne avec tous les jeux et reste disponible comme solution open sourc
 
 **En cours**
 
-- **Éditions pour la Chine continentale (bêta).** Un sélecteur de région dans les réglages affiche 原神, 崩坏：星穹铁道 et 绝区零 avec leurs propres installations, préfixes et réglages. 绝区零 s’installe depuis les serveurs miHoYo et fonctionne au-delà de l’écran de connexion grâce à notre [correctif Wine crypt32](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). 原神 et 崩坏：星穹铁道 doivent encore être testés en jeu, et la connexion au compte n’a été testée sur aucune édition de Chine continentale. Les testeurs disposant de comptes de cette région sont les bienvenus.
+- **Éditions pour la Chine continentale (bêta).** Un sélecteur de région dans les réglages affiche 原神, 崩坏：星穹铁道 et 绝区零 avec leurs propres installations, préfixes et réglages. 绝区零 s’installe depuis les serveurs miHoYo et fonctionne au-delà de l’écran de connexion grâce à notre [correctif Wine crypt32](https://github.com/deruta74/MacGacha/releases/tag/crypt32-fix-wine-11.20-1). Un testeur s’est connecté et a joué à 原神 7.2 avec D3DMetal. 崩坏：星穹铁道 doit encore être testé en jeu, et la connexion au compte n’a pas été testée sur 绝区零. Les testeurs disposant de comptes de cette région sont les bienvenus.
 - **Redémarrage après un correctif intégré à Star Rail.** Lors du seul test effectué jusqu’ici, le jeu a redémarré sans sa fenêtre de connexion. Le relancer depuis MacGacha a permis de se connecter normalement.
 - **Jour de sortie avec un pré-téléchargement**, qui reste à tester de bout en bout avec la prochaine version du jeu.
 
