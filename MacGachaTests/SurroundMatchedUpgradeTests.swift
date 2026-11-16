@@ -8,6 +8,74 @@ import RuntimeManager
 @testable import MacGacha
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct SurroundMatchedUpgradeTests {
+    @Test(arguments: ["starrail", "genshin", "genshin-cn", "zzz", "zzz-cn"], ["success", "failure", "cancel"])
+    func consentDrivenSetupIncludesPairedHelperWithoutGameOptIn(game: String, outcome: String) async throws {
+        let f = try await MatchedSurroundFixture.make()
+        var settings = f.model.launchSettings(for: game)
+        settings.backend = .d3dmetal; settings.surroundSound = false; settings.compatibilityPatches = false
+        f.model.launchSettingsCache[game] = settings
+        f.services.state.withLock { $0.accepted = false }
+        try await f.model.scanAndApply()
+        f.model.autoUpdateDependencies = true
+        await f.model.dependencyAutoUpdateTask?.value
+        let previous = try #require(f.model.runtimeCatalog)
+        let target = try #require(f.model.dependencySetupTarget(for: game))
+        // Neither the retired crypt32 correction nor the disabled FPS option
+        // changes selection with this Wine upgrade.
+        for kind in [ComponentKind.crypt32Fix, .genshinFps] {
+            #expect(target.selections.helpers[kind] == previous.selections.helpers[kind])
+        }
+        let plan = try #require(f.model.runtimeSetupPlan(for: game))
+        try #require(plan.items.map(\.id) == [f.new, SurroundAudio.wine1122ComponentID])
+        #expect(plan.needsAppleTerms)
+        let helper = try #require(f.manifest.components.first { $0.id.rawValue == SurroundAudio.wine1122ComponentID })
+        #expect(plan.items.last?.size == helper.size)
+        var events = f.services.installEvents.stream.makeAsyncIterator()
+        f.model.installRecommended(for: game)
+        try await waitForCatalogModel { f.model.consentRequest != nil }
+        f.model.respondToConsent(accept: true)
+        #expect(await events.next() == f.new)
+        try f.publishBundle(f.new); f.services.emit(.phase(.completed))
+        #expect(await events.next() == SurroundAudio.wine1122ComponentID)
+        #expect(f.model.runtimeCatalog?.selections == previous.selections)
+        if outcome == "success" {
+            try f.publishHelper(SurroundAudio.wine1122ComponentID); f.services.emit(.phase(.completed))
+        } else if outcome == "failure" { f.services.fail(.io("Synthetic helper failure")) }
+        else { f.model.cancelRuntimeSetup(for: game); f.services.emit(.phase(.cancelled)) }
+        try await waitForCatalogModel { f.model.runtimeCatalogMutationID == nil }
+        let persisted = try await f.model.catalogAccess?.snapshot()
+        #expect(persisted?.selections == (outcome == "success" ? target.selections : previous.selections))
+        #expect(f.services.snapshot.installs.count == 1)
+        if outcome == "success" { #expect(f.model.lastError == nil) }
+    }
+
+    @Test(arguments: [false, true])
+    func consentDrivenSetupDeduplicatesAndOmitsVerifiedPairedHelper(alreadyInstalled: Bool) async throws {
+        let f = try await MatchedSurroundFixture.make()
+        if alreadyInstalled { try f.publishHelper(SurroundAudio.wine1122ComponentID) }
+        f.services.state.withLock { $0.accepted = false }
+        try await f.model.scanAndApply()
+        f.model.autoUpdateDependencies = true
+        await f.model.dependencyAutoUpdateTask?.value
+        let plan = try #require(f.model.runtimeSetupPlan(for: "genshin"))
+        let helperItems = plan.items.filter { $0.id == SurroundAudio.wine1122ComponentID }
+        #expect(helperItems.count == (alreadyInstalled ? 0 : 1))
+    }
+
+    @Test func consentDrivenSetupDoesNotInstallUnusedHelperPreferences() async throws {
+        let f = try await MatchedSurroundFixture.make()
+        var settings = f.model.launchSettings(for: "starrail")
+        settings.backend = .d3dmetal; settings.compatibilityPatches = false
+        f.model.launchSettingsCache["starrail"] = settings
+        f.services.state.withLock { $0.accepted = false; $0.components = [] }
+        try await f.model.scanAndApply()
+        f.model.autoUpdateDependencies = true
+        await f.model.dependencyAutoUpdateTask?.value
+        let target = try #require(f.model.dependencySetupTarget(for: "starrail"))
+        #expect(target.selectedHelper(for: .surroundAudio)?.id.rawValue == SurroundAudio.wine1122ComponentID)
+        #expect(f.model.runtimeSetupPlan(for: "starrail")?.items.map(\.id) == [f.new])
+    }
+
     @Test(arguments: ["genshin", "genshin-cn", "zzz", "zzz-cn"])
     func enabledSurroundUpgradesWithMatchedModule(game: String) async throws {
         let f = try await MatchedSurroundFixture.make(game: game)
