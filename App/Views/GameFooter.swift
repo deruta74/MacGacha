@@ -61,20 +61,29 @@ struct GameFooter: View {
                 if let note = otherRegionNote {
                     OtherRegionNote(text: note.text) { model.region = note.region }
                 }
-                if showsPreDownload || playTime != nil {
+                if showsPreDownload {
+                    PreDownloadBar(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
+                }
+                if let installedVersion {
                     HStack(spacing: 8) {
-                        if let playTime { PlayTimeCapsule(summary: playTime) }
-                        if showsPreDownload {
-                            PreDownloadBar(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
+                        InfoCapsule(text: installedVersion, systemImage: nil)
+                            .accessibilityLabel(Text("Version \(installedVersion)", comment: "A dependency's version or build number, e.g. Version 11.0-1"))
+                        if let playTime {
+                            InfoCapsule(text: TimeText.duration(playTime.totalSeconds), systemImage: "clock")
+                                .help(TimeText.lastSession(playTime))
+                                .accessibilityLabel(Text(verbatim: TimeText.played(playTime.totalSeconds)))
+                                .accessibilityHint(Text(verbatim: TimeText.lastSession(playTime)))
                         }
                     }
                 }
+                let line = action == .progress && progressHovered ? state.progressDetail ?? statusLine : statusLine
+                if !line.isEmpty || launchLogAvailable {
                 HStack(spacing: 8) {
                     // Hovering the progress capsule swaps the hint for the numbers, as HoYoPlay does.
-                    Text(action == .progress && progressHovered ? state.progressDetail ?? statusLine : statusLine)
+                    Text(line)
                         .monospacedDigit()
                         .contentTransition(.opacity)
-                    if case .failed(let failure) = launch, failure.hasLog, model.sessionLogsEnabled {
+                    if launchLogAvailable {
                         Button("Open Log") { model.openLaunchLog(game.id) }
                             .buttonStyle(.link)
                             .underline()
@@ -83,6 +92,7 @@ struct GameFooter: View {
                 .font(.callout)
                 .foregroundStyle(.white.opacity(0.85))
                 .shadow(color: .black.opacity(0.4), radius: 3)
+                }
                 if let held = state.spaceShortage?.heldByMacOS {
                     PurgeableSpaceHint(bytes: held)
                         .foregroundStyle(.white.opacity(0.85))
@@ -164,13 +174,23 @@ struct GameFooter: View {
         }
     }
 
-    /// Play time shows beside an idle installed game only, never over progress or a launch.
-    private var playTime: PlayTimeSummary? {
-        guard launch == nil, let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 else { return nil }
+    /// The installed version, shown in a capsule beside an idle game only, never over progress or a launch.
+    private var installedVersion: String? {
+        guard launch == nil, state.activity == nil else { return nil }
         switch state.status {
-        case .installed, .updateAvailable: return state.activity == nil ? summary : nil
+        case .installed(let tag), .updateAvailable(let tag, _): return tag
         default: return nil
         }
+    }
+
+    private var playTime: PlayTimeSummary? {
+        guard let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 else { return nil }
+        return summary
+    }
+
+    private var launchLogAvailable: Bool {
+        if case .failed(let failure) = launch, failure.hasLog, model.sessionLogsEnabled { return true }
+        return false
     }
 
     /// The pre-download sits beside an installed game, never over another operation's progress.
@@ -228,8 +248,8 @@ struct GameFooter: View {
         switch model.gameUpdateCheck[game.id] {
         case .checking: return String(localized: "Checking for updates…")
         case .upToDate:
-            if case .installed(let tag) = state.status {
-                return String(localized: "Version \(tag) · Up to date", comment: "Game status after a manual update check; the argument is the game version")
+            if case .installed = state.status {
+                return String(localized: "Up to date", comment: "Game status after a manual update check")
             }
         case .failed(let error):
             return String(localized: "Couldn't check for updates: \(error.userMessage)", comment: "Manual game update check failed; the argument is the reason")
@@ -238,9 +258,10 @@ struct GameFooter: View {
         switch state.status {
         case .unknown: return String(localized: "Checking for updates…")
         case .notInstalled: return String(localized: "Not installed")
-        case .installed(let tag): return String(localized: "Version \(tag) · Installed", comment: "Game status; the argument is the game version")
-        case .updateAvailable(let from, let to):
-            return String(localized: "Version \(from) · Version \(to) is available", comment: "Game status: installed version, then the newer one")
+        // The version capsule and the Play button already say it.
+        case .installed: return ""
+        case .updateAvailable(_, let to):
+            return String(localized: "Version \(to) is available", comment: "Game status; the argument is the newer game version")
         case .paused:
             return state.spaceShortage == nil ? String(localized: "Paused") : String(localized: "Paused — Not enough free disk space")
         case .uninstallPaused: return String(localized: "Uninstall didn't finish")
@@ -678,7 +699,7 @@ struct GameMenu: View {
             Button("Uninstall…", systemImage: "trash", role: .destructive) { confirmingUninstall = true }
                 .disabled(model.isGameOperationRunning || isLive)
         } label: {
-            Image(systemName: "line.3.horizontal")
+            Image(systemName: "ellipsis")
                 .font(.title3)
                 .frame(width: 44, height: 44)
         }
@@ -810,21 +831,22 @@ struct OtherRegionNote: View {
     }
 }
 
-/// Total play time above Play. Hovering shows the last session.
-private struct PlayTimeCapsule: View {
-    let summary: PlayTimeSummary
+/// A quiet fact above Play, such as the installed version or the total play time.
+private struct InfoCapsule: View {
+    let text: String
+    let systemImage: String?
 
     var body: some View {
-        Label(TimeText.duration(summary.totalSeconds), systemImage: "clock")
-            .font(.callout)
-            .monospacedDigit()
-            .padding(.horizontal, 14)
-            .frame(height: 32)
-            .glassEffect(.regular, in: .capsule)
-            .foregroundStyle(.white)
-            .help(TimeText.lastSession(summary))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(verbatim: TimeText.played(summary.totalSeconds)))
-            .accessibilityHint(Text(verbatim: TimeText.lastSession(summary)))
+        HStack(spacing: 6) {
+            if let systemImage { Image(systemName: systemImage) }
+            Text(verbatim: text)
+        }
+        .font(.callout)
+        .monospacedDigit()
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .glassEffect(.regular, in: .capsule)
+        .foregroundStyle(.white)
+        .accessibilityElement(children: .ignore)
     }
 }

@@ -35168,6 +35168,89 @@
         }
       }
     },
+    "Up to date" : {
+      "comment" : "Game status after a manual update check",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuell"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actualizado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À jour"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terbaru"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "최신 상태"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Atualizado"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обновлений нет"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เป็นเวอร์ชันล่าสุด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Оновлень немає"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã cập nhật"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已是最新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已是最新"
+          }
+        }
+      }
+    },
     "Update" : {
       "localizations" : {
         "de" : {
@@ -36566,257 +36649,85 @@
         }
       }
     },
-    "Version %@ · Installed" : {
-      "comment" : "Game status; the argument is the game version",
+    "Version %@ is available" : {
+      "comment" : "Game status; the argument is the newer game version",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Version %@ · Installiert"
+            "value" : "Version %@ verfügbar"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Versión %@ · Instalado"
+            "value" : "Versión %@ disponible"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Version %@ · Installé"
+            "value" : "Version %@ disponible"
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Versi %@ · Terpasang"
+            "value" : "Versi %@ tersedia"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "バージョン %@ · インストール済み"
+            "value" : "バージョン %@ が利用可能"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "버전 %@ · 설치됨"
+            "value" : "버전 %@ 업데이트 가능"
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Versão %@ · Instalado"
+            "value" : "Versão %@ disponível"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Версия %@ · Установлено"
+            "value" : "Доступна версия %@"
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "เวอร์ชัน %@ · ติดตั้งแล้ว"
+            "value" : "มีเวอร์ชัน %@ ให้อัปเดต"
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Версія %@ · Встановлено"
+            "value" : "Доступна версія %@"
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Phiên bản %@ · Đã cài đặt"
+            "value" : "Đã có phiên bản %@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "版本 %@ · 已安装"
+            "value" : "可更新到版本 %@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "版本 %@ · 已安裝"
-          }
-        }
-      }
-    },
-    "Version %@ · Up to date" : {
-      "comment" : "Game status after a manual update check; the argument is the game version",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Version %@ · Aktuell"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Versión %@ · Actualizado"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Version %@ · À jour"
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Versi %@ · Terbaru"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "バージョン %@ · 最新です"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "버전 %@ · 최신 상태"
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Versão %@ · Atualizado"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Версия %@ · Обновлений нет"
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "เวอร์ชัน %@ · เป็นเวอร์ชันล่าสุด"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Версія %@ · Оновлень немає"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Phiên bản %@ · Đã cập nhật"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "版本 %@ · 已是最新"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "版本 %@ · 已是最新"
-          }
-        }
-      }
-    },
-    "Version %@ · Version %@ is available" : {
-      "comment" : "Game status: installed version, then the newer one",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Version %@ · Version %@ verfügbar"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Version %1$@ · Version %2$@ is available"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Versión %1$@ · Versión %2$@ disponible"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Version %1$@ · Version %2$@ disponible"
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Versi %@ · Versi %@ tersedia"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "バージョン %1$@ · バージョン %2$@ が利用可能"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "버전 %1$@ · 버전 %2$@ 업데이트 가능"
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Versão %1$@ · Versão %2$@ disponível"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Версия %@ · Доступна версия %@"
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "เวอร์ชัน %@ · มีเวอร์ชัน %@ ให้อัปเดต"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Версія %@ · Доступна версія %@"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Phiên bản %@ · Đã có phiên bản %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "版本 %1$@ · 可更新到版本 %2$@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "版本 %1$@ · 可更新至版本 %2$@"
+            "value" : "可更新至版本 %@"
           }
         }
       }
