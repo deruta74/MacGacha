@@ -522,18 +522,26 @@ struct URLSessionHTTPClientTests {
     @Test(.timeLimit(.minutes(1)))
     func requestIdleTimeoutResetsOnDataAndIgnoresStaleCallbacksAfterCompletion() async throws {
         let timer = ManualHTTPRequestTimer(), metrics = HTTPBufferMetrics()
+        let callbackFinished = TestEvent()
         let fixture = HTTPFixture(.controlledResponse(2), timeout: 15, timer: timer,
             bufferObserver: { metrics.record(bytes: $0, suspended: $1) })
         defer { fixture.close() }
-        let (_, body) = try await fixture.client.get(fixture.url, byteRangeFrom: nil)
+        let client = fixture.client.observingDataCallbacks { _, _ in callbackFinished.signal() }
+        let (_, body) = try await client.get(fixture.url, byteRangeFrom: nil)
         timer.advance(by: 14)
         fixture.control.send(Data([1]))
-        _ = try await metrics.waitForSnapshot { $0.received == 1 }
+        // The buffer observer precedes native reception accounting, which can
+        // also refresh the idle deadline. Finish both before advancing time.
+        try await callbackFinished.wait()
         timer.advance(by: 2) // Old deadline expired, but the received byte refreshed it.
         #expect(timer.deadline == 29 && !timer.cancelled)
         fixture.control.send(Data([2])); fixture.control.finish()
+        _ = try await metrics.waitForSnapshot { $0.received == 2 }
         var received = Data(); for try await data in body { received.append(data) }
         #expect(received == Data([1, 2]) && timer.cancelled)
+        // Stream exhaustion can precede the final buffer observation when
+        // another thread is still draining completion effects.
+        _ = try await metrics.waitForSnapshot { $0.bytes == 0 }
         timer.advance(by: 3600)
         #expect(metrics.snapshot.bytes == 0)
     }
