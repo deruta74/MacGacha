@@ -8,6 +8,7 @@ import SwiftUI
 struct StorageView: View {
     @Environment(AppModel.self) private var model
     @State private var confirming: StorageCleanupCandidate?
+    @State private var confirmingAll = false
     @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
@@ -60,7 +61,15 @@ struct StorageView: View {
                         }
                     }
                 } header: {
-                    Text("Can be freed")
+                    HStack {
+                        Text("Can be freed")
+                        Spacer()
+                        if snapshot.candidates.count > 1 {
+                            Button("Remove All…") { confirmingAll = true }
+                                .controlSize(.small)
+                                .disabled(model.storageCleanupInProgress)
+                        }
+                    }
                 } footer: {
                     Text("Game folders, the versions games use and anything a running game or file recovery needs are never listed here.")
                         .font(.caption)
@@ -102,6 +111,18 @@ struct StorageView: View {
             }
         } message: { candidate in
             Text(detail(candidate))
+        }
+        .confirmationDialog("Remove everything listed under Can be freed?", isPresented: $confirmingAll) {
+            if let candidates = model.storage?.candidates, !candidates.isEmpty {
+                Button("Remove All (\(ByteSize.text(candidates.reduce(0) { $0 + $1.bytes })))", role: .destructive) {
+                    Task {
+                        do { try await model.cleanUp(candidates) }
+                        catch { if launcherError(error) != .cancelled { model.show(error) } }
+                    }
+                }
+            }
+        } message: {
+            Text("Game folders, pre-downloads and the versions your games use stay.")
         }
     }
 

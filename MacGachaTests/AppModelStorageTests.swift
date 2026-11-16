@@ -40,6 +40,30 @@ import RuntimeManager
         #expect(resumed == 1)
     }
 
+    @Test func removeAllClearsEveryListedItemUnderOneReservation() async throws {
+        let model = AppModel.preview(rows: [], games: [:])
+        let root = model.paths.root
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fs = try ContainedFileSystem(root: root)
+        try fs.createDirectory(at: SafeRelativePath("Prefixes/genshin-old"))
+        try fs.createDirectory(at: SafeRelativePath("Prefixes/genshin-older"))
+        let service = CountingStorage(base: StorageInventory(paths: model.paths))
+        model.storageService = service
+        let candidates = try await model.refreshStorage().candidates
+        #expect(candidates.count == 2)
+        await service.resetRefreshes()
+        await service.attach(model)
+        try await model.cleanUp(candidates)
+        #expect(try fs.itemType(at: SafeRelativePath("Prefixes/genshin-old")) == nil)
+        #expect(try fs.itemType(at: SafeRelativePath("Prefixes/genshin-older")) == nil)
+        #expect(await service.reservedDuringEveryCleanUp())
+        #expect(await service.refreshes == 1)
+        #expect(model.storage?.candidates.isEmpty == true)
+        #expect(!model.storageCleanupInProgress)
+        // A stale list from an earlier inventory is refused as a whole.
+        await #expect(throws: (any Error).self) { try await model.cleanUp(candidates) }
+    }
+
     @Test func runtimeCleanupUsesManualRemovalAndRejectsNewSessionPin() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -147,4 +171,28 @@ private struct SuspendedStorage: StorageServicing {
     func validateRuntimeCandidate(_ item: StorageCleanupCandidate, context: StorageContext) async throws {
         try await base.validateRuntimeCandidate(item, context: context)
     }
+}
+
+private actor CountingStorage: StorageServicing {
+    let base: StorageInventory
+    private(set) var refreshes = 0
+    private var reservedFlags: [Bool] = []
+    init(base: StorageInventory) { self.base = base }
+    func resetRefreshes() { refreshes = 0 }
+    func refresh(_ context: StorageContext) async throws -> StorageSnapshot {
+        refreshes += 1
+        return try await base.refresh(context)
+    }
+    func cleanUp(_ item: StorageCleanupCandidate, context: StorageContext) async throws {
+        let model = self.model
+        let reserved = await MainActor.run { model?.storageCleanupInProgress ?? false }
+        reservedFlags.append(reserved)
+        try await base.cleanUp(item, context: context)
+    }
+    func validateRuntimeCandidate(_ item: StorageCleanupCandidate, context: StorageContext) async throws {
+        try await base.validateRuntimeCandidate(item, context: context)
+    }
+    private weak var model: AppModel?
+    func attach(_ model: AppModel) { self.model = model }
+    func reservedDuringEveryCleanUp() -> Bool { reservedFlags.count == 2 && reservedFlags.allSatisfy { $0 } }
 }
