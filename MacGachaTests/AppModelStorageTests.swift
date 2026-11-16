@@ -65,6 +65,49 @@ import RuntimeManager
         #expect(model.storage?.candidates.contains { $0.runtimeID == "wine-old" } == false)
     }
 
+    @Test(arguments: ["selected", "rollback", "session", "journal"])
+    func legacyRuntimeCleanupRechecksProtection(protection: String) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppPaths(root: root), fs = try ContainedFileSystem(root: root)
+        let installed = try InstalledComponent(kind: .d3dmetal, version: "4.0b3",
+            installedAt: Date(timeIntervalSince1970: 1), source: .importFromGPTK)
+        try fs.writeAtomically(JSONEncoder().encode(installed),
+            to: SafeRelativePath("Runtimes/d3dmetal/4.0b3/.macgacha-component.json"))
+        let payload = try SafeRelativePath("Runtimes/d3dmetal/4.0b3/bin/wine")
+        try fs.writeAtomically(Data([7]), to: payload)
+        let model = AppModel(paths: paths, manifest: try RuntimeManifest(components: []),
+            services: LiveRuntimeServices(paths: paths), defaults: nil)
+        await model.start()
+        let candidate = try #require(try await model.refreshStorage().candidates.first { $0.runtimeID == "d3dmetal-4.0b3" })
+        let component = try RuntimeComponent(id: SafeIdentifier("d3dmetal-4.0b3"), kind: .d3dmetal,
+            version: SafeIdentifier("4.0b3"), sourceMode: .importFromGPTK,
+            license: ComponentLicense(name: "Fixture", url: URL(string: "https://fixtures.invalid/license")!,
+                redistributable: false, termsRevision: "1"), consent: .appleGPTK,
+            rootPath: SafeRelativePath("payload"), wineBinary: SafeRelativePath("bin/wine"))
+        let bundle = try RuntimeBundle(id: SafeIdentifier("d3dmetal-wine11.20-gptk4.0b3"), displayName: "Fixture",
+            backend: .d3dmetal, components: [component.id])
+        let manifest = try RuntimeManifest(components: [component], bundles: [bundle])
+        let pin: RuntimePin?
+        switch protection {
+        case "selected", "rollback":
+            let snapshot = try await RuntimeCatalogService(baseline: manifest).snapshot()
+            model.applyRuntimeCatalog(try snapshot.replacingSelections(RuntimeCatalogSelections(
+                bundles: [.d3dmetal: RuntimeCatalogSelection(id: bundle.id, pinned: protection == "rollback")], helpers: [:])))
+            pin = nil
+        case "session":
+            pin = try RuntimePin.pin(paths: paths, componentIDs: [component.id.rawValue])
+        default:
+            try fs.writeAtomically(Data("{}".utf8), to: SafeRelativePath("Games/genshin/launch-session.json"))
+            pin = nil
+        }
+        defer { withExtendedLifetime(pin) {} }
+        await #expect(throws: (any Error).self) { try await model.cleanUp(candidate) }
+        #expect(!model.storageCleanupInProgress)
+        #expect(try fs.readFile(at: payload, maxBytes: 10) == Data([7]))
+        #expect(model.storage?.candidates.contains { $0.runtimeID == "d3dmetal-4.0b3" } == false)
+    }
+
     @Test func cancellationPreservesLastPublishedInventory() async throws {
         let model = AppModel.preview(rows: [], games: [:])
         defer { try? FileManager.default.removeItem(at: model.paths.root) }

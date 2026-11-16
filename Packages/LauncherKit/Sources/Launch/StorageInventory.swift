@@ -160,7 +160,12 @@ public struct StorageInventory: StorageServicing {
                 prefixes: prefixSize, preDownload: preDownload))
         }
         if journalsClear, let manifest = context.manifest {
-            let protected = context.selectedRuntimeIDs.union(context.pinnedRuntimeIDs)
+            var protected = context.selectedRuntimeIDs.union(context.pinnedRuntimeIDs)
+            // Legacy bundles run directly from their component directory. Their
+            // selections and rollback pins protect components even without an
+            // assembled tree, including during fresh removal validation.
+            protected.formUnion(manifest.bundles.filter { protected.contains($0.id.rawValue) }
+                .flatMap { $0.components.map(\.rawValue) })
             let store = RuntimeStore(paths: paths)
             let installed = try store.installed()
             // Bundle metadata is inspected by the caller's normal runtime scan.

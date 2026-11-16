@@ -158,6 +158,36 @@ struct StorageInventoryTests {
         await #expect(throws: (any Error).self) { try await service.validateRuntimeCandidate(item, context: newContext) }
     }
 
+    @Test(arguments: [false, true])
+    func legacyBundleComponentsRespectSelectionAndRollbackPins(pinned: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppPaths(root: root), fs = try ContainedFileSystem(root: root)
+        let component = try RuntimeComponent(id: SafeIdentifier("d3dmetal-4.0b3"), kind: .d3dmetal,
+            version: SafeIdentifier("4.0b3"), sourceMode: .importFromGPTK,
+            license: ComponentLicense(name: "Fixture", url: URL(string: "https://fixtures.invalid/license")!,
+                redistributable: false, termsRevision: "1"), consent: .appleGPTK,
+            rootPath: SafeRelativePath("payload"), wineBinary: SafeRelativePath("bin/wine"))
+        let bundle = try RuntimeBundle(id: SafeIdentifier("d3dmetal-wine11.20-gptk4.0b3"), displayName: "Fixture",
+            backend: .d3dmetal, components: [component.id])
+        let manifest = try RuntimeManifest(components: [component], bundles: [bundle])
+        let installed = try InstalledComponent(kind: .d3dmetal, version: "4.0b3",
+            installedAt: Date(timeIntervalSince1970: 1), source: .importFromGPTK)
+        try fs.writeAtomically(JSONEncoder().encode(installed),
+            to: SafeRelativePath("Runtimes/d3dmetal/4.0b3/.macgacha-component.json"))
+        try fs.writeAtomically(Data([7]), to: SafeRelativePath("Runtimes/d3dmetal/4.0b3/bin/wine"))
+        #expect(try fs.itemType(at: SafeRelativePath("Runtimes/bundles/\(bundle.id)")) == nil)
+        let service = StorageInventory(paths: paths)
+        let candidate = try #require(try await service.refresh(StorageContext(region: .global, manifest: manifest))
+            .candidates.first { $0.runtimeID == "d3dmetal-4.0b3" })
+        let context = StorageContext(region: .global,
+            selectedRuntimeIDs: pinned ? [] : [bundle.id.rawValue],
+            pinnedRuntimeIDs: pinned ? [bundle.id.rawValue] : [], manifest: manifest)
+        #expect(try await service.refresh(context).candidates.allSatisfy { $0.kind != .runtimeVersion })
+        await #expect(throws: (any Error).self) { try await service.validateRuntimeCandidate(candidate, context: context) }
+        #expect(try fs.readFile(at: SafeRelativePath("Runtimes/d3dmetal/4.0b3/bin/wine"), maxBytes: 10) == Data([7]))
+    }
+
     @Test func cacheContainingAnInstallationIsNeverDeleted() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
