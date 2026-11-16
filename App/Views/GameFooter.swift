@@ -694,6 +694,18 @@ struct GameMenu: View {
                     NSWorkspace.shared.activateFileViewerSelecting([folder])
                 }
             }
+            if isInstalled, model.canCreateShortcut(game.id) {
+                Button("Create Shortcut", systemImage: "plus.app") {
+                    Task {
+                        do {
+                            let app = try await model.createShortcut(game.id)
+                            // Selected in Finder, ready to drag to the Dock.
+                            NSWorkspace.shared.activateFileViewerSelecting([app])
+                        } catch { model.show(error) }
+                    }
+                }
+                .help("Adds \(game.name) to Applications. It starts the game without opening the launcher, and you can keep it in the Dock.")
+            }
             Divider()
             if model.preDownloadState(for: game.id).canDelete {
                 Button("Delete Pre-download…", systemImage: "xmark.bin") { confirmingPreDownloadDeletion = true }

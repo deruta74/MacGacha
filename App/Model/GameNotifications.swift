@@ -108,6 +108,18 @@ struct GameNotificationSelection: Equatable {
         NSApp.unhide(nil)
         let window = NSApp.windows.first { $0.identifier?.rawValue == "launcher" || $0.title == "MacGacha" }
             ?? NSApp.windows.first { $0.canBecomeMain && !$0.isExcludedFromWindowsMenu }
+        guard window != nil else {
+            // A shortcut launch has no window yet. Ask for one the way a Dock click does:
+            // SwiftUI answers a reopen event with no visible windows by creating the launcher.
+            let target = NSAppleEventDescriptor(processIdentifier: ProcessInfo.processInfo.processIdentifier)
+            let reopen = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEReopenApplication),
+                targetDescriptor: target, returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+            _ = try? reopen.sendEvent(options: [.noReply], timeout: 5)
+            NSApp.activate()
+            return
+        }
+        // A shortcut launch keeps the window transparent until it is needed.
+        window?.alphaValue = 1
         window?.deminiaturize(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()

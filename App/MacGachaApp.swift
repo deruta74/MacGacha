@@ -8,8 +8,16 @@ import SwiftUI
 
 @main
 struct MacGachaApp: App {
-    @State private var model = Self.makeModel()
+    @State private var model: AppModel
     @NSApplicationDelegateAdaptor(LauncherAppDelegate.self) private var delegate
+
+    init() {
+        let model = Self.makeModel()
+        _model = State(initialValue: model)
+        // A shortcut launch opens a URL, and SwiftUI creates no window for that,
+        // so the delegate needs the model to start without one.
+        LauncherAppDelegate.launchModel = model
+    }
 
     private static func makeModel() -> AppModel {
         #if DEBUG
@@ -31,6 +39,9 @@ struct MacGachaApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1280, height: 720)
+        // A shortcut session ends with the window hidden. Restoring that state would
+        // leave the next ordinary launch without a window.
+        .restorationBehavior(.disabled)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { model.checkForUpdates() }
@@ -57,8 +68,14 @@ struct MacGachaApp: App {
     }
     var replyToTermination: (Bool) -> Void = { NSApp.reply(toApplicationShouldTerminate: $0) }
 
+    /// Shortcut URLs that arrived before the model was bound.
+    private var pendingURLs: [URL] = []
+    static var launchModel: AppModel?
+
     func bind(_ model: AppModel) {
         dockModel = model
+        let urls = pendingURLs; pendingURLs = []
+        for url in urls { model.openShortcutURL(url) }
         retryRecoveries = { [weak model] in model?.retryRecoveriesOnActivation() }
         liveGameName = { [weak model] in model?.liveSessionGameName }
         catalogPublication = { [weak model] in model?.catalogMutationTask }
@@ -69,6 +86,40 @@ struct MacGachaApp: App {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) { retryRecoveries() }
+
+    /// The SwiftUI lifecycle doesn't forward URL events to `application(_:open:)`, and its own
+    /// handling would bring the launcher window forward. Shortcut URLs come straight here.
+    /// A shortcut launch has no window to run startup, so it starts here.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard let model = Self.launchModel, model.launchedHidden, dockModel == nil else { return }
+        bind(model)
+        Task { await model.start() }
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(handleGetURL(_:withReply:)),
+            forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+    }
+
+    @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReply reply: NSAppleEventDescriptor) {
+        guard let text = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+            let url = URL(string: text) else { return }
+        guard let model = dockModel else { pendingURLs.append(url); return }
+        model.openShortcutURL(url)
+    }
+
+    /// Closing the launcher still quits MacGacha, except while a shortcut keeps it hidden
+    /// to supervise the game it started.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        !(dockModel?.launchedHidden ?? CommandLine.arguments.contains(GameShortcut.launchArgument))
+    }
+
+    /// A Dock click while a shortcut kept the launcher hidden shows it.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard let model = dockModel, model.launchedHidden else { return true }
+        model.revealLauncher(selecting: nil)
+        return false
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if let publication = catalogPublication() {
@@ -116,7 +167,38 @@ private struct LauncherWindowContent: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.4), value: model.launcherRevealed)
         .frame(minWidth: 960, minHeight: 540)
+        .background { HiddenLaunchWindow(hidden: model.launchedHidden) }
         // Installed here, not in RootView: startup can reattach a running game while the loading screen shows.
         .task { model.quitConfirmation = QuitConfirmation.present }
+    }
+}
+
+/// Keeps the launcher window invisible while a shortcut started MacGacha only to play.
+/// The window still exists, so startup runs as usual and revealing it needs no new scene.
+private struct HiddenLaunchWindow: NSViewRepresentable {
+    let hidden: Bool
+
+    final class Probe: NSView {
+        var keepsWindowHidden = false
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard keepsWindowHidden, let window else { return }
+            // Transparent before SwiftUI first orders it front, then out of the window list.
+            window.alphaValue = 0
+            DispatchQueue.main.async { [weak window] in
+                guard let window, window.alphaValue == 0 else { return }
+                window.orderOut(nil)
+            }
+        }
+    }
+
+    func makeNSView(context: Context) -> Probe {
+        let probe = Probe(); probe.keepsWindowHidden = hidden
+        return probe
+    }
+
+    func updateNSView(_ probe: Probe, context: Context) {
+        probe.keepsWindowHidden = hidden
+        if !hidden { probe.window?.alphaValue = 1 }
     }
 }

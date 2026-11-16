@@ -10,6 +10,17 @@
     <false/>
     <key>SUAllowsAutomaticUpdates</key>
     <false/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.lo7ted.macgacha.play</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>macgacha</string>
+            </array>
+        </dict>
+    </array>
     <key>RuntimeCatalogPublicEdKeys</key>
     <string>$(RUNTIME_CATALOG_PUBLIC_ED_KEYS)</string>
 </dict>
