@@ -48,6 +48,10 @@ public actor GameEventsService {
     private nonisolated let snapshot = Mutex<[String: GameEventsSnapshot]>([:])
     private nonisolated let currentDate: @Sendable () -> Date
     private var hydrated = false
+    /// Called after the app drains providers and removes the inactive cache.
+    public func invalidateStorageCache() {
+        hydrated = false; snapshot.withLock { $0 = [:] }
+    }
     private var flight: (id: UUID, task: Task<[String: GameEventsSnapshot], Never>)?
 
     public init(cacheDirectory: URL, region: Region = .global, language: HoYoPlayLanguage = .enUS,

@@ -63,6 +63,7 @@ enum OtherRegionActivity: Sendable, Equatable {
     func loadGameArt() async { await loadGameArt(in: region) }
 
     func loadGameArt(in region: Region) async {
+        guard !storageCleanupInProgress else { return }
         beginGameEventsLoad(in: region)
         await refreshGameArt(in: region)
     }

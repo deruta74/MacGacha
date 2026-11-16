@@ -40,6 +40,7 @@ import LauncherCore
     /// Art completion must not wait for Events: first-launch reveal belongs to
     /// the art refresh. This owned task publishes Events whenever they arrive.
     @discardableResult func beginGameEventsLoad(in region: Region) -> Task<Void, Never>? {
+        guard !storageCleanupInProgress else { return nil }
         if let task = eventsTasks[region] { return task }
         guard let provider = eventsServices[region], !Task.isCancelled else { return nil }
         let hydration = hydrateGameEvents()

@@ -1266,6 +1266,109 @@ private final class RootDescriptor: Sendable {
 }
 
 extension ContainedFileSystem {
+    /// Physical allocation, including directory entries, counting a hard-linked
+    /// inode once per walk. Links are counted themselves and never traversed.
+    /// Call on BlockingIO. Bounds fail rather than publishing a partial total.
+    public func allocatedBytes(at path: SafeRelativePath? = nil,
+        excluding: Set<SafeRelativePath> = [], maximumEntries: Int = 1_000_000,
+        maximumDepth: Int = 128) throws -> Int64 {
+        try storageAllocatedBytes(at: [path], excluding: excluding, reclaiming: false,
+            maximumEntries: maximumEntries, maximumDepth: maximumDepth)
+    }
+
+    /// Combined allocation for disjoint roots, sharing one inode map and budget.
+    public func allocatedBytes(at paths: [SafeRelativePath], maximumEntries: Int = 1_000_000,
+        maximumDepth: Int = 128) throws -> Int64 {
+        try Task.checkCancellation()
+        guard paths.count <= maximumEntries else { throw LauncherError.io("Storage root limit exceeded") }
+        return try storageAllocatedBytes(at: Set(paths).map(Optional.some), excluding: [], reclaiming: false,
+            maximumEntries: maximumEntries, maximumDepth: maximumDepth)
+    }
+
+    /// A cleanup estimate excludes inodes with links retained outside these
+    /// targets. One shared walk budget and inode map span every deletion root.
+    public func reclaimableAllocatedBytes(at paths: [SafeRelativePath], maximumEntries: Int = 1_000_000,
+        maximumDepth: Int = 128) throws -> Int64 {
+        try Task.checkCancellation()
+        guard paths.count <= maximumEntries else { throw LauncherError.io("Storage root limit exceeded") }
+        var roots: [SafeRelativePath] = []
+        for path in Set(paths).sorted(by: { $0.components.lexicographicallyPrecedes($1.components) }) {
+            try Task.checkCancellation()
+            if let previous = roots.last, path.components.starts(with: previous.components) { continue }
+            roots.append(path)
+        }
+        return try storageAllocatedBytes(at: roots.map(Optional.some), excluding: [], reclaiming: true,
+            maximumEntries: maximumEntries, maximumDepth: maximumDepth)
+    }
+
+    private func storageAllocatedBytes(at paths: [SafeRelativePath?], excluding: Set<SafeRelativePath>,
+        reclaiming: Bool, maximumEntries: Int, maximumDepth: Int) throws -> Int64 {
+        guard maximumEntries > 0, maximumDepth >= 0 else { throw LauncherError.io("Invalid storage scan bounds") }
+        struct Inode: Hashable { let device: Int32; let inode: UInt64 }
+        var seen: Set<Inode> = [], budget = maximumEntries, total: Int64 = 0
+        struct LinkedAllocation { let info: stat; var references: UInt64 }
+        var linked: [Inode: LinkedAllocation] = [:]
+        func add(_ info: stat) throws {
+            let key = Inode(device: info.st_dev, inode: info.st_ino)
+            if reclaiming, info.st_mode & S_IFMT != S_IFDIR {
+                if var previous = linked[key] { previous.references += 1; linked[key] = previous }
+                else { linked[key] = LinkedAllocation(info: info, references: 1) }
+                return
+            }
+            guard seen.insert(key).inserted else { return }
+            let (bytes, overflow) = Int64(info.st_blocks).multipliedReportingOverflow(by: 512)
+            let (sum, sumOverflow) = total.addingReportingOverflow(bytes)
+            guard bytes >= 0, !overflow, !sumOverflow else { throw LauncherError.io("Storage size overflow") }
+            total = sum
+        }
+        func walk(_ fd: Int32, components: [String], depth: Int) throws {
+            try Task.checkCancellation()
+            guard depth <= maximumDepth else { throw LauncherError.io("Storage depth limit exceeded") }
+            var info = stat()
+            guard fstat(fd, &info) == 0 else { throw LauncherError.io("Cannot inspect storage directory") }
+            try add(info)
+            for name in try names(in: fd, budget: &budget) {
+                try Task.checkCancellation()
+                let childComponents = components + [name]
+                if excluding.contains(try SafeRelativePath(childComponents.joined(separator: "/"))) { continue }
+                guard let child = try entry(name, parent: fd) else { continue }
+                if child.st_mode & S_IFMT == S_IFDIR {
+                    let next = openat(fd, name, Self.directoryFlags)
+                    guard next >= 0 else { throw LauncherError.io("Storage directory changed") }
+                    defer { close(next) }
+                    var opened = stat()
+                    guard fstat(next, &opened) == 0, opened.st_dev == child.st_dev, opened.st_ino == child.st_ino else {
+                        throw LauncherError.io("Storage directory changed")
+                    }
+                    try walk(next, components: childComponents, depth: depth + 1)
+                } else { try add(child) }
+            }
+        }
+        try Task.checkCancellation()
+        for path in paths {
+            if let path {
+            guard !excluding.contains(path), let parent = try directory(Array(path.components.dropLast()), create: false) else { continue }
+            defer { close(parent) }
+            guard let info = try entry(path.components.last!, parent: parent) else { continue }
+            if info.st_mode & S_IFMT != S_IFDIR { try add(info); continue }
+            guard let pinned = try pinDirectoryIfPresent(at: path) else { continue }
+            try pinned.withRootDirectoryDescriptor { try walk($0, components: path.components, depth: 0) }
+        } else if let fd = try directory([], create: false) {
+            defer { close(fd) }
+            try walk(fd, components: [], depth: 0)
+        }
+        }
+        for allocation in linked.values where allocation.references >= UInt64(allocation.info.st_nlink) {
+            let (bytes, overflow) = Int64(allocation.info.st_blocks).multipliedReportingOverflow(by: 512)
+            let (sum, sumOverflow) = total.addingReportingOverflow(bytes)
+            guard bytes >= 0, !overflow, !sumOverflow else { throw LauncherError.io("Storage size overflow") }
+            total = sum
+        }
+        return total
+    }
+}
+
+extension ContainedFileSystem {
     /// Birth time also excludes reuse of a formerly owned inode after its unlink.
     package struct OwnedFileIdentity: Codable, Equatable, Sendable {
         package let device: Int64, inode: UInt64, birthSeconds: Int64, birthNanos: Int64

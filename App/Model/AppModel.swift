@@ -112,6 +112,7 @@ final class AppModel {
 
     var region: Region {
         didSet {
+            if storageCleanupInProgress { region = oldValue; return }
             guard region != oldValue else { return }
             defaults?.set(region.rawValue, forKey: "region")
             updateArtReveal()
@@ -257,6 +258,12 @@ final class AppModel {
     var dependencyAutoUpdates: [String: DependencyAutoUpdateState] = [:]
     var runtimeUpdatesAwaitingConsent: Set<String> = []
     var dependencyAutoUpdateReservation = false
+    var storage: StorageSnapshot?
+    var isRefreshingStorage = false
+    var storageCleanupInProgress = false
+    @ObservationIgnored var storageRefreshGeneration = UUID()
+    @ObservationIgnored var storageService: any StorageServicing
+    @ObservationIgnored let storageCacheDirectory: URL?
     var dependencyHasRetainedVersions = false
     @ObservationIgnored var dependencyAutoUpdateTask: Task<Void, Never>?
     @ObservationIgnored var dependencyAutoUpdateGeneration = UUID()
@@ -316,6 +323,7 @@ final class AppModel {
         artServices: [Region: any GameArtProviding] = [:],
         eventsServices: [Region: any GameEventsProviding] = [:],
         gameServices: any GameServices = PreviewGameServices(),
+        storageService: (any StorageServicing)? = nil, storageCacheDirectory: URL? = nil,
         volumeEvents: any VolumeEventSource = WorkspaceVolumeEventSource(),
         rosettaProbe: any RosettaProbing = UnknownRosettaProbe(),
         displayProbe: any DisplayProbe = FixedDisplayProbe(),
@@ -345,6 +353,8 @@ final class AppModel {
         terminateAfterLanguageRestart: @escaping @MainActor () -> Void = {},
         launchArguments: [String] = ProcessInfo.processInfo.arguments) {
         self.wishHistoryExporter = wishHistoryExporter
+        self.storageService = storageService ?? StorageInventory(paths: paths)
+        self.storageCacheDirectory = storageCacheDirectory
         self.relaunch = relaunch; self.terminateAfterLanguageRestart = terminateAfterLanguageRestart
         self.launchArguments = launchArguments
         self.artClock = artClock
@@ -473,6 +483,7 @@ final class AppModel {
         })
         return AppModel(paths: paths, services: runtimeServices, catalogAccess: catalog,
             artServices: art, eventsServices: events, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
+            storageCacheDirectory: gameArtCacheDirectory(in: caches, bundleIdentifier: Bundle.main.bundleIdentifier).deletingLastPathComponent(),
             rosettaProbe: SystemRosettaProbe(), displayProbe: SystemDisplayProbe(),
             displayNames: { ScreenDisplayNames.current() }, launchServices: launch, wishHistoryExporter: WishHistoryExporter(log: log),
             notifications: SystemGameNotificationCenter(), notificationIsFrontmost: { NSApp.isActive },

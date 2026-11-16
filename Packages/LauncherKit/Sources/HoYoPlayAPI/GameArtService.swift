@@ -28,6 +28,10 @@ public actor GameArtService {
     private let requestTimeout: Duration
     private var index = ArtIndex()
     private var hydrated = false
+    /// The app drains hydration/refresh and reserves new readers before cleanup.
+    public func invalidateStorageCache() {
+        hydrated = false; index = ArtIndex(); snapshot.withLock { $0 = [:] }
+    }
     private var flight: (id: UUID, task: Task<[String: GameArt], Never>)?
 
     public init(cacheDirectory: URL, region: Region = .global, language: HoYoPlayLanguage = .enUS, http: (any HTTPClient)? = nil, log: EventLog? = nil,

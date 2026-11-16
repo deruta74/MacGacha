@@ -55,6 +55,7 @@ struct GameRail: View {
             }
             Spacer(minLength: 24)
             RailButton(title: "Dependencies", symbol: "shippingbox", marked: model.hasUnansweredDependencyOffer) { panel = .dependencies }
+            RailButton(title: "Storage", symbol: "internaldrive") { panel = .storage }
             RailButton(title: "Diagnostics", symbol: "stethoscope") { panel = .diagnostics }
             SettingsLink {
                 Image(systemName: "gearshape")

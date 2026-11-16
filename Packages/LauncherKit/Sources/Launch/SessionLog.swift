@@ -201,3 +201,13 @@ public struct SessionLog: Sendable {
     }
     package static func precedes(_ lhs: String, _ rhs: String) -> Bool { LaunchLogFiles.precedes(lhs, rhs) }
 }
+
+extension SessionLog {
+package static func removeOldStorageLog(fs: ContainedFileSystem, game: String, path: SafeRelativePath) throws {
+    guard try matchingLogs(fs: fs, game: game).dropFirst().contains(path),
+        let record = try readOwnership(fs, path) else { throw LauncherError.busy("Session log is not obsolete") }
+    if try fs.removeOwnedFile(at: path, matching: record.identity) {
+        _ = try fs.removeOwnedFile(at: sidecar(path), matching: record.sidecarIdentity)
+    } else { throw LauncherError.busy("Session log changed") }
+}
+}

@@ -6,6 +6,10 @@ protocol GameEventsProviding: Sendable {
     func cached() -> [String: GameEventsSnapshot]
     func loadCached() async -> [String: GameEventsSnapshot]
     func refresh() async -> [String: GameEventsSnapshot]
+    func invalidateStorageCache() async
+}
+extension GameEventsProviding {
+    func invalidateStorageCache() async {}
 }
 
 extension GameEventsService: GameEventsProviding { }

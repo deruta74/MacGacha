@@ -75,6 +75,19 @@ public struct GameRecord: Codable, Sendable, Equatable {
 public enum GameAction: Sendable, Equatable { case install, adopt, update, repair, voices, resume, uninstall, preDownload, deletePreDownload }
 
 public enum GameRecordRules {
+    /// Cleanup shares installation admission's symlink, case and firmlink-aware
+    /// overlap rules, without its restrictions on choosing a new game location.
+    package static func requireStorageDisjoint(_ target: URL, records: [GameRecord]) throws {
+        // Cleanup can unlink a regular file or a symlink leaf. Resolve only
+        // its directory ancestors, then compare the leaf's filesystem identity.
+        let parent = try resolvedURL(target.deletingLastPathComponent())
+        let key = try locationKey(parent.appendingPathComponent(target.lastPathComponent))
+        for record in records {
+            guard try !overlaps(key, locationKey(resolvedURL(record.installPath))) else {
+                throw LauncherError.busy("Storage target overlaps a game installation")
+            }
+        }
+    }
     /// Pure transition policy. Paused records of other games do not establish a
     /// running operation; Task 18's library owns that independent concurrency lock.
     public static func check(_ action: GameAction, record: GameRecord?, others _: [GameRecord]) throws {

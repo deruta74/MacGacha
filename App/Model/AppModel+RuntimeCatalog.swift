@@ -107,7 +107,7 @@ struct RuntimeInstallContext: Sendable {
         runtimeInstallContexts[id] = RuntimeInstallContext(component: component, bundle: bundle, manifest: captured)
     }
     var canChangeRuntimeCatalog: Bool {
-        !isStarting && !runtimeCatalogUnavailable && runtimeCatalogMutationID == nil &&
+        !storageCleanupInProgress && !isStarting && !runtimeCatalogUnavailable && runtimeCatalogMutationID == nil &&
             launchSlotOwner == nil && liveLaunchGames.isEmpty && launchStartupError == nil &&
             !launchStates.values.contains { if case .recoveryNeeded = $0 { true } else { false } } &&
             !isRuntimeOperationRunning && !isGameOperationRunning && consentRequest == nil && importState == nil &&

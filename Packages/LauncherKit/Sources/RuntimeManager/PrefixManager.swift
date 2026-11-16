@@ -9,6 +9,18 @@ public struct PrefixManager: Sendable {
     private let runner: any ProcessRunner
     private let inspector: any ProcessInspector
     private let serverProbe: WineServerProbe
+/// Storage cleanup owns the edition's session lock and this prefix's sibling
+/// preparation lock. Confirm kernel process/server idleness before removing it.
+package func removeStoragePrefix(at path: SafeRelativePath) throws {
+    guard path.components.count == 2, path.components[0] == "Prefixes" else { throw LauncherError.io("Invalid prefix cleanup target") }
+    let fs = try ContainedFileSystem(root: paths.root)
+    guard let prefix = try fs.pinDirectoryIfPresent(at: path) else { throw LauncherError.busy("Prefix disappeared") }
+    try PrefixShellFolders.requireIdle(prefix: path.resolved(against: paths.root), prefixFS: prefix,
+        wineBinary: paths.runtimes.appendingPathComponent("wine"), runtimeRoot: paths.runtimes,
+        inspector: inspector, serverProbe: serverProbe)
+    try Task.checkCancellation()
+    try fs.removeItem(at: path)
+}
     static let markerLimit = 16_384
 
     public init(paths: AppPaths, runner: any ProcessRunner, inspector: any ProcessInspector = SystemProcessInspector(), wineServerRoot: URL? = nil) {
