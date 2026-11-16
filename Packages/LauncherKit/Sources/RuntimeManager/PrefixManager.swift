@@ -70,6 +70,7 @@ package func removeStoragePrefix(at path: SafeRelativePath) throws {
             let fs = try ContainedFileSystem(root: paths.root)
             let lock = try await Self.acquireLock(fs: fs, prefix: prefix)
             defer { withExtendedLifetime(lock) {} }
+            try sweepRetiredPrefix(for: prefix, fs: fs)
             try fs.createDirectory(at: prefix)
             // Validate every Prefixes ancestor immediately before crossing the process boundary.
             _ = try fs.directoryURL(at: prefix)
