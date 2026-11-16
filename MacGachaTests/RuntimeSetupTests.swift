@@ -12,6 +12,21 @@ import Launch
 @testable import MacGacha
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct RuntimeSetupTests {
+    @Test func dependencySetupNotifiesOnceWhenTheLastRequiredItemIsInstalled() async throws {
+        let center = TestGameNotificationCenter()
+        let (model, fake, manifest) = try fixture("genshin", notifications: center)
+        let plan = try #require(model.runtimeSetupPlan(for: "genshin"))
+        for item in plan.items { try publish(item.id, fake: fake, manifest: manifest) }
+        await model.refreshRuntimes()
+        model.runtimeSetupChains["genshin"] = RuntimeSetupChain(plan: plan)
+        model.advanceRuntimeSetups()
+        await model.notificationTask?.value
+        #expect(center.delivered.map(\.kind) == [.dependencySetupFinished])
+        model.advanceRuntimeSetups()
+        await model.notificationTask?.value
+        #expect(center.delivered.count == 1)
+    }
+
     @Test(arguments: SetupCase.all)
     func planMatchesBackendAndRecipe(configuration: SetupCase) throws {
         let (model, _, manifest) = try fixture(configuration.game, backend: configuration.backend, patches: configuration.patches)
@@ -345,11 +360,11 @@ import Launch
         #expect(model.runtimeSetupPlan(for: "starrail")?.items.isEmpty == false)
     }
 
-    private func fixture(_ game: String, backend: RuntimeBackend = .dxmt, patches: Bool = true) throws -> (AppModel, FakeRuntimeServices, RuntimeManifest) {
+    private func fixture(_ game: String, backend: RuntimeBackend = .dxmt, patches: Bool = true, notifications: any GameNotificationCenter = EmptyGameNotificationCenter()) throws -> (AppModel, FakeRuntimeServices, RuntimeManifest) {
         let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
         let manifest = try RuntimeManifest.load(from: url), fake = FakeRuntimeServices()
         let model = AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/Setup")), manifest: manifest,
-            services: fake, defaults: nil)
+            services: fake, defaults: nil, notifications: notifications, notificationIsFrontmost: { false })
         for definition in GameDefinition.all {
             var settings = LaunchSettings.defaults(for: definition.id)
             settings.backend = backend; settings.compatibilityPatches = patches

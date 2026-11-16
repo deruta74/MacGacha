@@ -16,6 +16,103 @@ import Launch
 
 @Suite(.serialized) @MainActor
 struct AppModelGamesTests {
+    @Test(.timeLimit(.minutes(1)), arguments: [PendingOperation.Kind.install, .update, .repair])
+    func resumedActivePlanNotifiesItsActualKind(kind: PendingOperation.Kind) async throws {
+        let center = TestGameNotificationCenter(), fake = FakeGameServices()
+        defer { fake.finish() }
+        let (model, _, _) = try gameFixture(fake: fake, notifications: center)
+        fake.setStatus(.paused(kind), for: "genshin")
+        var record = try #require(try await fake.record("genshin"))
+        record.pending = PendingOperation(kind: kind, planID: try SafeIdentifier("active-plan"),
+            planDigest: try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)),
+            target: try #require(record.installed))
+        fake.setRecord(record, for: "genshin"); model.setGameRecord("genshin", record)
+        model.resumeGame("genshin")
+        let worker = try #require(model.gameTask)
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        fake.emit(.phase(.completed)); fake.finish()
+        await worker.value; await model.notificationTask?.value
+        let expected: GameNotificationKind = switch kind {
+        case .install: .installFinished
+        case .update: .updateFinished
+        default: .repairFinished
+        }
+        #expect(center.delivered.map(\.kind) == [expected])
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func finishedDurableResumeDoesNotNotifyFromStalePendingRecord(fails: Bool) async throws {
+        let center = TestGameNotificationCenter(), fake = FakeGameServices()
+        defer { fake.finish() }
+        let (model, _, _) = try gameFixture(fake: fake, notifications: center)
+        fake.setStatus(.installed(tag: "2.0"), for: "genshin")
+        var stale = try #require(try await fake.record("genshin"))
+        stale.pending = PendingOperation(kind: .update, planID: try SafeIdentifier("already-finished"),
+            planDigest: try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)),
+            target: try #require(stale.installed))
+        model.setGameRecord("genshin", stale)
+        model.resumeGame("genshin")
+        let worker = try #require(model.gameTask)
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        if fails { fake.fail(.io("No pending operation")) }
+        else { fake.emit(.phase(.completed)); fake.finish() }
+        await worker.value
+        await model.notificationTask?.value
+        #expect(center.delivered.isEmpty)
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: ["install", "update", "repair", "failure", "space", "cancel", "resumeFinished", "adopt"])
+    func notificationsFollowExplicitOperationOutcomes(action: String) async throws {
+        let center = TestGameNotificationCenter(), fake = FakeGameServices()
+        defer { fake.finish() }
+        let (model, _, _) = try gameFixture(fake: fake, notifications: center)
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        switch action {
+        case "install": model.installGame("genshin", voices: [], at: gameLocation, approved: true)
+        case "repair": model.verifyGame("genshin")
+        case "resumeFinished": model.resumeGame("genshin")
+        case "adopt": model.adoptGame("genshin", folder: gameLocation, voices: [])
+        default: model.updateGame("genshin")
+        }
+        let worker = try #require(model.gameTask)
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        switch action {
+        case "failure": fake.fail(.io("Private /sensitive/path"))
+        case "space": fake.emit(.needsBatchApproval(required: 200, available: 10)); fake.finish()
+        case "cancel": model.pauseGame("genshin")
+        case "resumeFinished": fake.setStatus(.installed(tag: "2.0"), for: "genshin"); fake.finish()
+        default: fake.emit(.phase(.completed)); fake.finish()
+        }
+        await worker.value
+        await model.notificationTask?.value
+        let expected: GameNotificationKind? = switch action {
+        case "install": .installFinished
+        case "update": .updateFinished
+        case "repair": .repairFinished
+        case "failure": .operationFailed
+        case "space": .pausedForSpace
+        default: nil
+        }
+        #expect(center.delivered.map(\.kind) == (expected.map { [$0] } ?? []))
+    }
+
+    @Test(.timeLimit(.minutes(1))) func refreshNotifiesAvailabilityOnceWithoutReplayingCompletions() async throws {
+        let root = URL(fileURLWithPath: "/tmp/macgacha-notification-refresh-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let center = TestGameNotificationCenter(), fake = FakeGameServices()
+        fake.setStatus(.updateAvailable(from: "1.0", to: "2.0"), for: "genshin")
+        let model = AppModel(paths: AppPaths(root: root), manifest: try RuntimeManifest(components: []),
+            services: PreviewRuntimeServices(), defaults: nil, gameServices: fake,
+            notifications: center, notificationIsFrontmost: { false })
+        await model.refreshGames()
+        await model.notificationTask?.value
+        #expect(center.delivered.map(\.kind) == [.updateAvailable])
+        model.gameLastRefresh = [:]
+        await model.refreshGames()
+        await model.notificationTask?.value
+        #expect(center.delivered.count == 1)
+    }
+
     @Test(.timeLimit(.minutes(1)), arguments: ["snapshot", "cacheInfo"], [false, true])
     func remountDuringEjectFinalizationRestoresAvailableState(read: String, notifiedEject: Bool) async throws {
         let gate = GameReadGate(), source = TestVolumeEventSource(), fake = FakeGameServices()
@@ -920,11 +1017,11 @@ struct AppModelGamesTests {
 }
 
 private let gameLocation = URL(fileURLWithPath: "/inert/Games/Genshin")
-@MainActor private func gameFixture(fake: FakeGameServices = FakeGameServices(), purgeable: any PurgeableSpaceProbe = GamePurgeableProbe(bytes: nil), volumeEvents: any VolumeEventSource = TestVolumeEventSource(), launches: any LaunchServices = PreviewLaunchServices()) throws -> (AppModel, FakeGameServices, GameTestClock) {
+@MainActor private func gameFixture(fake: FakeGameServices = FakeGameServices(), purgeable: any PurgeableSpaceProbe = GamePurgeableProbe(bytes: nil), volumeEvents: any VolumeEventSource = TestVolumeEventSource(), launches: any LaunchServices = PreviewLaunchServices(), notifications: any GameNotificationCenter = EmptyGameNotificationCenter()) throws -> (AppModel, FakeGameServices, GameTestClock) {
     let clock = GameTestClock()
     let model = AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/AppSupport")),
         manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(), defaults: nil,
-        gameServices: fake, volumeEvents: volumeEvents, purgeable: purgeable, launchServices: launches, now: { clock.time })
+        gameServices: fake, volumeEvents: volumeEvents, purgeable: purgeable, launchServices: launches, notifications: notifications, notificationIsFrontmost: { false }, now: { clock.time })
     return (model, fake, clock)
 }
 @MainActor private func gamesEventually(_ condition: () -> Bool) async throws {

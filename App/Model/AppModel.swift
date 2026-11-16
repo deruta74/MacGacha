@@ -128,6 +128,15 @@ final class AppModel {
     var isGameOperationRunning: Bool { gameOperation != nil }
     private(set) var isRuntimeOperationRunning = false
     @ObservationIgnored let updater: any AppUpdating
+    var notificationAuthorization: GameNotificationAuthorization = .notDetermined
+    var notificationSelection: GameNotificationSelection?
+    @ObservationIgnored let notifications: any GameNotificationCenter
+    @ObservationIgnored let notificationHistory: any GameNotificationHistoryAccess
+    @ObservationIgnored let notificationIsFrontmost: @MainActor () -> Bool
+    @ObservationIgnored let notificationReveal: @MainActor () -> Void
+    @ObservationIgnored let notificationSettings: @MainActor () -> Void
+    @ObservationIgnored var notificationTask: Task<Void, Never>?
+    @ObservationIgnored var notificationActivationTask: Task<Void, Never>?
     private(set) var launcherRevealed = false
     private(set) var artCacheStates: [Region: ArtCacheState] = [:]
     var artCacheState: ArtCacheState { artCacheStates[region] ?? .notChecked }
@@ -321,6 +330,11 @@ final class AppModel {
         launchWindows: LaunchWindowCoordinator = LaunchWindowCoordinator(),
         launchSleep: @escaping @Sendable () async throws -> Void = { try await ContinuousClock().sleep(for: .milliseconds(500)) },
         recoverySleep: @escaping @Sendable (Duration) async throws -> Void = { try await ContinuousClock().sleep(for: $0) },
+        notifications: any GameNotificationCenter = EmptyGameNotificationCenter(),
+        notificationHistory: (any GameNotificationHistoryAccess)? = nil,
+        notificationIsFrontmost: @escaping @MainActor () -> Bool = { NSApp?.isActive ?? true },
+        notificationReveal: @escaping @MainActor () -> Void = {},
+        notificationSettings: @escaping @MainActor () -> Void = {},
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
         eventsNow: @escaping @Sendable () -> Date = Date.init,
         eventsSleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
@@ -333,6 +347,11 @@ final class AppModel {
         self.launchArguments = launchArguments
         self.artClock = artClock
         self.updater = updater
+        self.notifications = notifications
+        self.notificationHistory = notificationHistory ?? LiveGameNotificationHistory(store: GameNotificationHistory(paths: paths))
+        self.notificationIsFrontmost = notificationIsFrontmost
+        self.notificationReveal = notificationReveal
+        self.notificationSettings = notificationSettings
         self.eventsServices = eventsServices
         self.eventsNow = eventsNow; self.eventsSleep = eventsSleep
         self.eventsSnapshots = eventsServices.mapValues { $0.cached() }
@@ -361,6 +380,7 @@ final class AppModel {
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Games/MacGacha", isDirectory: true)
         rebuildRows()
         revalidateGameEvents()
+        configureNotifications()
         observeGameActivation()
         observeEventsWindowActivation()
         refreshConnectedDisplays()
@@ -452,7 +472,10 @@ final class AppModel {
         return AppModel(paths: paths, services: runtimeServices, catalogAccess: catalog,
             artServices: art, eventsServices: events, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
             rosettaProbe: SystemRosettaProbe(), displayProbe: SystemDisplayProbe(),
-            displayNames: { ScreenDisplayNames.current() }, launchServices: launch, wishHistoryExporter: WishHistoryExporter(log: log), updater: SparkleUpdaterService(), relaunch: { arguments in
+            displayNames: { ScreenDisplayNames.current() }, launchServices: launch, wishHistoryExporter: WishHistoryExporter(log: log),
+            notifications: SystemGameNotificationCenter(), notificationIsFrontmost: { NSApp.isActive },
+            notificationReveal: { SystemGameNotificationCenter.revealLauncher() },
+            notificationSettings: { SystemGameNotificationCenter.openSettings() }, updater: SparkleUpdaterService(), relaunch: { arguments in
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.createsNewApplicationInstance = true; configuration.arguments = arguments
                 _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
@@ -500,6 +523,7 @@ final class AppModel {
         for task in artHydrationTasks.values { task.cancel() }
         artStartupTask?.cancel(); artRevealTask?.cancel()
         for task in eventsTasks.values { task.cancel() }
+        notificationTask?.cancel(); notificationActivationTask?.cancel()
         eventsHydrationTask?.cancel(); eventsExpiryTask?.cancel(); eventsWindowTask?.cancel()
         volumeEventTask?.cancel()
         gameTask?.cancel(); gameStartupTask?.cancel(); gameActivationTask?.cancel()

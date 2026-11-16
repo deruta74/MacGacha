@@ -8,21 +8,24 @@ public struct GlobalLaunchSettings: Codable, Equatable, Sendable {
     public var sessionLogsEnabled: Bool
     public var gameModeEnabled: Bool
     public var autoUpdateDependencies: Bool
+    public var notificationsEnabled: Bool
     public var genshinFpsRiskAcknowledged: Bool
     public init(sessionLogsEnabled: Bool = true, gameModeEnabled: Bool = true, genshinFpsRiskAcknowledged: Bool = false,
-        autoUpdateDependencies: Bool = true, wishHistoryEnabled: Bool = false) {
+        autoUpdateDependencies: Bool = true, wishHistoryEnabled: Bool = false, notificationsEnabled: Bool = true) {
         self.sessionLogsEnabled = sessionLogsEnabled; self.gameModeEnabled = gameModeEnabled
         self.genshinFpsRiskAcknowledged = genshinFpsRiskAcknowledged
         self.autoUpdateDependencies = autoUpdateDependencies
         self.wishHistoryEnabled = wishHistoryEnabled
+        self.notificationsEnabled = notificationsEnabled
     }
-    private enum CodingKeys: CodingKey { case sessionLogsEnabled, gameModeEnabled, genshinFpsRiskAcknowledged, autoUpdateDependencies, wishHistoryEnabled }
+    private enum CodingKeys: CodingKey { case sessionLogsEnabled, gameModeEnabled, genshinFpsRiskAcknowledged, autoUpdateDependencies, wishHistoryEnabled, notificationsEnabled }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         wishHistoryEnabled = try values.decodeIfPresent(Bool.self, forKey: .wishHistoryEnabled) ?? false
         sessionLogsEnabled = try values.decodeIfPresent(Bool.self, forKey: .sessionLogsEnabled) ?? true
         gameModeEnabled = try values.decodeIfPresent(Bool.self, forKey: .gameModeEnabled) ?? true
         autoUpdateDependencies = try values.decodeIfPresent(Bool.self, forKey: .autoUpdateDependencies) ?? true
+        notificationsEnabled = try values.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         genshinFpsRiskAcknowledged = try values.decodeIfPresent(Bool.self, forKey: .genshinFpsRiskAcknowledged) ?? false
     }
 }

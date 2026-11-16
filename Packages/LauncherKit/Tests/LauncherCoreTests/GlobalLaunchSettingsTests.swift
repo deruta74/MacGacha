@@ -6,6 +6,17 @@ import TestSupport
 @testable import LauncherCore
 
 @Suite(.timeLimit(.minutes(1))) struct GlobalLaunchSettingsTests {
+    @Test func notificationsDefaultOnAndPersistWithoutChangingOtherPreferences() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), store = GlobalLaunchSettingsStore(paths: AppPaths(root: temp.url))
+            #expect(try store.load().notificationsEnabled)
+            #expect(try JSONDecoder().decode(GlobalLaunchSettings.self, from: Data("{}".utf8)).notificationsEnabled)
+            var settings = GlobalLaunchSettings(sessionLogsEnabled: false, gameModeEnabled: false)
+            settings.notificationsEnabled = false
+            try store.save(settings)
+            #expect(try store.load() == settings)
+        }
+    }
     @Test func dependencyUpdatesDefaultOnAndPersistAlongsideOtherGlobalSettings() async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), store = GlobalLaunchSettingsStore(paths: AppPaths(root: temp.url))

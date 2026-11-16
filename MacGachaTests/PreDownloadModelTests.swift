@@ -12,6 +12,50 @@ import GameLibrary
 @testable import MacGacha
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct PreDownloadModelTests {
+    @Test func resumeOfAlreadyReadyPredownloadDoesNotRepeatCompletion() async throws {
+        let center = TestGameNotificationCenter(), service = try PreDownloadModelServices()
+        defer { service.finish() }
+        let model = AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/notifications-ready")),
+            manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(), defaults: nil,
+            gameServices: service, launchPreferences: PreDownloadModelPreferences(),
+            notifications: center, notificationIsFrontmost: { false })
+        service.setInfo(try info(.ready, downloaded: 100))
+        await model.refreshPreDownloads(in: .global)
+        model.resumePreDownload("genshin")
+        await service.waitForOpen()
+        let worker = try #require(model.gameTask)
+        service.emit(.phase(.completed)); service.finish()
+        await worker.value
+        await model.notificationTask?.value
+        #expect(center.delivered.isEmpty)
+    }
+
+    @Test(arguments: [true, false]) func notificationsRequireExplicitPredownloadCompletion(completed: Bool) async throws {
+        let center = TestGameNotificationCenter(), service = try PreDownloadModelServices()
+        let root = URL(fileURLWithPath: "/tmp/macgacha-notification-predownload-\(UUID())")
+        defer { service.finish(); try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(paths: AppPaths(root: root), manifest: try RuntimeManifest(components: []),
+            services: PreviewRuntimeServices(), defaults: nil, gameServices: service,
+            launchPreferences: PreDownloadModelPreferences(), notifications: center, notificationIsFrontmost: { false })
+        model.setGameState("genshin", GameState(status: .installed(tag: "1.0")))
+        await model.refreshPreDownloads(in: .global)
+        await model.notificationTask?.value
+        #expect(center.delivered.map(\.kind) == [.preDownloadAvailable])
+        model.startPreDownload("genshin")
+        await service.waitForOpen()
+        let worker = try #require(model.gameTask)
+        service.setInfo(try info(.ready, downloaded: 100))
+        if completed { service.emit(.phase(.completed)) }
+        service.finish()
+        await worker.value
+        await model.notificationTask?.value
+        #expect(center.delivered.map(\.kind) == (completed ? [.preDownloadAvailable, .preDownloadFinished] : [.preDownloadAvailable]))
+        // Startup/cache refresh of already ready work must never replay completion.
+        await model.refreshPreDownloads(in: .global)
+        await model.notificationTask?.value
+        #expect(center.delivered.count == (completed ? 2 : 1))
+    }
+
     @Test func movePausesAndDrainsPredownloadWithoutReleasingReservation() async throws {
         let gate = PreDownloadModelGate()
         let (model, service) = try fixture(drain: gate); defer { service.finish() }
