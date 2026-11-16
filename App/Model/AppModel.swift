@@ -511,6 +511,7 @@ final class AppModel {
         model.shortcutWriter = LiveGameShortcutWriter(
             directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
             hostBundleID: Bundle.main.bundleIdentifier ?? "com.lo7ted.macgacha",
+            hostPath: Bundle.main.bundleURL.path(percentEncoded: false),
             icons: CachedGameModeIcons(cacheDirectory: gameArtCacheDirectory(in: caches, bundleIdentifier: Bundle.main.bundleIdentifier)))
         model.terminateAfterShortcut = { NSApp.terminate(nil) }
         return model

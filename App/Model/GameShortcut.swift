@@ -33,12 +33,20 @@ enum GameShortcut {
         return cleaned.isEmpty ? "MacGacha Game" : cleaned
     }
 
-    static func script(gameID: String, hostBundleID: String) -> String {
-        """
+    /// MacGacha is activated (no `-g`), so it can hand focus to the game it starts.
+    /// Opens the exact MacGacha that made the shortcut, so an older copy elsewhere can't take
+    /// the request. If that copy was moved or deleted, any MacGacha with the bundle ID is used.
+    static func script(gameID: String, hostBundleID: String, hostPath: String) -> String {
+        let path = hostPath.replacingOccurrences(of: "'", with: "'\\''")
+        return """
         #!/bin/sh
         # Created by MacGacha. Starts this game through MacGacha without opening its window.
         # Delete this app to remove the shortcut.
-        exec /usr/bin/open -g -b '\(hostBundleID)' 'macgacha://play/\(gameID)' --args \(launchArgument)
+        url='macgacha://play/\(gameID)'
+        if [ -d '\(path)' ]; then
+            exec /usr/bin/open -a '\(path)' "$url" --args \(launchArgument)
+        fi
+        exec /usr/bin/open -b '\(hostBundleID)' "$url" --args \(launchArgument)
 
         """
     }
@@ -57,7 +65,7 @@ enum GameShortcut {
     /// Writes `<name>.app` into `directory` through a temporary sibling and returns its URL.
     /// An earlier shortcut for the same game is replaced. Another app with that name is
     /// never touched: the shortcut then gets a "(MacGacha)" suffix. Call on BlockingIO.
-    static func write(gameID: String, name: String, icns: Data?, hostBundleID: String, in directory: URL) throws -> URL {
+    static func write(gameID: String, name: String, icns: Data?, hostBundleID: String, hostPath: String, in directory: URL) throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let fs = try ContainedFileSystem(root: directory)
         let base = appName(for: name)
@@ -79,7 +87,7 @@ enum GameShortcut {
             }
             let executable = try fs.openForWriting(at: SafeRelativePath("\(temporary)/Contents/MacOS/launch"), truncate: true)
             defer { try? executable.close() }
-            try executable.write(contentsOf: Data(script(gameID: gameID, hostBundleID: hostBundleID).utf8))
+            try executable.write(contentsOf: Data(script(gameID: gameID, hostBundleID: hostBundleID, hostPath: hostPath).utf8))
             guard fchmod(executable.fileDescriptor, 0o755) == 0 else { throw LauncherError.io("Cannot make the shortcut executable") }
             // Swapped in atomically. An earlier shortcut ends up at the temporary name and is removed.
             if try fs.publishDirectory(at: temporary, to: destination) { try? fs.removeItem(at: temporary) }
@@ -106,15 +114,16 @@ protocol GameShortcutWriting: Sendable {
 struct LiveGameShortcutWriter: GameShortcutWriting {
     let directory: URL
     let hostBundleID: String
+    let hostPath: String
     let icons: any GameModeIconProviding
 
     func write(gameID: String, name: String) async throws -> URL {
         guard let game = GameDefinition.find(gameID) else { throw LauncherError.io("Unknown game") }
         // The cached HoYoPlay icon, or MacGacha's own icon when none is cached yet.
         let icns = try? await icons.icon(for: game).icns
-        let directory = directory, host = hostBundleID
+        let directory = directory, host = hostBundleID, path = hostPath
         return try await BlockingIO.run {
-            try GameShortcut.write(gameID: gameID, name: name, icns: icns, hostBundleID: host, in: directory)
+            try GameShortcut.write(gameID: gameID, name: name, icns: icns, hostBundleID: host, hostPath: path, in: directory)
         }
     }
 }

@@ -28,7 +28,7 @@ struct GameShortcutTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let icns = Data("icns synthetic".utf8)
         let app = try GameShortcut.write(gameID: "starrail", name: "Honkai: Star Rail", icns: icns,
-            hostBundleID: "com.lo7ted.macgacha", in: directory)
+            hostBundleID: "com.lo7ted.macgacha", hostPath: "/Applications/Mac'Gacha.app", in: directory)
         #expect(app.lastPathComponent == "Honkai Star Rail.app")
         let plistData = try Data(contentsOf: app.appendingPathComponent("Contents/Info.plist"))
         let plist = try #require(try PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any])
@@ -41,12 +41,15 @@ struct GameShortcutTests {
         #expect((attributes[.posixPermissions] as? Int) == 0o755)
         let text = try String(contentsOf: script, encoding: .utf8)
         #expect(text.hasPrefix("#!/bin/sh\n"))
-        #expect(text.contains("open -g -b 'com.lo7ted.macgacha' 'macgacha://play/starrail' --args --macgacha-shortcut"))
+        #expect(text.contains("url='macgacha://play/starrail'"))
+        #expect(text.contains("if [ -d '/Applications/Mac'\\''Gacha.app' ]; then"))
+        #expect(text.contains("exec /usr/bin/open -a '/Applications/Mac'\\''Gacha.app' \"$url\" --args --macgacha-shortcut"))
+        #expect(text.contains("exec /usr/bin/open -b 'com.lo7ted.macgacha' \"$url\" --args --macgacha-shortcut"))
         #expect(try Data(contentsOf: app.appendingPathComponent("Contents/Resources/AppIcon.icns")) == icns)
 
         // Writing again replaces the earlier shortcut in place, without the icon this time.
         let again = try GameShortcut.write(gameID: "starrail", name: "Honkai: Star Rail", icns: nil,
-            hostBundleID: "com.lo7ted.macgacha", in: directory)
+            hostBundleID: "com.lo7ted.macgacha", hostPath: "/Applications/Mac'Gacha.app", in: directory)
         #expect(again == app)
         #expect(!FileManager.default.fileExists(atPath: app.appendingPathComponent("Contents/Resources/AppIcon.icns").path))
 
@@ -55,7 +58,7 @@ struct GameShortcutTests {
         try FileManager.default.createDirectory(at: foreign, withIntermediateDirectories: true)
         try Data("not ours".utf8).write(to: foreign.appendingPathComponent("marker"))
         let separate = try GameShortcut.write(gameID: "genshin", name: "Genshin Impact", icns: nil,
-            hostBundleID: "com.lo7ted.macgacha", in: directory)
+            hostBundleID: "com.lo7ted.macgacha", hostPath: "/Applications/Mac'Gacha.app", in: directory)
         #expect(separate.lastPathComponent == "Genshin Impact (MacGacha).app")
         #expect(try Data(contentsOf: foreign.appendingPathComponent("marker")) == Data("not ours".utf8))
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix(".") }

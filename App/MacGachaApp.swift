@@ -8,8 +8,16 @@ import SwiftUI
 
 @main
 struct MacGachaApp: App {
-    @State private var model = Self.makeModel()
+    @State private var model: AppModel
     @NSApplicationDelegateAdaptor(LauncherAppDelegate.self) private var delegate
+
+    init() {
+        let model = Self.makeModel()
+        _model = State(initialValue: model)
+        // A shortcut launch opens a URL, and SwiftUI creates no window for that,
+        // so the delegate needs the model to start without one.
+        LauncherAppDelegate.launchModel = model
+    }
 
     private static func makeModel() -> AppModel {
         #if DEBUG
@@ -60,8 +68,9 @@ struct MacGachaApp: App {
     }
     var replyToTermination: (Bool) -> Void = { NSApp.reply(toApplicationShouldTerminate: $0) }
 
-    /// Shortcut URLs that arrived before the window bound the model.
+    /// Shortcut URLs that arrived before the model was bound.
     private var pendingURLs: [URL] = []
+    static var launchModel: AppModel?
 
     func bind(_ model: AppModel) {
         dockModel = model
@@ -80,6 +89,13 @@ struct MacGachaApp: App {
 
     /// The SwiftUI lifecycle doesn't forward URL events to `application(_:open:)`, and its own
     /// handling would bring the launcher window forward. Shortcut URLs come straight here.
+    /// A shortcut launch has no window to run startup, so it starts here.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard let model = Self.launchModel, model.launchedHidden, dockModel == nil else { return }
+        bind(model)
+        Task { await model.start() }
+    }
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(handleGetURL(_:withReply:)),
             forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))

@@ -37,11 +37,21 @@ import LauncherCore
             await refreshGames(in: game.region)
             guard !Task.isCancelled else { return }
         }
-        guard canPlayFromDock(id) else { revealLauncher(selecting: id); return }
+        // Startup's refresh returns early while another one (the window's, for example) is
+        // still reading records. Decide only once the game's region has its records.
+        for _ in 0..<600 where gameRefreshInFlight.contains(game.region) {
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+        }
+        guard canPlayFromDock(id) else { shortcutEvent(id, "Shortcut opened the launcher", hidden: launchedHidden); revealLauncher(selecting: id); return }
         play(id)
         // Play claims the launch slot synchronously. If it refused, show why.
-        guard liveLaunchGames.contains(id) else { revealLauncher(selecting: id); return }
+        guard liveLaunchGames.contains(id) else { shortcutEvent(id, "Shortcut launch refused", hidden: launchedHidden); revealLauncher(selecting: id); return }
+        shortcutEvent(id, "Shortcut started the game", hidden: launchedHidden)
         if launchedHidden { watchShortcutSession(id, sawGame: true) }
+    }
+
+    private func shortcutEvent(_ id: String, _ message: String, hidden: Bool) {
+        EventLog(directory: paths.logs).post(.info, "shortcut", message, metadata: ["game": id, "hidden": hidden ? "yes" : "no"])
     }
 
     /// Shows the launcher on a game, for example when a shortcut can't start it directly.
