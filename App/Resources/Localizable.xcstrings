@@ -2735,6 +2735,89 @@
         }
       }
     },
+    "Adds %@ to Applications. It starts the game without opening the launcher, and you can keep it in the Dock." : {
+      "comment" : "Help for Create Shortcut; the argument is the game name",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fügt %@ zu „Programme“ hinzu. Damit startest du das Spiel, ohne den Launcher zu öffnen, und kannst es im Dock behalten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añade %@ a Aplicaciones. Inicia el juego sin abrir el launcher y puedes dejarlo en el Dock."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajoute %@ aux Applications. Il lance le jeu sans ouvrir le lanceur, et vous pouvez le garder dans le Dock."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Menambahkan %@ ke Aplikasi. Pintasan ini memulai game tanpa membuka launcher, dan bisa disimpan di Dock."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ を「アプリケーション」に追加します。ランチャーを開かずにゲームを起動でき、Dock に置いておくこともできます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@을(를) 응용 프로그램에 추가합니다. 런처를 열지 않고 게임을 시작하며 Dock에 둘 수도 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adiciona %@ a Aplicativos. Ele inicia o jogo sem abrir o launcher, e você pode mantê-lo no Dock."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавляет %@ в «Программы». Ярлык запускает игру, не открывая лаунчер, и его можно закрепить в Dock."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เพิ่ม %@ ลงในแอปพลิเคชัน ทางลัดนี้เปิดเกมได้โดยไม่ต้องเปิดตัวเรียกใช้ และเก็บไว้ใน Dock ได้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Додає %@ до «Програм». Ярлик запускає гру, не відкриваючи лаунчер, і його можна закріпити в Dock."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thêm %@ vào Ứng dụng. Lối tắt này mở game mà không cần mở trình khởi chạy, và bạn có thể giữ nó trên Dock."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将%@添加到“应用程序”。它会直接启动游戏而不打开启动器，你也可以把它留在程序坞中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將%@加入「應用程式」。它會直接啟動遊戲而不開啟啟動器，你也可以把它留在 Dock 中。"
+          }
+        }
+      }
+    },
     "Adds Export Wish History… to each game's menu. While off, MacGacha doesn't read the history link or contact HoYoverse for it." : {
       "localizations" : {
         "de" : {
@@ -8409,6 +8492,89 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法為%@啟動網路輔助程式"
+          }
+        }
+      }
+    },
+    "Create Shortcut" : {
+      "comment" : "Game menu item that adds an app to ~/Applications which starts the game without showing the launcher",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verknüpfung erstellen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crear acceso directo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Créer un raccourci"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buat pintasan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ショートカットを作成"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "바로 가기 만들기"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Criar atalho"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создать ярлык"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "สร้างทางลัด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Створити ярлик"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tạo lối tắt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建快捷方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建立捷徑"
           }
         }
       }

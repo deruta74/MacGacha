@@ -251,6 +251,13 @@ final class AppModel {
     @ObservationIgnored private var requestModes: [String: ConsentMode] = [:]
     @ObservationIgnored private var progressTimes: [String: ContinuousClock.Instant] = [:]
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var startupFinished = false
+    @ObservationIgnored private var startupWaiters: [CheckedContinuation<Void, Never>] = []
+    /// A shortcut started this process: the launcher window stays hidden until something needs it.
+    var launchedHidden = false
+    @ObservationIgnored var shortcutWriter: any GameShortcutWriting = UnavailableGameShortcutWriter()
+    @ObservationIgnored var terminateAfterShortcut: @MainActor () -> Void = {}
+    @ObservationIgnored var shortcutTask: Task<Void, Never>?
     @ObservationIgnored private var importComponent: RuntimeComponent?
     @ObservationIgnored private var extraRoots: [URL] = []
     @ObservationIgnored private var searchTask: Task<Void, Never>?
@@ -364,6 +371,7 @@ final class AppModel {
         self.prefixResetter = prefixResetter ?? WinePrefixResetter(paths: paths)
         self.relaunch = relaunch; self.terminateAfterLanguageRestart = terminateAfterLanguageRestart
         self.launchArguments = launchArguments
+        self.launchedHidden = launchArguments.contains(GameShortcut.launchArgument)
         self.artClock = artClock
         self.updater = updater
         self.notifications = notifications
@@ -488,7 +496,7 @@ final class AppModel {
                 .appendingPathComponent("GameEvents", isDirectory: true), region: $0,
                 language: HoYoPlayLanguage.content(forInterface: InterfaceLanguageSettings.runningLocalization)))
         })
-        return AppModel(paths: paths, services: runtimeServices, catalogAccess: catalog,
+        let model = AppModel(paths: paths, services: runtimeServices, catalogAccess: catalog,
             artServices: art, eventsServices: events, gameServices: LiveGameServices(paths: paths, log: log, guard: launch),
             storageCacheDirectory: gameArtCacheDirectory(in: caches, bundleIdentifier: Bundle.main.bundleIdentifier).deletingLastPathComponent(),
             rosettaProbe: SystemRosettaProbe(), displayProbe: SystemDisplayProbe(),
@@ -500,6 +508,12 @@ final class AppModel {
                 configuration.createsNewApplicationInstance = true; configuration.arguments = arguments
                 _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
             }, terminateAfterLanguageRestart: { NSApp.terminate(nil) })
+        model.shortcutWriter = LiveGameShortcutWriter(
+            directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
+            hostBundleID: Bundle.main.bundleIdentifier ?? "com.lo7ted.macgacha",
+            icons: CachedGameModeIcons(cacheDirectory: gameArtCacheDirectory(in: caches, bundleIdentifier: Bundle.main.bundleIdentifier)))
+        model.terminateAfterShortcut = { NSApp.terminate(nil) }
+        return model
     }
 
     static func forCurrentProcess() -> AppModel {
@@ -581,6 +595,15 @@ final class AppModel {
         await eventsHydration.value
         scheduleRuntimeCatalogRefresh()
         updater.start { [weak self] in self?.isBusyForUpdates ?? true }
+        startupFinished = true
+        let waiters = startupWaiters; startupWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// Returns once `start()` has completed, whoever called it.
+    func waitForStartup() async {
+        guard !startupFinished else { return }
+        await withCheckedContinuation { startupWaiters.append($0) }
     }
 
     /// Retries the runtime scan quietly while the store stays busy, so a lock held at
@@ -1039,7 +1062,10 @@ final class AppModel {
 
     func show(_ error: any Error) {
         let error = launcherError(error)
-        if error != .cancelled { lastError = error.userMessage }
+        guard error != .cancelled else { return }
+        lastError = error.userMessage
+        // An error must not wait in a window a shortcut kept hidden.
+        if launchedHidden { revealLauncher(selecting: nil) }
     }
     private static func id(_ component: InstalledComponent) -> String { "\(component.kind.idPrefix)-\(component.version)" }
     static func kindName(_ kind: ComponentKind) -> String {

@@ -108,6 +108,8 @@ struct GameNotificationSelection: Equatable {
         NSApp.unhide(nil)
         let window = NSApp.windows.first { $0.identifier?.rawValue == "launcher" || $0.title == "MacGacha" }
             ?? NSApp.windows.first { $0.canBecomeMain && !$0.isExcludedFromWindowsMenu }
+        // A shortcut launch keeps the window transparent until it is needed.
+        window?.alphaValue = 1
         window?.deminiaturize(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
