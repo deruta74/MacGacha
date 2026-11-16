@@ -232,7 +232,8 @@ private struct DependencyCard: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.canUseRuntimeVersion(newer.id))
                     .help(String(localized: "Switch to \(DependencyText.name(newer))"))
-                if !offersWineChoice { ActiveMenu(row: current, remove: { removing = current }) }
+                // Wine-choice cards pin through the Wine Version list, so their menu only removes.
+                ActiveMenu(row: current, offersPin: !offersWineChoice, remove: { removing = current })
             case .ready(let current):
                 switch autoUpdate {
                 case .installing(let id) where AutoUpdateNote.canCancel(group, id):
@@ -240,7 +241,7 @@ private struct DependencyCard: View {
                         .help("Stop this update. Games keep using the current version.")
                 default: EmptyView()
                 }
-                if !offersWineChoice { ActiveMenu(row: current, remove: { removing = current }) }
+                ActiveMenu(row: current, offersPin: !offersWineChoice, remove: { removing = current })
             case .damaged:
                 EmptyView()
             }
