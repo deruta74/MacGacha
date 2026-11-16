@@ -62,6 +62,28 @@ struct AppModelTests {
         #expect(model.rows.first?.state == .installed(source: .download))
         #expect(fake.snapshot.calls.contains("scan"))
     }
+    @Test func busyStoreAtLaunchRetriesQuietlyInsteadOfShowingAnError() async throws {
+        let (model, fake, component) = try fixture()
+        let installed = try InstalledComponent(kind: component.kind, version: component.version.rawValue,
+            installedAt: Date(), source: .download)
+        fake.setInstalled(installed)
+        fake.state.withLock { $0.busyScans = 3 }
+        model.runtimeRescanDelay = .zero
+        await model.start()
+        await model.runtimeRescanTask?.value
+        #expect(model.lastError == nil)
+        #expect(model.rows.first?.state == .installed(source: .download))
+        #expect(fake.snapshot.calls.filter { $0 == "scan" }.count == 4)
+    }
+    @Test func storeBusyThroughEveryRescanIsReported() async throws {
+        let (model, fake, _) = try fixture()
+        fake.state.withLock { $0.busyScans = 100 }
+        model.runtimeRescanDelay = .zero
+        await model.start()
+        await model.runtimeRescanTask?.value
+        #expect(model.lastError != nil)
+        #expect(fake.snapshot.calls.filter { $0 == "scan" }.count == 25)
+    }
     @Test(arguments: [false, true]) func refusedBusyRemovalKeepsInstalledRow(bundleRemoval: Bool) async throws {
         if bundleRemoval {
             let url = try #require(Bundle.main.url(forResource: "runtime-manifest", withExtension: "json"))
@@ -630,6 +652,7 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
         var exportError: LauncherError?
         var exportData = completedDiagnosticBytes
         var scanError: LauncherError?
+        var busyScans = 0
         var sweepError: LauncherError?
         var removeError: LauncherError?
         var acceptError: LauncherError?
@@ -653,6 +676,7 @@ final class FakeRuntimeServices: RuntimeServices, Sendable {
             let result: Result<RuntimeScan, any Error>? = state.withLock {
                 $0.calls.append("scan")
                 if let error = $0.scanError { return .failure(error) }
+                if $0.busyScans > 0 { $0.busyScans -= 1; return .failure(LauncherError.busy("install root in use")) }
                 let scan = RuntimeScan(components: $0.components, invalid: $0.invalid)
                 if $0.holdNextScan {
                     $0.holdNextScan = false; $0.scanWaiter = continuation; $0.heldScan = scan

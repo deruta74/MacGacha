@@ -12,13 +12,25 @@ public final class InstallLock: Sendable {
     public enum Mode: Sendable { case exclusive, shared }
     private let handle: Mutex<FileHandle?>
 
-    public init(fs: ContainedFileSystem, path: SafeRelativePath, mode: Mode = .exclusive) throws {
+    /// Attempts and pause for short-lived locks that are better waited for than refused,
+    /// such as the runtime store lock: about 10 seconds in total.
+    public static let shortWaitRetries = 200
+    public static let shortWaitPause: @Sendable () -> Void = { usleep(50_000) }
+
+    /// `retries` re-attempts a lock held elsewhere, calling `pause` between attempts.
+    /// Only call with retries from a thread that may block (BlockingIO), never a cooperative one.
+    public init(fs: ContainedFileSystem, path: SafeRelativePath, mode: Mode = .exclusive,
+        retries: Int = 0, pause: () -> Void = InstallLock.shortWaitPause) throws {
         let opened = try fs.openForWriting(at: path, truncate: false)
+        var remaining = retries
         do {
             while true {
                 guard !Task.isCancelled else { throw LauncherError.cancelled }
                 if flock(opened.fileDescriptor, (mode == .exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB) == 0 { break }
-                if errno == EWOULDBLOCK || errno == EAGAIN { throw LauncherError.busy("install root in use") }
+                if errno == EWOULDBLOCK || errno == EAGAIN {
+                    guard remaining > 0 else { throw LauncherError.busy("install root in use") }
+                    remaining -= 1; pause(); continue
+                }
                 guard errno == EINTR else { throw LauncherError.io("Cannot lock install root") }
             }
         } catch { try? opened.close(); throw error }

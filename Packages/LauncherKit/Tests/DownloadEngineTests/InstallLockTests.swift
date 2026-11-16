@@ -72,3 +72,29 @@ private func duplicateLockDescription(at path: String) throws -> Int32 {
     }
     throw LauncherError.io("Cannot find test lock descriptor")
 }
+
+@Test
+func retryingLockWaitsForTheHolderToRelease() throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url)
+    let path = try SafeRelativePath("Runtimes/.lock")
+    var holder: InstallLock? = try InstallLock(fs: fs, path: path)
+    var pauses = 0
+    // The holder releases during the first pause, as another task or process would.
+    let waited = try InstallLock(fs: fs, path: path, retries: 3) { pauses += 1; holder = nil }
+    #expect(pauses == 1)
+    #expect(holder == nil)
+    withExtendedLifetime(waited) {}
+}
+
+@Test
+func retryingLockGivesUpAfterItsRetries() throws {
+    let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url)
+    let path = try SafeRelativePath("Runtimes/.lock")
+    let holder = try InstallLock(fs: fs, path: path)
+    var pauses = 0
+    #expect(throws: LauncherError.busy("install root in use")) {
+        _ = try InstallLock(fs: fs, path: path, retries: 2) { pauses += 1 }
+    }
+    #expect(pauses == 2)
+    withExtendedLifetime(holder) {}
+}

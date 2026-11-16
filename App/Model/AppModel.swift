@@ -180,6 +180,9 @@ final class AppModel {
     var runtimeCatalogMutationID: String?
     @ObservationIgnored let catalogAccess: (any RuntimeCatalogAccess)?
     @ObservationIgnored var catalogRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var runtimeRescanTask: Task<Void, Never>?
+    /// Pause between quiet startup rescans while another process holds the runtime store.
+    @ObservationIgnored var runtimeRescanDelay: Duration = .seconds(5)
     @ObservationIgnored var catalogMutationTask: Task<Void, Never>?
     @ObservationIgnored var catalogSelectionGeneration = UUID()
     @ObservationIgnored var cancelledCatalogSetups: Set<String> = []
@@ -526,7 +529,7 @@ final class AppModel {
     }
 
     deinit {
-        catalogRefreshTask?.cancel(); catalogMutationTask?.cancel(); dependencyAutoUpdateTask?.cancel()
+        catalogRefreshTask?.cancel(); runtimeRescanTask?.cancel(); catalogMutationTask?.cancel(); dependencyAutoUpdateTask?.cancel()
         rosettaRefreshTask?.cancel(); rosettaPollTask?.cancel(); rosettaInstallTask?.cancel()
         for check in runtimeSetupRosettaChecks.values { check.task.cancel() }
         for task in tasks.values { task.cancel() }
@@ -565,7 +568,12 @@ final class AppModel {
                 // Recovery defers mutation, but installed runtimes remain
                 // inspectable and must not appear available for replacement.
             }
-            try await scanAndApply()
+            do { try await scanAndApply() }
+            catch LauncherError.busy {
+                // Another process (an older MacGacha still quitting, or one installing
+                // a runtime) holds the store longer than the lock's short wait.
+                scheduleRuntimeRescan()
+            }
             try? await refreshAutomaticRetention()
             await refreshLogs()
         } catch { show(error) }
@@ -573,6 +581,23 @@ final class AppModel {
         await eventsHydration.value
         scheduleRuntimeCatalogRefresh()
         updater.start { [weak self] in self?.isBusyForUpdates ?? true }
+    }
+
+    /// Retries the runtime scan quietly while the store stays busy, so a lock held at
+    /// launch neither shows an error nor makes installed runtimes look missing.
+    func scheduleRuntimeRescan(attempts: Int = 24) {
+        runtimeRescanTask?.cancel()
+        runtimeRescanTask = Task { [weak self] in
+            for _ in 0..<attempts {
+                guard let delay = self?.runtimeRescanDelay else { return }
+                do { try await Task.sleep(for: delay) } catch { return }
+                guard let self, !Task.isCancelled else { return }
+                do { try await self.scanAndApply(); return }
+                catch LauncherError.busy { continue }
+                catch { if !Task.isCancelled { self.show(error) }; return }
+            }
+            if !Task.isCancelled { self?.show(LauncherError.busy("Runtime store stayed in use")) }
+        }
     }
 
     func refreshRuntimes() async {
