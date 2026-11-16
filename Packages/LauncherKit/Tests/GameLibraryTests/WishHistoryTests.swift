@@ -53,8 +53,8 @@ import TestSupport
         let route = game.region == .global && game.family == .genshin ? "genshin" : family
         let raw = "https://\(pageHost)/\(route)/event/\(event)/index.html?authkey=synthetic&game_biz=\(game.biz)#/log"
         try await BlockingIO.run {
-            try ContainedFileSystem(root: root).writeAtomically(Data((raw + "\u{0}").utf8),
-                to: SafeRelativePath(game.dataDirectoryName + "/webCaches/1/Cache/Cache_Data/data_2"))
+            try writeSyntheticWishCache(ContainedFileSystem(root: root),
+                at: SafeRelativePath(game.dataDirectoryName + "/webCaches/1/Cache/Cache_Data"), entries: [.init(key: raw)])
         }
         let http = WishHTTP { _, _ in Self.page([]) }
         _ = try await WishHistoryExporter(http: http, sleep: { _ in }).export(request(game, root: root)) { _ in }
@@ -113,7 +113,7 @@ import TestSupport
         }
     }
 
-    @Test func cacheSelectsLastValidLinkAndRefusesWrongEditionAndSymlinks() async throws {
+    @Test func cacheSelectsIndexedLinksAndRefusesWrongEditionAndSymlinks() async throws {
         let temp = try TempDir(), game = GameDefinition.find("genshin")!
         try await cache(temp.url, game: game, suffix: "\u{0}https://public-operation-hk4e.mihoyo.com/gacha_info/api/getGachaLog?authkey=synthetic\u{0}https://attacker.invalid/gacha_info/api/getGachaLog?authkey=synthetic")
         let http = WishHTTP { _, _ in Self.page([]) }
@@ -210,8 +210,8 @@ import TestSupport
             let route = game.region == .global ? "https://gs.hoyoverse.com/genshin" : "https://webstatic.mihoyo.com/hk4e"
             let raw = route + "/event/e20250716gacha/index.html?authkey=synthetic&game_biz=" + game.biz + "#/log"
             try await BlockingIO.run {
-                try ContainedFileSystem(root: root).writeAtomically(Data((raw + "\u{0}").utf8),
-                    to: SafeRelativePath(game.dataDirectoryName + "/webCaches/2.57.0.0/Cache/Cache_Data/data_2"))
+                try writeSyntheticWishCache(ContainedFileSystem(root: root),
+                    at: SafeRelativePath(game.dataDirectoryName + "/webCaches/2.57.0.0/Cache/Cache_Data"), entries: [.init(key: raw)])
             }
         }
         let http = WishHTTP { url, _ in
@@ -464,7 +464,11 @@ private func cache(_ root: URL, game: GameDefinition, suffix: String = "") async
     try await BlockingIO.run {
         let fs = try ContainedFileSystem(root: root)
         let url = "https://\(host(game))/\(game.family == .genshin ? "gacha_info" : "common/gacha_record")/api/getGachaLog?authkey=synthetic%2Btoken%3D&authkey_ver=1&sign_type=2&game_biz=\(game.biz)"
-        try fs.writeAtomically(Data((url + suffix + "\u{0}").utf8), to: SafeRelativePath(game.dataDirectoryName + "/webCaches/2.57.0.0/Cache/Cache_Data/data_2"))
+        let keys = (url + suffix).split(separator: "\u{0}").map(String.init)
+        let entries = keys.enumerated().map { index, key in
+            SyntheticWishCacheEntry(key: key, created: UInt64(index + 1), used: UInt64(index + 1), keyBlock: index * 4)
+        }
+        try writeSyntheticWishCache(fs, at: SafeRelativePath(game.dataDirectoryName + "/webCaches/2.57.0.0/Cache/Cache_Data"), entries: entries)
     }
 }
 private final class WishHTTP: HTTPClient, Sendable {

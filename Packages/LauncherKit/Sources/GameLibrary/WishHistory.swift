@@ -41,7 +41,7 @@ public protocol WishHistoryExporting: Sendable {
 }
 
 /// Query credentials deliberately have no printable or reflected representation.
-struct WishHistoryLink: Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+struct WishHistoryLink: Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     private let credentials: [URLQueryItem]
     var description: String { "WishHistoryLink(redacted)" }
     var debugDescription: String { description }
@@ -75,6 +75,10 @@ struct WishHistoryLink: Sendable, CustomStringConvertible, CustomDebugStringConv
         if !names.contains("authkey_ver") { copied.append(URLQueryItem(name: "authkey_ver", value: "1")) }
         if !names.contains("sign_type") { copied.append(URLQueryItem(name: "sign_type", value: "2")) }
         credentials = copied
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.credentials.sorted { $0.name < $1.name } == rhs.credentials.sorted { $0.name < $1.name }
     }
 
     func requestURL(game: GameDefinition, banner: String, page: Int, endID: String, language: String) -> URL {
@@ -124,24 +128,25 @@ struct WishHistoryCache {
             for version in versions {
                 try Task.checkCancellation()
                 guard try fs.itemType(at: version) == .directory else { continue }
-                let path = try SafeRelativePath(version.description + "/Cache/Cache_Data/data_2")
+                let path = try SafeRelativePath(version.description + "/Cache/Cache_Data/index")
                 if let date = try fs.modificationDate(at: path) { candidates.append((path, date)) }
             }
             candidates.sort { $0.1 == $1.1 ? $0.0.description.compare($1.0.description, options: .numeric) == .orderedDescending : $0.1 > $1.1 }
-            let regex = try NSRegularExpression(pattern: #"https://[^\x00-\x20"<>\\]{1,16384}"#)
-            var totalBytes = 0
-            for (path, _) in candidates.prefix(16) {
+            let budget = WishHistoryCacheBudget()
+            var selection = WishHistoryCacheSelection()
+            for (index, _) in candidates.prefix(16) {
                 try Task.checkCancellation()
-                guard totalBytes < 64 << 20 else { break }
-                let bytes = try fs.readFile(at: path, maxBytes: min(16 << 20, (64 << 20) - totalBytes))
-                totalBytes += bytes.count
-                let text = String(decoding: bytes, as: UTF8.self)
-                // Cache entries are appended. Last valid link in the newest file wins.
-                for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
-                    try Task.checkCancellation()
-                    if let range = Range(match.range, in: text), let link = WishHistoryLink(String(text[range]), game: request.game) { return link }
+                guard budget.remaining > 0 else { break }
+                let directory = try SafeRelativePath(index.components.dropLast().joined(separator: "/"))
+                do {
+                    let cache = try WishHistoryBlockCache(fs: fs, root: directory, budget: budget)
+                    selection.merge(try cache.select(for: request.game))
+                } catch {
+                    if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
+                    // A corrupt cache version cannot contribute partially read candidates.
                 }
             }
+            if let link = selection.link { return link }
             throw LauncherError.wishHistoryNoCachedLink
         } catch {
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }

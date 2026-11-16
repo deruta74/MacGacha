@@ -78,3 +78,32 @@ enum, then pass every other constraint using a test-only overlay that adds the
 two omitted members. The committed schema fixture remains unchanged. Strict
 conformance for those two record types requires an upstream schema correction
 or an explicit decision to change their representation.
+
+## Chromium cache link freshness
+
+Verified 2026-11-16 against Chromium revision 3d6abaa84a0acd9640e9d11d1803f92c644faf1e.
+
+- Index, EntryStore and RankingsNode layout: https://github.com/chromium/chromium/blob/3d6abaa84a0acd9640e9d11d1803f92c644faf1e/net/disk_cache/blockfile/disk_format.h
+- Block headers and allocation bitmap: https://github.com/chromium/chromium/blob/3d6abaa84a0acd9640e9d11d1803f92c644faf1e/net/disk_cache/blockfile/disk_format_base.h
+- Typed block addresses: https://github.com/chromium/chromium/blob/3d6abaa84a0acd9640e9d11d1803f92c644faf1e/net/disk_cache/blockfile/addr.h
+- Block reuse: https://github.com/chromium/chromium/blob/3d6abaa84a0acd9640e9d11d1803f92c644faf1e/net/disk_cache/blockfile/block_files.cc
+- Entry creation, key storage and last-used semantics: https://github.com/chromium/chromium/blob/3d6abaa84a0acd9640e9d11d1803f92c644faf1e/net/disk_cache/blockfile/entry_impl.cc
+
+Freed blocks are reused, so a key's offset cannot establish freshness. The
+reader follows only reachable index entries with normal state and allocated,
+correctly typed blocks. It validates key bounds and the rankings back-pointer,
+then compares entry creation time across every inspected version, using
+last-used time only for a creation-time tie. Reaccessing an old URL does not
+renew its credential, so last-used time cannot override a later creation time.
+Indistinguishable timestamps with different credentials fail safely rather
+than selecting by byte order. No naked data_2 scan or undocumented authkey
+timestamp heuristic is used as a fallback.
+
+Metadata and keys are bounded range reads through contained pinned descriptors.
+Synthetic fixtures place a fresh key at a lower data_2 offset than an expired
+one, leave unindexed freed bytes intact, exercise evicted entries, ties,
+cycles, typed-address corruption, allocation errors and symlink escapes, and
+prove a large sparse block file does not cause a whole-file read. No real cache
+contents are committed. Read-only local header checks confirmed blockfile v2.1
+indexes and the expected 36/256/1024/4096-byte block sizes in the required local
+Genshin and Star Rail caches. Only aggregate/header metadata was reported.
