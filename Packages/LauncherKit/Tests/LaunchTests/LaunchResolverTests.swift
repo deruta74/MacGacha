@@ -110,6 +110,11 @@ func metalHUDOptionsResolveExactly(backend: RuntimeBackend, enabled: Bool) throw
     #expect(try !resolve("zzz", settings: settings).arguments.contains("-use-d3d12"))
 }
 
+@Test(arguments: ["genshin", "starrail", "zzz", "genshin-cn", "starrail-cn", "zzz-cn"]) func onlyZZZCNClearsItsWebViewRenderMethod(game: String) throws {
+    let expected: Region? = game == "zzz-cn" ? .mainlandChina : nil
+    #expect(try resolve(game).preparation.webViewRenderReset == expected)
+}
+
 @Test(arguments: ["genshin", "starrail", "zzz"], [Int?.none, 30, 60, 90, 120]) func dxmtFrameLimit(game: String, limit: Int?) throws {
     var settings = LaunchSettings.defaults(for: game); settings.backend = .dxmt; settings.frameLimit = limit; settings.retina = true
     let value = try resolve(game, settings: settings)

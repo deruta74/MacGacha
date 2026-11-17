@@ -199,6 +199,81 @@ import TestSupport
             #expect(runner.invocations.last?.arguments.prefix(2) == ["reg", "query"])
         }
     }
+    @Test(arguments: [Region.global, .mainlandChina]) func savedWebViewRenderMethodIsClearedEveryLaunch(region: Region) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let key = region == .global ? "HKCU\\Software\\miHoYo\\ZenlessZoneZero" : "HKCU\\Software\\miHoYo\\绝区零"
+            let listing = """
+                HKEY_CURRENT_USER\\Software\\miHoYo\\???
+                    MIHOYOSDK_WEBVIEW_RENDER_METHOD_h1573598267    REG_DWORD    0x1
+                    HOYO_WEBVIEW_RENDER_METHOD_ABTEST_h12345    REG_DWORD    0x2
+                    HOYO_WEBVIEW_RENDER_METHOD_ABTEST_h12345    REG_DWORD    0x2
+                    HOYO_WEBVIEW_RENDER_METHOD_ABTEST_    REG_DWORD    0x2
+                    Screenmanager Resolution Width_h182942802    REG_DWORD    0x780
+                    MIHOYOSDK_WEBVIEW_RENDER_METHOD_h1573598267x    REG_DWORD    0x1
+
+                """
+            let runner = FakeProcessRunner { call in
+                if call.arguments.prefix(2) == ["reg", "query"] {
+                    #expect(call.arguments == ["reg", "query", key])
+                    return ProcessResult(exitCode: 0, stdout: Data(listing.utf8), stderr: Data())
+                }
+                return preparationSuccess()
+            }
+            let request = PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, webViewRenderReset: region)
+            for _ in 0..<2 {
+                _ = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: request)
+            }
+            let deletes = runner.invocations.filter { $0.arguments.prefix(3) == ["reg", "delete", key] }.map(\.arguments)
+            let once = [["reg", "delete", key, "/v", "MIHOYOSDK_WEBVIEW_RENDER_METHOD_h1573598267", "/f"],
+                ["reg", "delete", key, "/v", "HOYO_WEBVIEW_RENDER_METHOD_ABTEST_h12345", "/f"]]
+            #expect(deletes == once + once)
+            #expect(runner.invocations.last?.arguments == ["-w"])
+        }
+    }
+    @Test(arguments: ["missing", "queryFailure", "deleteFailure"]) func webViewResetNeverBlocksTheLaunch(scenario: String) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let runner = FakeProcessRunner { call in
+                if call.arguments.prefix(2) == ["reg", "query"] {
+                    switch scenario {
+                    case "missing": return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: Unable to find the specified registry key\n".utf8))
+                    case "queryFailure": throw LauncherError.io("query failed")
+                    default: return ProcessResult(exitCode: 0, stdout: Data("    MIHOYOSDK_WEBVIEW_RENDER_METHOD_h1573598267    REG_DWORD    0x1\n".utf8), stderr: Data())
+                    }
+                }
+                if call.arguments.prefix(2) == ["reg", "delete"], call.arguments.contains("/v"), call.arguments.contains("MIHOYOSDK_WEBVIEW_RENDER_METHOD_h1573598267") {
+                    return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("access denied".utf8))
+                }
+                return preparationSuccess()
+            }
+            _ = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, webViewRenderReset: .mainlandChina))
+            #expect(runner.invocations.last?.arguments == ["-w"])
+            #expect(try fixture.revision() == LaunchPreparation.provisioningRevision)
+        }
+    }
+    @Test func cancelledWebViewQueryStillCancelsPreparation() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let runner = FakeProcessRunner { call in
+                if call.arguments.prefix(2) == ["reg", "query"] { throw LauncherError.cancelled }
+                return preparationSuccess()
+            }
+            await #expect(throws: LauncherError.cancelled) {
+                try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                    request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, webViewRenderReset: .global))
+            }
+        }
+    }
+    @Test func otherGamesNeverTouchWebViewValues() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url), runner = FakeProcessRunner()
+            _ = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
+                request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false))
+            #expect(!runner.invocations.contains { $0.arguments.contains { $0.contains("miHoYo") } })
+        }
+    }
     @Test(arguments: [false, true]) func crypt32RegistryPolicyIsScopedAndUsesPersistenceBarrier(enabled: Bool) async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
