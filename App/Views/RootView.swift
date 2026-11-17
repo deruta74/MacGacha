@@ -14,7 +14,9 @@ enum Panel: String, Identifiable {
 /// and the game's primary action bottom-right, like HoYoPlay.
 struct RootView: View {
     @Environment(AppModel.self) private var model
-    @SceneStorage("selectedGame") private var selectedID = LauncherGame.all[0].id
+    /// The last game opened or started (`AppModel.selectedGameKey`). App storage, not
+    /// scene storage: window restoration is off, so scene storage forgot it on every launch.
+    @AppStorage(AppModel.selectedGameKey) private var selectedID = LauncherGame.all[0].id
     @State private var panel: Panel?
     @State private var gameSheet: GameSheet?
     /// On by default like HoYoPlay; Reduce Motion starts with still images instead.

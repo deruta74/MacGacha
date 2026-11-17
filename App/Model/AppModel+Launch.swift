@@ -127,6 +127,9 @@ import RuntimeManager
         await refreshPlayTime()
     }
 
+    /// Shared with the launcher view's selection, so it opens on the last game opened or started.
+    static let selectedGameKey = "selectedGame"
+
     func play(_ id: String) {
         guard canBeginGameOrRuntimeOperation() else { return }
         guard !runtimeCatalogUnavailable, runtimeCatalogMutationID == nil, launchSlotOwner == nil, launchTasks.isEmpty,
@@ -137,6 +140,8 @@ import RuntimeManager
         // Reserve before any await, and assume potentially live before spawning.
         // A post-spawn journal write may suspend before the .watch event arrives.
         launchSlotOwner = id; liveLaunchGames.insert(id)
+        // A game started from the Dock menu or a shortcut is the one the launcher opens on next.
+        defaults?.set(id, forKey: Self.selectedGameKey)
         launchLogURLs[id] = nil; launchFailures[id] = nil; launchNotes[id] = nil
         knownEndedLaunchGames.remove(id); launchRecoveryConflicts.remove(id)
         launchObservationGenerations[id] = UUID()
