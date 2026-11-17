@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-555555?style=for-the-badge)](README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-555555?style=for-the-badge)](README.ja.md)
 
-> ✨ **Вийшла [MacGacha 0.3.3](https://github.com/deruta74/MacGacha/releases/tag/v0.3.3)**: MacGacha Wine 11.22, ярлики ігор, сповіщення, панель «Сховище» та експорт історії молитов. Уже користуєтеся версією 0.3.1? MacGacha оновиться сама. Щось помітили? [Повідомте нам](#feedback).
+> ✨ **Вийшла [MacGacha 0.3.4](https://github.com/deruta74/MacGacha/releases/tag/v0.3.4)**: будь-яка швидкість завантаження на ваш вибір, лаунчер відкривається на останній грі, значок у Dock показує запуск гри, а порожню капчу в ZZZ (материковий Китай) виправлено. Уже користуєтеся версією 0.3.1? MacGacha оновиться сама. Щось помітили? [Повідомте нам](#feedback).
 
 Нативний лаунчер **Genshin Impact**, **Honkai: Star Rail** і **Zenless Zone Zero** для macOS на Apple Silicon. Він установлює, оновлює та перевіряє ігри з офіційних серверів HoYoverse, керує середовищами Wine / DXMT / D3DMetal і запускає кожну гру одним натисканням.
 

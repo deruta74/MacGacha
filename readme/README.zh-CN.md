@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-0078D4?style=for-the-badge)](README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-555555?style=for-the-badge)](README.ja.md)
 
-> ✨ **[MacGacha 0.3.3](https://github.com/deruta74/MacGacha/releases/tag/v0.3.3) 已发布**：带来 MacGacha Wine 11.22、游戏快捷方式、通知、存储面板和祈愿记录导出。已经在使用 0.3.1？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
+> ✨ **[MacGacha 0.3.4](https://github.com/deruta74/MacGacha/releases/tag/v0.3.4) 已发布**：下载速度可自定义，启动器会打开上次的游戏，游戏启动时程序坞图标会显示进度，并修复了绝区零（国服）登录时验证码空白的问题。已经在使用 0.3.1？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
 
 面向 Apple Silicon 的原生 macOS 启动器，支持 **《原神》**、**《崩坏：星穹铁道》** 和 **《绝区零》**。它从 HoYoverse 官方服务器安装、更新和校验游戏，管理 Wine / DXMT / D3DMetal 运行环境，并可一键启动各款游戏。
 

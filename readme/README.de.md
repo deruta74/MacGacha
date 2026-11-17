@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-555555?style=for-the-badge)](README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-555555?style=for-the-badge)](README.ja.md)
 
-> ✨ **[MacGacha 0.3.3](https://github.com/deruta74/MacGacha/releases/tag/v0.3.3) ist da**: MacGacha Wine 11.22, Spielverknüpfungen, Mitteilungen, ein Speicher-Bereich und der Export des Gebetsverlaufs. Du nutzt bereits 0.3.1? MacGacha aktualisiert sich selbst. Etwas entdeckt? Bitte [melde es](#feedback).
+> ✨ **[MacGacha 0.3.4](https://github.com/deruta74/MacGacha/releases/tag/v0.3.4) ist da**: eine frei wählbare Download-Geschwindigkeit, der Launcher öffnet dein zuletzt gewähltes Spiel, das Dock-Symbol zeigt den Spielstart an und das leere Captcha in ZZZ (Festlandchina) ist behoben. Du nutzt bereits 0.3.1? MacGacha aktualisiert sich selbst. Etwas entdeckt? Bitte [melde es](#feedback).
 
 Ein nativer macOS-Launcher für **Genshin Impact**, **Honkai: Star Rail** und **Zenless Zone Zero** auf Apple Silicon. Er installiert, aktualisiert und überprüft die Spiele über die offiziellen Server von HoYoverse, verwaltet Wine / DXMT / D3DMetal und startet jedes Spiel mit einem Klick.
 
