@@ -455,6 +455,27 @@ struct AppModelGamesTests {
         #expect(indicator.states.last == false)
     }
 
+    @Test func startedGameBecomesTheOneTheLauncherOpensOn() async throws {
+        let suite = "macgacha-selected-game-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let fake = FakeGameServices()
+        let model = AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/AppSupport")),
+            manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(), defaults: defaults,
+            gameServices: fake, launchServices: LocationLaunchSpy(), notifications: EmptyGameNotificationCenter(), notificationIsFrontmost: { false })
+        defaults.set("starrail", forKey: AppModel.selectedGameKey)
+        fake.setStatus(.installed(tag: "1.0"), for: "zzz")
+        model.setGameRecord("zzz", try await fake.record("zzz"))
+        model.setGameState("zzz", GameState(status: .installed(tag: "1.0")))
+        model.play("zzz")
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "zzz")
+        await model.launchTasks["zzz"]?.value
+        // A play refused before it starts leaves the choice alone.
+        model.launchSlotOwner = "zzz"
+        model.play("genshin")
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "zzz")
+        model.launchSlotOwner = nil
+    }
+
     @Test func workspaceSourceDeliversInjectedMountAndUnmountNotifications() async throws {
         let center = NotificationCenter(), source = WorkspaceVolumeEventSource(center: center)
         let events = AsyncStream<VolumeEvent>.makeStream()
