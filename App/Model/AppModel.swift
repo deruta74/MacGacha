@@ -257,6 +257,7 @@ final class AppModel {
     var launchedHidden = false
     @ObservationIgnored var shortcutWriter: any GameShortcutWriting = UnavailableGameShortcutWriter()
     @ObservationIgnored var terminateAfterShortcut: @MainActor () -> Void = {}
+    @ObservationIgnored var dockStartingIndicator: any DockStartingIndicating = InertDockStartingIndicator()
     @ObservationIgnored var shortcutTask: Task<Void, Never>?
     @ObservationIgnored private var importComponent: RuntimeComponent?
     @ObservationIgnored private var extraRoots: [URL] = []
@@ -284,7 +285,9 @@ final class AppModel {
     @ObservationIgnored var dependencyWorking: [String: RowState] = [:]
     @ObservationIgnored var dependencyUpdateLog: EventLog?
     var launchSettingsRevisions: [String: UUID] = [:]
-    var launchStates: [String: LaunchUIState] = [:]
+    var launchStates: [String: LaunchUIState] = [:] {
+        didSet { dockStartingIndicator.setStarting(launchStates.values.contains { $0.showsDockStarting }) }
+    }
     var playTimeSummaries: [String: PlayTimeSummary] = [:]
     @ObservationIgnored var playTimeStartupTask: Task<Void, Never>?
     @ObservationIgnored var playTimeRefreshRevision = UUID()
@@ -514,6 +517,7 @@ final class AppModel {
             hostPath: Bundle.main.bundleURL.path(percentEncoded: false),
             icons: CachedGameModeIcons(cacheDirectory: gameArtCacheDirectory(in: caches, bundleIdentifier: Bundle.main.bundleIdentifier)))
         model.terminateAfterShortcut = { NSApp.terminate(nil) }
+        model.dockStartingIndicator = LiveDockStartingIndicator()
         return model
     }
 

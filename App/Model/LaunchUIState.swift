@@ -10,6 +10,16 @@ enum LaunchUIState: Sendable, Equatable {
     case recoveryNeeded(String)
 }
 
+extension LaunchUIState {
+    /// Starting until the game's window appears (`ready`), not only until its process does.
+    var showsDockStarting: Bool {
+        switch self {
+        case .starting, .running: true
+        case .ready, .failed, .recoveryNeeded: false
+        }
+    }
+}
+
 struct LaunchFailureInfo: Sendable, Equatable {
     let stage: LaunchStage
     let message: String
