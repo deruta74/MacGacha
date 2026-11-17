@@ -7,6 +7,8 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var choosing = false
+    /// Turning the limit back on offers the value it had before.
+    @State private var lastSpeedLimit: Int64?
     @AppStorage("animatedBackgrounds") private var animatedBackgrounds = true
     @AppStorage("animatedBackgroundsChosen") private var animatedChosen = false
     @State private var language = InterfaceLanguageSettings()
@@ -73,14 +75,27 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section {
-                Picker("Download speed", selection: Binding(
-                    get: { model.downloadSpeedLimit },
-                    set: { value in
-                        do { try model.setDownloadSpeedLimit(value) } catch { model.show(error) }
+                Toggle("Limit download speed", isOn: Binding(
+                    get: { model.downloadSpeedLimit != nil },
+                    set: { on in
+                        if !on { lastSpeedLimit = model.downloadSpeedLimit }
+                        setSpeedLimit(on ? lastSpeedLimit ?? AppModel.defaultDownloadSpeedLimit : nil)
                     }
-                )) {
-                    ForEach(AppModel.downloadSpeedLimitOptions, id: \.self) { limit in
-                        Text(Self.speedLimitName(limit)).tag(limit)
+                ))
+                if let limit = model.downloadSpeedLimit {
+                    LabeledContent("Maximum speed") {
+                        HStack(spacing: 6) {
+                            TextField("Maximum speed", value: Binding(
+                                get: { Double(limit) / 1_000_000 },
+                                set: { setSpeedLimit(AppModel.downloadSpeedLimit(megabytesPerSecond: $0)) }
+                            ), format: .number.precision(.fractionLength(0...1)))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 72)
+                            Text("MB/s", comment: "Unit after the download speed field: megabytes per second")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             } footer: {
@@ -187,10 +202,8 @@ struct SettingsView: View {
         }
     }
 
-    private static func speedLimitName(_ limit: Int64?) -> String {
-        guard let limit else { return String(localized: "Unlimited", comment: "Download speed limit: no limit") }
-        let rate = ByteCountFormatter.string(fromByteCount: limit, countStyle: .decimal)
-        return String(localized: "\(rate)/s", comment: "Download speed, e.g. 47 MB/s")
+    private func setSpeedLimit(_ bytesPerSecond: Int64?) {
+        do { try model.setDownloadSpeedLimit(bytesPerSecond) } catch { model.show(error) }
     }
 }
 

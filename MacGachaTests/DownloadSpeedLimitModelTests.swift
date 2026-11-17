@@ -11,11 +11,11 @@ import RuntimeManager
 @testable import MacGacha
 
 @Suite @MainActor struct DownloadSpeedLimitModelTests {
-    @Test func offeredDecimalLimitsPersistAndSerializeWithOtherGlobalWrites() async throws {
+    @Test func customDecimalLimitsPersistAndSerializeWithOtherGlobalWrites() async throws {
         let preferences = SpeedPreferences(), model = try fixture(preferences)
-        #expect(AppModel.downloadSpeedLimitOptions == [nil, 5_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000])
         #expect(model.downloadSpeedLimit == nil)
-        for limit in AppModel.downloadSpeedLimitOptions {
+        let limits: [Int64?] = [nil, 100_000, 2_500_000, 7_300_000, 10_000_000, 250_000_000, 10_000_000_000]
+        for limit in limits {
             try model.setDownloadSpeedLimit(limit)
             #expect(model.downloadSpeedLimit == limit)
             model.gameModeEnabled = false
@@ -30,7 +30,7 @@ import RuntimeManager
 
     @Test func invalidValuesAndRestartReservationRefuseChanges() async throws {
         let preferences = SpeedPreferences(), model = try fixture(preferences)
-        for invalid: Int64 in [-1, 0, 5, 5_242_880, Int64.max] {
+        for invalid: Int64 in [-1, 0, 5, 99_999, 5_242_880, 10_000_100_000, Int64.max] {
             #expect(throws: LauncherError.self) { try model.setDownloadSpeedLimit(invalid) }
         }
         #expect(model.downloadSpeedLimit == nil)
@@ -40,6 +40,14 @@ import RuntimeManager
         }
         #expect(model.downloadSpeedLimit == nil)
         #expect(preferences.writes == 0)
+    }
+
+    @Test(arguments: [(0.0, 100_000), (0.04, 100_000), (0.15, 200_000), (7.3, 7_300_000), (12.34, 12_300_000),
+        (10_000, 10_000_000_000), (1e300, 10_000_000_000), (-5, 100_000), (.nan, 100_000), (.infinity, 10_000_000_000)] as [(Double, Int64)])
+    func typedMegabytesRoundToAValidLimit(typed: Double, expected: Int64) throws {
+        #expect(AppModel.downloadSpeedLimit(megabytesPerSecond: typed) == expected)
+        let model = try fixture(SpeedPreferences())
+        try model.setDownloadSpeedLimit(AppModel.downloadSpeedLimit(megabytesPerSecond: typed))
     }
 
     @Test func failedWriteRollsBackObservableLimitAndLiveBucket() async throws {
