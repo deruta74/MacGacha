@@ -437,6 +437,24 @@ struct AppModelGamesTests {
         #expect(!model.liveLaunchGames.contains("genshin"))
     }
 
+    @Test func dockSpinsFromStartUntilTheGameWindowAppears() throws {
+        let indicator = RecordingDockIndicator()
+        let (model, _, _) = try gameFixture()
+        model.dockStartingIndicator = indicator
+        model.launchStates["genshin"] = .starting(.preflight)
+        #expect(indicator.states.last == true)
+        model.launchStates["genshin"] = .running
+        #expect(indicator.states.last == true)
+        model.launchStates["genshin"] = .ready
+        #expect(indicator.states.last == false)
+        // Any game still starting keeps it spinning.
+        model.launchStates["zzz"] = .starting(.preflight)
+        model.launchStates["genshin"] = .failed(LaunchFailureInfo(stage: .preflight, message: "x", hasLog: false, unverifiedBuild: false))
+        #expect(indicator.states.last == true)
+        model.launchStates["zzz"] = nil
+        #expect(indicator.states.last == false)
+    }
+
     @Test func workspaceSourceDeliversInjectedMountAndUnmountNotifications() async throws {
         let center = NotificationCenter(), source = WorkspaceVolumeEventSource(center: center)
         let events = AsyncStream<VolumeEvent>.makeStream()
@@ -1293,4 +1311,9 @@ private final class LocationLaunchSpy: LaunchServices, Sendable {
     func markReady(_ id: String) async {}
     func notices() async throws -> [RecoveryNotice] { [] }
     func acknowledge(_ id: UUID) async throws {}
+}
+
+@MainActor private final class RecordingDockIndicator: DockStartingIndicating {
+    var states: [Bool] = []
+    func setStarting(_ starting: Bool) { states.append(starting) }
 }
