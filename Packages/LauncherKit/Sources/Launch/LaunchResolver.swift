@@ -178,7 +178,8 @@ public enum LaunchResolver {
                 crypt32Native: requiredComponents.contains(.crypt32Fix),
                 starRailFrameRate: offersStarRailUnlock(recipe.game) ? (settings.unlockFPS ? .unlock120 : .restore) : nil,
                 starRailRegion: starRail ? (GameDefinition.find(recipe.game)?.region ?? .global) : .global,
-                windowsVersion: [GameFamily.genshin, .zzz].contains(GameDefinition.find(recipe.game)?.family ?? .starrail) ? .win11 : nil),
+                windowsVersion: [GameFamily.genshin, .zzz].contains(GameDefinition.find(recipe.game)?.family ?? .starrail) ? .win11 : nil,
+                webViewRenderReset: GameDefinition.find(recipe.game).flatMap { $0.family == .zzz && $0.region == .mainlandChina ? $0.region : nil }),
             requiredComponents: requiredComponents, componentCopies: componentCopies, displayFallback: displayFallback, fpsInjector: fpsInjector)
     }
 

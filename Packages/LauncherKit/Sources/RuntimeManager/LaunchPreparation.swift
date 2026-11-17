@@ -118,6 +118,7 @@ public struct LaunchPreparation: Sendable {
             try await run(binary, ["reg", "add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "crypt32", "/t", "REG_SZ", "/d", "native,builtin", "/f"], environment)
         }
         let frameRate = try await applyStarRailFrameRate(request, binary: binary, environment: environment)
+        try await resetWebViewRender(request, binary: binary, environment: environment)
         // reg.exe success only acknowledges wineserver's in-memory state. Wait
         // for the server to save it, then flush the files and directory before
         // the marker's full-sync boundary can certify this provisioning revision.
@@ -179,6 +180,25 @@ public struct LaunchPreparation: Sendable {
         } catch {
             if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled { throw LauncherError.cancelled }
             return .unreadable
+        }
+    }
+
+    /// Best effort: a missing key or a failed delete never blocks the launch.
+    private func resetWebViewRender(_ request: PreparationRequest, binary: URL, environment: [String: String]) async throws {
+        guard let region = request.webViewRenderReset else { return }
+        let key = WebViewRenderReset.registryKey(for: region)
+        do {
+            let query = try await runner.run(binary, arguments: ["reg", "query", key], environment: environment,
+                currentDirectory: nil, timeout: .seconds(10), timeoutWait: timeoutWait)
+            try Task.checkCancellation()
+            guard query.exitCode == 0, query.stdout.count <= WebViewRenderReset.maximumQueryBytes else { return }
+            for name in WebViewRenderReset.valueNames(in: String(decoding: query.stdout, as: UTF8.self)) {
+                _ = try await runner.run(binary, arguments: ["reg", "delete", key, "/v", name, "/f"], environment: environment,
+                    currentDirectory: nil, timeout: .seconds(10), timeoutWait: timeoutWait)
+                try Task.checkCancellation()
+            }
+        } catch {
+            if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled { throw LauncherError.cancelled }
         }
     }
 

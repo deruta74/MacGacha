@@ -18,13 +18,17 @@ public struct PreparationRequest: Equatable, Sendable {
     public let crypt32Native: Bool
     public let starRailFrameRate: StarRailFrameRate?
     public let starRailRegion: Region
+    /// The ZZZ edition whose saved WebView render method is cleared, if any.
+    public let webViewRenderReset: Region?
 
     public init(retina: Bool, steamShim: URL?, dxmtExtras: [String], nvidiaKeys: Bool, crypt32Native: Bool = false,
-        starRailFrameRate: StarRailFrameRate? = nil, starRailRegion: Region = .global, windowsVersion: WineWindowsVersion? = nil) {
+        starRailFrameRate: StarRailFrameRate? = nil, starRailRegion: Region = .global, windowsVersion: WineWindowsVersion? = nil,
+        webViewRenderReset: Region? = nil) {
         self.windowsVersion = windowsVersion
         self.retina = retina; self.steamShim = steamShim
         self.dxmtExtras = dxmtExtras; self.nvidiaKeys = nvidiaKeys
         self.crypt32Native = crypt32Native
         self.starRailFrameRate = starRailFrameRate; self.starRailRegion = starRailRegion
+        self.webViewRenderReset = webViewRenderReset
     }
 }
