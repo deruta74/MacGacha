@@ -115,6 +115,9 @@ struct GameSettingsSheet: View {
     /// Only Zenless Zone Zero has a DirectX 12 renderer, and only D3DMetal runs it.
     private var offersDirectX12: Bool { Recipes.recipe(for: game.id)?.supportsDirectX12 == true }
 
+    /// Follows the launcher window as it is resized.
+    var maxHeight: CGFloat = .infinity
+
     var body: some View {
         NavigationStack {
             Form {
@@ -284,6 +287,9 @@ struct GameSettingsSheet: View {
             }
         }
         .frame(width: 520)
+        // Fits its content up to the height the launcher window leaves it, and scrolls
+        // beyond that, so the last sections never end up below the window or the Dock.
+        .frame(maxHeight: maxHeight)
         .fixedSize(horizontal: false, vertical: true)
     }
 

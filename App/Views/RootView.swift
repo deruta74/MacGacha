@@ -31,6 +31,8 @@ struct RootView: View {
     /// The slide on screen: it follows the selection only once its image has loaded,
     /// so the background and its highlights button always change together.
     @State private var shownSlide: GameBackground?
+    /// Sheets size themselves from the window, so they grow and shrink with it.
+    @State private var windowHeight: CGFloat = 720
 
     /// The rail shows one region; a selection from the other region falls back to its first game.
     private var game: LauncherGame {
@@ -119,6 +121,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { updateWindowState() }
         .ignoresSafeArea()
         .frame(minWidth: 960, minHeight: 540)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { windowHeight = $0 }
         .sheet(item: $panel) { panel in
             PanelSheet(panel: panel)
         }
@@ -129,7 +132,8 @@ struct RootView: View {
             case .voices(let id):
                 VoicePacksSheet(game: Self.game(id))
             case .settings(let id):
-                GameSettingsSheet(game: Self.game(id))
+                // 500 pt in the default 720 pt window.
+                GameSettingsSheet(game: Self.game(id), maxHeight: max(320, windowHeight - 220))
             case .wishExport(let id):
                 WishExportSheet(game: Self.game(id))
             case .setup(let id):
