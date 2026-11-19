@@ -184,12 +184,12 @@ public actor GameLibrary {
         if !record.uninstallFilesRemoved {
             try locationProbe.requireAvailable(at: record.installPath)
             try checkLocation(record.installPath, records: records, game: game)
-            record = try await removeSandboxForUninstall(game, record: record)
             let fs: ContainedFileSystem?
             do { fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps).pinRootIfPresent() }
             catch LauncherError.unsafePath { throw LauncherError.io("install folder was replaced") }
             if let fs {
                 guard try fs.rootIdentity() == record.installIdentity else { throw LauncherError.io("install folder was replaced") }
+                record = try await removeSandboxForUninstall(game, record: record, in: fs)
             } else if !record.uninstalling { throw LauncherError.io("install folder was replaced") }
             record.uninstalling = true
             try await store.save(record, for: game.id) // 1. Persist intent before removal.

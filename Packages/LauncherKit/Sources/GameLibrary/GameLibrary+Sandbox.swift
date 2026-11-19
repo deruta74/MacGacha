@@ -180,9 +180,8 @@ extension GameLibrary {
     }
 
     /// Adopted uninstall removes owned editor files as well as Sophon files.
-    func removeSandboxForUninstall(_ game: GameDefinition, record: GameRecord) async throws -> GameRecord {
+    func removeSandboxForUninstall(_ game: GameDefinition, record: GameRecord, in fs: ContainedFileSystem) async throws -> GameRecord {
         guard game.family == .genshin, record.ownership == .adopted, !record.uninstallFilesRemoved else { return record }
-        let fs = try sandboxFilesystem(record)
         var current = record
         guard try await !sandboxListIsManaged(game.id, record: record) else { return record }
         if current.sandbox == nil, let list = record.sandboxListPath {

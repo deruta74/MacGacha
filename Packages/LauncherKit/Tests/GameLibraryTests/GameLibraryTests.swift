@@ -2031,6 +2031,19 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         #expect(f.cdn.requestLog.count == requests)
     }
 
+    @Test func interruptedAdoptedUninstallResumesAfterFolderWasRemoved() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try f.seedExisting()
+        _ = try await libraryCollect(await f.library.adopt(game, folder: f.install, voices: ["en-us"]))
+        var record = try #require(try await f.store.load(game.id))
+        record.uninstalling = true
+        try await f.store.save(record, for: game.id)
+        try f.fs.pinRoot().removePinnedRoot(onlyIfEmpty: false)
+        let offline = MockCDN()
+        try await f.restarted(http: offline).uninstall(game)
+        #expect(try await f.store.load(game.id) == nil)
+        #expect(offline.requestLog.isEmpty)
+    }
+
     @Test func adoptedUninstallRemovesManagedSandboxAndPreservesForeignFiles() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try f.seedExisting()
         _ = try await libraryCollect(await f.library.adopt(game, folder: f.install, voices: ["en-us"]))
