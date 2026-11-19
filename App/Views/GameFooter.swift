@@ -148,7 +148,7 @@ struct GameFooter: View {
         .confirmationDialog("Remove Miliastra Sandbox?", isPresented: $confirmingSandboxRemoval) {
             Button("Remove", role: .destructive) { model.removeSandbox(game.id) }
         } message: {
-            Text("Miliastra Wonderland editing and test play won't work until you install it again. Your stages are kept.")
+            Text("Editing and test-playing stages in Miliastra Wonderland won't work until you install it again.")
         }
         .confirmationDialog("Uninstall \(game.name)?", isPresented: $confirmingUninstall) {
             Button("Uninstall", role: .destructive) {
@@ -196,7 +196,7 @@ struct GameFooter: View {
     private var installedVersion: String? {
         // A failed launch leaves the game as installed as before, so its facts stay.
         if case .failed = launch {} else if launch != nil { return nil }
-        guard state.activity == nil else { return nil }
+        guard state.activity == nil || state.isAutomaticSandboxUpdate else { return nil }
         switch state.status {
         case .installed(let tag), .updateAvailable(let tag, _): return tag
         default: return nil
