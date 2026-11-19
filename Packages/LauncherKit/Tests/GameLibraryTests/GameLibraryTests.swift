@@ -1768,7 +1768,7 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
             }
         } else {
             let events = try await libraryCollect(await f.library.automaticallyUpdateSandbox(game, expectedVersion: expected))
-            #expect(events == [.phase(.completed)])
+            #expect(events == (reason == "gameUpdate" ? [.sandboxDeferred] : [.phase(.completed)]))
         }
         #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path == "sandbox/package.zip" })
         #expect(try await f.store.load(game.id)?.sandbox?.version == (reason == "absent" ? nil : "1.0"))

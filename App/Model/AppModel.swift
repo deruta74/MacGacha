@@ -864,7 +864,7 @@ final class AppModel {
                         self?.working[id] = .working(phase: phase, fraction: nil); self?.rebuildRows()
                     case .progress(let downloaded, let network, let staged, let totalStaged):
                         self?.updateProgress(id, downloaded: downloaded, network: network, staged: staged, totalStaged: totalStaged)
-                    case .fileVerified, .sandboxPhase, .sandboxFailed: break
+                    case .fileVerified, .sandboxPhase, .sandboxFailed, .sandboxDeferred: break
                     }
                     if completed { break } // A terminal event is consumed exactly once.
                 }

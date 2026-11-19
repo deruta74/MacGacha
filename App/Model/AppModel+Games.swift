@@ -343,6 +343,7 @@ private struct GameSnapshot: Sendable {
             var approval: (required: Int64, available: Int64)?
             var failure: LauncherError?
             var completed = false
+            var sandboxDeferred = false
             var notificationCompletion = token.notificationCompletion
             do {
                 if let previousPreDownload {
@@ -373,6 +374,7 @@ private struct GameSnapshot: Sendable {
                     case .failed(let error): throw error
                     case .sandboxPhase(let phase): self?.setSandboxOperationPhase(id, phase: phase)
                     case .sandboxFailed(let error): self?.sandboxFailures[id] = error
+                    case .sandboxDeferred: sandboxDeferred = true
                     case .needsBatchApproval(let required, let available):
                         // Approval becomes actionable only after the stream and
                         // durable snapshot finish and we release the reservation.
@@ -395,7 +397,8 @@ private struct GameSnapshot: Sendable {
             }
             guard self?.gameOperation == token else { return }
             if let self, let version = token.automaticSandboxVersion {
-                await self.finishAutomaticSandbox(token, version: version, completed: completed, failure: failure)
+                await self.finishAutomaticSandbox(token, version: version, completed: completed,
+                    deferredForGameUpdate: sandboxDeferred, failure: failure)
                 return
             }
             // Retire older location reads before capture, preserving later events.
@@ -483,7 +486,8 @@ private struct GameSnapshot: Sendable {
         return task
     }
 
-    private func finishAutomaticSandbox(_ token: GameOperationToken, version: String, completed: Bool, failure: LauncherError?) async {
+    private func finishAutomaticSandbox(_ token: GameOperationToken, version: String, completed: Bool,
+        deferredForGameUpdate: Bool, failure: LauncherError?) async {
         let id = token.id, services = gameServices
         let status = games[id]?.status ?? .unknown
         let revision = gameRevisions[id]
@@ -502,7 +506,7 @@ private struct GameSnapshot: Sendable {
         let stopped = !completed && (failure == nil || failure == .cancelled)
         let yieldedToPlay = automaticSandboxYieldingToPlay == token.generation
         if yieldedToPlay { automaticSandboxYieldingToPlay = nil }
-        if deferred || (stopped && yieldedToPlay) { automaticSandboxAttempts[id]?.remove(version) }
+        if deferredForGameUpdate || deferred || (stopped && yieldedToPlay) { automaticSandboxAttempts[id]?.remove(version) }
         if let error = snapshot.error { sandboxFailures[id] = error }
         else if let failure, !deferred, !stopped { sandboxFailures[id] = failure }
         if gameRevisions[id] == revision {

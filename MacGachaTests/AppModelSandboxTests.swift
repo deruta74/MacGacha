@@ -234,6 +234,26 @@ import RuntimeManager
         #expect(fake.actions == ["automatic-2", "automatic-2"])
     }
 
+    @Test(.timeLimit(.minutes(1))) func gameUpdateDeferralCanRetrySameSandboxOffer() async throws {
+        let fake = SandboxModelServices()
+        let model = try await fixture(fake, allowAutomatic: true)
+        defer { fake.finish() }
+        let deferred = try #require(model.gameTask)
+        await fake.waitForOpen()
+        fake.gameStatus = .updateAvailable(from: "2", to: "3")
+        fake.emit(.sandboxDeferred); fake.finish()
+        await deferred.value
+        #expect(model.sandboxFailure(for: "genshin") == nil)
+        #expect(model.automaticSandboxAttempts["genshin"]?.contains("2") != true)
+        fake.gameStatus = .installed(tag: "2")
+        await model.refreshGames()
+        let retry = try #require(model.gameTask)
+        await fake.waitForOpen()
+        #expect(fake.actions == ["automatic-2", "automatic-2"])
+        fake.emit(.phase(.completed)); fake.finish()
+        await retry.value
+    }
+
     @Test(.timeLimit(.minutes(1))) func playDrainsOtherEditionButChecksOnlyLaunchEditionJournal() async throws {
         let drain = SandboxModelDrain(), launch = SandboxModelLaunchServices()
         let fake = SandboxModelServices(drain: drain)

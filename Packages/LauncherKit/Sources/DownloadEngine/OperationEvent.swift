@@ -10,6 +10,8 @@ public enum OperationEvent: Sendable, Equatable {
     case sandboxPhase(SandboxPhase)
     /// A chained optional package failed after the game itself succeeded.
     case sandboxFailed(LauncherError)
+    /// The game has an update and must go first. No sandbox transfer started.
+    case sandboxDeferred
     case phase(OperationPhase)
     case progress(downloaded: Int64, totalNetwork: Int64, staged: Int64, totalStaged: Int64)
     case fileVerified(SafeRelativePath)

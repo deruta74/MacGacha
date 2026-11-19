@@ -80,7 +80,7 @@ extension GameLibrary {
         try await requireSandboxLocation(record, game: game.id)
         guard try await store.loadPlan(for: game.id) == nil else { throw LauncherError.busy("Finish the current game operation") }
         if expectedVersion != nil, try await checkForUpdate(game) != .installed(tag: build.tag) {
-            progress(.phase(.completed))
+            progress(.sandboxDeferred)
             return
         }
         guard try await !sandboxListIsManaged(game.id, record: record) else { throw LauncherError.io("Sandbox list belongs to the game") }
