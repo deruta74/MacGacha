@@ -205,6 +205,8 @@ extension AppModel {
         case "launching": state = .starting(.prepare)
         case "launchFailed": state = .failed(LaunchFailureInfo(stage: .watch,
             message: String(localized: "The game closed during startup."), hasLog: true, unverifiedBuild: false))
+        case "launchOffline": state = .failed(LaunchFailureInfo(stage: .watch,
+            message: String(localized: "The game closed during startup."), hasLog: true, unverifiedBuild: false, cause: .antiCheatOffline))
         case "recoveryNeeded": state = .recoveryNeeded(String(localized: "MacGacha is putting the game's files back. You can play when it's done."))
         default: state = nil
         }

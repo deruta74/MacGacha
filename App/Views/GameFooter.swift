@@ -77,7 +77,11 @@ struct GameFooter: View {
                     }
                 }
                 let line = action == .progress && progressHovered ? state.progressDetail ?? statusLine : statusLine
-                if !line.isEmpty || launchLogAvailable {
+                if case .failed = launch, !line.isEmpty {
+                    LaunchFailureNotice(title: line, showsLog: launchLogAvailable) { model.openLaunchLog(game.id) }
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
+
+                } else if !line.isEmpty || launchLogAvailable {
                 HStack(spacing: 8) {
                     // Hovering the progress capsule swaps the hint for the numbers, as HoYoPlay does.
                     Text(line)
@@ -179,7 +183,9 @@ struct GameFooter: View {
 
     /// The installed version, shown in a capsule beside an idle game only, never over progress or a launch.
     private var installedVersion: String? {
-        guard launch == nil, state.activity == nil else { return nil }
+        // A failed launch leaves the game as installed as before, so its facts stay.
+        if case .failed = launch {} else if launch != nil { return nil }
+        guard state.activity == nil else { return nil }
         switch state.status {
         case .installed(let tag), .updateAvailable(let tag, _): return tag
         default: return nil
@@ -302,10 +308,7 @@ struct GameFooter: View {
             if let note { return note }
             return String(localized: "Keep MacGacha open while you play — it restores the game's files when you quit")
         case .failed(let failure):
-            let line = failureLine(failure)
-            return failure.unverifiedBuild
-                ? StatusText.joined(line, String(localized: "This game version hasn't been tested with MacGacha yet"))
-                : line
+            return failureLine(failure)
         case .recoveryNeeded(let reason): return reason
         case nil:
             if let note { return note }
@@ -321,6 +324,9 @@ struct GameFooter: View {
     private func failureLine(_ failure: LaunchFailureInfo) -> String {
         switch failure.stage {
         case .preflight, .lock: failure.message
+        case .watch where failure.cause == .antiCheatOffline:
+            // The game closes itself when its anti-cheat can't reach HoYoverse at startup.
+            String(localized: "\(game.name) couldn't reach its servers. School or work Wi-Fi may be blocking them", comment: "Launch failure; the argument is the game's name")
         case .watch: String(localized: "\(game.name) closed during startup", comment: "The argument is the game's name")
         case .prepare, .snapshot: String(localized: "Couldn't prepare Wine for \(game.name)", comment: "The argument is the game's name")
         case .proxy: String(localized: "Couldn't start the network helper for \(game.name)", comment: "The argument is the game's name")
@@ -843,6 +849,33 @@ struct OtherRegionNote: View {
         .buttonStyle(.glass)
         .controlSize(.small)
         .foregroundStyle(.white)
+    }
+}
+
+/// A failed launch stands out from the quiet status line: the same glass capsule as the facts above it, warm-tinted.
+private struct LaunchFailureNotice: View {
+    let title: String
+    let showsLog: Bool
+    let openLog: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text(title)
+            if showsLog {
+                Button("Open Log", action: openLog)
+                    .buttonStyle(.link)
+                    .underline()
+            }
+        }
+        .font(.callout.weight(.medium))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .glassEffect(.regular.tint(.orange.opacity(0.25)), in: .capsule)
+        .fixedSize()
     }
 }
 

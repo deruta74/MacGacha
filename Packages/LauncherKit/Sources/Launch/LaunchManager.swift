@@ -467,7 +467,9 @@ public actor LaunchManager {
                 if let failure = context.deferredFailure {
                     context.continuation?.yield(.stage(.report)); context.continuation?.yield(.failed(failure)); context.continuation?.finish()
                 } else if !context.ready {
-                    report(LauncherError.io("The game ended before a window appeared"), stage: .watch, context: context, unverified: context.unverifiedBuild)
+                    let cause = await endCause(context)
+                    report(LauncherError.io("The game ended before a window appeared"), stage: .watch, context: context,
+                        unverified: context.unverifiedBuild, cause: cause)
                 } else { context.continuation?.yield(.stage(.report)); context.continuation?.finish() }
                 return
             } catch SessionWatchError.startup {
@@ -479,7 +481,11 @@ public actor LaunchManager {
                 _ = await restore(context)
                 if let failure = context.deferredFailure {
                     context.continuation?.yield(.stage(.report)); context.continuation?.yield(.failed(failure)); context.continuation?.finish()
-                } else { report(LauncherError.io("The game did not start"), stage: .watch, context: context, unverified: context.unverifiedBuild) }
+                } else {
+                    let cause = await endCause(context)
+                    report(LauncherError.io("The game did not start"), stage: .watch, context: context,
+                        unverified: context.unverifiedBuild, cause: cause)
+                }
                 return
             } catch {
                 // A failed write or incomplete scan cannot authorize restoration or
@@ -937,13 +943,25 @@ public actor LaunchManager {
         let paths = paths, journalFileOps = journalFileOps, beforeJournalRead = beforeJournalRead
         return try await BlockingIO.run { try LaunchJournal(paths: paths, fileOps: journalFileOps, beforeRead: beforeJournalRead).read(game: game) }
     }
-    private func report(_ error: any Error, stage: LaunchStage, context: Context, unverified: Bool) {
+    private func report(_ error: any Error, stage: LaunchStage, context: Context, unverified: Bool, cause: LaunchFailureCause? = nil) {
         if stage == .watch {
-            event("Launch failed", game: context.session.game, level: .error, metadata: Self.failureMetadata(error, stage: stage))
+            var metadata = Self.failureMetadata(error, stage: stage)
+            metadata["cause"] = cause?.rawValue
+            event("Launch failed", game: context.session.game, level: .error, metadata: metadata)
         }
         context.continuation?.yield(.stage(.report))
-        context.continuation?.yield(.failed(Self.failure(error, stage: stage, log: context.lifecycleLog?.url, unverified: unverified)))
+        context.continuation?.yield(.failed(Self.failure(error, stage: stage, log: context.lifecycleLog?.url, unverified: unverified, cause: cause)))
         context.continuation?.finish(); context.continuation = nil
+    }
+    /// Reads the game's own startup error, if it wrote one during this session.
+    private func endCause(_ context: Context) async -> LaunchFailureCause? {
+        let session = context.session
+        let found = (try? await BlockingIO.run {
+            AntiCheatDriverError.occurred(installRoot: session.installRoot, identity: session.installIdentity, since: session.createdAt)
+        }) ?? false
+        guard found else { return nil }
+        note(context, "anti-cheat driver failed at startup")
+        return .antiCheatOffline
     }
     private static func failureMetadata(_ error: any Error, stage: LaunchStage) -> [String: String] {
         let failure = error as? LauncherError ?? (error is CancellationError ? .cancelled : .io(""))
@@ -955,8 +973,9 @@ public actor LaunchManager {
         let fields = Self.failureMetadata(error, stage: stage)
         note(context, "failed \(stage.rawValue) case=\(fields["case", default: "io"])" + (fields["reason"].map { " reason=\($0)" } ?? ""))
     }
-    private static func failure(_ error: any Error, stage: LaunchStage, log: URL?, unverified: Bool) -> LaunchFailure {
-        LaunchFailure(stage: stage, message: String(localized: "Launch failed during \(stage.rawValue)."), logURL: log, unverifiedBuild: unverified)
+    private static func failure(_ error: any Error, stage: LaunchStage, log: URL?, unverified: Bool, cause: LaunchFailureCause? = nil) -> LaunchFailure {
+        LaunchFailure(stage: stage, message: String(localized: "Launch failed during \(stage.rawValue)."), logURL: log,
+            unverifiedBuild: unverified, cause: cause)
     }
     private static func name(_ game: String) -> String {
         GameDefinition.find(game)?.defaultInstallDirectoryName ?? "A game"

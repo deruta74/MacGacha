@@ -222,7 +222,8 @@ import RuntimeManager
             else { launchLogURLs[id] = nil }
             recordLaunchFailure(LaunchFailureInfo(stage: failure.stage,
                 message: LauncherError.io(failure.message).userMessage,
-                hasLog: sessionLogsEnabled && launchLogURLs[id] != nil, unverifiedBuild: failure.unverifiedBuild), id: id)
+                hasLog: sessionLogsEnabled && launchLogURLs[id] != nil, unverifiedBuild: failure.unverifiedBuild,
+                cause: failure.cause), id: id)
             _ = await refreshLaunchSession(id)
         }
     }
