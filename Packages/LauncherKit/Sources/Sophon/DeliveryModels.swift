@@ -49,16 +49,22 @@ public struct GameConfig: Sendable, Codable {
     public let installationDir: SafeRelativePath
     public let executable: SafeRelativePath
     public let enableLdiff: Bool
-    public init(installationDir: SafeRelativePath, executable: SafeRelativePath, enableLdiff: Bool = false) {
+    public let wpfExecutable: SafeRelativePath?
+    public let wpfPackageVersion: SafeRelativePath?
+    public init(installationDir: SafeRelativePath, executable: SafeRelativePath, enableLdiff: Bool = false,
+        wpfExecutable: SafeRelativePath? = nil, wpfPackageVersion: SafeRelativePath? = nil) {
         self.installationDir = installationDir; self.executable = executable; self.enableLdiff = enableLdiff
+        self.wpfExecutable = wpfExecutable; self.wpfPackageVersion = wpfPackageVersion
     }
 
-    private enum CodingKeys: String, CodingKey { case installationDir, executable, enableLdiff }
+    private enum CodingKeys: String, CodingKey { case installationDir, executable, enableLdiff, wpfExecutable, wpfPackageVersion }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(installationDir: try c.decode(SafeRelativePath.self, forKey: .installationDir),
             executable: try c.decode(SafeRelativePath.self, forKey: .executable),
-            enableLdiff: try c.decodeIfPresent(Bool.self, forKey: .enableLdiff) ?? false)
+            enableLdiff: try c.decodeIfPresent(Bool.self, forKey: .enableLdiff) ?? false,
+            wpfExecutable: try c.decodeIfPresent(SafeRelativePath.self, forKey: .wpfExecutable),
+            wpfPackageVersion: try c.decodeIfPresent(SafeRelativePath.self, forKey: .wpfPackageVersion))
     }
 }
 

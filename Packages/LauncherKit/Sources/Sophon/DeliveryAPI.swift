@@ -34,8 +34,40 @@ public struct DeliveryAPI: Sendable {
         }
         do {
             return try GameConfig(installationDir: SafeRelativePath(entry.installation_dir), executable: SafeRelativePath(entry.exe_file_name),
-                enableLdiff: entry.enable_ldiff ?? false)
+                enableLdiff: entry.enable_ldiff ?? false,
+                wpfExecutable: entry.wpf_exe_dir.flatMap { $0.isEmpty ? nil : $0 }.map { try SafeRelativePath($0) },
+                wpfPackageVersion: entry.wpf_pkg_version_dir.flatMap { $0.isEmpty ? nil : $0 }.map { try SafeRelativePath($0) })
         } catch { throw LauncherError.unsafePath("delivery path") }
+    }
+
+    /// Optional editor metadata for a known edition, independently of its Sophon build.
+    public func sandboxPackage(biz: String) async throws -> SandboxPackage? {
+        guard GameDefinition.inRegion(region).contains(where: { $0.biz == biz }) else {
+            throw LauncherError.io("invalid sandbox edition")
+        }
+        var components = URLComponents(url: endpoint("getWPFPackages"), resolvingAgainstBaseURL: false)!
+        components.queryItems?.append(URLQueryItem(name: "language", value: region == .global ? "en-us" : "zh-cn"))
+        let data: SandboxPackagesWire = try await json(components.url!, limit: 1 << 20)
+        let entries = data.wpf_packages.filter { $0.game.biz == biz }
+        guard entries.count <= 1 else { throw LauncherError.io("invalid sandbox package") }
+        return try entries.first?.wpf_package?.model(region: region)
+    }
+
+    /// Opens a fresh package transfer through the shared, optionally rate-limited delivery client.
+    /// The caller must bound consumption by `package.size`, verify MD5, and own body deadlines.
+    public func sandboxDownload(_ package: SandboxPackage) async throws -> (HTTPResponseHead, HTTPBody) {
+        guard package.region == region else { throw LauncherError.io("invalid sandbox package") }
+        try package.validate()
+        return try await deadline {
+            let response: (HTTPResponseHead, HTTPBody)
+            do { response = try await http.get(package.url, byteRangeFrom: nil) }
+            catch { throw await requestFailure(error) }
+            guard response.0.status == 200 else { throw LauncherError.io("delivery HTTP status \(response.0.status)") }
+            if let length = response.0.contentLength, length != package.size {
+                throw LauncherError.sizeMismatch(path: "sandbox", expected: package.size, actual: length)
+            }
+            return response
+        }
     }
 
     public func build(_ branch: GameBranch, tag: String? = nil) async throws -> SophonBuild {
@@ -104,8 +136,8 @@ public struct DeliveryAPI: Sendable {
         region.hypAPIURL(name)
     }
 
-    private func json<T: Decodable & Sendable>(_ url: URL, post: Bool = false) async throws -> T {
-        let data = try await deadline { try await bytes(url, limit: Self.metadataLimit, post: post) }
+    private func json<T: Decodable & Sendable>(_ url: URL, post: Bool = false, limit: Int = Self.metadataLimit) async throws -> T {
+        let data = try await deadline { try await bytes(url, limit: limit, post: post) }
         do { return try JSONDecoder().decode(Envelope<T>.self, from: data).data }
         catch let error as LauncherError { throw error }
         catch { throw LauncherError.io("invalid delivery response") }
@@ -203,8 +235,28 @@ private struct BranchesWire: Decodable, Sendable {
     let game_branches: [Entry]
 }
 private struct ConfigsWire: Decodable, Sendable {
-    struct Entry: Decodable, Sendable { let game: GameWire; let installation_dir: String; let exe_file_name: String; let enable_ldiff: Bool? }
+    struct Entry: Decodable, Sendable {
+        let game: GameWire; let installation_dir: String; let exe_file_name: String; let enable_ldiff: Bool?
+        let wpf_exe_dir: String?; let wpf_pkg_version_dir: String?
+    }
     let launch_configs: [Entry]
+}
+private struct SandboxPackagesWire: Decodable, Sendable {
+    struct Entry: Decodable, Sendable { let game: GameWire; let wpf_package: Package? }
+    struct Package: Decodable, Sendable {
+        let version: String; let url: String; let md5: String; let size: String
+        func model(region: Region) throws -> SandboxPackage {
+            guard md5.utf8.count == 32, let size = Int64(size),
+                  self.size.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+                  let url = URL(string: url, encodingInvalidCharacters: false) else {
+                throw LauncherError.io("invalid sandbox package")
+            }
+            do {
+                return try SandboxPackage(version: version, url: url, md5: Digest(algorithm: .md5, hex: md5), size: size, region: region)
+            } catch { throw LauncherError.io("invalid sandbox package") }
+        }
+    }
+    let wpf_packages: [Entry]
 }
 private struct BuildWire: Decodable, Sendable {
     let build_id: String; let tag: String; let manifests: [Category]
