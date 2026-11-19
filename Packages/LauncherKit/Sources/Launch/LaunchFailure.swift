@@ -6,13 +6,21 @@ public enum LaunchStage: String, Sendable {
     case preflight, lock, snapshot, prepare, proxy, spawn, watch, restore, report
 }
 
+/// A likely reason the game itself gave for closing, when it left one.
+public enum LaunchFailureCause: String, Sendable, Equatable {
+    /// The anti-cheat driver failed at startup, which under Wine means the
+    /// game couldn't reach its servers (see `AntiCheatDriverError`).
+    case antiCheatOffline
+}
+
 public struct LaunchFailure: Error, Sendable {
     public let stage: LaunchStage
     public let message: String
     public let logURL: URL?
     public let unverifiedBuild: Bool
-    public init(stage: LaunchStage, message: String, logURL: URL?, unverifiedBuild: Bool) {
-        self.stage = stage; self.message = message; self.logURL = logURL; self.unverifiedBuild = unverifiedBuild
+    public let cause: LaunchFailureCause?
+    public init(stage: LaunchStage, message: String, logURL: URL?, unverifiedBuild: Bool, cause: LaunchFailureCause? = nil) {
+        self.stage = stage; self.message = message; self.logURL = logURL; self.unverifiedBuild = unverifiedBuild; self.cause = cause
     }
 }
 

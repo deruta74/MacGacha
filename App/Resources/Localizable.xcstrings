@@ -332,6 +332,89 @@
         }
       }
     },
+    "%@ couldn't reach its servers. School or work Wi-Fi may be blocking them" : {
+      "comment" : "Launch failure; the argument is the game's name",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ konnte die Server nicht erreichen. Das WLAN in der Schule oder bei der Arbeit blockiert sie möglicherweise"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ no pudo conectar con sus servidores. Puede que el Wi-Fi de la escuela o del trabajo los esté bloqueando"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ n'a pas pu joindre ses serveurs. Le Wi-Fi de l'école ou du travail les bloque peut-être"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ tidak dapat menjangkau servernya. Wi-Fi sekolah atau kantor mungkin memblokirnya"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@がサーバーに接続できませんでした。学校や職場の Wi-Fi がブロックしている可能性があります"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@이(가) 서버에 연결하지 못함. 학교나 회사 Wi-Fi가 차단하고 있을 수 있음"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ não conseguiu acessar seus servidores. O Wi-Fi da escola ou do trabalho pode estar bloqueando"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: нет связи с серверами игры. Их может блокировать школьный или рабочий Wi-Fi"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ Wi-Fi ของโรงเรียนหรือที่ทำงานอาจบล็อกไว้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: немає зв'язку із серверами гри. Їх може блокувати шкільний або робочий Wi-Fi"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ không thể kết nối tới máy chủ. Wi-Fi ở trường hoặc nơi làm việc có thể đang chặn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 无法连接到服务器。学校或公司的 Wi-Fi 可能屏蔽了它们"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 無法連線到伺服器。學校或公司的 Wi-Fi 可能封鎖了它們"
+          }
+        }
+      }
+    },
     "%@ couldn't start" : {
       "comment" : "The argument is the game's name",
       "localizations" : {
@@ -34094,88 +34177,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此資料夾不是空的。請選擇空資料夾，或使用現有的安裝。"
-          }
-        }
-      }
-    },
-    "This game version hasn't been tested with MacGacha yet" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Diese Spielversion wurde noch nicht mit MacGacha getestet"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Esta versión del juego aún no se ha probado con MacGacha"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cette version du jeu n'a pas encore été testée avec MacGacha"
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Versi game ini belum diuji dengan MacGacha"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このゲームバージョンはまだMacGachaでテストされていません"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 게임 버전은 아직 MacGacha에서 테스트되지 않았습니다"
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Esta versão do jogo ainda não foi testada com o MacGacha"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Эта версия игры ещё не проверялась с MacGacha"
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "เกมเวอร์ชันนี้ยังไม่ได้ทดสอบกับ MacGacha"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Цю версію гри ще не перевірено з MacGacha"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Phiên bản game này chưa được thử nghiệm với MacGacha"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此游戏版本尚未在 MacGacha 上测试"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此遊戲版本尚未在 MacGacha 上測試"
           }
         }
       }
