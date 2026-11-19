@@ -22,6 +22,6 @@ public struct SandboxInstallation: Codable, Sendable, Equatable {
 
 public enum SandboxState: Sendable, Equatable {
     case notInstalled(size: Int64)
-    case installed(version: String)
+    case installed(version: String?)
     case outdated(installed: String?, available: String, size: Int64)
 }

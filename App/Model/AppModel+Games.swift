@@ -90,6 +90,18 @@ private struct GameSnapshot: Sendable {
     do { return .success(try await services.sandboxState(id)) }
     catch { return .failure(launcherError(error)) }
 }
+@concurrent private func readGameDetails(_ services: any GameServices, id: String, status: GameStatus) async throws -> GameSnapshot {
+    var record = try await services.record(id)
+    let sandbox = await readSandbox(services, id: id, status: status, record: record)
+    if record?.sandbox == nil {
+        // Discovery can persist a package already on disk during the status read.
+        switch sandbox {
+        case .success(.installed), .success(.outdated): record = try await services.record(id)
+        default: break
+        }
+    }
+    return GameSnapshot(status: status, record: record, sandbox: sandbox)
+}
 @concurrent private func readGame(_ services: any GameServices, id: String, draining: Bool = false) async -> GameSnapshot {
     if draining {
         do { try await services.waitUntilIdle(id) }
@@ -100,8 +112,7 @@ private struct GameSnapshot: Sendable {
     }
     let status = await services.status(id)
     do {
-        let record = try await services.record(id)
-        return GameSnapshot(status: status, record: record, sandbox: await readSandbox(services, id: id, status: status, record: record))
+        return try await readGameDetails(services, id: id, status: status)
     } catch {
         let error = launcherError(error)
         return GameSnapshot(status: status, record: nil, error: error, sandbox: .failure(error))
@@ -145,13 +156,12 @@ private struct GameSnapshot: Sendable {
                 }
                 if let error = self.launchStartupError { throw error }
                 let status = try await services.checkForUpdate(id)
-                let record = try await services.record(id)
-                let sandbox = await readSandbox(services, id: id, status: status, record: record)
+                let snapshot = try await readGameDetails(services, id: id, status: status)
                 try Task.checkCancellation()
                 guard self.isCurrentGameUpdateCheck(id, revision: revision) else {
                     self.clearCheckingGameUpdate(id); return
                 }
-                self.applyGame(GameSnapshot(status: status, record: record, sandbox: sandbox), id: id, activity: nil)
+                self.applyGame(snapshot, id: id, activity: nil)
                 if case .updateAvailable(_, let version) = status { self.notify(.updateAvailable, gameID: id, version: version) }
                 self.gameRevisions[id] = UUID() // Invalidate automatic reads begun during the check.
                 switch status {
@@ -159,7 +169,7 @@ private struct GameSnapshot: Sendable {
                 case .updateAvailable: self.gameUpdateCheck[id] = .updateAvailable
                 default: break // A missing or paused installation is not an up-to-date claim.
                 }
-                self.startAutomaticSandboxIfEligible(id, status: status, offer: sandbox)
+                self.startAutomaticSandboxIfEligible(id, status: status, offer: snapshot.sandbox)
             } catch {
                 guard self.isCurrentGameUpdateCheck(id, revision: revision) else {
                     self.clearCheckingGameUpdate(id); return

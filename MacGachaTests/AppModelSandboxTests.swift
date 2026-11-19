@@ -234,6 +234,16 @@ import RuntimeManager
         #expect(fake.actions == ["automatic-2", "automatic-2"])
     }
 
+    @Test func canRemoveUsesDurableRecordWhenRemoteOfferIsAbsent() async throws {
+        let fake = SandboxModelServices()
+        fake.sandbox = nil
+        fake.recordedSandboxVersion = "1"
+        let model = try await fixture(fake)
+        #expect(model.canRemoveSandbox("genshin"))
+        #expect(!model.canUpdateSandbox("genshin"))
+        #expect(!model.canInstallSandbox("genshin"))
+    }
+
     @Test(.timeLimit(.minutes(1))) func gameUpdateDeferralCanRetrySameSandboxOffer() async throws {
         let fake = SandboxModelServices()
         let model = try await fixture(fake, allowAutomatic: true)
@@ -329,6 +339,7 @@ private final class SandboxModelServices: GameServices, Sendable {
     private struct State: Sendable {
         var sandbox: SandboxState? = .outdated(installed: "1", available: "2", size: 100)
         var sandboxError: LauncherError?
+        var recordedSandboxVersion: String?
         var gameStatus: GameStatus = .installed(tag: "2")
         var pending = false
         var journalBlockedGame: String?
@@ -340,6 +351,10 @@ private final class SandboxModelServices: GameServices, Sendable {
     var sandbox: SandboxState? {
         get { state.withLock { $0.sandbox } }
         set { state.withLock { $0.sandbox = newValue } }
+    }
+    var recordedSandboxVersion: String? {
+        get { state.withLock { $0.recordedSandboxVersion } }
+        set { state.withLock { $0.recordedSandboxVersion = newValue } }
     }
     var actions: [String] { state.withLock { $0.actions } }
     var sandboxError: LauncherError? {
@@ -371,8 +386,14 @@ private final class SandboxModelServices: GameServices, Sendable {
     func checkForUpdate(_ id: String) async throws -> GameStatus { await status(id) }
     func record(_ id: String) async throws -> GameRecord? {
         guard var record = try await preview.record(id) else { return nil }
-        if case .installed(let version) = sandbox {
-            record.sandbox = try SandboxInstallation(version: version, listPath: SafeRelativePath("beyond_pkg_version"))
+        if id == "genshin" {
+            let version: String? = switch sandbox {
+            case .installed(let version), .outdated(let version, _, _): version
+            default: recordedSandboxVersion
+            }
+            if let version {
+                record.sandbox = try SandboxInstallation(version: version, listPath: SafeRelativePath("beyond_pkg_version"))
+            }
         }
         if pending, let target = record.installed {
             record.pending = PendingOperation(kind: .update, planID: try SafeIdentifier("pending"),

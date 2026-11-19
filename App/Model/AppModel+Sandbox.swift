@@ -27,11 +27,7 @@ import GameLibrary
     }
 
     func canRemoveSandbox(_ id: String) -> Bool {
-        guard canOperateSandbox(id) else { return false }
-        switch sandboxState(for: id) {
-        case .installed, .outdated: return true
-        case .notInstalled, nil: return false
-        }
+        canOperateSandbox(id) && gameRecords[id]?.sandbox != nil
     }
 
     private func canOperateSandbox(_ id: String) -> Bool {

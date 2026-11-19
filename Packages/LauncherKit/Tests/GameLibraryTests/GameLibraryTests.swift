@@ -1968,6 +1968,25 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         #expect(record.sandboxListPath == nil)
     }
 
+    @Test(arguments: [false, true])
+    func durableSandboxRemainsRemovableWithoutAnOffer(offerWithdrawn: Bool) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        _ = try f.advertiseSandbox()
+        _ = try await libraryCollect(await f.library.installSandbox(game))
+        let offline = MockCDN(), cold = f.restarted(http: offline)
+        if offerWithdrawn {
+            f.cdn.serve("hyp/hyp-connect/api/getWPFPackages", data: try jsonData(["wpf_packages": []]))
+            #expect(try await f.restarted().sandboxState(game) == .installed(version: "1.0"))
+        } else {
+            #expect(try await cold.sandboxState(game) == .installed(version: "1.0"))
+        }
+        let count = offline.requestLog.count
+        #expect(try await libraryCollect(await cold.removeSandbox(game)).last == .phase(.completed))
+        #expect(offline.requestLog.count == count)
+        #expect(try await f.store.load(game.id)?.sandbox == nil)
+        #expect(try f.fs.itemType(at: SandboxFiles.defaultList) == nil)
+    }
+
     @Test func quickVerifyRepairsMissingSandboxFile() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         _ = try f.advertiseSandbox(); _ = try await libraryCollect(await f.library.installSandbox(game))
