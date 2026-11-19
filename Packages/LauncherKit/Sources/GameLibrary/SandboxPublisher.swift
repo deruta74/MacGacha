@@ -72,9 +72,10 @@ struct SandboxPublisher: Sendable {
         }
     }
 
-    func recover(game: String) async throws {
+    /// Returns whether recovery finished a durable swap.
+    @discardableResult func recover(game: String) async throws -> Bool {
         try await BlockingIO.run {
-            guard let data = try await store.readState(Self.journalName, for: game, maxBytes: 65536) else { return }
+            guard let data = try await store.readState(Self.journalName, for: game, maxBytes: 65536) else { return false }
             let journal: Journal
             do { journal = try JSONDecoder().decode(Journal.self, from: data); try journal.validate() }
             catch { throw LauncherError.journalCorrupt("Invalid sandbox journal") }
@@ -94,7 +95,7 @@ struct SandboxPublisher: Sendable {
                     try fs.synchronizeParentDirectory(of: journal.list)
                     try await cleanup(journal, fs: fs, game: game)
                 } else { try await finish(journal, game: game, record: record) }
-                return
+                return !journal.rolledBack
             }
             // Both sides of a possibly completed rename are inspected by identity.
             if let current = try fs.pinDirectoryIfPresent(at: SandboxFiles.assets) {
@@ -124,6 +125,7 @@ struct SandboxPublisher: Sendable {
             rolledBack.newTree = journal.oldTree; rolledBack.newListDigest = journal.oldListDigest
             try await save(rolledBack, game: game)
             try await cleanup(rolledBack, fs: fs, game: game)
+            return false
         }
     }
 

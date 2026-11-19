@@ -40,7 +40,10 @@ enum SandboxFiles {
         return try SandboxInstallation(version: version, listPath: listPath)
     }
     static func writeConfigVersion(_ version: String?, in fs: ContainedFileSystem) throws {
-        guard try fs.itemType(at: config) != nil else { return }
+        if let data = try configData(setting: version, in: fs) { try fs.writeAtomically(data, to: config) }
+    }
+    static func configData(setting version: String?, in fs: ContainedFileSystem) throws -> Data? {
+        guard try fs.itemType(at: config) != nil else { return nil }
         guard try fs.itemType(at: config) == .regularFile else { throw LauncherError.unsafePath("Invalid game config") }
         let data = try fs.readFile(at: config, maxBytes: maximumConfigBytes)
         guard let text = String(data: data, encoding: .utf8), version.map(SandboxPackage.isValidVersion) ?? true else {
@@ -64,7 +67,7 @@ enum SandboxFiles {
             result += "wpf_version=" + version + ending
         }
         guard result.utf8.count <= maximumConfigBytes else { throw LauncherError.io("Game config exceeds size limit") }
-        try fs.writeAtomically(Data(result.utf8), to: config)
+        return Data(result.utf8)
     }
     private static func configValue(_ line: String) -> String? {
         guard let equals = line.firstIndex(of: "="),

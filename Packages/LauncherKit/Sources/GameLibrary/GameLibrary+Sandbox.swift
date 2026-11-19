@@ -7,7 +7,7 @@ import Sophon
 import RuntimeManager
 
 extension GameLibrary {
-    /// Metadata and local presence only. Idle checks never download the package.
+    /// The model uses this metadata and local presence to schedule optional work.
     public func sandboxState(_ game: GameDefinition) async throws -> SandboxState? {
         guard game.family == .genshin, let record = try await store.load(game.id), record.installed != nil,
             !record.uninstalling else { return nil }
@@ -29,20 +29,53 @@ extension GameLibrary {
     public func updateSandbox(_ game: GameDefinition) -> AsyncThrowingStream<OperationEvent, any Error> { sandboxStream(game, remove: false) }
     public func removeSandbox(_ game: GameDefinition) -> AsyncThrowingStream<OperationEvent, any Error> { sandboxStream(game, remove: true) }
 
-    private func sandboxStream(_ game: GameDefinition, remove: Bool) -> AsyncThrowingStream<OperationEvent, any Error> {
-        sandboxWork { progress in try await self.performSandbox(game, remove: remove, progress: progress) }
+    /// Revalidate the observed offer and the game's update priority under the same
+    /// exclusions as an explicit sandbox update. A stale offer is a quiet no-op.
+    public func automaticallyUpdateSandbox(_ game: GameDefinition, expectedVersion: String) -> AsyncThrowingStream<OperationEvent, any Error> {
+        sandboxWork(prepare: { try await self.acquireSandboxLease(game, allowRecovery: false) }) { progress in
+            do {
+                try await self.performSandbox(game, remove: false, expectedVersion: expectedVersion, progress: progress)
+            } catch {
+                let outcome = Task.isCancelled ? "cancelled" : "failed"
+                self.log?.post(.info, "sandbox", "Automatic sandbox update", metadata: ["outcome": outcome])
+                throw error
+            }
+        }
     }
-    private func performSandbox(_ game: GameDefinition, remove: Bool, progress: @escaping @Sendable (OperationEvent) -> Void) async throws {
+
+    /// Play joins abandoned transfers and refuses an unresolved publication.
+    public func waitForSandboxDrain(_ id: String) async throws {
+        try await store.waitForPipelineDrain()
+        try LaunchMutationBarrier.requireNoSandbox(paths: paths, game: id)
+    }
+
+    private func sandboxStream(_ game: GameDefinition, remove: Bool) -> AsyncThrowingStream<OperationEvent, any Error> {
+        sandboxWork(prepare: { try await self.acquireSandboxLease(game, allowRecovery: true) }) { progress in
+            try await self.performSandbox(game, remove: remove, progress: progress)
+        }
+    }
+
+    private func acquireSandboxLease(_ game: GameDefinition, allowRecovery: Bool) async throws -> GameOperationLease {
         guard game.family == .genshin else { throw LauncherError.io("Sandbox is unavailable") }
+        if !allowRecovery { try LaunchMutationBarrier.requireNoJournal(paths: paths, game: game.id) }
         try await operationGuard?.willOperate(on: game.id)
-        let gameLock = try acquireGameLock(game.id, allowSandboxRecovery: true)
-        let lease = try await store.acquireOperationLease(retainedGameLock: gameLock)
-        defer { withExtendedLifetime(lease) {} }
-        try await recoverSandbox(game.id)
-        guard var record = try await store.load(game.id) else { throw LauncherError.io("Game is not installed") }
+        let gameLock = try acquireGameLock(game.id, allowSandboxRecovery: allowRecovery)
+        return try await store.acquireOperationLease(retainedGameLock: gameLock)
+    }
+
+    private func performSandbox(_ game: GameDefinition, remove: Bool, expectedVersion: String? = nil,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws {
+        if expectedVersion == nil { try await recoverSandbox(game.id) }
+        guard var record = try await store.load(game.id), let build = record.installed else {
+            throw LauncherError.io("Game is not installed")
+        }
         try GameRecordRules.check(.repair, record: record, others: [])
         try locationProbe.requireAvailable(at: record.installPath)
         guard try await store.loadPlan(for: game.id) == nil else { throw LauncherError.busy("Finish the current game operation") }
+        if expectedVersion != nil, try await checkForUpdate(game) != .installed(tag: build.tag) {
+            progress(.phase(.completed))
+            return
+        }
         if remove {
             let fs = try sandboxFilesystem(record)
             if record.sandbox == nil {
@@ -60,14 +93,30 @@ extension GameLibrary {
         } else {
             let config = try await gameConfig(game)
             guard let list = config.wpfPackageVersion, let executable = config.wpfExecutable,
-                let package = try await api.sandboxPackage(biz: game.biz) else { throw LauncherError.io("Sandbox is unavailable") }
+                let package = try await api.sandboxPackage(biz: game.biz) else {
+                if expectedVersion != nil { progress(.phase(.completed)); return }
+                throw LauncherError.io("Sandbox is unavailable")
+            }
             try validateSandboxConfig(list: list, executable: executable)
             let fs = try sandboxFilesystem(record)
+            let local = try record.sandbox ?? SandboxFiles.detect(in: fs, listPath: list)
+            if let expectedVersion {
+                guard let local, package.version == expectedVersion else { progress(.phase(.completed)); return }
+                if local.version == package.version, try fs.itemType(at: local.listPath) == .regularFile,
+                    try fs.itemType(at: executable) == .regularFile {
+                    progress(.phase(.completed))
+                    return
+                }
+                guard local.listPath == list else { throw LauncherError.io("Sandbox list changed") }
+                // Reject an invalid config before downloading or entering publication.
+                _ = try SandboxFiles.configData(setting: package.version, in: fs)
+            }
             if record.sandbox == nil {
-                record.sandbox = try SandboxFiles.detect(in: fs, listPath: list)
+                record.sandbox = local
                 if record.sandbox != nil { try await store.save(record, for: game.id) }
             }
-            try await installSandboxPackage(game, record: record, package: package, list: list, executable: executable, progress: progress)
+            try await installSandboxPackage(game, record: record, package: package, list: list, executable: executable,
+                recoverOnFailure: expectedVersion != nil, progress: progress)
         }
         progress(.phase(.completed))
     }
@@ -179,7 +228,8 @@ extension GameLibrary {
     }
 
     private func installSandboxPackage(_ game: GameDefinition, record: GameRecord, package: SandboxPackage,
-        list: SafeRelativePath, executable: SafeRelativePath, progress: @escaping @Sendable (OperationEvent) -> Void) async throws {
+        list: SafeRelativePath, executable: SafeRelativePath, recoverOnFailure: Bool = false,
+        progress: @escaping @Sendable (OperationEvent) -> Void) async throws {
         let fs = try sandboxFilesystem(record)
         progress(.sandboxPhase(.downloading)); progress(.phase(.checkingSpace))
         // Admit the archive first, then inspect its verified directory before
@@ -224,6 +274,16 @@ extension GameLibrary {
             let store = store
             let hasJournal = try? await Task.detached { try await store.readState(SandboxPublisher.journalName, for: game.id, maxBytes: 65536) != nil }.value
             if hasJournal == false { try? await BlockingIO.finish { try fs.removeItem(at: stage) } }
+            if hasJournal == true, recoverOnFailure {
+                // Keep the lease while rolling back pre-commit cancellation or
+                // finishing a durable swap. Play can proceed only after this joins.
+                let publisher = sandboxPublisher
+                let committed = try await Task.detached { try await publisher.recover(game: game.id) }.value
+                if committed {
+                    log?.post(.info, "sandbox", "Sandbox operation", metadata: ["outcome": "installed", "version": package.version])
+                    return
+                }
+            }
             log?.post(.warning, "sandbox", "Sandbox operation", metadata: ["outcome": Task.isCancelled ? "cancelled" : "failed", "version": package.version, "bytes": "0"])
             throw error
         }
@@ -249,18 +309,22 @@ extension GameLibrary {
     }
 }
 
-private func sandboxWork(retaining lease: GameOperationLease? = nil, _ work: @escaping @Sendable (@escaping @Sendable (OperationEvent) -> Void) async throws -> Void) -> AsyncThrowingStream<OperationEvent, any Error> {
-    let session = SandboxOperationStream(work, retaining: lease)
+private func sandboxWork(retaining lease: GameOperationLease? = nil, prepare: (@Sendable () async throws -> GameOperationLease)? = nil,
+    _ work: @escaping @Sendable (@escaping @Sendable (OperationEvent) -> Void) async throws -> Void) -> AsyncThrowingStream<OperationEvent, any Error> {
+    let session = SandboxOperationStream(work, retaining: lease, prepare: prepare)
     return session.stream()
 }
 private actor SandboxOperationStream {
     private let work: @Sendable (@escaping @Sendable (OperationEvent) -> Void) async throws -> Void
+    private let prepare: (@Sendable () async throws -> GameOperationLease)?
     private let channel = PipelineChannel()
     private var producer: Task<Void, Never>?
+    private var pulling = false
     private let owner = UUID()
     private let retention = PipelineRootRetention(key: "sandbox-" + UUID().uuidString)
-    init(_ work: @escaping @Sendable (@escaping @Sendable (OperationEvent) -> Void) async throws -> Void, retaining lease: GameOperationLease?) {
-        self.work = work
+    init(_ work: @escaping @Sendable (@escaping @Sendable (OperationEvent) -> Void) async throws -> Void,
+        retaining lease: GameOperationLease?, prepare: (@Sendable () async throws -> GameOperationLease)?) {
+        self.work = work; self.prepare = prepare
         retention.hold(nil, owner: owner, retaining: lease)
     }
     nonisolated func stream() -> AsyncThrowingStream<OperationEvent, any Error> {
@@ -269,7 +333,14 @@ private actor SandboxOperationStream {
         }
     }
     func next(register: @Sendable (Task<Void, Never>) -> Void) async throws -> OperationEvent? {
+        guard !pulling else { throw LauncherError.busy("Sandbox stream already in use") }
+        pulling = true; defer { pulling = false }
         if producer == nil {
+            if let prepare {
+                let lease = try await prepare()
+                try Task.checkCancellation()
+                retention.hold(nil, owner: owner, retaining: lease)
+            }
             let work = work, channel = channel, retention = retention, owner = owner
             retention.activate(owner)
             let task = Task {

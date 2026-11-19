@@ -1726,6 +1726,84 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         #expect(!f.cdn.requestLog.contains { $0.path == "sandbox/package.zip" })
     }
 
+    @Test(arguments: [false, true])
+    func automaticSandboxUpdatesOnlyAnInstalledPackage(adopted: Bool) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        _ = try f.advertiseSandbox(version: "1.0")
+        if adopted {
+            try f.fs.writeAtomically(Data(), to: SafeRelativePath("beyond_pkg_version"))
+        } else {
+            _ = try await libraryCollect(await f.library.installSandbox(game))
+        }
+        _ = try f.advertiseSandbox(version: "2.0", editor: "automatic-v2")
+        let events = try await libraryCollect(await f.library.automaticallyUpdateSandbox(game, expectedVersion: "2.0"))
+        #expect(events.contains(.sandboxPhase(.downloading)))
+        #expect(events.last == .phase(.completed))
+        #expect(try await f.store.load(game.id)?.sandbox?.version == "2.0")
+        #expect(try await f.store.load(game.id)?.installed?.tag == "1.0")
+        #expect(try f.fs.readFile(at: sandboxEditorPath, maxBytes: 100) == Data("automatic-v2".utf8))
+    }
+
+    @Test(arguments: ["absent", "staleOffer", "gameUpdate", "sandboxJournal", "badConfig"])
+    func automaticSandboxRevalidatesBeforeChangingInstalledFiles(reason: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        _ = try f.advertiseSandbox(version: "1.0")
+        if reason != "absent" { _ = try await libraryCollect(await f.library.installSandbox(game)) }
+        if reason == "gameUpdate" { try f.advertise(2) }
+        if reason == "sandboxJournal" {
+            try await f.store.writeState(Data("unresolved".utf8), named: SandboxPublisher.journalName, for: game.id)
+        }
+        if reason == "badConfig" { try f.fs.writeAtomically(Data([0xff]), to: SafeRelativePath("config.ini")) }
+        _ = try f.advertiseSandbox(version: "2.0")
+        let start = f.cdn.requestLog.count
+        let expected = reason == "staleOffer" ? "1.0" : "2.0"
+        if reason == "sandboxJournal" || reason == "badConfig" {
+            await #expect(throws: LauncherError.self) {
+                _ = try await libraryCollect(await f.library.automaticallyUpdateSandbox(game, expectedVersion: expected))
+            }
+        } else {
+            let events = try await libraryCollect(await f.library.automaticallyUpdateSandbox(game, expectedVersion: expected))
+            #expect(events == [.phase(.completed)])
+        }
+        #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path == "sandbox/package.zip" })
+        #expect(try await f.store.load(game.id)?.sandbox?.version == (reason == "absent" ? nil : "1.0"))
+        #expect(try await f.store.load(game.id)?.installed?.tag == "1.0")
+    }
+
+    @Test func cancellingAutomaticSandboxKeepsOldPackageAndReleasesLease() async throws {
+        let gate = LibraryRequestGate(pathSuffix: "/sandbox/package.zip")
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        _ = try f.advertiseSandbox(version: "1.0")
+        _ = try await libraryCollect(await f.library.installSandbox(game))
+        _ = try f.advertiseSandbox(version: "2.0")
+        let library = f.restarted(http: LibraryGatedHTTP(cdn: f.cdn, gate: gate))
+        let stream = await library.automaticallyUpdateSandbox(game, expectedVersion: "2.0")
+        let task = Task { try await libraryCollect(stream) }
+        defer { task.cancel(); gate.release() }
+        try await gate.waitUntilEntered()
+        task.cancel(); gate.release()
+        _ = try? await task.value
+        try await library.waitUntilIdle(game.id)
+        #expect(try await f.store.load(game.id)?.sandbox?.version == "1.0")
+        #expect(try await f.store.readState(SandboxPublisher.journalName, for: game.id, maxBytes: 65536) == nil)
+        #expect(try f.fs.itemType(at: SafeRelativePath(".macgacha-staging/sandbox-work")) == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func automaticSandboxRollsBackInterruptedTreeSwap(cancelled: Bool) async throws {
+        let ops = SandboxRetirementFileOps(cancelled: cancelled)
+        let f = try LibraryFixture(fileOps: ops); try f.advertise(1); try await f.installGame()
+        _ = try f.advertiseSandbox(version: "1.0")
+        _ = try await libraryCollect(await f.library.installSandbox(game))
+        _ = try f.advertiseSandbox(version: "2.0", editor: "replacement")
+        let stream = await f.library.automaticallyUpdateSandbox(game, expectedVersion: "2.0")
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(stream) }
+        try await f.library.waitForSandboxDrain(game.id)
+        #expect(try await f.store.load(game.id)?.sandbox?.version == "1.0")
+        #expect(try f.fs.readFile(at: sandboxEditorPath, maxBytes: 100) == Data("sandbox-v1".utf8))
+        #expect(try f.fs.itemType(at: SafeRelativePath(".macgacha-staging/sandbox-work")) == nil)
+    }
+
     @Test func explicitInstallUpdateAndRemovePreserveExistingConfigAndGame() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         _ = try f.advertiseSandbox()
@@ -2012,7 +2090,7 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         #expect(try fs.readFile(at: SafeRelativePath("GenshinImpact.exe"), maxBytes: 100) == Data("commonv1!!!".utf8))
     }
 
-    @Test(arguments: ["install", "update", "remove"])
+    @Test(arguments: ["install", "update", "remove", "automatic"])
     func sessionLeaseAndExternalGuardBlockSandboxBeforeMutation(action: String) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         _ = try f.advertiseSandbox(); _ = try await libraryCollect(await f.library.installSandbox(game))
@@ -2038,7 +2116,7 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         #expect(try libraryStateFiles(at: f.paths.games) == state)
     }
 
-    @Test(arguments: ["install", "update", "remove"])
+    @Test(arguments: ["install", "update", "remove", "automatic"])
     func unresolvedLaunchJournalAndUnavailableLocationBlockSandbox(action: String) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         _ = try f.advertiseSandbox(); _ = try await libraryCollect(await f.library.installSandbox(game))
@@ -2057,6 +2135,27 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
     }
 }
 
+private struct SandboxRetirementFileOps: FileOps {
+    let cancelled: Bool
+    private let system = SystemFileOps()
+
+    func write(_ fd: Int32, bytes: UnsafeRawBufferPointer) throws -> Int { try system.write(fd, bytes: bytes) }
+    func synchronize(_ fd: Int32, durable: Bool) throws { try system.synchronize(fd, durable: durable) }
+    func rename(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32, exclusive: Bool) throws {
+        try system.rename(from: source, in: sourceDirectory, to: destination, in: destinationDirectory, exclusive: exclusive)
+        if source == "BeyondAssets", destination == "retired" {
+            if cancelled { withUnsafeCurrentTask { $0?.cancel() } }
+            else { throw LauncherError.io("Synthetic failure after sandbox retirement") }
+        }
+    }
+    func swap(from source: String, in sourceDirectory: Int32, to destination: String, in destinationDirectory: Int32) throws {
+        try system.swap(from: source, in: sourceDirectory, to: destination, in: destinationDirectory)
+    }
+    func unlink(_ name: String, in directory: Int32, isDirectory: Bool) throws {
+        try system.unlink(name, in: directory, isDirectory: isDirectory)
+    }
+}
+
 private let sandboxEditorPath = try! SafeRelativePath("BeyondAssets/BeyondAssistEditor/BeyondEditor.exe")
 private func sandboxConfigText(_ fixture: borrowing LibraryFixture) throws -> String {
     String(decoding: try fixture.fs.readFile(at: SafeRelativePath("config.ini"), maxBytes: 1024), as: UTF8.self)
@@ -2065,6 +2164,7 @@ private func sandboxOperation(_ library: GameLibrary, action: String) async -> A
     switch action {
     case "install": await library.installSandbox(game)
     case "update": await library.updateSandbox(game)
+    case "automatic": await library.automaticallyUpdateSandbox(game, expectedVersion: "2.0")
     default: await library.removeSandbox(game)
     }
 }
