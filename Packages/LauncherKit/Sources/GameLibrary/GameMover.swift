@@ -161,6 +161,7 @@ public struct GameMover: Sendable {
         try fs.createDirectoryDurably(at: directory)
         let lock = try InstallLock(fs: fs, path: SafeRelativePath("\(directory)/.session.lock"))
         try LaunchMutationBarrier.requireNoJournal(paths: paths, game: id)
+        try LaunchMutationBarrier.requireNoSandbox(paths: paths, game: id)
         return lock
     }
 

@@ -295,7 +295,7 @@ package final class PipelineRootRetention: Sendable {
         state.withLock { s in
             guard s.owner == owner else { return }
             if !s.active { s.lock = nil; s.retainedOwner = nil; return }
-            if s.drain == nil, s.lock != nil, let owner {
+            if s.drain == nil, s.lock != nil || s.retainedOwner != nil, let owner {
                 let drain = Drain(); s.drain = drain
                 Self.draining.withLock { $0[key] = Entry(owner: owner, drain: drain) }
                 (s.retainedOwner as? any PipelineDrainOwner)?.pipelineWillDrain { try await drain.wait() }
