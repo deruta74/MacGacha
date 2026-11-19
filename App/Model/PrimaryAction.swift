@@ -10,6 +10,8 @@ struct GameState: Sendable, Equatable {
     var activity: GameActivity? = nil
     var spaceShortage: GameSpaceShortage? = nil
     var timing: GameTiming? = nil
+    /// Separate from the engine phase so existing footer progress and pause rules still apply.
+    var sandboxPhase: SandboxPhase? = nil
 }
 
 struct GameSpaceShortage: Sendable, Equatable {

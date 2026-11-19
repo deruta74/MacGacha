@@ -125,6 +125,9 @@ final class AppModel {
     var preDownloads: [String: PreDownloadOverlay] = [:]
     @ObservationIgnored var preDownloadRevisions: [String: UUID] = [:]
     var gameUpdateCheck: [String: GameUpdateCheckResult] = [:]
+    var sandboxStates: [String: SandboxState] = [:]
+    /// Chained sandbox maintenance may fail after the game itself updates successfully.
+    var sandboxFailures: [String: LauncherError] = [:]
     @ObservationIgnored var gameUpdateCheckTasks: [String: Task<Void, Never>] = [:]
     var isGameOperationRunning: Bool { gameOperation != nil }
     private(set) var isRuntimeOperationRunning = false
@@ -423,6 +426,7 @@ final class AppModel {
         // check, including one still waiting for its remote response.
         gameUpdateCheck[id] = nil
         var state = state
+        state.sandboxPhase = gameOperation?.id == id ? gameProgress.sandboxPhase : nil
         if case .working(let phase, let fraction, _, _, _) = state.activity {
             if case .working(let previous, _, _, _, _) = games[id]?.activity,
                 GameProgress.trackingPhase(for: previous) != GameProgress.trackingPhase(for: phase) { state.timing = nil }
@@ -857,7 +861,7 @@ final class AppModel {
                         self?.working[id] = .working(phase: phase, fraction: nil); self?.rebuildRows()
                     case .progress(let downloaded, let network, let staged, let totalStaged):
                         self?.updateProgress(id, downloaded: downloaded, network: network, staged: staged, totalStaged: totalStaged)
-                    case .fileVerified: break
+                    case .fileVerified, .sandboxPhase, .sandboxFailed: break
                     }
                     if completed { break } // A terminal event is consumed exactly once.
                 }

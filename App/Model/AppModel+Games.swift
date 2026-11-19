@@ -18,11 +18,16 @@ struct GameOperationToken: Sendable, Equatable {
     var isUninstall = false
     var isPreDownload = false
     var isMoving = false
+    var isSandbox = false
     var moveDestination: URL? = nil
     var installPath: URL? = nil
 }
 private enum GameRequest: Sendable {
     case install(Set<String>, URL, Bool), adopt(URL, Set<String>), update, resume(Bool), verify, voices(Set<String>), uninstall, move(URL)
+    case installSandbox, updateSandbox, removeSandbox
+    var isSandbox: Bool {
+        switch self { case .installSandbox, .updateSandbox, .removeSandbox: true; default: false }
+    }
     var isMoving: Bool { if case .move = self { true } else { false } }
     var isUninstall: Bool { if case .uninstall = self { true } else { false } }
     var installPath: URL? {
@@ -49,9 +54,9 @@ private enum GameRequest: Sendable {
     func activity(record: GameRecord?) -> OtherRegionActivity {
         switch self {
         case .verify, .adopt: .verifying
-        case .update, .uninstall, .move: .updating
+        case .update, .uninstall, .move, .updateSandbox, .removeSandbox: .updating
         case .resume: record?.pending?.kind == .update ? .updating : record?.pending?.kind == .repair ? .verifying : .downloading
-        case .install, .voices: .downloading
+        case .install, .voices, .installSandbox: .downloading
         }
     }
 }
@@ -63,15 +68,30 @@ private struct GameSnapshot: Sendable {
     let status: GameStatus
     let record: GameRecord?
     var error: LauncherError? = nil
+    var sandbox: Result<SandboxState?, LauncherError> = .success(nil)
+}
+@concurrent private func readSandbox(_ services: any GameServices, id: String, status: GameStatus, record: GameRecord?) async -> Result<SandboxState?, LauncherError> {
+    guard record?.installed != nil else { return .success(nil) }
+    if case .locationUnavailable = status { return .failure(.installVolumeUnavailable) }
+    do { return .success(try await services.sandboxState(id)) }
+    catch { return .failure(launcherError(error)) }
 }
 @concurrent private func readGame(_ services: any GameServices, id: String, draining: Bool = false) async -> GameSnapshot {
     if draining {
         do { try await services.waitUntilIdle(id) }
-        catch { return GameSnapshot(status: await services.status(id), record: try? await services.record(id), error: launcherError(error)) }
+        catch {
+            let error = launcherError(error)
+            return GameSnapshot(status: await services.status(id), record: try? await services.record(id), error: error, sandbox: .failure(error))
+        }
     }
     let status = await services.status(id)
-    do { return GameSnapshot(status: status, record: try await services.record(id)) }
-    catch { return GameSnapshot(status: status, record: nil, error: launcherError(error)) }
+    do {
+        let record = try await services.record(id)
+        return GameSnapshot(status: status, record: record, sandbox: await readSandbox(services, id: id, status: status, record: record))
+    } catch {
+        let error = launcherError(error)
+        return GameSnapshot(status: status, record: nil, error: error, sandbox: .failure(error))
+    }
 }
 
 @MainActor extension AppModel {
@@ -93,11 +113,12 @@ private struct GameSnapshot: Sendable {
                 if let error = self.launchStartupError { throw error }
                 let status = try await services.checkForUpdate(id)
                 let record = try await services.record(id)
+                let sandbox = await readSandbox(services, id: id, status: status, record: record)
                 try Task.checkCancellation()
                 guard self.isCurrentGameUpdateCheck(id, revision: revision) else {
                     self.clearCheckingGameUpdate(id); return
                 }
-                self.applyGame(GameSnapshot(status: status, record: record), id: id, activity: nil)
+                self.applyGame(GameSnapshot(status: status, record: record, sandbox: sandbox), id: id, activity: nil)
                 if case .updateAvailable(_, let version) = status { self.notify(.updateAvailable, gameID: id, version: version) }
                 self.gameRevisions[id] = UUID() // Invalidate automatic reads begun during the check.
                 switch status {
@@ -195,6 +216,9 @@ private struct GameSnapshot: Sendable {
     func resumeGame(_ id: String) { beginGame(id, .resume(false)) }
     func verifyGame(_ id: String) { beginGame(id, .verify) }
     func setVoices(_ id: String, _ voices: Set<String>) { beginGame(id, .voices(voices)) }
+    func installSandbox(_ id: String) { if canInstallSandbox(id) { beginGame(id, .installSandbox) } }
+    func updateSandbox(_ id: String) { if canUpdateSandbox(id) { beginGame(id, .updateSandbox) } }
+    func removeSandbox(_ id: String) { if canRemoveSandbox(id) { beginGame(id, .removeSandbox) } }
     func pauseGame(_ id: String) { if gameOperation?.id == id { gameTask?.cancel() } }
     func approveBatches(_ id: String) {
         guard case .needsApproval = games[id]?.activity else { return }
@@ -253,13 +277,14 @@ private struct GameSnapshot: Sendable {
         return task
     }
 
-    private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity, isVerification: Bool, isUninstall: Bool, installPath: URL?, isMoving: Bool = false, moveDestination: URL? = nil, notificationCompletion: GameNotificationKind? = nil) -> GameOperationToken? {
+    private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity, isVerification: Bool, isUninstall: Bool, installPath: URL?, isMoving: Bool = false, isSandbox: Bool = false, moveDestination: URL? = nil, notificationCompletion: GameNotificationKind? = nil) -> GameOperationToken? {
         guard canBeginGameOrRuntimeOperation() else { return nil }
         guard GameDefinition.all.contains(where: { $0.id == id }) else { show(LauncherError.io("Unknown game")); return nil }
         guard gameOperation == nil || (isMoving && gameOperation?.id == id && gameOperation?.isPreDownload == true && gameOperation?.isUninstall == false) else { show(LauncherError.busy("another game operation is running")); return nil }
-        let token = GameOperationToken(id: id, generation: UUID(), kind: kind, notificationCompletion: notificationCompletion, isVerification: isVerification, isUninstall: isUninstall, isMoving: isMoving, moveDestination: moveDestination, installPath: installPath)
+        let token = GameOperationToken(id: id, generation: UUID(), kind: kind, notificationCompletion: notificationCompletion, isVerification: isVerification, isUninstall: isUninstall, isMoving: isMoving, isSandbox: isSandbox, moveDestination: moveDestination, installPath: installPath)
         gameOperation = token; gameRevisions[id] = token.generation
         gameProgress = GameProgress()
+        sandboxFailures[id] = nil
         dismissError()
         setGameState(id, GameState(status: games[id]?.status ?? .unknown, activity: activity))
         return token
@@ -269,7 +294,7 @@ private struct GameSnapshot: Sendable {
         let previousPreDownload = request.isMoving && gameOperation?.id == id && gameOperation?.isPreDownload == true ? gameTask : nil
         let destination: URL? = if case .move(let folder) = request { folder } else { nil }
         guard let token = reserveGame(id, activity: request.isUninstall ? .working(.deleting, fraction: nil, bytesPerSecond: nil) : .resolving,
-            kind: request.activity(record: gameRecords[id]), isVerification: { if case .verify = request { true } else { false } }(), isUninstall: request.isUninstall, installPath: request.installPath ?? gameRecords[id]?.installPath, isMoving: request.isMoving, moveDestination: destination, notificationCompletion: request.notificationCompletion(record: gameRecords[id])) else { return nil }
+            kind: request.activity(record: gameRecords[id]), isVerification: { if case .verify = request { true } else { false } }(), isUninstall: request.isUninstall, installPath: request.installPath ?? gameRecords[id]?.installPath, isMoving: request.isMoving, isSandbox: request.isSandbox, moveDestination: destination, notificationCompletion: request.notificationCompletion(record: gameRecords[id])) else { return nil }
         previousPreDownload?.cancel()
         let services = gameServices, startup = ensureGameStartup()
         let task = Task { [weak self] in
@@ -291,7 +316,7 @@ private struct GameSnapshot: Sendable {
                     notificationCompletion = request.notificationCompletion(record: current)
                 }
                 switch request {
-                case .update, .resume, .verify, .voices, .uninstall, .move: try await self?.recheckGameLocation(id)
+                case .update, .resume, .verify, .voices, .uninstall, .move, .installSandbox, .updateSandbox, .removeSandbox: try await self?.recheckGameLocation(id)
                 case .install, .adopt: break
                 }
                 self?.gameLocationPauseReasons[id] = nil
@@ -304,6 +329,8 @@ private struct GameSnapshot: Sendable {
                     case .phase(.cancelled): throw LauncherError.cancelled
                     case .phase(.failed): throw LauncherError.io("Game operation failed")
                     case .failed(let error): throw error
+                    case .sandboxPhase(let phase): self?.setSandboxOperationPhase(id, phase: phase)
+                    case .sandboxFailed(let error): self?.sandboxFailures[id] = error
                     case .needsBatchApproval(let required, let available):
                         // Approval becomes actionable only after the stream and
                         // durable snapshot finish and we release the reservation.
@@ -428,6 +455,7 @@ private struct GameSnapshot: Sendable {
 
     private func applyGame(_ snapshot: GameSnapshot, id: String, activity: GameActivity?, reportError: Bool = true) {
         setGameRecord(id, snapshot.record)
+        if case .success(let state) = snapshot.sandbox { sandboxStates[id] = state }
         if snapshot.record?.installed == nil {
             preDownloadRevisions[id] = UUID()
             preDownloads[id] = nil
@@ -441,8 +469,9 @@ private struct GameSnapshot: Sendable {
         guard gameOperation == token else { return }
         var state = games[token.id] ?? GameState(status: .unknown)
         state.activity = activity
+        gameProgress = GameProgress()
         setGameState(token.id, state)
-        gameOperation = nil; gameTask = nil; gameProgress = GameProgress()
+        gameOperation = nil; gameTask = nil
     }
     func setGameOperationPhase(_ id: String, phase: OperationPhase) {
         // Batch transitions retain the operation bar, while the actual phase
@@ -473,6 +502,9 @@ private struct GameSnapshot: Sendable {
 
 private func gameStream(_ services: any GameServices, id: String, request: GameRequest) async -> GameEventStream {
     switch request {
+    case .installSandbox: return await services.installSandbox(id)
+    case .updateSandbox: return await services.updateSandbox(id)
+    case .removeSandbox: return await services.removeSandbox(id)
     case .install(let voices, let location, let approved): return await services.install(id, voices: voices, at: location, approved: approved)
     case .adopt(let folder, let voices): return await services.adopt(id, folder: folder, voices: voices)
     case .update: return await services.update(id, approved: false)

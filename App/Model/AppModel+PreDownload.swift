@@ -138,7 +138,7 @@ struct PreDownloadOverlay: Sendable, Equatable {
                         self?.updatePreDownloadPhase(id, phase: phase)
                     case .progress(let downloaded, let network, _, _):
                         self?.updatePreDownloadProgress(id, downloaded: downloaded, total: network)
-                    case .fileVerified: break
+                    case .fileVerified, .sandboxPhase, .sandboxFailed: break
                     }
                 }
             } catch {

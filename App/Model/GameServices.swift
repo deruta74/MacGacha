@@ -19,6 +19,10 @@ protocol GameServices: Sendable {
     func locationStatus(_ id: String) async throws -> GameStatus
     func status(_ id: String) async -> GameStatus
     func checkForUpdate(_ id: String) async throws -> GameStatus
+    func sandboxState(_ id: String) async throws -> SandboxState?
+    func installSandbox(_ id: String) async -> GameEventStream
+    func updateSandbox(_ id: String) async -> GameEventStream
+    func removeSandbox(_ id: String) async -> GameEventStream
     func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo
     func preDownload(_ id: String) async -> GameEventStream
     func resumePreDownload(_ id: String, expectedPlanID: String?) async -> GameEventStream
@@ -37,6 +41,13 @@ protocol GameServices: Sendable {
 
 /// Existing fakes and previews opt out without touching delivery or disk.
 extension GameServices {
+    func sandboxState(_ id: String) async throws -> SandboxState? { nil }
+    func installSandbox(_ id: String) async -> GameEventStream { unavailableSandbox() }
+    func updateSandbox(_ id: String) async -> GameEventStream { unavailableSandbox() }
+    func removeSandbox(_ id: String) async -> GameEventStream { unavailableSandbox() }
+    private func unavailableSandbox() -> GameEventStream {
+        GameEventStream { $0.finish(throwing: LauncherError.busy("Sandbox is unavailable")) }
+    }
     func setDownloadSpeedLimit(_ bytesPerSecond: Int64?) {}
     func recoverPendingMoves() async -> [String] { [] }
     func move(_ id: String, to folder: URL) async -> GameEventStream {
@@ -131,6 +142,22 @@ final class LiveGameServices: GameServices, Sendable {
     func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo {
         do { let game = try Self.requireGame(id); return try await library(for: game).preDownloadInfo(game, refresh: refresh) }
         catch { throw await failure(error, id: id) }
+    }
+    func sandboxState(_ id: String) async throws -> SandboxState? {
+        let game = try Self.requireGame(id)
+        return try await library(for: game).sandboxState(game)
+    }
+    func installSandbox(_ id: String) async -> GameEventStream {
+        guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
+        return logged(await library(for: game).installSandbox(game), id: id)
+    }
+    func updateSandbox(_ id: String) async -> GameEventStream {
+        guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
+        return logged(await library(for: game).updateSandbox(game), id: id)
+    }
+    func removeSandbox(_ id: String) async -> GameEventStream {
+        guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
+        return logged(await library(for: game).removeSandbox(game), id: id)
     }
     func preDownload(_ id: String) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }

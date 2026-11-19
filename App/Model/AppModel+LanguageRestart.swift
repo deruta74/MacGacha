@@ -45,7 +45,7 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
             !runtimeSetupRosettaChecks.isEmpty { return .runtimeWork }
         if let operation = gameOperation {
             let record = gameRecords[operation.id]
-            if operation.isMoving || operation.isUninstall || record?.uninstalling == true || (record?.pending == nil && !operation.isVerification && !operation.isPreDownload) {
+            if operation.isSandbox || gameProgress.sandboxPhase != nil || operation.isMoving || operation.isUninstall || record?.uninstalling == true || (record?.pending == nil && !operation.isVerification && !operation.isPreDownload) {
                 return .unresumableOperation(operation.id)
             }
         }
