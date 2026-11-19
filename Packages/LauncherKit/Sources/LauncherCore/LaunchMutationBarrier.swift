@@ -21,6 +21,13 @@ public enum LaunchMutationBarrier {
             throw LauncherError.busy("Move recovery is required")
         }
     }
+    public static func requireNoSandbox(paths: AppPaths, game: String) throws {
+        let fs = try ContainedFileSystem(root: paths.root)
+        let path = try SafeRelativePath("Games/\(SafeIdentifier(game).rawValue)/sandbox-journal.json")
+        guard try fs.itemType(at: path, allowingLeafSymlink: true) == nil else {
+            throw LauncherError.busy("Sandbox recovery is required")
+        }
+    }
     public static func requireNoJournals(paths: AppPaths) throws {
         do {
             let fs = try ContainedFileSystem(root: paths.root)
@@ -32,6 +39,7 @@ public enum LaunchMutationBarrier {
                     throw LauncherError.busy("Launch recovery is required")
                 }
                 try requireNoJournal(paths: paths, game: entry.components.last!)
+                try requireNoSandbox(paths: paths, game: entry.components.last!)
             }
         } catch { throw LauncherError.busy("Launch recovery is required") }
     }

@@ -31,6 +31,25 @@ extension AppModel {
                 preview.preDownloads[game.id] = overlay
             }
             model = preview
+        } else if let name, ["sandboxUpdating", "sandboxFailed"].contains(name), let first = games.first {
+            // Background Miliastra Sandbox update beside Play, or its quiet failure line.
+            let installed = GameState(status: .installed(tag: "7.2.0"))
+            var updating = GameState(status: .installed(tag: "7.2.0"), activity: .working(.staging, fraction: 0.42,
+                bytesPerSecond: 31_000_000, downloaded: 213_800_000, total: 508_949_016))
+            updating.isAutomaticSandboxUpdate = true
+            updating.sandboxPhase = .downloading
+            let preview = preview(logLines: [], games: Dictionary(uniqueKeysWithValues: games.map {
+                ($0.id, $0.id == first.id && name == "sandboxUpdating" ? updating : installed)
+            }), region: region)
+            preview.debugLaunchRuntimesReady = true
+            if name == "sandboxUpdating" {
+                preview.gameOperation = GameOperationToken(id: first.id, generation: UUID(), isSandbox: true,
+                    automaticSandboxVersion: "7.2.0.49085326")
+                preview.setGameState(first.id, updating)
+            }
+            preview.sandboxStates[first.id] = .outdated(installed: "7.1.0.48000000", available: "7.2.0.49085326", size: 508_949_016)
+            if name == "sandboxFailed" { preview.sandboxFailures[first.id] = .transport("") }
+            model = preview
         } else if name == "moving", let first = games.first {
             // Copying to another drive: the move owns the operation slot, so the footer shows its phase and Cancel.
             let copying = GameState(status: .installed(tag: "7.1.0"), activity: .working(.staging, fraction: 0.42, bytesPerSecond: nil))

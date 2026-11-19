@@ -60,9 +60,9 @@ public actor OperationRunner {
     /// Claims a fresh root under the store lease. A persisted GameRecord is never
     /// manufactured until the root exists and its identity has been measured.
     package func startInstall(_ game: String, at root: URL, executable: SafeRelativePath, plan: InstallPlan,
-        target: InstalledBuild, approved: Bool, lease: GameOperationLease? = nil,
+        target: InstalledBuild, approved: Bool, lease: GameOperationLease? = nil, sandboxListPath: SafeRelativePath? = nil,
         managedPaths: Set<SafeRelativePath>, reservedLocations: [URL] = []) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, request: .start(.fresh(root, executable), plan, .install, target, managedPaths, reservedLocations), approved: approved, lease: lease)
+        stream(game, request: .start(.fresh(root, executable, sandboxListPath), plan, .install, target, managedPaths, reservedLocations), approved: approved, lease: lease)
     }
 
     func preDownloadSettings() -> (fetcher: ChunkFetcher, maxConcurrentObjects: Int, pipeline: PipelineConfiguration) {
@@ -72,6 +72,9 @@ public actor OperationRunner {
     public func reconcile(_ game: String) async throws -> GameRecord? {
         let lease = try await store.acquireOperationLease(waitForPipelineDrain: true)
         defer { withExtendedLifetime(lease) {} }
+        guard try await store.readState(SandboxPublisher.journalName, for: game, maxBytes: 65536) == nil else {
+            throw LauncherError.busy("Sandbox recovery is required")
+        }
         guard let record = try await store.load(game) else {
             try await store.cleanupOrphanGameDirectory(game)
             return nil
@@ -117,10 +120,11 @@ private enum RunnerRequest: Sendable {
 
 private enum RunnerRecordProposal: Sendable {
     case record(GameRecord)
-    case fresh(URL, SafeRelativePath)
+    case fresh(URL, SafeRelativePath, SafeRelativePath?)
     var record: GameRecord? { if case .record(let value) = self { value } else { nil } }
-    var root: URL { switch self { case .record(let value): value.installPath; case .fresh(let root, _): root } }
-    var executable: SafeRelativePath { switch self { case .record(let value): value.executable; case .fresh(_, let executable): executable } }
+    var root: URL { switch self { case .record(let value): value.installPath; case .fresh(let root, _, _): root } }
+    var sandboxListPath: SafeRelativePath? { switch self { case .record(let value): value.sandboxListPath; case .fresh(_, _, let list): list } }
+    var executable: SafeRelativePath { switch self { case .record(let value): value.executable; case .fresh(_, let executable, _): executable } }
 }
 
 private actor RunnerSession {
@@ -220,9 +224,13 @@ private actor RunnerSession {
         var current: GameRecord
         switch request {
         case .start(let proposal, let requested, let kind, let target, let managedPaths, let reserved):
+            guard try await store.readState(SandboxPublisher.journalName, for: game, maxBytes: 65536) == nil else {
+                throw LauncherError.busy("Sandbox recovery is required")
+            }
             let proposed = proposal.record
             try requested.validate(supportedCodecs: ChunkCodec.supportedCodecs)
             let existing = try await store.load(game)
+            try SandboxFiles.requireGamePlanSafe(requested, game: game)
             if existing?.pending != nil || proposed?.pending != nil {
                 throw LauncherError.busy("finish or uninstall the paused operation first")
             }
@@ -241,7 +249,7 @@ private actor RunnerSession {
             // Durable order 1 -> 2. The engine is not constructed until both finish.
             try await store.savePlan(requested, for: game)
             hooks.reach(.afterGamePlanSaved)
-            current = proposed ?? GameRecord(installPath: proposal.root, ownership: .created, executable: proposal.executable, installIdentity: identity)
+            current = proposed ?? GameRecord(installPath: proposal.root, ownership: .created, executable: proposal.executable, installIdentity: identity, sandboxListPath: proposal.sandboxListPath)
             try await store.prepareManagedPaths(managedPaths, target: target, record: current, for: game)
             try GameRecordRules.checkLocation(proposal.root, others: others, reserved: reserved)
             if fresh, try !pinned.contentsOfRootDirectory().isEmpty {
@@ -253,6 +261,9 @@ private actor RunnerSession {
             hooks.reach(.afterGamePendingSaved)
             plan = requested
         case .resume:
+            guard try await store.readState(SandboxPublisher.journalName, for: game, maxBytes: 65536) == nil else {
+                throw LauncherError.busy("Sandbox recovery is required")
+            }
             guard let saved = try await store.load(game) else { throw LauncherError.io("no pending operation") }
             try GameRecordRules.check(.resume, record: saved, others: [])
             guard let pending = saved.pending else { throw LauncherError.io("no pending operation") }
@@ -265,6 +276,7 @@ private actor RunnerSession {
             guard let stored = try await store.loadPlan(for: game), stored.id == pending.planID,
                 stored.planDigest == pending.planDigest else { throw LauncherError.journalCorrupt("Missing or mismatched pending plan") }
             current = saved; plan = stored
+            try SandboxFiles.requireGamePlanSafe(stored, game: game)
             _ = try ContainedFileSystem(root: saved.installPath, fileOps: fileOps,
                 expectedRootIdentity: saved.installIdentity, identityProvider: identityProvider).rootIdentity()
         }

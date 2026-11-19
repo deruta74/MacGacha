@@ -52,21 +52,34 @@ public struct GameRecord: Codable, Sendable, Equatable {
     /// Required identity of the directory claimed for this record.
     public var installIdentity: FileSystemIdentity
     public var uninstallFilesRemoved: Bool
+    public var sandbox: SandboxInstallation?
+    /// Configuration reserves this path even when the optional package is absent.
+    public var sandboxListPath: SafeRelativePath?
     public init(installPath: URL, ownership: FolderOwnership, executable: SafeRelativePath,
-        installed: InstalledBuild? = nil, pending: PendingOperation? = nil, uninstalling: Bool = false, installIdentity: FileSystemIdentity, uninstallFilesRemoved: Bool = false) {
+        installed: InstalledBuild? = nil, pending: PendingOperation? = nil, uninstalling: Bool = false, installIdentity: FileSystemIdentity, uninstallFilesRemoved: Bool = false, sandbox: SandboxInstallation? = nil, sandboxListPath: SafeRelativePath? = nil) {
         self.installPath = installPath; self.ownership = ownership; self.executable = executable
         self.installed = installed; self.pending = pending; self.uninstalling = uninstalling
         self.installIdentity = installIdentity
         self.uninstallFilesRemoved = uninstallFilesRemoved
+        self.sandbox = sandbox
+        self.sandboxListPath = sandboxListPath
     }
-    private enum CodingKeys: String, CodingKey { case installPath, ownership, executable, installed, pending, uninstalling, installIdentity, uninstallFilesRemoved }
+    private enum CodingKeys: String, CodingKey { case installPath, ownership, executable, installed, pending, uninstalling, installIdentity, uninstallFilesRemoved, sandbox, sandboxListPath }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let sandbox: SandboxInstallation?
+        if c.contains(.sandbox), try !c.decodeNil(forKey: .sandbox) {
+            let fields = try c.nestedContainer(keyedBy: SandboxInstallation.CodingKeys.self, forKey: .sandbox)
+            let list = try fields.decode(SafeRelativePath.self, forKey: .listPath)
+            sandbox = SandboxFiles.supportedList(list) == nil ? nil : try c.decode(SandboxInstallation.self, forKey: .sandbox)
+        } else { sandbox = nil }
         self.init(installPath: try c.decode(URL.self, forKey: .installPath), ownership: try c.decode(FolderOwnership.self, forKey: .ownership),
             executable: try c.decode(SafeRelativePath.self, forKey: .executable), installed: try c.decodeIfPresent(InstalledBuild.self, forKey: .installed),
             pending: try c.decodeIfPresent(PendingOperation.self, forKey: .pending), uninstalling: try c.decode(Bool.self, forKey: .uninstalling),
             installIdentity: try c.decode(FileSystemIdentity.self, forKey: .installIdentity),
-            uninstallFilesRemoved: try c.decodeIfPresent(Bool.self, forKey: .uninstallFilesRemoved) ?? false)
+            uninstallFilesRemoved: try c.decodeIfPresent(Bool.self, forKey: .uninstallFilesRemoved) ?? false,
+            sandbox: sandbox,
+            sandboxListPath: SandboxFiles.supportedList(try c.decodeIfPresent(SafeRelativePath.self, forKey: .sandboxListPath)))
         guard localFileURL(installPath) else { throw LauncherError.io("invalid game record") }
         guard !uninstallFilesRemoved || uninstalling else { throw LauncherError.io("invalid game record") }
     }

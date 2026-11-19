@@ -8,7 +8,7 @@ import LauncherCore
 /// central names to agree, including any Unicode-path overrides, before either tool runs.
 /// Content, types, links and canonical path collisions are validated by ArchiveExtractor.
 enum ZIPDirectory {
-    static func validate(_ handle: FileHandle, maxEntries: Int) throws {
+    static func validate(_ handle: FileHandle, maxEntries: Int, validateName: ((String) throws -> Void)? = nil) throws {
         var info = stat()
         guard fstat(handle.fileDescriptor, &info) == 0, info.st_size >= 22 else { throw invalid() }
         let size = UInt64(info.st_size)
@@ -53,6 +53,7 @@ enum ZIPDirectory {
                 !name.contains(where: { $0 >= 128 }) || central.u16(8) & 0x800 != 0 else {
                 throw LauncherError.unsafePath("Invalid ZIP filename encoding")
             }
+            try validateName?(String(decoding: name, as: UTF8.self))
             let extra = try read(handle, at: offset + 46 + UInt64(nameLength), count: extraLength)
             try validateUnicode(extra, name: name)
             var localOffset = UInt64(central.u32(42))

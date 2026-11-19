@@ -38,6 +38,7 @@ struct GameFooter: View {
     @State private var confirmingParts = false
     @State private var confirmingUninstall = false
     @State private var confirmingPreDownloadDeletion = false
+    @State private var confirmingSandboxRemoval = false
     @State private var progressHovered = false
 
     private var state: GameState { model.games[game.id] ?? GameState(status: .unknown) }
@@ -60,6 +61,10 @@ struct GameFooter: View {
             VStack(alignment: .trailing, spacing: 10) {
                 if let note = otherRegionNote {
                     OtherRegionNote(text: note.text) { model.region = note.region }
+                }
+                if state.isAutomaticSandboxUpdate {
+                    SandboxUpdateBar(game: game, state: state)
+                        .transition(.opacity)
                 }
                 if showsPreDownload {
                     PreDownloadBar(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
@@ -108,7 +113,8 @@ struct GameFooter: View {
                     }
                     if showsMenu {
                         GameMenu(game: game, state: state, gameSheet: $gameSheet, confirmingUninstall: $confirmingUninstall,
-                            confirmingPreDownloadDeletion: $confirmingPreDownloadDeletion)
+                            confirmingPreDownloadDeletion: $confirmingPreDownloadDeletion,
+                            confirmingSandboxRemoval: $confirmingSandboxRemoval)
                     }
                     if showsPreDownload {
                         PreDownloadButton(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
@@ -138,6 +144,11 @@ struct GameFooter: View {
             }
         } message: {
             Text("The update will download these files again when it's released.")
+        }
+        .confirmationDialog("Remove Miliastra Sandbox?", isPresented: $confirmingSandboxRemoval) {
+            Button("Remove", role: .destructive) { model.removeSandbox(game.id) }
+        } message: {
+            Text("Editing and test-playing stages in Miliastra Wonderland won't work until you install it again.")
         }
         .confirmationDialog("Uninstall \(game.name)?", isPresented: $confirmingUninstall) {
             Button("Uninstall", role: .destructive) {
@@ -185,7 +196,7 @@ struct GameFooter: View {
     private var installedVersion: String? {
         // A failed launch leaves the game as installed as before, so its facts stay.
         if case .failed = launch {} else if launch != nil { return nil }
-        guard state.activity == nil else { return nil }
+        guard state.activity == nil || state.isAutomaticSandboxUpdate else { return nil }
         switch state.status {
         case .installed(let tag), .updateAvailable(let tag, _): return tag
         default: return nil
@@ -213,7 +224,8 @@ struct GameFooter: View {
     }
 
     private var showsMenu: Bool {
-        switch state.activity {
+        // A background sandbox update leaves Play in place, so the menu stays too; its actions check the operation slot.
+        switch state.isAutomaticSandboxUpdate ? nil : state.activity {
         // Nothing in the menu can run while an operation is in flight.
         case .resolving, .working: return false
         // Waiting for approval is a pause: Show in Finder and Uninstall stay reachable.
@@ -227,7 +239,7 @@ struct GameFooter: View {
     }
 
     private var statusLine: String {
-        if case .working(let phase, _, _, _, _) = state.activity {
+        if case .working(let phase, _, _, _, _) = state.activity, !state.isAutomaticSandboxUpdate {
             switch phase {
             case .committing, .deleting, .cleaningUp: return String(localized: "Finishing up — this can't be paused")
             default:
@@ -239,6 +251,10 @@ struct GameFooter: View {
             }
         }
         if let launchLine { return launchLine }
+        if !state.isAutomaticSandboxUpdate, state.activity == nil, let failure = model.sandboxFailure(for: game.id) {
+            return String(localized: "Miliastra Sandbox didn't update: \(failure.userMessage)",
+                comment: "Quiet footer note; the argument is the reason. The game itself is fine.")
+        }
         if case .needsRosetta = action {
             return String(localized: "Rosetta 2 is needed to run Windows games on this Mac")
         }
@@ -620,6 +636,7 @@ struct PrimaryActionButton: View {
         guard case .working(let phase, let fraction, _, let downloaded, _) = state.activity else { return "" }
         let localWork = (phase == .staging && downloaded == nil) || (phase == .checkingSpace && fraction != nil)
         let label = if let move = model.gameMovePhase(for: game.id) { move.label }
+            else if let sandbox = model.sandboxPhaseLabel(for: game.id) { sandbox }
             else if localWork { String(localized: "Installing…") }
             else { RuntimePhaseText.label(for: phase, fraction: fraction) }
         switch state.timing?.display(at: now) ?? .none {
@@ -653,6 +670,7 @@ struct GameMenu: View {
     @Binding var gameSheet: GameSheet?
     @Binding var confirmingUninstall: Bool
     @Binding var confirmingPreDownloadDeletion: Bool
+    @Binding var confirmingSandboxRemoval: Bool
     @State private var choosingMoveFolder = false
 
     /// While waiting for approval only folder actions make sense; verify and voices would start new work.
@@ -674,6 +692,7 @@ struct GameMenu: View {
                     .disabled(model.gameUpdateCheck[game.id] == .checking)
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
                 Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
+                sandboxItems
                 if model.wishHistoryEnabled {
                     Button("Export Wish History…", systemImage: "square.and.arrow.up") { gameSheet = .wishExport(game.id) }
                         .disabled(!model.canExportWishHistory(game.id))
@@ -738,6 +757,31 @@ struct GameMenu: View {
         }
         .fileDialogMessage("Choose where to move \(game.name)")
         .fileDialogConfirmationLabel("Move Here")
+    }
+
+    /// Genshin's level editor. HoYoPlay installs it for everyone; here it is opt-in and then kept current.
+    @ViewBuilder private var sandboxItems: some View {
+        switch model.sandboxState(for: game.id) {
+        case .notInstalled(let size):
+            Button("Install Miliastra Sandbox (\(ByteSize.text(size)))", systemImage: "square.stack.3d.up") {
+                model.installSandbox(game.id)
+            }
+            .disabled(!model.canInstallSandbox(game.id))
+            .help("The Miliastra Wonderland editor. The game opens it when you edit a stage or test-play it.")
+        case .outdated:
+            Button("Update Miliastra Sandbox", systemImage: "square.stack.3d.up") { model.updateSandbox(game.id) }
+                .disabled(!model.canUpdateSandbox(game.id))
+            removeSandboxItem
+        case .installed:
+            removeSandboxItem
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private var removeSandboxItem: some View {
+        Button("Remove Miliastra Sandbox…", systemImage: "square.stack.3d.up.slash") { confirmingSandboxRemoval = true }
+            .disabled(!model.canRemoveSandbox(game.id))
     }
 
     /// The game is launching, running or still being restored; its files must stay put.

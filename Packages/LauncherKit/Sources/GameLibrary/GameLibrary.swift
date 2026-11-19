@@ -45,6 +45,8 @@ public actor GameLibrary {
     let operationGuard: (any GameOperationGuard)?
     let hooks: CrashHooks
     let fileOps: any FileOps
+    let sandboxExtractor: (any SandboxPackageExtracting)?
+    var sandboxConfigurations: [String: GameConfig] = [:]
     private var started = false
     private static let cleanupName = "uninstall-cleaned.json"
 
@@ -65,10 +67,12 @@ public actor GameLibrary {
     }
 
     public init(paths: AppPaths, api: DeliveryAPI, runner: OperationRunner, store: GameRecordStore,
-        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(), guard operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe()) {
+        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(), guard operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe(),
+        sandboxExtractor: (any SandboxPackageExtracting)? = nil) {
         self.locationProbe = locationProbe
         self.paths = paths; self.api = api; self.runner = runner; self.store = store
         self.operationGuard = operationGuard
+        self.sandboxExtractor = sandboxExtractor
         self.disk = disk; self.purgeable = purgeable; self.log = log; hooks = crashHooks; self.fileOps = fileOps
     }
 
@@ -80,9 +84,16 @@ public actor GameLibrary {
                 do {
                     try await operationGuard?.willOperate(on: id)
                     try await store.waitForPipelineDrain()
-                    try await mover.recover(id)
-                    let gameLock = try acquireGameLock(id)
+                    if try await store.readState("move-journal.json", for: id, maxBytes: 65536) != nil {
+                        try await mover.recover(id)
+                    }
+                    let gameLock = try acquireGameLock(id, allowSandboxRecovery: true)
                     defer { withExtendedLifetime(gameLock) {} }
+                    do {
+                        let lease = try await store.acquireOperationLease()
+                        defer { withExtendedLifetime(lease) {} }
+                        try await recoverSandbox(id)
+                    }
                     _ = try await runner.reconcile(id)
                 }
                 catch { await log?.log(.error, "game-library", "Reconciliation failed", metadata: ["game": id]) }
@@ -164,8 +175,9 @@ public actor GameLibrary {
 
     public func uninstall(_ game: GameDefinition) async throws {
         try await operationGuard?.willOperate(on: game.id)
-        let gameLock = try acquireGameLock(game.id)
+        let gameLock = try acquireGameLock(game.id, allowSandboxRecovery: true)
         let lease = try await store.acquireOperationLease(retainedGameLock: gameLock); defer { withExtendedLifetime(lease) {} }
+        try await recoverSandbox(game.id)
         let records = try await store.records()
         try GameRecordRules.check(.uninstall, record: records[game.id], others: others(records, game))
         guard var record = records[game.id] else { throw LauncherError.io("game is not installed") }
@@ -177,6 +189,7 @@ public actor GameLibrary {
             catch LauncherError.unsafePath { throw LauncherError.io("install folder was replaced") }
             if let fs {
                 guard try fs.rootIdentity() == record.installIdentity else { throw LauncherError.io("install folder was replaced") }
+                record = try await removeSandboxForUninstall(game, record: record, in: fs)
             } else if !record.uninstalling { throw LauncherError.io("install folder was replaced") }
             record.uninstalling = true
             try await store.save(record, for: game.id) // 1. Persist intent before removal.
@@ -225,7 +238,7 @@ public actor GameLibrary {
         try await store.deleteGameDirectory(game.id)
     }
 
-    func acquireGameLock(_ game: String) throws -> InstallLock {
+    func acquireGameLock(_ game: String, allowSandboxRecovery: Bool = false) throws -> InstallLock {
         let id = try SafeIdentifier(game)
         let fs = try ContainedFileSystem(root: paths.root, fileOps: fileOps)
         try fs.createRootDurably()
@@ -235,6 +248,7 @@ public actor GameLibrary {
         // Revalidate durable ownership while no launcher can acquire this game.
         try LaunchMutationBarrier.requireNoJournal(paths: paths, game: game)
         try LaunchMutationBarrier.requireNoMove(paths: paths, game: game)
+        if !allowSandboxRecovery { try LaunchMutationBarrier.requireNoSandbox(paths: paths, game: game) }
         return lock
     }
 
@@ -249,21 +263,40 @@ public actor GameLibrary {
         // A cancelled pipeline retains both locks until it drains. Resume joins
         // that drainage before trying the per-game lock, rather than failing busy.
         if resumes { try await store.waitForPipelineDrain() }
-        let gameLock = try acquireGameLock(game.id)
+        let gameLock = try acquireGameLock(game.id, allowSandboxRecovery: true)
         let lease = try await store.acquireOperationLease(retainedGameLock: gameLock)
-        let records = try await store.records(); let record = records[game.id]
+        try await recoverSandbox(game.id)
+        let records = try await store.records(); var record = records[game.id]
         try GameRecordRules.check(request.action, record: record, others: others(records, game))
-        if let record { try locationProbe.requireAvailable(at: record.installPath) }
+        var configuration: Result<GameConfig, LauncherError>?
+        if let existing = record {
+            try locationProbe.requireAvailable(at: existing.installPath)
+            let discoversConfig: Bool = switch request {
+            case .update, .verify: true
+            case .resume: try needsSandboxConfigDiscovery(existing)
+            default: false
+            }
+            if game.family == .genshin, discoversConfig {
+                do { configuration = .success(try await gameConfig(game)) }
+                catch {
+                    if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
+                    configuration = .failure(error as? LauncherError ?? .transport("Game configuration unavailable"))
+                }
+            }
+            record = try await detectSandboxBeforeGameOperation(game, record: existing)
+        }
         switch request {
         case .resume(let approved):
-            return LibraryPrepared(lease: lease, stream: await runner.resume(game.id, approved: approved, lease: lease))
+            return LibraryPrepared(lease: lease, stream: await runner.resume(game.id, approved: approved, lease: lease),
+                sandboxMode: record?.pending?.kind == .repair || record?.pending?.kind == .adopt ? .full : nil,
+                maintainsSandbox: record?.pending?.kind != .voices)
         case .install(let voices, let location, let approved):
             try checkNewLocation(location, records: records, game: game, empty: true)
             try await store.deleteState(Self.cleanupName, for: game.id)
-            let config = try await api.config(biz: game.biz), target = try await resolve(game, voices: voices)
+            let config = try await gameConfig(game), target = try await resolve(game, voices: voices)
             let plan = try SophonPlanner.fullPlan(id: planID(game, kind: .install, build: target.build, categories: target.categories), target: target.categories)
             return LibraryPrepared(lease: lease, stream: await runner.startInstall(game.id, at: location, executable: config.executable, plan: plan,
-                target: target.build, approved: approved, lease: lease, managedPaths: target.managedPaths,
+                target: target.build, approved: approved, lease: lease, sandboxListPath: SandboxFiles.supportedList(config.wpfPackageVersion), managedPaths: target.managedPaths,
                 reservedLocations: [paths.root, paths.runtimes]))
         case .adopt(let voices, let location):
             try checkNewLocation(location, records: records, game: game, empty: false)
@@ -271,21 +304,26 @@ public actor GameLibrary {
             try AdoptEditionValidator.validate(game, in: source)
             let identity = try source.rootIdentity()
             try await store.deleteState(Self.cleanupName, for: game.id)
-            let config = try await api.config(biz: game.biz), target = try await resolve(game, voices: voices)
-            let record = GameRecord(installPath: location, ownership: .adopted, executable: config.executable, installIdentity: identity)
+            let config = try await gameConfig(game), target = try await resolve(game, voices: voices)
+            let sandbox: SandboxInstallation?
+            if game.family == .genshin, let list = SandboxFiles.supportedList(config.wpfPackageVersion),
+                !SandboxFiles.listIsManaged(target.managedPaths) {
+                sandbox = try SandboxFiles.detect(in: source, listPath: list)
+            } else { sandbox = nil }
+            let record = GameRecord(installPath: location, ownership: .adopted, executable: config.executable, installIdentity: identity, sandbox: sandbox, sandboxListPath: SandboxFiles.supportedList(config.wpfPackageVersion))
             return LibraryPrepared(lease: lease, stream: verification { progress in
                 try await self.verifyAndRun(game, record: record, target: target, kind: .adopt, mode: .full, lease: lease, progress: progress)
-            })
+            }, sandboxMode: .full)
         case .verify(let mode):
             guard let record, let installed = record.installed else { throw LauncherError.io("game is not installed") }
             let target = LibraryTarget(build: installed, categories: try await planned(installed.categories, game: game))
             return LibraryPrepared(lease: lease, stream: verification { progress in
                 try await self.verifyAndRun(game, record: record, target: target, kind: .repair, mode: mode, lease: lease, progress: progress)
-            })
+            }, sandboxMode: mode)
         case .update(let approved):
             guard let record, let installed = record.installed else { throw LauncherError.io("game is not installed") }
             let target = try await resolve(game, voices: installed.voices)
-            return try await updateStream(game, record: record, installed: installed, target: target, kind: .update, approved: approved, lease: lease)
+            return try await updateStream(game, record: record, installed: installed, target: target, kind: .update, approved: approved, lease: lease, configuration: configuration)
         case .voices(let voices):
             guard let record, let installed = record.installed else { throw LauncherError.io("game is not installed") }
             let target: LibraryTarget
@@ -303,7 +341,7 @@ public actor GameLibrary {
     }
 
     private func updateStream(_ game: GameDefinition, record: GameRecord, installed: InstalledBuild, target: LibraryTarget,
-        kind: PendingOperation.Kind, approved: Bool, lease: GameOperationLease) async throws -> LibraryPrepared {
+        kind: PendingOperation.Kind, approved: Bool, lease: GameOperationLease, configuration: Result<GameConfig, LauncherError>? = nil) async throws -> LibraryPrepared {
         let snapshot = InstalledSnapshot(categories: try await planned(installed.categories, game: game))
         let id = try planID(game, kind: kind, build: target.build, categories: target.categories)
         var requiresPatchMetadata = false
@@ -314,22 +352,23 @@ public actor GameLibrary {
             }
         }
         let patch = kind == .update ? try await patchPlan(game, id: id, target: target, installed: installed, snapshot: snapshot,
-            requiresPatchMetadata: requiresPatchMetadata) : nil
+            requiresPatchMetadata: requiresPatchMetadata, configuration: configuration) : nil
         let plan = try patch ?? SophonPlanner.plan(id: id, target: target.categories, installed: snapshot)
         return LibraryPrepared(lease: lease, stream: await runner.start(game.id, record: record, plan: plan, kind: kind,
             target: target.build, approved: approved, lease: lease, managedPaths: target.managedPaths,
-                reservedLocations: [paths.root, paths.runtimes]))
+                reservedLocations: [paths.root, paths.runtimes]), maintainsSandbox: kind != .voices)
     }
 
     private func patchPlan(_ game: GameDefinition, id: SafeIdentifier, target: LibraryTarget,
-        installed: InstalledBuild, snapshot: InstalledSnapshot, requiresPatchMetadata: Bool) async throws -> InstallPlan? {
+        installed: InstalledBuild, snapshot: InstalledSnapshot, requiresPatchMetadata: Bool, configuration: Result<GameConfig, LauncherError>?) async throws -> InstallPlan? {
         guard let branch = target.branch else {
             if requiresPatchMetadata { throw LauncherError.transport("Update metadata unavailable") }
             return nil
         }
         if !branch.diffTags.contains(installed.tag), !requiresPatchMetadata { return nil }
         do {
-            guard try await api.config(biz: game.biz).enableLdiff else { return nil }
+            let config = if let configuration { try configuration.get() } else { try await gameConfig(game) }
+            guard config.enableLdiff else { return nil }
             guard branch.diffTags.contains(installed.tag) else { throw LauncherError.io("patch source unavailable") }
             let build = try await api.patchBuild(branch)
             guard build.tag == target.build.tag, build.buildID == target.build.buildID else {
@@ -495,7 +534,16 @@ private struct LibraryTarget: Sendable {
     }
     var managedPaths: Set<SafeRelativePath> { Set(categories.flatMap { $0.manifest.files.map(\.path) }) }
 }
-fileprivate struct LibraryPrepared: Sendable { let lease: GameOperationLease; let stream: AsyncThrowingStream<OperationEvent, any Error> }
+fileprivate struct LibraryPrepared: Sendable {
+    let lease: GameOperationLease
+    let stream: AsyncThrowingStream<OperationEvent, any Error>
+    let sandboxMode: Verifier.Mode?
+    let maintainsSandbox: Bool
+    init(lease: GameOperationLease, stream: AsyncThrowingStream<OperationEvent, any Error>,
+        sandboxMode: Verifier.Mode? = nil, maintainsSandbox: Bool = true) {
+        self.lease = lease; self.stream = stream; self.sandboxMode = sandboxMode; self.maintainsSandbox = maintainsSandbox
+    }
+}
 fileprivate enum LibraryRequest: Sendable {
     case install(Set<String>, URL, Bool), adopt(Set<String>, URL), update(Bool), resume(Bool), verify(Verifier.Mode), voices(Set<String>)
     var action: GameAction {
@@ -507,6 +555,8 @@ private actor LibrarySession {
     var lease: GameOperationLease?
     var iterator: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
     var prepared = false, done = false, pulling = false
+    var maintainingSandbox = false
+    var sandboxMode: Verifier.Mode?
     init(owner: GameLibrary, game: GameDefinition, request: LibraryRequest) { self.owner = owner; self.game = game; self.request = request }
     func next() async throws -> OperationEvent? {
         guard !pulling else { throw LauncherError.busy("game stream already in use") }
@@ -517,10 +567,18 @@ private actor LibrarySession {
             if !prepared {
                 let value = try await owner.prepare(game, request: request)
                 lease = value.lease; iterator = value.stream.makeAsyncIterator(); prepared = true
+                sandboxMode = value.sandboxMode; maintainingSandbox = !value.maintainsSandbox
             }
             guard var current = iterator else { throw LauncherError.io("missing library stream") }
-            iterator = nil; let event = try await current.next(isolation: self); iterator = current
+            iterator = nil; var event = try await current.next(isolation: self); iterator = current
             guard !Task.isCancelled else { throw LauncherError.cancelled }
+            if event == .phase(.completed), !maintainingSandbox {
+                maintainingSandbox = true
+                guard let lease else { throw LauncherError.io("Missing game operation ownership") }
+                var maintenance = await owner.sandboxMaintenance(game, mode: sandboxMode, lease: lease).makeAsyncIterator()
+                event = try await maintenance.next(isolation: self)
+                iterator = maintenance
+            }
             if event == nil || event == .phase(.completed) { done = true; iterator = nil; lease = nil }
             return event
         } catch { done = true; iterator = nil; lease = nil; throw error }

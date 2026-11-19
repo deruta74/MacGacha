@@ -68,7 +68,7 @@ public struct ArchiveExtractor: Sendable {
                 // Select normalized members literally; no archive name is ever a tar pattern.
                 // The same projection was validated above, including hardlink targets.
                 try handle.seek(toOffset: 0)
-                _ = try Self.scan(handle, format: format, limit: limit, maxEntries: maxEntries, fileOps: fs.fileOps) { entry in
+                _ = try Self.scan(handle, format: format, limit: limit, maxEntries: maxEntries, fileOps: fs.fileOps, output: { entry in
                     guard let entry = try ArchivePolicy.project(entry, under: rootPath) else { return nil }
                     let path = try SafeRelativePath("\(target)/\(entry.path)")
                     switch entry.kind {
@@ -78,7 +78,7 @@ public struct ArchiveExtractor: Sendable {
                     case .file: return try fs.openForWriting(at: path, truncate: true)
                     }
                     return nil
-                }
+                })
             } else if format == .zip {
                 try await run("/usr/bin/ditto", ["-x", "-k", archiveURL.path, targetURL.path])
             } else {
@@ -114,9 +114,10 @@ public struct ArchiveExtractor: Sendable {
         }
     }
 
-    private static func scan(_ handle: FileHandle, format: ArchiveFormat, limit: Int64, maxEntries: Int, fileOps: any FileOps = SystemFileOps(),
+    static func scan(_ handle: FileHandle, format: ArchiveFormat, limit: Int64, maxEntries: Int, fileOps: any FileOps = SystemFileOps(),
+        requireExactSizes: Bool = false, validateZIPName: ((String) throws -> Void)? = nil, progress: ((Int64) -> Void)? = nil,
         output: ((ArchiveEntry) throws -> FileHandle?)? = nil) throws -> [ArchiveEntry] {
-        if format == .zip { try ZIPDirectory.validate(handle, maxEntries: maxEntries) }
+        if format == .zip { try ZIPDirectory.validate(handle, maxEntries: maxEntries, validateName: validateZIPName) }
         guard let reader = archive_read_new() else { throw LauncherError.io("Cannot initialize archive reader") }
         defer { archive_read_free(reader) }
         if format == .zip { archive_read_support_format_zip(reader) }
@@ -185,7 +186,7 @@ public struct ArchiveExtractor: Sendable {
             guard metadata <= 16 << 20, path.utf8.count <= 4096, (kind.link?.utf8.count ?? 0) <= 4096 else {
                 throw LauncherError.io("Archive metadata limit exceeded")
             }
-            let scanned = ArchiveEntry(path: path, kind: kind)
+            let scanned = ArchiveEntry(path: path, kind: kind, size: size)
             result.append(scanned)
             let destination = try output?(scanned)
             defer { try? destination?.close() }
@@ -200,8 +201,10 @@ public struct ArchiveExtractor: Sendable {
                 read = try addSize(read, Int64(count), limit: min(size, limit))
                 if let destination {
                     try fileOps.writeAll(Data(buffer.prefix(count)), to: destination.fileDescriptor)
+                    progress?(Int64(count))
                 }
             }
+            if requireExactSizes, case .file = kind, read != size { throw LauncherError.io("Invalid archive data size") }
             if let destination {
                 guard fchmod(destination.fileDescriptor, archive_entry_perm(entry) & 0o777) == 0 else {
                     throw LauncherError.fileSystemFailure("Cannot set runtime file permissions")
@@ -229,6 +232,7 @@ struct ArchiveEntry: Sendable {
     }
     let path: String
     let kind: Kind
+    var size: Int64 = 0
 }
 
 enum ArchivePolicy {
@@ -303,7 +307,7 @@ enum ArchivePolicy {
         }
     }
 
-    private static func normalized(_ value: String, directory: Bool) throws -> String {
+    static func normalized(_ value: String, directory: Bool) throws -> String {
         guard value.utf8.first != 47, !value.utf8.contains(0), !value.utf8.contains(92),
             !value.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else { throw LauncherError.unsafePath(value) }
         let bytes = Array(value.utf8)

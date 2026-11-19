@@ -6,6 +6,9 @@ import LauncherCore
 import DownloadEngine
 import Sophon
 import GameLibrary
+import RuntimeManager
+
+extension SandboxArchiveExtractor: @retroactive SandboxPackageExtracting {}
 
 typealias GameEventStream = AsyncThrowingStream<OperationEvent, any Error>
 
@@ -19,6 +22,12 @@ protocol GameServices: Sendable {
     func locationStatus(_ id: String) async throws -> GameStatus
     func status(_ id: String) async -> GameStatus
     func checkForUpdate(_ id: String) async throws -> GameStatus
+    func sandboxState(_ id: String) async throws -> SandboxState?
+    func installSandbox(_ id: String) async -> GameEventStream
+    func updateSandbox(_ id: String) async -> GameEventStream
+    func automaticallyUpdateSandbox(_ id: String, expectedVersion: String) async -> GameEventStream
+    func waitForSandboxDrain(_ id: String) async throws
+    func removeSandbox(_ id: String) async -> GameEventStream
     func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo
     func preDownload(_ id: String) async -> GameEventStream
     func resumePreDownload(_ id: String, expectedPlanID: String?) async -> GameEventStream
@@ -37,6 +46,15 @@ protocol GameServices: Sendable {
 
 /// Existing fakes and previews opt out without touching delivery or disk.
 extension GameServices {
+    func sandboxState(_ id: String) async throws -> SandboxState? { nil }
+    func installSandbox(_ id: String) async -> GameEventStream { unavailableSandbox() }
+    func updateSandbox(_ id: String) async -> GameEventStream { unavailableSandbox() }
+    func automaticallyUpdateSandbox(_ id: String, expectedVersion: String) async -> GameEventStream { unavailableSandbox() }
+    func waitForSandboxDrain(_ id: String) async throws { try await waitUntilIdle(id) }
+    func removeSandbox(_ id: String) async -> GameEventStream { unavailableSandbox() }
+    private func unavailableSandbox() -> GameEventStream {
+        GameEventStream { $0.finish(throwing: LauncherError.busy("Sandbox is unavailable")) }
+    }
     func setDownloadSpeedLimit(_ bytesPerSecond: Int64?) {}
     func recoverPendingMoves() async -> [String] { [] }
     func move(_ id: String, to folder: URL) async -> GameEventStream {
@@ -77,7 +95,8 @@ final class LiveGameServices: GameServices, Sendable {
             let fetcher = ChunkFetcher(http: client, retry: retry, sleeper: sleeper)
             libraries[region] = GameLibrary(paths: paths, api: DeliveryAPI(http: client, region: region),
                 runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog, locationProbe: locationProbe),
-                store: store, disk: disk, log: eventLog, guard: operationGuard, locationProbe: locationProbe)
+                store: store, disk: disk, log: eventLog, guard: operationGuard, locationProbe: locationProbe,
+                sandboxExtractor: SandboxArchiveExtractor())
         }
         self.libraries = libraries; self.sessions = sessions
     }
@@ -131,6 +150,31 @@ final class LiveGameServices: GameServices, Sendable {
     func preDownloadInfo(_ id: String, refresh: Bool) async throws -> PreDownloadInfo {
         do { let game = try Self.requireGame(id); return try await library(for: game).preDownloadInfo(game, refresh: refresh) }
         catch { throw await failure(error, id: id) }
+    }
+    func sandboxState(_ id: String) async throws -> SandboxState? {
+        let game = try Self.requireGame(id)
+        return try await library(for: game).sandboxState(game)
+    }
+    func installSandbox(_ id: String) async -> GameEventStream {
+        guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
+        return logged(await library(for: game).installSandbox(game), id: id)
+    }
+    func updateSandbox(_ id: String) async -> GameEventStream {
+        guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
+        return logged(await library(for: game).updateSandbox(game), id: id)
+    }
+    func automaticallyUpdateSandbox(_ id: String, expectedVersion: String) async -> GameEventStream {
+        guard let game = Self.game(id) else { return invalidGame() }
+        let source = await library(for: game).automaticallyUpdateSandbox(game, expectedVersion: expectedVersion)
+        return logged(source, id: id, logFailures: false)
+    }
+    func waitForSandboxDrain(_ id: String) async throws {
+        let game = try Self.requireGame(id)
+        try await library(for: game).waitForSandboxDrain(id)
+    }
+    func removeSandbox(_ id: String) async -> GameEventStream {
+        guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
+        return logged(await library(for: game).removeSandbox(game), id: id)
     }
     func preDownload(_ id: String) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
@@ -194,8 +238,9 @@ final class LiveGameServices: GameServices, Sendable {
         return game
     }
     private func invalidGame() -> GameEventStream { GameEventStream { $0.finish(throwing: LauncherError.io("Unknown game")) } }
-    private func logged(_ source: GameEventStream, id: String) -> GameEventStream {
-        let pull = LoggedGameOperation(source: source, id: Self.game(id)?.id ?? "unknown", log: log, session: Self.game(id).flatMap { sessions[$0.region] })
+    private func logged(_ source: GameEventStream, id: String, logFailures: Bool = true) -> GameEventStream {
+        let pull = LoggedGameOperation(source: source, id: Self.game(id)?.id ?? "unknown", log: log,
+            session: Self.game(id).flatMap { sessions[$0.region] }, logFailures: logFailures)
         return GameEventStream(unfolding: { try await pull.next() })
     }
     private func failure(_ error: any Error, id: String) async -> LauncherError {
@@ -221,9 +266,11 @@ private actor LoggedGameOperation {
     private var iterator: GameEventStream.Iterator?
     private let id: String, log: EventLog
     private let session: DeliveryHTTPSession?
+    private let logFailures: Bool
     private var pulling = false, approval = false
-    init(source: GameEventStream, id: String, log: EventLog, session: DeliveryHTTPSession?) {
+    init(source: GameEventStream, id: String, log: EventLog, session: DeliveryHTTPSession?, logFailures: Bool) {
         iterator = source.makeAsyncIterator(); self.id = id; self.log = log; self.session = session
+        self.logFailures = logFailures
     }
     func next() async throws -> OperationEvent? {
         guard !pulling else { throw LauncherError.busy("Game stream already in use") }
@@ -245,7 +292,7 @@ private actor LoggedGameOperation {
         } catch {
             iterator = nil
             let error = launcherError(error)
-            if !(approval && { if case .insufficientSpace = error { true } else { false } }()) {
+            if logFailures, !(approval && { if case .insufficientSpace = error { true } else { false } }()) {
                 await logGameFailure(error, id: id, log: log)
             }
             throw error

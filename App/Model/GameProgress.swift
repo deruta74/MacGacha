@@ -25,6 +25,14 @@ struct GameProgress {
     private var lastUpdate: ContinuousClock.Instant?
     private var speedSamples: [Sample] = []
     private(set) var timing: GameTiming?
+    private(set) var sandboxPhase: SandboxPhase?
+
+    /// Sandbox counters start again after the game, and download/extraction have different totals.
+    mutating func beginSandboxPhase(_ phase: SandboxPhase) {
+        guard sandboxPhase != phase else { return }
+        self = GameProgress()
+        sandboxPhase = phase
+    }
 
     static func trackingPhase(for phase: OperationPhase) -> OperationPhase {
         [.checkingSpace, .committing].contains(phase) ? .staging : phase

@@ -15,6 +15,7 @@ public final class SessionLock: Sendable {
         let fs = try ContainedFileSystem(root: paths.root)
         let lock = try SessionLock(InstallLock(fs: fs, path: SafeRelativePath("Games/\(id)/.session.lock")))
         try LaunchMutationBarrier.requireNoMove(paths: paths, game: game)
+        try LaunchMutationBarrier.requireNoSandbox(paths: paths, game: game)
         return lock
     }
 }
