@@ -136,7 +136,7 @@ extension GameLibrary {
     }
 
     private func sandboxListIsManaged(_ game: String, record: GameRecord) async throws -> Bool {
-        guard record.installed != nil else { return false }
+        guard record.installed != nil || record.pending != nil else { return false }
         return try await SandboxFiles.listIsManaged(store.managedPaths(for: game, record: record))
     }
 
@@ -192,9 +192,11 @@ extension GameLibrary {
         var current = record
         guard try await !sandboxListIsManaged(game.id, record: record) else { return record }
         if current.sandbox == nil {
-            // Legacy records have no list path. Require the editor tree as well as the list before claiming it.
-            if current.sandboxListPath == nil,
-                try fs.itemType(at: SandboxFiles.assets, allowingLeafSymlink: true) != .directory { return record }
+            if current.sandboxListPath == nil {
+                // Infer ownership from disk only after the base game installation has completed.
+                guard current.installed != nil, current.pending == nil,
+                    try fs.itemType(at: SandboxFiles.assets, allowingLeafSymlink: true) == .directory else { return record }
+            }
             current.sandbox = try SandboxFiles.detect(in: fs, listPath: current.sandboxListPath ?? SandboxFiles.defaultList)
         }
         guard current.sandbox != nil else { return record }

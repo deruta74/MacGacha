@@ -2132,6 +2132,43 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         }
     }
 
+    @Test(arguments: ["manifest-owned", "manifest-owned-configured", "unowned"])
+    func pausedAdoptUninstallPreservesFilesDuringSandboxCleanup(listOwnership: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try f.seedExisting()
+        for try await event in await f.library.adopt(game, folder: f.install, voices: ["en-us"]) {
+            if event == .phase(.checkingSpace) { break }
+        }
+        var record = try #require(try await f.store.load(game.id))
+        let pending = try #require(record.pending)
+        try #require(pending.kind == .adopt && record.installed == nil && record.sandbox == nil && record.sandboxListPath == nil)
+
+        let list = SandboxFiles.defaultList, userFile = try SafeRelativePath("BeyondAssets/user-file.txt")
+        let listData = Data("canonical list".utf8), userData = Data("user data".utf8)
+        try f.fs.writeAtomically(listData, to: list)
+        try f.fs.writeAtomically(userData, to: userFile)
+        let manifestOwned = listOwnership != "unowned"
+        if manifestOwned {
+            let paths = try await f.store.managedPaths(for: game.id, record: record)
+            try await f.store.prepareManagedPaths(paths.union([list]), target: pending.target, record: record, for: game.id)
+        }
+        if listOwnership == "manifest-owned-configured" {
+            record.sandboxListPath = list
+            try await f.store.save(record, for: game.id)
+        }
+
+        let offline = MockCDN(), library = f.restarted(http: offline)
+        let afterSandboxCleanup = try await library.removeSandboxForUninstall(game, record: record, in: f.fs.pinRoot())
+        #expect(afterSandboxCleanup == record)
+        #expect((try? f.fs.readFile(at: list, maxBytes: 100)) == listData)
+        #expect((try? f.fs.readFile(at: userFile, maxBytes: 100)) == userData)
+
+        try await library.uninstall(game)
+        #expect(try await f.store.load(game.id) == nil)
+        #expect(try f.fs.readFile(at: userFile, maxBytes: 100) == userData)
+        #expect(try f.fs.itemType(at: list) == (manifestOwned ? nil : .regularFile))
+        #expect(offline.requestLog.isEmpty)
+    }
+
     @Test(arguments: [false, true])
     func movingGameRetainsSandboxFilesAndVersion(crossVolume: Bool) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
