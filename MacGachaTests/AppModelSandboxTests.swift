@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Launch
 import Synchronization
 import Testing
 import LauncherCore
@@ -121,6 +122,118 @@ import RuntimeManager
         if case .completed = model.lastGameConsumerOutcome?.outcome {} else { Issue.record("Game update was not successful") }
     }
 
+    @Test(.timeLimit(.minutes(1)), arguments: ["startup", "automatic", "manual"])
+    func remoteRefreshStartsAutomaticSandboxUpdate(source: String) async throws {
+        let fake = SandboxModelServices()
+        let offer = fake.sandbox
+        if source != "startup" { fake.sandbox = .installed(version: "1") }
+        let model = try await fixture(fake, allowAutomatic: true)
+        defer { fake.finish() }
+        fake.sandbox = offer
+        if source == "manual" {
+            model.checkForGameUpdate("genshin")
+            await model.gameUpdateCheckTasks["genshin"]?.value
+        } else if source == "automatic" { await model.refreshGames() }
+        let task = try #require(model.gameTask)
+        await fake.waitForOpen()
+        #expect(fake.actions == ["automatic-2"])
+        #expect(model.isAutomaticallyUpdatingSandbox("genshin"))
+        let game = try #require(model.games["genshin"])
+        #expect(PrimaryAction.resolve(game, runtimesReady: true) == .play)
+        fake.sandbox = .installed(version: "2")
+        fake.emit(.sandboxPhase(.finishing)); fake.emit(.phase(.completed)); fake.finish()
+        await task.value
+        #expect(!model.isAutomaticallyUpdatingSandbox("genshin"))
+        #expect(model.sandboxState(for: "genshin") == .installed(version: "2"))
+    }
+
+    @Test(arguments: ["restart", "sparkle", "storage", "move", "operation", "predownload", "launch", "session", "recovery", "pending", "volume", "gameUpdate", "notInstalled"])
+    func automaticSandboxDefersWhileGameOrAppIsBlocked(blocker: String) async throws {
+        let fake = SandboxModelServices(), updater = SandboxModelUpdater()
+        let offer = fake.sandbox
+        fake.sandbox = .installed(version: "1")
+        let model = try await fixture(fake, allowAutomatic: true, updater: updater)
+        fake.sandbox = offer
+        switch blocker {
+        case "restart": model.setLanguageRestart(UUID())
+        case "sparkle": updater.isInstallingUpdate = true
+        case "storage": model.storageCleanupInProgress = true
+        case "move": model.gameMoveRecoveryReservation = true
+        case "operation": model.gameOperation = GameOperationToken(id: "zzz", generation: UUID())
+        case "predownload": model.gameOperation = GameOperationToken(id: "zzz", generation: UUID(), isPreDownload: true)
+        case "launch": model.launchSlotOwner = "genshin"
+        case "session": model.liveLaunchGames.insert("genshin")
+        case "recovery": model.launchStates["genshin"] = .recoveryNeeded("pending")
+        case "volume": fake.gameStatus = .locationUnavailable(URL(fileURLWithPath: "/inert/game"))
+        case "gameUpdate": fake.gameStatus = .updateAvailable(from: "2", to: "3")
+        case "notInstalled": fake.sandbox = .notInstalled(size: 100)
+        default:
+            fake.pending = true
+            fake.gameStatus = .paused(.update)
+        }
+        await model.refreshGames()
+        #expect(!model.isAutomaticallyUpdatingSandbox("genshin"))
+        #expect(model.automaticSandboxAttempts["genshin"] == nil)
+        #expect(fake.actions.isEmpty)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func automaticFailureIsQuietAndLimitedPerVersion() async throws {
+        let fake = SandboxModelServices(), model = try await fixture(fake, allowAutomatic: true)
+        defer { fake.finish() }
+        let task = try #require(model.gameTask)
+        await fake.waitForOpen()
+        fake.emit(.failed(.transport("synthetic"))); fake.finish()
+        await task.value
+        #expect(model.sandboxFailure(for: "genshin") == .transport("synthetic"))
+        #expect(model.lastError == nil)
+        #expect(fake.actions == ["automatic-2"])
+        await model.refreshGames()
+        #expect(model.gameTask == nil)
+        model.checkForGameUpdate("genshin")
+        await model.gameUpdateCheckTasks["genshin"]?.value
+        #expect(model.gameTask == nil)
+        model.updateSandbox("genshin")
+        let manual = try #require(model.gameTask)
+        await fake.waitForOpen()
+        #expect(fake.actions == ["automatic-2", "update"])
+        fake.emit(.phase(.completed)); fake.finish(); await manual.value
+        fake.sandbox = .outdated(installed: "1", available: "3", size: 100)
+        model.gameLastRefresh = [:]
+        await model.refreshGames()
+        let next = try #require(model.gameTask)
+        await fake.waitForOpen()
+        #expect(fake.actions == ["automatic-2", "update", "automatic-3"])
+        fake.emit(.phase(.completed)); fake.finish(); await next.value
+    }
+
+    @Test(.timeLimit(.minutes(1))) func playCancelsAutomaticSandboxAndJoinsDrainBeforeLaunching() async throws {
+        let drain = SandboxModelDrain(), launch = SandboxModelLaunchServices(), fake = SandboxModelServices(drain: drain)
+        let model = try await fixture(fake, allowAutomatic: true, launch: launch)
+        defer { fake.finish() }
+        await fake.waitForOpen()
+        model.play("genshin")
+        #expect(model.launchSlotOwner == "genshin")
+        await drain.waitForEntry()
+        #expect(launch.count == 0)
+        #expect(model.isAutomaticallyUpdatingSandbox("genshin"))
+        await drain.release()
+        await model.launchTasks["genshin"]?.value
+        #expect(launch.count == 1)
+        #expect(model.gameOperation == nil)
+        #expect(model.sandboxFailure(for: "genshin") == nil)
+        #expect(fake.actions == ["automatic-2"])
+        await model.refreshGames()
+        let retry = try #require(model.gameTask)
+        await fake.waitForOpen()
+        #expect(fake.actions == ["automatic-2", "automatic-2"])
+        model.cancelAutomaticSandboxUpdate("genshin")
+        await retry.value
+        model.gameLastRefresh = [:]
+        await model.refreshGames()
+        #expect(model.gameTask == nil)
+        #expect(fake.actions == ["automatic-2", "automatic-2"])
+    }
+
     @Test func sandboxProgressResetsAtEachDistinctPhase() {
         let time = ContinuousClock.now
         var progress = GameProgress()
@@ -155,10 +268,12 @@ import RuntimeManager
         #expect(model.sandboxPhase(for: "genshin") == nil)
     }
 
-    private func fixture(_ fake: SandboxModelServices) async throws -> AppModel {
+    private func fixture(_ fake: SandboxModelServices, allowAutomatic: Bool = false,
+        launch: any LaunchServices = PreviewLaunchServices(), updater: (any AppUpdating)? = nil) async throws -> AppModel {
         let model = AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/sandbox-model")),
             manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(),
-            defaults: nil, gameServices: fake, locale: Locale(identifier: "en_US"))
+            defaults: nil, gameServices: fake, locale: Locale(identifier: "en_US"), launchServices: launch, updater: updater ?? InertAppUpdater())
+        if !allowAutomatic { model.automaticSandboxAttempts["genshin"] = ["2"] }
         await model.start()
         model.gameLastRefresh = [:]
         return model
@@ -167,10 +282,14 @@ import RuntimeManager
 
 private final class SandboxModelServices: GameServices, Sendable {
     let opened = AsyncStream<Void>.makeStream()
+    private let drain: SandboxModelDrain?
+    init(drain: SandboxModelDrain? = nil) { self.drain = drain }
     private let preview = PreviewGameServices(states: ["genshin": GameState(status: .installed(tag: "2"))])
     private struct State: Sendable {
         var sandbox: SandboxState? = .outdated(installed: "1", available: "2", size: 100)
         var sandboxError: LauncherError?
+        var gameStatus: GameStatus = .installed(tag: "2")
+        var pending = false
         var actions: [String] = []
         var continuation: GameEventStream.Continuation?
     }
@@ -184,17 +303,38 @@ private final class SandboxModelServices: GameServices, Sendable {
         get { state.withLock { $0.sandboxError } }
         set { state.withLock { $0.sandboxError = newValue } }
     }
+    var gameStatus: GameStatus {
+        get { state.withLock { $0.gameStatus } }
+        set { state.withLock { $0.gameStatus = newValue } }
+    }
+    var pending: Bool {
+        get { state.withLock { $0.pending } }
+        set { state.withLock { $0.pending = newValue } }
+    }
+    func waitForOpen() async { var iterator = opened.stream.makeAsyncIterator(); _ = await iterator.next() }
     func start() async {}
+    func waitForSandboxDrain(_ id: String) async throws { await drain?.wait() }
     func waitUntilIdle(_ id: String) async throws {}
-    func status(_ id: String) async -> GameStatus { await preview.status(id) }
-    func checkForUpdate(_ id: String) async throws -> GameStatus { await preview.status(id) }
-    func record(_ id: String) async throws -> GameRecord? { try await preview.record(id) }
+    func status(_ id: String) async -> GameStatus { id == "genshin" ? gameStatus : .notInstalled }
+    func checkForUpdate(_ id: String) async throws -> GameStatus { await status(id) }
+    func record(_ id: String) async throws -> GameRecord? {
+        guard var record = try await preview.record(id) else { return nil }
+        if case .installed(let version) = sandbox {
+            record.sandbox = try SandboxInstallation(version: version, listPath: SafeRelativePath("beyond_pkg_version"))
+        }
+        if pending, let target = record.installed {
+            record.pending = PendingOperation(kind: .update, planID: try SafeIdentifier("pending"),
+                planDigest: try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)), target: target)
+        }
+        return record
+    }
     func sandboxState(_ id: String) async throws -> SandboxState? {
         if let sandboxError { throw sandboxError }
         return id == "genshin" ? sandbox : nil
     }
     func installSandbox(_ id: String) async -> GameEventStream { open("install") }
     func updateSandbox(_ id: String) async -> GameEventStream { open("update") }
+    func automaticallyUpdateSandbox(_ id: String, expectedVersion: String) async -> GameEventStream { open("automatic-" + expectedVersion) }
     func removeSandbox(_ id: String) async -> GameEventStream { open("remove") }
     func update(_ id: String, approved: Bool) async -> GameEventStream { open("game-update") }
     func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate {
@@ -219,4 +359,42 @@ private final class SandboxModelServices: GameServices, Sendable {
         let continuation = state.withLock { let value = $0.continuation; $0.continuation = nil; return value }
         continuation?.finish()
     }
+}
+
+private actor SandboxModelDrain {
+    private let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var released = false
+
+    func wait() async {
+        entered.continuation.yield(())
+        if !released { await withCheckedContinuation { waiter = $0 } }
+    }
+    func waitForEntry() async { var iterator = entered.stream.makeAsyncIterator(); _ = await iterator.next() }
+    func release() { released = true; waiter?.resume(); waiter = nil }
+}
+
+@MainActor private final class SandboxModelUpdater: AppUpdating {
+    var isInstallingUpdate = false
+    let canCheckForUpdates = false
+    var automaticallyChecksForUpdates = false
+    func start(isBusy: @escaping @MainActor () -> Bool) {}
+    func checkForUpdates() {}
+}
+
+private final class SandboxModelLaunchServices: LaunchServices, Sendable {
+    private let launches = Mutex(0)
+    var count: Int { launches.withLock { $0 } }
+    func reattach() async throws -> [String: LaunchSession] { [:] }
+    func launch(game: GameDefinition, record: GameRecord) async throws -> AsyncStream<LaunchEvent> {
+        launches.withLock { $0 += 1 }
+        return AsyncStream { $0.finish() }
+    }
+    func observation(_ id: String) async throws -> LaunchObservation? { nil }
+    func recover(_ id: String) async throws {}
+    func session(_ id: String) async -> LaunchSession? { nil }
+    func gameProcessIDs(_ id: String) async -> [Int32] { [] }
+    func markReady(_ id: String) async {}
+    func notices() async throws -> [RecoveryNotice] { [] }
+    func acknowledge(_ id: UUID) async throws {}
 }

@@ -126,6 +126,8 @@ final class AppModel {
     @ObservationIgnored var preDownloadRevisions: [String: UUID] = [:]
     var gameUpdateCheck: [String: GameUpdateCheckResult] = [:]
     var sandboxStates: [String: SandboxState] = [:]
+    @ObservationIgnored var automaticSandboxAttempts: [String: Set<String>] = [:]
+    @ObservationIgnored var automaticSandboxYieldingToPlay: UUID?
     /// Chained sandbox maintenance may fail after the game itself updates successfully.
     var sandboxFailures: [String: LauncherError] = [:]
     @ObservationIgnored var gameUpdateCheckTasks: [String: Task<Void, Never>] = [:]
@@ -427,6 +429,7 @@ final class AppModel {
         gameUpdateCheck[id] = nil
         var state = state
         state.sandboxPhase = gameOperation?.id == id ? gameProgress.sandboxPhase : nil
+        state.isAutomaticSandboxUpdate = state.activity != nil && gameOperation?.id == id && gameOperation?.automaticSandboxVersion != nil
         if case .working(let phase, let fraction, _, _, _) = state.activity {
             if case .working(let previous, _, _, _, _) = games[id]?.activity,
                 GameProgress.trackingPhase(for: previous) != GameProgress.trackingPhase(for: phase) { state.timing = nil }

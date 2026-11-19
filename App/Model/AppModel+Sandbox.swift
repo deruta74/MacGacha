@@ -6,11 +6,15 @@ import DownloadEngine
 import GameLibrary
 
 @MainActor extension AppModel {
-    /// Metadata refreshes discover availability; only an explicit action downloads the package.
     func sandboxState(for id: String) -> SandboxState? { sandboxStates[id] }
     func sandboxFailure(for id: String) -> LauncherError? { sandboxFailures[id] }
     func dismissSandboxFailure(_ id: String) { sandboxFailures[id] = nil }
     func sandboxPhase(for id: String) -> SandboxPhase? { games[id]?.sandboxPhase }
+    func isAutomaticallyUpdatingSandbox(_ id: String) -> Bool { games[id]?.isAutomaticSandboxUpdate == true }
+    func cancelAutomaticSandboxUpdate(_ id: String) {
+        guard isAutomaticallyUpdatingSandbox(id) else { return }
+        pauseGame(id)
+    }
 
     func canInstallSandbox(_ id: String) -> Bool {
         guard canOperateSandbox(id), case .notInstalled = sandboxState(for: id) else { return false }

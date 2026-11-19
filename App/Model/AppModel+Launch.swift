@@ -133,13 +133,17 @@ import RuntimeManager
     func play(_ id: String) {
         guard canBeginGameOrRuntimeOperation() else { return }
         guard !runtimeCatalogUnavailable, runtimeCatalogMutationID == nil, launchSlotOwner == nil, launchTasks.isEmpty,
-            (gameOperation?.id != id || (gameOperation?.isPreDownload == true && gameOperation?.isUninstall == false)),
+            (gameOperation?.id != id || gameOperation?.yieldsToPlay == true),
             let game = GameDefinition.all.first(where: { $0.id == id }) else { return }
         if case .recoveryNeeded = launchStates[id] { return }
         let preDownload = gameOperation.flatMap { $0.id == id && $0.isPreDownload ? $0 : nil }
+        let automaticSandbox = gameOperation.flatMap { $0.automaticSandboxVersion != nil ? $0 : nil }
+        let sandboxTask = automaticSandbox == nil ? nil : gameTask
         // Reserve before any await, and assume potentially live before spawning.
         // A post-spawn journal write may suspend before the .watch event arrives.
         launchSlotOwner = id; liveLaunchGames.insert(id)
+        automaticSandboxYieldingToPlay = automaticSandbox?.generation
+        sandboxTask?.cancel()
         // A game started from the Dock menu or a shortcut is the one the launcher opens on next.
         defaults?.set(id, forKey: Self.selectedGameKey)
         launchLogURLs[id] = nil; launchFailures[id] = nil; launchNotes[id] = nil
@@ -154,6 +158,10 @@ import RuntimeManager
                 if self.launchTaskGenerations[id] == generation { self.launchTasks[id] = nil; self.launchTaskGenerations[id] = nil }
             }
             do {
+                if let automaticSandbox {
+                    await sandboxTask?.value
+                    try await self.gameServices.waitForSandboxDrain(automaticSandbox.id)
+                }
                 if let preDownload { _ = try await self.stopPreDownloadOperation(preDownload) }
                 await self.reattachOnStart()
                 if let error = self.launchStartupError { throw error }

@@ -91,7 +91,7 @@ struct DockGame: Identifiable, Equatable {
             gameRecords[id]?.uninstalling == false, !isStarting, launchStartupError == nil,
             prefixResetGame == nil, !gameMoveRecoveryReservation, languageRestart == nil, !updater.isInstallingUpdate,
             !runtimeCatalogUnavailable, runtimeCatalogMutationID == nil, launchSlotOwner == nil, launchTasks.isEmpty,
-            gameOperation?.id != id || gameOperation?.isPreDownload == true else { return false }
+            gameOperation?.id != id || gameOperation?.yieldsToPlay == true else { return false }
         return PrimaryAction.resolve(state, runtimesReady: runtimesReady, launch: launchState(for: id),
             missingComponents: missingComponents(for: id), rosetta: rosetta) == .play
     }
