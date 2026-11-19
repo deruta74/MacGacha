@@ -305,7 +305,7 @@ extension GameLibrary {
             throw error
         }
     }
-    private var sandboxPublisher: SandboxPublisher { SandboxPublisher(store: store, fileOps: fileOps) }
+    private var sandboxPublisher: SandboxPublisher { SandboxPublisher(store: store, fileOps: fileOps, log: log) }
     private func sandboxFilesystem(_ record: GameRecord) throws -> ContainedFileSystem {
         try ContainedFileSystem(root: record.installPath, fileOps: fileOps, expectedRootIdentity: record.installIdentity).pinRoot()
     }

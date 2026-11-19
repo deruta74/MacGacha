@@ -16,6 +16,7 @@ struct SandboxPublisher: Sendable {
     let store: GameRecordStore
     var fileOps: any FileOps = SystemFileOps()
     var hooks = SandboxPublishHooks()
+    var log: EventLog? = nil
     static let journalName = "sandbox-journal.json"
 
     func publish(game: String, record: GameRecord, stage: SafeRelativePath, installation: SandboxInstallation?) async throws {
@@ -25,6 +26,7 @@ struct SandboxPublisher: Sendable {
             }
             let fs = try filesystem(record), stageFS = try fs.pinDirectoryIfPresent(at: stage)
             guard let stageFS else { throw LauncherError.io("Sandbox staging is missing") }
+            _ = try SandboxFiles.configData(setting: installation?.version, in: fs)
             let list = installation?.listPath ?? record.sandbox?.listPath ?? SandboxFiles.defaultList
             try SandboxFiles.validateListPath(list)
             guard record.sandbox == nil || record.sandbox?.listPath == list else { throw LauncherError.io("Sandbox list changed") }
@@ -142,7 +144,10 @@ struct SandboxPublisher: Sendable {
                 updated.installPath == journal.root else { throw LauncherError.io("Sandbox installation changed") }
             updated.sandbox = journal.desired
             updated.sandboxListPath = journal.list
-            try SandboxFiles.writeConfigVersion(journal.desired?.version, in: fs)
+            if journal.state == .swapped {
+                do { try SandboxFiles.writeConfigVersion(journal.desired?.version, in: fs) }
+                catch { log?.post(.warning, "sandbox", "Skipped config update after sandbox swap") }
+            }
             try await store.save(updated, for: game)
             try hooks.reach(.recordSaved)
             var cleaned = journal; cleaned.state = .cleaned

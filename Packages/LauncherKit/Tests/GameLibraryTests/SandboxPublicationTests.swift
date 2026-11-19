@@ -70,6 +70,57 @@ import TestSupport
         #expect(try await store.readState("sandbox-journal.json", for: "hk4e_global", maxBytes: 65536) == nil)
     }
 
+    @Test(arguments: [false, true])
+    func invalidConfigRefusesPublicationAndRemovalBeforePlanning(remove: Bool) async throws {
+        let temp = try TempDir(), root = temp.url.appendingPathComponent("game")
+        let fs = try ContainedFileSystem(root: root), store = GameRecordStore(directory: temp.url.appendingPathComponent("records"))
+        let list = SandboxFiles.defaultList, editor = try SafeRelativePath("BeyondAssets/a")
+        let config = try SafeRelativePath("config.ini"), stage = try SafeRelativePath(".macgacha-staging/sandbox-invalid-config")
+        try fs.writeAtomically(Data("old".utf8), to: editor)
+        try fs.writeAtomically(Data("old-list".utf8), to: list)
+        try fs.writeAtomically(Data([0xff]), to: config)
+        try fs.writeAtomically(Data("new".utf8), to: SafeRelativePath(stage.description + "/new/BeyondAssets/a"))
+        try fs.writeAtomically(Data("new-list".utf8), to: SafeRelativePath(stage.description + "/new/beyond_pkg_version"))
+        let record = GameRecord(installPath: root, ownership: .created, executable: try SafeRelativePath("Game.exe"),
+            installIdentity: try fs.rootIdentity(), sandbox: try SandboxInstallation(version: "1", listPath: list))
+        try await store.save(record, for: "hk4e_global")
+        let desired = remove ? nil : try SandboxInstallation(version: "2", listPath: list)
+        await #expect(throws: LauncherError.self) {
+            try await SandboxPublisher(store: store).publish(game: "hk4e_global", record: record, stage: stage, installation: desired)
+        }
+        #expect(try await store.readState(SandboxPublisher.journalName, for: "hk4e_global", maxBytes: 65536) == nil)
+        #expect(try fs.readFile(at: editor, maxBytes: 32) == Data("old".utf8))
+        #expect(try fs.readFile(at: list, maxBytes: 32) == Data("old-list".utf8))
+        #expect(try await store.load("hk4e_global") == record)
+    }
+
+    @Test func swappedJournalFinishesWhenConfigBecameUnwritable() async throws {
+        let temp = try TempDir(), root = temp.url.appendingPathComponent("game")
+        let fs = try ContainedFileSystem(root: root), store = GameRecordStore(directory: temp.url.appendingPathComponent("records"))
+        let list = SandboxFiles.defaultList, config = try SafeRelativePath("config.ini")
+        let stage = try SafeRelativePath(".macgacha-staging/sandbox-config-after-swap")
+        try fs.writeAtomically(Data("user=value\n".utf8), to: config)
+        try fs.writeAtomically(Data("new".utf8), to: SafeRelativePath(stage.description + "/new/BeyondAssets/a"))
+        try fs.writeAtomically(Data("new-list".utf8), to: SafeRelativePath(stage.description + "/new/beyond_pkg_version"))
+        let record = GameRecord(installPath: root, ownership: .created,
+            executable: try SafeRelativePath("Game.exe"), installIdentity: try fs.rootIdentity())
+        try await store.save(record, for: "hk4e_global")
+        let publisher = SandboxPublisher(store: store, hooks: SandboxPublishHooks { point in
+            if point == .swapped {
+                try fs.writeAtomically(Data([0xff]), to: config)
+                throw LauncherError.io("simulated process death")
+            }
+        })
+        await #expect(throws: LauncherError.self) {
+            try await publisher.publish(game: "hk4e_global", record: record, stage: stage,
+                installation: SandboxInstallation(version: "2", listPath: list))
+        }
+        #expect(try await SandboxPublisher(store: store).recover(game: "hk4e_global"))
+        #expect(try await store.load("hk4e_global")?.sandbox?.version == "2")
+        #expect(try await store.readState(SandboxPublisher.journalName, for: "hk4e_global", maxBytes: 65536) == nil)
+        #expect(try fs.readFile(at: config, maxBytes: 32) == Data([0xff]))
+    }
+
     @Test func exchangedCleanupStageIsPreserved() async throws {
         let temp = try TempDir(), root = temp.url.appendingPathComponent("game")
         let fs = try ContainedFileSystem(root: root), store = GameRecordStore(directory: temp.url.appendingPathComponent("records"))
