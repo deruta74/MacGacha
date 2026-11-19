@@ -15,12 +15,16 @@ enum SandboxFiles {
     static let assets = try! SafeRelativePath("BeyondAssets")
     private static let config = try! SafeRelativePath("config.ini")
 
+    static func supportedList(_ path: SafeRelativePath?) -> SafeRelativePath? {
+        path == defaultList ? defaultList : nil
+    }
+
     static func validateListPath(_ path: SafeRelativePath) throws {
-        let key = folded(path.description)
-        guard path.components.count == 1, !path.description.hasPrefix("."),
-            !["beyondassets", "config.ini"].contains(key), !key.hasSuffix(".exe") else {
-            throw LauncherError.unsafePath("Invalid sandbox list")
-        }
+        guard supportedList(path) != nil else { throw LauncherError.unsafePath("Invalid sandbox list") }
+    }
+
+    static func listIsManaged(_ paths: Set<SafeRelativePath>) -> Bool {
+        paths.contains { folded($0.components[0]) == defaultList.description }
     }
     static func detect(in fs: ContainedFileSystem, listPath: SafeRelativePath) throws -> SandboxInstallation? {
         try validateListPath(listPath)
@@ -117,13 +121,11 @@ enum SandboxFiles {
         }
         return true
     }
-    static func requireGamePlanSafe(_ plan: InstallPlan, game: String, listPath: SafeRelativePath? = nil, configuredList: SafeRelativePath? = nil) throws {
+    static func requireGamePlanSafe(_ plan: InstallPlan, game: String) throws {
         guard GameDefinition.all.first(where: { $0.id == game })?.family == .genshin else { return }
-        let list = folded((listPath ?? defaultList).description)
         for path in plan.files.map(\.path) + plan.deletions {
             let root = folded(path.components[0])
-            guard root != "beyondassets", root != folded(defaultList.description), root != list,
-                configuredList.map({ root != folded($0.description) }) ?? true else {
+            guard root != "beyondassets", root != defaultList.description else {
                 throw LauncherError.unsafePath("Sandbox files are separately managed")
             }
         }

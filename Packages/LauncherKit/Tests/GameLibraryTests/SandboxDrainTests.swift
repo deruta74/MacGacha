@@ -21,6 +21,7 @@ import TestSupport
             installed: InstalledBuild(tag: "7.2", buildID: "test", categories: [], voices: []), installIdentity: try fs.rootIdentity(),
             sandbox: try SandboxInstallation(version: "1", listPath: SafeRelativePath("beyond_pkg_version")))
         try await store.save(record, for: game.id)
+        try await store.prepareManagedPaths([], target: try #require(record.installed), record: record, for: game.id)
         let http = SandboxDrainHTTP(), disk = FixedDiskSpace(bytes: Int64.max)
         defer { http.release.signal() }
         let library = GameLibrary(paths: paths, api: DeliveryAPI(http: http),

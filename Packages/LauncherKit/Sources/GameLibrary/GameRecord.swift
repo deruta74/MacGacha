@@ -67,14 +67,19 @@ public struct GameRecord: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey { case installPath, ownership, executable, installed, pending, uninstalling, installIdentity, uninstallFilesRemoved, sandbox, sandboxListPath }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let sandbox: SandboxInstallation?
+        if c.contains(.sandbox), try !c.decodeNil(forKey: .sandbox) {
+            let fields = try c.nestedContainer(keyedBy: SandboxInstallation.CodingKeys.self, forKey: .sandbox)
+            let list = try fields.decode(SafeRelativePath.self, forKey: .listPath)
+            sandbox = SandboxFiles.supportedList(list) == nil ? nil : try c.decode(SandboxInstallation.self, forKey: .sandbox)
+        } else { sandbox = nil }
         self.init(installPath: try c.decode(URL.self, forKey: .installPath), ownership: try c.decode(FolderOwnership.self, forKey: .ownership),
             executable: try c.decode(SafeRelativePath.self, forKey: .executable), installed: try c.decodeIfPresent(InstalledBuild.self, forKey: .installed),
             pending: try c.decodeIfPresent(PendingOperation.self, forKey: .pending), uninstalling: try c.decode(Bool.self, forKey: .uninstalling),
             installIdentity: try c.decode(FileSystemIdentity.self, forKey: .installIdentity),
             uninstallFilesRemoved: try c.decodeIfPresent(Bool.self, forKey: .uninstallFilesRemoved) ?? false,
-            sandbox: try c.decodeIfPresent(SandboxInstallation.self, forKey: .sandbox),
-            sandboxListPath: try c.decodeIfPresent(SafeRelativePath.self, forKey: .sandboxListPath))
-        if let sandboxListPath { try SandboxFiles.validateListPath(sandboxListPath) }
+            sandbox: sandbox,
+            sandboxListPath: SandboxFiles.supportedList(try c.decodeIfPresent(SafeRelativePath.self, forKey: .sandboxListPath)))
         guard localFileURL(installPath) else { throw LauncherError.io("invalid game record") }
         guard !uninstallFilesRemoved || uninstalling else { throw LauncherError.io("invalid game record") }
     }

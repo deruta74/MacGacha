@@ -36,7 +36,7 @@ public struct DeliveryAPI: Sendable {
             return try GameConfig(installationDir: SafeRelativePath(entry.installation_dir), executable: SafeRelativePath(entry.exe_file_name),
                 enableLdiff: entry.enable_ldiff ?? false,
                 wpfExecutable: entry.wpf_exe_dir.flatMap { $0.isEmpty ? nil : $0 }.map { try SafeRelativePath($0) },
-                wpfPackageVersion: entry.wpf_pkg_version_dir.flatMap { $0.isEmpty ? nil : $0 }.map { try SafeRelativePath($0) })
+                wpfPackageVersion: entry.wpf_pkg_version_dir.flatMap { try? SafeRelativePath($0) })
         } catch { throw LauncherError.unsafePath("delivery path") }
     }
 

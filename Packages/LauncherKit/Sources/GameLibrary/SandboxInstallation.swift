@@ -13,7 +13,7 @@ public struct SandboxInstallation: Codable, Sendable, Equatable {
         try SandboxFiles.validateListPath(listPath)
         self.version = version; self.listPath = listPath
     }
-    private enum CodingKeys: String, CodingKey { case version, listPath }
+    enum CodingKeys: String, CodingKey { case version, listPath }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(version: c.decodeIfPresent(String.self, forKey: .version), listPath: c.decode(SafeRelativePath.self, forKey: .listPath))

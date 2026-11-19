@@ -19,8 +19,9 @@ extension GameLibrary {
             !record.uninstalling else { return nil }
         try locationProbe.requireAvailable(at: record.installPath)
         let config = try await gameConfig(game)
-        guard let list = config.wpfPackageVersion, let executable = config.wpfExecutable else { return nil }
+        guard let list = SandboxFiles.supportedList(config.wpfPackageVersion), let executable = config.wpfExecutable else { return nil }
         try validateSandboxConfig(list: list, executable: executable)
+        guard try await !sandboxListIsManaged(game.id, record: record) else { return nil }
         guard let package = try await api.sandboxPackage(biz: game.biz) else { return nil }
         let fs = try sandboxFilesystem(record)
         let local = try record.sandbox ?? SandboxFiles.detect(in: fs, listPath: list)
@@ -82,11 +83,11 @@ extension GameLibrary {
             progress(.phase(.completed))
             return
         }
+        guard try await !sandboxListIsManaged(game.id, record: record) else { throw LauncherError.io("Sandbox list belongs to the game") }
         if remove {
             let fs = try sandboxFilesystem(record)
             if record.sandbox == nil {
-                record.sandbox = try SandboxFiles.detect(in: fs, listPath: record.sandboxListPath ?? SandboxFiles.defaultList)
-                if record.sandbox == nil, let config = try? await gameConfig(game), let list = config.wpfPackageVersion {
+                if let config = try? await gameConfig(game), let list = SandboxFiles.supportedList(config.wpfPackageVersion) {
                     record.sandbox = try SandboxFiles.detect(in: fs, listPath: list)
                 }
             }
@@ -98,7 +99,7 @@ extension GameLibrary {
             log?.post(.info, "sandbox", "Sandbox operation", metadata: ["outcome": "removed", "bytes": "0"])
         } else {
             let config = try await gameConfig(game)
-            guard let list = config.wpfPackageVersion, let executable = config.wpfExecutable,
+            guard let list = SandboxFiles.supportedList(config.wpfPackageVersion), let executable = config.wpfExecutable,
                 let package = try await api.sandboxPackage(biz: game.biz) else {
                 if expectedVersion != nil { progress(.phase(.completed)); return }
                 throw LauncherError.io("Sandbox is unavailable")
@@ -127,6 +128,11 @@ extension GameLibrary {
         progress(.phase(.completed))
     }
 
+    private func sandboxListIsManaged(_ game: String, record: GameRecord) async throws -> Bool {
+        guard record.installed != nil else { return false }
+        return try await SandboxFiles.listIsManaged(store.managedPaths(for: game, record: record))
+    }
+
     func gameConfig(_ game: GameDefinition) async throws -> GameConfig {
         let config = try await api.config(biz: game.biz)
         sandboxConfigurations[game.id] = config
@@ -142,6 +148,7 @@ extension GameLibrary {
             guard var current = try await store.load(game.id), current == record,
                 current.pending == nil, !current.uninstalling else { return }
             try locationProbe.requireAvailable(at: current.installPath)
+            guard try await !sandboxListIsManaged(game.id, record: current) else { return }
             current.sandbox = installation
             current.sandboxListPath = installation.listPath
             try await store.save(current, for: game.id)
@@ -153,12 +160,12 @@ extension GameLibrary {
         guard game.family == .genshin, record.installed != nil else { return record }
         let fs = try sandboxFilesystem(record)
         var updated = record
-        if let list = sandboxConfigurations[game.id]?.wpfPackageVersion {
-            try SandboxFiles.validateListPath(list)
-            updated.sandboxListPath = list
+        if let config = sandboxConfigurations[game.id] {
+            updated.sandboxListPath = SandboxFiles.supportedList(config.wpfPackageVersion)
         }
-        if updated.sandbox == nil {
-            updated.sandbox = try SandboxFiles.detect(in: fs, listPath: updated.sandboxListPath ?? SandboxFiles.defaultList)
+        if updated.sandbox == nil, let list = updated.sandboxListPath,
+            try await !sandboxListIsManaged(game.id, record: record) {
+            updated.sandbox = try SandboxFiles.detect(in: fs, listPath: list)
         }
         if updated != record { try await store.save(updated, for: game.id) }
         return updated
@@ -174,7 +181,10 @@ extension GameLibrary {
         guard game.family == .genshin, record.ownership == .adopted, !record.uninstallFilesRemoved else { return record }
         let fs = try sandboxFilesystem(record)
         var current = record
-        if current.sandbox == nil { current.sandbox = try SandboxFiles.detect(in: fs, listPath: record.sandboxListPath ?? SandboxFiles.defaultList) }
+        guard try await !sandboxListIsManaged(game.id, record: record) else { return record }
+        if current.sandbox == nil, let list = record.sandboxListPath {
+            current.sandbox = try SandboxFiles.detect(in: fs, listPath: list)
+        }
         guard current.sandbox != nil else { return record }
         try await store.save(current, for: game.id)
         try await sandboxPublisher.publish(game: game.id, record: current, stage: prepareSandboxStage(fs), installation: nil)
@@ -208,13 +218,14 @@ extension GameLibrary {
         try locationProbe.requireAvailable(at: record.installPath)
         let fs = try sandboxFilesystem(record)
         // Avoid making an absent optional package a prerequisite for game updates.
-        let detected = try record.sandbox ?? SandboxFiles.detect(in: fs, listPath: record.sandboxListPath ?? SandboxFiles.defaultList)
-        let local = try detected ?? sandboxConfigurations[game.id]?.wpfPackageVersion.flatMap { try SandboxFiles.detect(in: fs, listPath: $0) }
-        guard let local else { return }
+        guard record.sandbox != nil || record.sandboxListPath != nil,
+            try await !sandboxListIsManaged(game.id, record: record) else { return }
+        let detected = try record.sandbox ?? record.sandboxListPath.flatMap { try SandboxFiles.detect(in: fs, listPath: $0) }
+        guard let local = detected else { return }
         let config = try await gameConfig(game)
+        guard let list = SandboxFiles.supportedList(config.wpfPackageVersion), let executable = config.wpfExecutable else { return }
+        guard let package = try await api.sandboxPackage(biz: game.biz) else { return }
         if record.sandbox == nil { record.sandbox = local; try await store.save(record, for: game.id) }
-        guard let list = config.wpfPackageVersion, let executable = config.wpfExecutable,
-            let package = try await api.sandboxPackage(biz: game.biz) else { throw LauncherError.io("Sandbox is unavailable") }
         try validateSandboxConfig(list: list, executable: executable)
         var damaged = false
         if let mode {

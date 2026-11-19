@@ -299,7 +299,7 @@ public actor GameLibrary {
             let config = try await gameConfig(game), target = try await resolve(game, voices: voices)
             let plan = try SophonPlanner.fullPlan(id: planID(game, kind: .install, build: target.build, categories: target.categories), target: target.categories)
             return LibraryPrepared(lease: lease, stream: await runner.startInstall(game.id, at: location, executable: config.executable, plan: plan,
-                target: target.build, approved: approved, lease: lease, sandboxListPath: config.wpfPackageVersion, managedPaths: target.managedPaths,
+                target: target.build, approved: approved, lease: lease, sandboxListPath: SandboxFiles.supportedList(config.wpfPackageVersion), managedPaths: target.managedPaths,
                 reservedLocations: [paths.root, paths.runtimes]))
         case .adopt(let voices, let location):
             try checkNewLocation(location, records: records, game: game, empty: false)
@@ -308,8 +308,12 @@ public actor GameLibrary {
             let identity = try source.rootIdentity()
             try await store.deleteState(Self.cleanupName, for: game.id)
             let config = try await gameConfig(game), target = try await resolve(game, voices: voices)
-            let sandbox = try config.wpfPackageVersion.flatMap { try SandboxFiles.detect(in: source, listPath: $0) }
-            let record = GameRecord(installPath: location, ownership: .adopted, executable: config.executable, installIdentity: identity, sandbox: sandbox, sandboxListPath: config.wpfPackageVersion)
+            let sandbox: SandboxInstallation?
+            if game.family == .genshin, let list = SandboxFiles.supportedList(config.wpfPackageVersion),
+                !SandboxFiles.listIsManaged(target.managedPaths) {
+                sandbox = try SandboxFiles.detect(in: source, listPath: list)
+            } else { sandbox = nil }
+            let record = GameRecord(installPath: location, ownership: .adopted, executable: config.executable, installIdentity: identity, sandbox: sandbox, sandboxListPath: SandboxFiles.supportedList(config.wpfPackageVersion))
             return LibraryPrepared(lease: lease, stream: verification { progress in
                 try await self.verifyAndRun(game, record: record, target: target, kind: .adopt, mode: .full, lease: lease, progress: progress)
             }, sandboxMode: .full)

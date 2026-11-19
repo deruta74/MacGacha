@@ -230,7 +230,7 @@ private actor RunnerSession {
             let proposed = proposal.record
             try requested.validate(supportedCodecs: ChunkCodec.supportedCodecs)
             let existing = try await store.load(game)
-            try SandboxFiles.requireGamePlanSafe(requested, game: game, listPath: existing?.sandbox?.listPath, configuredList: existing?.sandboxListPath ?? proposal.sandboxListPath)
+            try SandboxFiles.requireGamePlanSafe(requested, game: game)
             if existing?.pending != nil || proposed?.pending != nil {
                 throw LauncherError.busy("finish or uninstall the paused operation first")
             }
@@ -276,7 +276,7 @@ private actor RunnerSession {
             guard let stored = try await store.loadPlan(for: game), stored.id == pending.planID,
                 stored.planDigest == pending.planDigest else { throw LauncherError.journalCorrupt("Missing or mismatched pending plan") }
             current = saved; plan = stored
-            try SandboxFiles.requireGamePlanSafe(stored, game: game, listPath: saved.sandbox?.listPath, configuredList: saved.sandboxListPath)
+            try SandboxFiles.requireGamePlanSafe(stored, game: game)
             _ = try ContainedFileSystem(root: saved.installPath, fileOps: fileOps,
                 expectedRootIdentity: saved.installIdentity, identityProvider: identityProvider).rootIdentity()
         }

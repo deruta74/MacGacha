@@ -1927,86 +1927,45 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         #expect(try libraryStateFiles(at: f.paths.games) == metadata)
     }
 
-    @Test(arguments: ["update", "verify"])
-    func coldCustomListIsDiscoveredAndMaintainedWithoutSandboxStateRefresh(action: String) async throws {
+    @Test(arguments: ["game.dll", "BEYOND_PKG_VERSION", "../other"])
+    func rejectsUnsupportedListBeforeDetectionOrMutation(name: String) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
-        let oldEditor = Data("old-editor".utf8)
-        try f.fs.writeAtomically(oldEditor, to: sandboxEditorPath)
-        var oldList = try JSONSerialization.data(withJSONObject: ["remoteName": sandboxEditorPath.description,
-            "md5": md5Library(oldEditor).hex, "fileSize": oldEditor.count], options: [.sortedKeys])
-        oldList.append(10)
-        try f.fs.writeAtomically(oldList, to: SafeRelativePath("editor_contents"))
-        try f.fs.writeAtomically(Data("[General]\nwpf_version=1.0\nother=keep\n".utf8), to: SafeRelativePath("config.ini"))
+        let canonical = try SafeRelativePath("beyond_pkg_version")
+        try f.fs.writeAtomically(Data("unowned".utf8), to: canonical)
+        _ = try f.advertiseSandbox(listName: name)
+        let before = try libraryStateFiles(at: f.install)
+        #expect(try await f.library.sandboxState(game) == nil)
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.installSandbox(game)) }
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.removeSandbox(game)) }
+        _ = try await libraryCollect(await f.library.verify(game, mode: .full))
         #expect(try await f.store.load(game.id)?.sandbox == nil)
-        try f.advertise(action == "update" ? 2 : 1)
-        _ = try f.advertiseSandbox(version: "2.0", editor: "sandbox-v2", listName: "editor_contents")
-        // No sandboxState call or explicit editor operation primes the new instance.
-        let cold = f.restarted()
-        let events = try await libraryCollect(action == "update" ? await cold.update(game, approved: true) : await cold.verify(game, mode: .full))
-        #expect(events.contains(.sandboxPhase(.downloading)))
-        #expect(events.last == .phase(.completed))
-        #expect(try await f.store.load(game.id)?.installed?.tag == (action == "update" ? "2.0" : "1.0"))
-        #expect(try await f.store.load(game.id)?.sandbox?.version == "2.0")
-        #expect(try await f.store.load(game.id)?.sandbox?.listPath == SafeRelativePath("editor_contents"))
-        #expect(try f.fs.readFile(at: sandboxEditorPath, maxBytes: 100) == Data("sandbox-v2".utf8))
-        let config = try sandboxConfigText(f)
-        #expect(config == "[General]\nwpf_version=2.0\nother=keep\n")
+        #expect(try libraryStateFiles(at: f.install) == before)
+        #expect(!f.cdn.requestLog.contains { $0.path == "sandbox/package.zip" })
     }
 
-    @Test(arguments: [false, true])
-    func configuredButAbsentCustomListIsReservedAgainstGamePlans(deletion: Bool) async throws {
+    @Test func canonicalListOwnedByGameIsNotDetectedOrAdmitted() async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
+        let record = try #require(try await f.store.load(game.id)), target = try #require(record.installed)
+        let list = try SafeRelativePath("beyond_pkg_version")
+        try await f.store.prepareManagedPaths([list], target: target, record: record, for: game.id)
+        try f.fs.writeAtomically(Data("game-owned".utf8), to: list)
+        _ = try f.advertiseSandbox()
+        #expect(try await f.library.sandboxState(game) == nil)
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.installSandbox(game)) }
+        await #expect(throws: LauncherError.self) { _ = try await libraryCollect(await f.library.removeSandbox(game)) }
+        #expect(try await f.store.load(game.id)?.sandbox == nil)
+        #expect(try f.fs.readFile(at: list, maxBytes: 64) == Data("game-owned".utf8))
+    }
+
+    @Test func legacyCustomListDoesNotClaimOrReserveGameFiles() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         let original = try #require(try await f.store.load(game.id))
-        // Exercise persisted reservation decoding without opting into installation.
         var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
-        object["sandboxListPath"] = "editor_contents"
+        object["sandboxListPath"] = "game.dll"
+        object["sandbox"] = ["version": "1.0", "listPath": "game.dll"]
         let record = try JSONDecoder().decode(GameRecord.self, from: JSONSerialization.data(withJSONObject: object))
-        try await f.store.save(record, for: game.id)
-        let saved = try #require(try await f.store.load(game.id))
-        let persisted = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any])
-        #expect(persisted["sandboxListPath"] as? String == "editor_contents")
-        #expect(saved.sandbox == nil)
-        #expect(try f.fs.itemType(at: SafeRelativePath("editor_contents")) == nil)
-        let before = try libraryStateFiles(at: f.install)
-        let target = try #require(saved.installed), path = try SafeRelativePath("editor_contents")
-        let plan = InstallPlan(id: try SafeIdentifier("absent-custom-list"), objects: [:],
-            files: deletion ? [] : [FileTask(path: path, size: 0, digest: md5Library(Data()), extents: [])],
-            deletions: deletion ? [path] : [])
-        let runner = OperationRunner(store: f.store,
-            fetcher: ChunkFetcher(http: f.cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: f.disk, log: nil)
-        await #expect(throws: LauncherError.self) {
-            _ = try await libraryCollect(await runner.start(game.id, record: saved, plan: plan, kind: .update,
-                target: target, approved: true, managedPaths: []))
-        }
-        #expect(try await f.store.load(game.id) == saved)
-        #expect(try libraryStateFiles(at: f.install) == before)
-    }
-
-    @Test func customListIsPreservedAcrossGameUpdateAndRecordVersionIsAuthoritative() async throws {
-        let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
-        _ = try f.advertiseSandbox(listName: "editor_contents")
-        _ = try await libraryCollect(await f.library.installSandbox(game))
-        #expect(try await f.store.load(game.id)?.sandbox?.listPath == SafeRelativePath("editor_contents"))
-        #expect(try f.fs.itemType(at: SafeRelativePath("beyond_pkg_version")) == nil)
-        try f.fs.writeAtomically(Data("[General]\nwpf_version=99.0\nother=keep\n".utf8), to: SafeRelativePath("config.ini"))
-        #expect(try await f.library.sandboxState(game) == .installed(version: "1.0"))
-        let originalList = try f.fs.readFile(at: SafeRelativePath("editor_contents"), maxBytes: 4096)
-        try f.advertise(2); _ = try f.advertiseSandbox(listName: "editor_contents")
-        _ = try await libraryCollect(await f.library.update(game, approved: true))
-        #expect(try f.fs.readFile(at: SafeRelativePath("editor_contents"), maxBytes: 4096) == originalList)
-        #expect(try await f.store.load(game.id)?.sandbox?.version == "1.0")
-        let record = try #require(try await f.store.load(game.id)), target = try #require(record.installed)
-        let plan = InstallPlan(id: try SafeIdentifier("custom-list-deletion"), objects: [:], files: [], deletions: [try SafeRelativePath("editor_contents")])
-        let runner = OperationRunner(store: f.store,
-            fetcher: ChunkFetcher(http: f.cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: f.disk, log: nil)
-        await #expect(throws: LauncherError.self) {
-            _ = try await libraryCollect(await runner.start(game.id, record: record, plan: plan, kind: .update, target: target, approved: true, managedPaths: []))
-        }
-        _ = try await libraryCollect(await f.library.removeSandbox(game))
-        #expect(try f.fs.itemType(at: SafeRelativePath("editor_contents")) == nil)
-        let config = try sandboxConfigText(f)
-        #expect(config == "[General]\nother=keep\n")
-        try f.assertFiles(2)
+        #expect(record.sandbox == nil)
+        #expect(record.sandboxListPath == nil)
     }
 
     @Test func quickVerifyRepairsMissingSandboxFile() async throws {
@@ -2057,12 +2016,12 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         let config = "[General]\ngame_version=1.0\nother=keep\n"
         try f.fs.writeAtomically(Data(config.utf8), to: SafeRelativePath("config.ini"))
         try f.fs.writeAtomically(Data("foreign".utf8), to: SafeRelativePath("user-file.txt"))
-        _ = try f.advertiseSandbox(listName: "editor_contents")
+        _ = try f.advertiseSandbox()
         _ = try await libraryCollect(await f.library.installSandbox(game))
         try await f.library.uninstall(game)
         #expect(try await f.store.load(game.id) == nil)
         #expect(try f.fs.itemType(at: SafeRelativePath("BeyondAssets")) == nil)
-        #expect(try f.fs.itemType(at: SafeRelativePath("editor_contents")) == nil)
+        #expect(try f.fs.itemType(at: SafeRelativePath("beyond_pkg_version")) == nil)
         #expect(try f.fs.readFile(at: SafeRelativePath("user-file.txt"), maxBytes: 100) == Data("foreign".utf8))
         let remainingConfig = try sandboxConfigText(f)
         #expect(remainingConfig == config)
@@ -2072,10 +2031,10 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
     @Test(arguments: [false, true])
     func movingGameRetainsSandboxFilesAndVersion(crossVolume: Bool) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
-        _ = try f.advertiseSandbox(listName: "editor_contents")
+        _ = try f.advertiseSandbox()
         _ = try await libraryCollect(await f.library.installSandbox(game))
         let original = try #require(try await f.store.load(game.id))
-        let list = try f.fs.readFile(at: SafeRelativePath("editor_contents"), maxBytes: 4096)
+        let list = try f.fs.readFile(at: SafeRelativePath("beyond_pkg_version"), maxBytes: 4096)
         let parent = f.base.appendingPathComponent("Destination")
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
         let mover = GameMover(paths: f.paths, store: f.store, disk: f.disk, sameVolume: { _, _ in !crossVolume })
@@ -2087,11 +2046,11 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         #expect(!FileManager.default.fileExists(atPath: f.install.path))
         let fs = try ContainedFileSystem(root: destination)
         #expect(try fs.readFile(at: sandboxEditorPath, maxBytes: 100) == Data("sandbox-v1".utf8))
-        #expect(try fs.readFile(at: SafeRelativePath("editor_contents"), maxBytes: 4096) == list)
+        #expect(try fs.readFile(at: SafeRelativePath("beyond_pkg_version"), maxBytes: 4096) == list)
         #expect(try await f.library.sandboxState(game) == .installed(version: "1.0"))
         _ = try await libraryCollect(await f.library.removeSandbox(game))
         #expect(try fs.itemType(at: SafeRelativePath("BeyondAssets")) == nil)
-        #expect(try fs.itemType(at: SafeRelativePath("editor_contents")) == nil)
+        #expect(try fs.itemType(at: SafeRelativePath("beyond_pkg_version")) == nil)
         #expect(try fs.readFile(at: SafeRelativePath("GenshinImpact.exe"), maxBytes: 100) == Data("commonv1!!!".utf8))
     }
 
