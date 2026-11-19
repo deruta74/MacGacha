@@ -5,6 +5,7 @@ import Testing
 import LauncherCore
 import DownloadEngine
 import Sophon
+import RuntimeManager
 import TestSupport
 @testable import GameLibrary
 
@@ -23,7 +24,8 @@ import TestSupport
         let http = SandboxDrainHTTP(), disk = FixedDiskSpace(bytes: Int64.max)
         defer { http.release.signal() }
         let library = GameLibrary(paths: paths, api: DeliveryAPI(http: http),
-            runner: OperationRunner(store: store, fetcher: ChunkFetcher(http: http, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil), store: store, disk: disk, log: nil)
+            runner: OperationRunner(store: store, fetcher: ChunkFetcher(http: http, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil),
+            store: store, disk: disk, log: nil, sandboxExtractor: SandboxArchiveExtractor())
         var lease: GameOperationLease? = try await claimSandboxTestLease(library, store: store, game: game.id)
         var source: AsyncThrowingStream<OperationEvent, any Error>? = await library.sandboxMaintenance(game, mode: nil, lease: try #require(lease))
         lease = nil

@@ -4,7 +4,13 @@ import Foundation
 import LauncherCore
 import DownloadEngine
 import Sophon
-import RuntimeManager
+
+/// Validates the sandbox archive policy before sizing or extracting into contained staging.
+public protocol SandboxPackageExtracting: Sendable {
+    func expandedSize(archive: SafeRelativePath, in fs: ContainedFileSystem, listPath: SafeRelativePath) async throws -> Int64
+    func extract(archive: SafeRelativePath, in fs: ContainedFileSystem, to target: SafeRelativePath,
+        listPath: SafeRelativePath, progress: @escaping @Sendable (Int64, Int64) -> Void) async throws
+}
 
 extension GameLibrary {
     /// The model uses this metadata and local presence to schedule optional work.
@@ -230,6 +236,7 @@ extension GameLibrary {
     private func installSandboxPackage(_ game: GameDefinition, record: GameRecord, package: SandboxPackage,
         list: SafeRelativePath, executable: SafeRelativePath, recoverOnFailure: Bool = false,
         progress: @escaping @Sendable (OperationEvent) -> Void) async throws {
+        guard let extractor = sandboxExtractor else { throw LauncherError.io("Sandbox extraction is unavailable") }
         let fs = try sandboxFilesystem(record)
         progress(.sandboxPhase(.downloading)); progress(.phase(.checkingSpace))
         // Admit the archive first, then inspect its verified directory before
@@ -252,7 +259,6 @@ extension GameLibrary {
             }
             guard downloaded == package.size, hash.finalize() == package.md5 else { throw LauncherError.io("Sandbox package verification failed") }
             try fs.fullSync(at: archive)
-            let extractor = SandboxArchiveExtractor()
             let expanded = try await extractor.expandedSize(archive: archive, in: fs, listPath: list)
             try requireSandboxSpace(expanded + SpaceBudget.margin, record: record)
             progress(.sandboxPhase(.extracting)); progress(.phase(.staging))

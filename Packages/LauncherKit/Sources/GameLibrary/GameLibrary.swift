@@ -45,6 +45,7 @@ public actor GameLibrary {
     let operationGuard: (any GameOperationGuard)?
     let hooks: CrashHooks
     let fileOps: any FileOps
+    let sandboxExtractor: (any SandboxPackageExtracting)?
     var sandboxConfigurations: [String: GameConfig] = [:]
     private var started = false
     private static let cleanupName = "uninstall-cleaned.json"
@@ -66,10 +67,12 @@ public actor GameLibrary {
     }
 
     public init(paths: AppPaths, api: DeliveryAPI, runner: OperationRunner, store: GameRecordStore,
-        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(), guard operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe()) {
+        disk: any DiskSpaceProbe, log: EventLog?, crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(), purgeable: any PurgeableSpaceProbe = SystemPurgeableSpaceProbe(), guard operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe(),
+        sandboxExtractor: (any SandboxPackageExtracting)? = nil) {
         self.locationProbe = locationProbe
         self.paths = paths; self.api = api; self.runner = runner; self.store = store
         self.operationGuard = operationGuard
+        self.sandboxExtractor = sandboxExtractor
         self.disk = disk; self.purgeable = purgeable; self.log = log; hooks = crashHooks; self.fileOps = fileOps
     }
 

@@ -7,8 +7,11 @@ import Testing
 import LauncherCore
 @testable import DownloadEngine
 import Sophon
+import RuntimeManager
 import TestSupport
 @testable import GameLibrary
+
+extension SandboxArchiveExtractor: SandboxPackageExtracting {}
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
     @Test func localVolumeStatusUsesCachedBranchWithoutNetwork() async throws {
@@ -994,11 +997,13 @@ private struct LibraryFixture: ~Copyable {
         if let requestGate { http = LibraryGatedHTTP(cdn: cdn, gate: requestGate) }
         else if let metadataGate { http = LibraryDelayedHTTP(cdn: cdn, gate: metadataGate) } else { http = cdn }
         library = GameLibrary(paths: paths, api: DeliveryAPI(http: http), runner: OperationRunner(store: store,
-            fetcher: ChunkFetcher(http: http, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: log), store: store, disk: disk, log: log, fileOps: fileOps, purgeable: purgeable)
+            fetcher: ChunkFetcher(http: http, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: log),
+            store: store, disk: disk, log: log, fileOps: fileOps, purgeable: purgeable, sandboxExtractor: SandboxArchiveExtractor())
     }
     func restarted(http: (any HTTPClient)? = nil, runnerHooks: CrashHooks = .none, operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe()) -> GameLibrary {
         GameLibrary(paths: paths, api: DeliveryAPI(http: http ?? cdn), runner: OperationRunner(store: store,
-            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil, crashHooks: runnerHooks), store: store, disk: disk, log: nil, guard: operationGuard, locationProbe: locationProbe)
+            fetcher: ChunkFetcher(http: cdn, retry: RetryPolicy(maxAttempts: 1), sleeper: InstantSleeper()), disk: disk, log: nil, crashHooks: runnerHooks),
+            store: store, disk: disk, log: nil, guard: operationGuard, locationProbe: locationProbe, sandboxExtractor: SandboxArchiveExtractor())
     }
     func installGame() async throws { _ = try await libraryCollect(await library.install(game, voices: ["en-us"], at: install, approved: true)) }
     func seedExisting() throws {

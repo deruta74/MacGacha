@@ -6,6 +6,9 @@ import LauncherCore
 import DownloadEngine
 import Sophon
 import GameLibrary
+import RuntimeManager
+
+extension SandboxArchiveExtractor: @retroactive SandboxPackageExtracting {}
 
 typealias GameEventStream = AsyncThrowingStream<OperationEvent, any Error>
 
@@ -92,7 +95,8 @@ final class LiveGameServices: GameServices, Sendable {
             let fetcher = ChunkFetcher(http: client, retry: retry, sleeper: sleeper)
             libraries[region] = GameLibrary(paths: paths, api: DeliveryAPI(http: client, region: region),
                 runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog, locationProbe: locationProbe),
-                store: store, disk: disk, log: eventLog, guard: operationGuard, locationProbe: locationProbe)
+                store: store, disk: disk, log: eventLog, guard: operationGuard, locationProbe: locationProbe,
+                sandboxExtractor: SandboxArchiveExtractor())
         }
         self.libraries = libraries; self.sessions = sessions
     }
