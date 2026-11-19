@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Darwin
 import Foundation
 import Launch
 import Synchronization
@@ -244,6 +245,41 @@ import RuntimeManager
         #expect(!model.canInstallSandbox("genshin"))
     }
 
+    @Test func withdrawnSandboxConfigurationPreservesRemoveMenuState() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SandboxMenu-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppPaths(root: root.appendingPathComponent("AppSupport"))
+        let game = try #require(GameDefinition.find("genshin"))
+        let executable = try SafeRelativePath(game.executableName), install = root.appendingPathComponent("Game")
+        let identity = try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: root)
+            try fs.writeAtomically(Data(), to: SafeRelativePath("Game/" + executable.description))
+            let descriptor = open(install.path, O_RDONLY | O_DIRECTORY)
+            guard descriptor >= 0 else { throw LauncherError.io("Cannot open test installation") }
+            defer { close(descriptor) }
+            return try SystemFileSystemIdentityProvider().identity(of: descriptor)
+        }
+        let build = InstalledBuild(tag: "1", buildID: "test", categories: [], voices: [])
+        let record = GameRecord(installPath: install, ownership: .created, executable: executable, installed: build,
+            installIdentity: identity, sandbox: try SandboxInstallation(version: "1", listPath: SafeRelativePath("beyond_pkg_version")))
+        try await GameRecordStore(directory: paths.games).save(record, for: game.id)
+        try await BlockingIO.run {
+            let entry: [String: Any] = ["build": try JSONSerialization.jsonObject(with: JSONEncoder().encode(build)),
+                "paths": [executable.description]]
+            let fs = try ContainedFileSystem(root: paths.games)
+            try fs.writeAtomically(JSONSerialization.data(withJSONObject: [entry]),
+                to: SafeRelativePath(game.id + "/managed-paths.json"))
+        }
+        let model = AppModel(paths: paths, manifest: try RuntimeManifest(components: []), services: PreviewRuntimeServices(),
+            defaults: nil, gameServices: LiveGameServices(paths: paths, http: SandboxWithdrawnConfigHTTP()),
+            locale: Locale(identifier: "en_US"))
+        await model.start()
+        // The footer renders Remove for .installed and uses this predicate to enable it.
+        #expect(model.sandboxState(for: game.id) == .installed(version: "1"))
+        #expect(model.canRemoveSandbox(game.id))
+        #expect(!model.canInstallSandbox(game.id) && !model.canUpdateSandbox(game.id))
+    }
+
     @Test(.timeLimit(.minutes(1))) func gameUpdateDeferralCanRetrySameSandboxOffer() async throws {
         let fake = SandboxModelServices()
         let model = try await fixture(fake, allowAutomatic: true)
@@ -431,6 +467,23 @@ private final class SandboxModelServices: GameServices, Sendable {
     func finish() {
         let continuation = state.withLock { let value = $0.continuation; $0.continuation = nil; return value }
         continuation?.finish()
+    }
+}
+
+private struct SandboxWithdrawnConfigHTTP: HTTPClient {
+    func post(_ url: URL) async throws -> (HTTPResponseHead, HTTPBody) {
+        try await get(url, byteRangeFrom: nil)
+    }
+    func get(_ url: URL, byteRangeFrom offset: Int64?) async throws -> (HTTPResponseHead, HTTPBody) {
+        guard url.lastPathComponent == "getGameConfigs" else { throw LauncherError.transport("No fixture for request") }
+        let data = Data(#"{"retcode":0,"data":{"launch_configs":[{"game":{"id":"synthetic","biz":"hk4e_global"},"installation_dir":"Game","exe_file_name":"GenshinImpact.exe"}]}}"#.utf8)
+        let remaining = Mutex<Data?>(data)
+        return (HTTPResponseHead(status: 200, contentLength: Int64(data.count)), HTTPBody(next: {
+            remaining.withLock { value in
+                defer { value = nil }
+                return value
+            }
+        }))
     }
 }
 

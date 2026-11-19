@@ -1968,17 +1968,29 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         #expect(record.sandboxListPath == nil)
     }
 
-    @Test(arguments: [false, true])
-    func durableSandboxRemainsRemovableWithoutAnOffer(offerWithdrawn: Bool) async throws {
+    @Test(arguments: ["offline", "package", "list", "editor", "both"])
+    func durableSandboxRemainsRemovableWithoutAnOffer(withdrawn: String) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         _ = try f.advertiseSandbox()
         _ = try await libraryCollect(await f.library.installSandbox(game))
         let offline = MockCDN(), cold = f.restarted(http: offline)
-        if offerWithdrawn {
-            f.cdn.serve("hyp/hyp-connect/api/getWPFPackages", data: try jsonData(["wpf_packages": []]))
-            #expect(try await f.restarted().sandboxState(game) == .installed(version: "1.0"))
-        } else {
+        if withdrawn == "offline" {
             #expect(try await cold.sandboxState(game) == .installed(version: "1.0"))
+        } else {
+            if withdrawn == "package" {
+                f.cdn.serve("hyp/hyp-connect/api/getWPFPackages", data: try jsonData(["wpf_packages": []]))
+            } else {
+                var config: [String: Any] = ["game": ["id": game.gameID, "biz": game.biz],
+                    "installation_dir": "TestGame", "exe_file_name": game.executableName]
+                if withdrawn == "list" { config["wpf_exe_dir"] = sandboxEditorPath.description }
+                if withdrawn == "editor" { config["wpf_pkg_version_dir"] = SandboxFiles.defaultList.description }
+                f.cdn.serve("hyp/hyp-connect/api/getGameConfigs", data: try jsonData(["launch_configs": [config]]))
+            }
+            let start = f.cdn.requestLog.count
+            #expect(try await f.restarted().sandboxState(game) == .installed(version: "1.0"))
+            if withdrawn != "package" {
+                #expect(!f.cdn.requestLog.dropFirst(start).contains { $0.path.hasSuffix("getWPFPackages") })
+            }
         }
         let count = offline.requestLog.count
         #expect(try await libraryCollect(await cold.removeSandbox(game)).last == .phase(.completed))

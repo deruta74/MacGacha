@@ -23,7 +23,8 @@ extension GameLibrary {
         let list: SafeRelativePath, executable: SafeRelativePath, package: SandboxPackage
         do {
             let config = try await gameConfig(game)
-            guard let supportedList = SandboxFiles.supportedList(config.wpfPackageVersion) else { return nil }
+            guard let configuredList = config.wpfPackageVersion else { return installed }
+            guard let supportedList = SandboxFiles.supportedList(configuredList) else { return nil }
             guard let editor = config.wpfExecutable else { return installed }
             try validateSandboxConfig(list: supportedList, executable: editor)
             guard let offer = try await api.sandboxPackage(biz: game.biz) else { return installed }
