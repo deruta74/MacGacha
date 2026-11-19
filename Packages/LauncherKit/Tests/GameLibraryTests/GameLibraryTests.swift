@@ -2010,6 +2010,27 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         try f.assertFiles(1)
     }
 
+    @Test(arguments: ["install", "update", "remove", "uninstall"])
+    func overlapIsRejectedBeforeSandboxMutation(action: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try f.seedExisting()
+        _ = try await libraryCollect(await f.library.adopt(game, folder: f.install, voices: ["en-us"]))
+        try f.fs.writeAtomically(Data("user=keep\n".utf8), to: SafeRelativePath("config.ini"))
+        _ = try f.advertiseSandbox()
+        if action != "install" { _ = try await libraryCollect(await f.library.installSandbox(game)) }
+        _ = try f.advertiseSandbox(version: "2.0")
+        let record = try #require(try await f.store.load(game.id))
+        let other = try #require(GameDefinition.all.first { $0.id != game.id })
+        try await f.store.save(record, for: other.id)
+        let before = try libraryStateFiles(at: f.install), requests = f.cdn.requestLog.count
+        await #expect(throws: LauncherError.self) {
+            if action == "uninstall" { try await f.library.uninstall(game) }
+            else { _ = try await libraryCollect(await sandboxOperation(f.library, action: action)) }
+        }
+        #expect(try await f.store.load(game.id) == record)
+        #expect(try libraryStateFiles(at: f.install) == before)
+        #expect(f.cdn.requestLog.count == requests)
+    }
+
     @Test func adoptedUninstallRemovesManagedSandboxAndPreservesForeignFiles() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try f.seedExisting()
         _ = try await libraryCollect(await f.library.adopt(game, folder: f.install, voices: ["en-us"]))

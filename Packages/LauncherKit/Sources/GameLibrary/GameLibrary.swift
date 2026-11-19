@@ -183,11 +183,8 @@ public actor GameLibrary {
         guard var record = records[game.id] else { throw LauncherError.io("game is not installed") }
         if !record.uninstallFilesRemoved {
             try locationProbe.requireAvailable(at: record.installPath)
-            record = try await removeSandboxForUninstall(game, record: record)
-        }
-        if !record.uninstallFilesRemoved {
-            try locationProbe.requireAvailable(at: record.installPath)
             try checkLocation(record.installPath, records: records, game: game)
+            record = try await removeSandboxForUninstall(game, record: record)
             let fs: ContainedFileSystem?
             do { fs = try ContainedFileSystem(root: record.installPath, fileOps: fileOps).pinRootIfPresent() }
             catch LauncherError.unsafePath { throw LauncherError.io("install folder was replaced") }

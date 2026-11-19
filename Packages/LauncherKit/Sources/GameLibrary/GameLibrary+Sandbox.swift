@@ -77,7 +77,7 @@ extension GameLibrary {
             throw LauncherError.io("Game is not installed")
         }
         try GameRecordRules.check(.repair, record: record, others: [])
-        try locationProbe.requireAvailable(at: record.installPath)
+        try await requireSandboxLocation(record, game: game.id)
         guard try await store.loadPlan(for: game.id) == nil else { throw LauncherError.busy("Finish the current game operation") }
         if expectedVersion != nil, try await checkForUpdate(game) != .installed(tag: build.tag) {
             progress(.phase(.completed))
@@ -147,7 +147,7 @@ extension GameLibrary {
             defer { withExtendedLifetime(lease) {} }
             guard var current = try await store.load(game.id), current == record,
                 current.pending == nil, !current.uninstalling else { return }
-            try locationProbe.requireAvailable(at: current.installPath)
+            try await requireSandboxLocation(current, game: game.id)
             guard try await !sandboxListIsManaged(game.id, record: current) else { return }
             current.sandbox = installation
             current.sandboxListPath = installation.listPath
@@ -167,7 +167,10 @@ extension GameLibrary {
             try await !sandboxListIsManaged(game.id, record: record) {
             updated.sandbox = try SandboxFiles.detect(in: fs, listPath: list)
         }
-        if updated != record { try await store.save(updated, for: game.id) }
+        if updated != record {
+            try await requireSandboxLocation(record, game: game.id)
+            try await store.save(updated, for: game.id)
+        }
         return updated
     }
 
@@ -196,8 +199,14 @@ extension GameLibrary {
     func recoverSandbox(_ id: String) async throws {
         guard try await store.readState(SandboxPublisher.journalName, for: id, maxBytes: 65536) != nil else { return }
         guard let record = try await store.load(id) else { throw LauncherError.journalCorrupt("Missing sandbox game record") }
-        try locationProbe.requireAvailable(at: record.installPath)
+        try await requireSandboxLocation(record, game: id)
         try await sandboxPublisher.recover(game: id)
+    }
+
+    private func requireSandboxLocation(_ record: GameRecord, game: String) async throws {
+        try locationProbe.requireAvailable(at: record.installPath)
+        let others = try await store.records().filter { $0.key != game }.map(\.value)
+        try GameRecordRules.checkLocation(record.installPath, others: others, reserved: [paths.root, paths.runtimes])
     }
 
     /// Shares the outer operation's lease. Optional maintenance errors have their
@@ -222,6 +231,7 @@ extension GameLibrary {
             try await !sandboxListIsManaged(game.id, record: record) else { return }
         let detected = try record.sandbox ?? record.sandboxListPath.flatMap { try SandboxFiles.detect(in: fs, listPath: $0) }
         guard let local = detected else { return }
+        try await requireSandboxLocation(record, game: game.id)
         let config = try await gameConfig(game)
         guard let list = SandboxFiles.supportedList(config.wpfPackageVersion), let executable = config.wpfExecutable else { return }
         guard let package = try await api.sandboxPackage(biz: game.biz) else { return }
