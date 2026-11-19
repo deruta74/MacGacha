@@ -158,9 +158,9 @@ import RuntimeManager
                 if self.launchTaskGenerations[id] == generation { self.launchTasks[id] = nil; self.launchTaskGenerations[id] = nil }
             }
             do {
-                if let automaticSandbox {
+                if automaticSandbox != nil {
                     await sandboxTask?.value
-                    try await self.gameServices.waitForSandboxDrain(automaticSandbox.id)
+                    try await self.gameServices.waitForSandboxDrain(id)
                 }
                 if let preDownload { _ = try await self.stopPreDownloadOperation(preDownload) }
                 await self.reattachOnStart()

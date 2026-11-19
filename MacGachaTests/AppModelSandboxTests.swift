@@ -234,6 +234,24 @@ import RuntimeManager
         #expect(fake.actions == ["automatic-2", "automatic-2"])
     }
 
+    @Test(.timeLimit(.minutes(1))) func playDrainsOtherEditionButChecksOnlyLaunchEditionJournal() async throws {
+        let drain = SandboxModelDrain(), launch = SandboxModelLaunchServices()
+        let fake = SandboxModelServices(drain: drain)
+        fake.journalBlockedGame = "genshin"
+        let model = try await fixture(fake, allowAutomatic: true, launch: launch)
+        defer { fake.finish() }
+        await fake.waitForOpen()
+        model.play("starrail")
+        let task = try #require(model.launchTasks["starrail"])
+        await drain.waitForEntry()
+        #expect(launch.count == 0)
+        await drain.release()
+        await task.value
+        #expect(fake.drainChecks == ["genshin", "starrail"])
+        #expect(launch.count == 1)
+        #expect(model.sandboxFailure(for: "genshin") != nil)
+    }
+
     @Test func sandboxProgressResetsAtEachDistinctPhase() {
         let time = ContinuousClock.now
         var progress = GameProgress()
@@ -284,12 +302,17 @@ private final class SandboxModelServices: GameServices, Sendable {
     let opened = AsyncStream<Void>.makeStream()
     private let drain: SandboxModelDrain?
     init(drain: SandboxModelDrain? = nil) { self.drain = drain }
-    private let preview = PreviewGameServices(states: ["genshin": GameState(status: .installed(tag: "2"))])
+    private let preview = PreviewGameServices(states: [
+        "genshin": GameState(status: .installed(tag: "2")),
+        "starrail": GameState(status: .installed(tag: "1")),
+    ])
     private struct State: Sendable {
         var sandbox: SandboxState? = .outdated(installed: "1", available: "2", size: 100)
         var sandboxError: LauncherError?
         var gameStatus: GameStatus = .installed(tag: "2")
         var pending = false
+        var journalBlockedGame: String?
+        var drainChecks: [String] = []
         var actions: [String] = []
         var continuation: GameEventStream.Continuation?
     }
@@ -313,7 +336,16 @@ private final class SandboxModelServices: GameServices, Sendable {
     }
     func waitForOpen() async { var iterator = opened.stream.makeAsyncIterator(); _ = await iterator.next() }
     func start() async {}
-    func waitForSandboxDrain(_ id: String) async throws { await drain?.wait() }
+    var journalBlockedGame: String? {
+        get { state.withLock { $0.journalBlockedGame } }
+        set { state.withLock { $0.journalBlockedGame = newValue } }
+    }
+    var drainChecks: [String] { state.withLock { $0.drainChecks } }
+    func waitForSandboxDrain(_ id: String) async throws {
+        state.withLock { $0.drainChecks.append(id) }
+        await drain?.wait()
+        if journalBlockedGame == id { throw LauncherError.busy("Synthetic sandbox journal") }
+    }
     func waitUntilIdle(_ id: String) async throws {}
     func status(_ id: String) async -> GameStatus { id == "genshin" ? gameStatus : .notInstalled }
     func checkForUpdate(_ id: String) async throws -> GameStatus { await status(id) }
