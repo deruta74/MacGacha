@@ -6,10 +6,12 @@ import CoreMedia
 
 @MainActor package protocol BackdropVideoSink: AnyObject {
     var isDisplayable: Bool { get }
+    var currentTime: CMTime { get }
     var onReady: (@MainActor @Sendable () -> Void)? { get set }
     func prepare() async
     func enqueue(_ frame: BackdropFrame) async throws
     func setPlaying(_ playing: Bool)
+    func align(to time: CMTime)
     func flush()
 }
 
@@ -22,6 +24,7 @@ import CoreMedia
     var onReady: (@MainActor @Sendable () -> Void)?
     private var observer: (any NSObjectProtocol)?
     var isDisplayable: Bool { layer.isReadyForDisplay }
+    var currentTime: CMTime { synchronizer.currentTime() }
     init(layer: AVSampleBufferDisplayLayer) {
         self.layer = layer
         let synchronizer = AVSampleBufferRenderSynchronizer()
@@ -51,6 +54,7 @@ import CoreMedia
         }
     }
     func setPlaying(_ playing: Bool) { synchronizer.setRate(playing ? 1 : 0, time: .invalid) }
+    func align(to time: CMTime) { synchronizer.setRate(1, time: time) }
     func flush() { receiver.flush(); synchronizer.setRate(0, time: .zero) }
     isolated deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }

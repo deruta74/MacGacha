@@ -77,6 +77,74 @@ import LauncherCore
         #expect(player.state == .playing)
         let resumed = player.workTask; player.stop(); await resumed?.value
     }
+    @Test(arguments: [0, 100, 101])
+    func reanchorsOnlyWhenAFrameExceedsTheMinimumTolerance(lateness: Int) async throws {
+        let source = TestFrameSource(), sink = TestVideoSink()
+        let player = BackdropVideoPlayer(sink: sink, makeSource: { _ in source })
+        defer { player.stop() }
+        var requests = source.requests.stream.makeAsyncIterator()
+        player.play(URL(fileURLWithPath: "/a.webm")); _ = await requests.next()
+        source.send(.success(try testFrame())); _ = await requests.next()
+        sink.makeReady()
+
+        let second = CMTime(value: 40, timescale: 1_000)
+        sink.advanceClock(by: CMTime(value: Int64(40 + lateness), timescale: 1_000))
+        source.send(.success(try testFrame(at: second))); _ = await requests.next()
+        source.send(.success(try testFrame(at: CMTime(value: 80, timescale: 1_000)))); _ = await requests.next()
+
+        #expect(sink.alignments == (lateness > 100 ? [second] : []))
+        if lateness > 100 { #expect(sink.enqueueTimes.dropFirst() == [second, second]) }
+        #expect(sink.frames.count == 3 && player.state == .playing)
+    }
+    @Test func slowFramesUseTwoFrameIntervalsAsTolerance() async throws {
+        let source = TestFrameSource(), sink = TestVideoSink()
+        let player = BackdropVideoPlayer(sink: sink, makeSource: { _ in source })
+        defer { player.stop() }
+        var requests = source.requests.stream.makeAsyncIterator()
+        player.play(URL(fileURLWithPath: "/a.webm")); _ = await requests.next()
+        source.send(.success(try testFrame())); _ = await requests.next()
+        sink.makeReady()
+
+        sink.advanceClock(by: CMTime(value: 300, timescale: 1_000))
+        source.send(.success(try testFrame(at: CMTime(value: 100, timescale: 1_000)))); _ = await requests.next()
+        #expect(sink.alignments.isEmpty)
+
+        let third = CMTime(value: 200, timescale: 1_000)
+        sink.advanceClock(by: CMTime(value: 101, timescale: 1_000))
+        source.send(.success(try testFrame(at: third))); _ = await requests.next()
+        #expect(sink.alignments == [third])
+    }
+    @Test(arguments: [false, true])
+    func longPauseResumesAtNormalPace(frameWasLateBeforePause: Bool) async throws {
+        let source = TestFrameSource(), sink = TestVideoSink()
+        let player = BackdropVideoPlayer(sink: sink, makeSource: { _ in source })
+        defer { player.stop() }
+        var requests = source.requests.stream.makeAsyncIterator()
+        player.play(URL(fileURLWithPath: "/a.webm")); _ = await requests.next()
+        source.send(.success(try testFrame())); _ = await requests.next()
+        sink.makeReady()
+
+        let second = CMTime(value: 40, timescale: 1_000)
+        let pauseTime = CMTime(value: frameWasLateBeforePause ? 2_000 : 40, timescale: 1_000)
+        sink.advanceClock(by: pauseTime)
+        let pausedWork = player.workTask
+        player.pause()
+        sink.advanceClock(by: CMTime(value: 600, timescale: 1))
+        source.send(.success(try testFrame(at: second)))
+        await pausedWork?.value
+        #expect(sink.rates == [true, false])
+        #expect(sink.currentTime == pauseTime)
+        #expect(sink.frames.count == 1 && sink.alignments.isEmpty)
+
+        player.resume(); _ = await requests.next()
+        let third = CMTime(value: 80, timescale: 1_000)
+        sink.advanceClock(by: CMTime(value: 40, timescale: 1_000))
+        source.send(.success(try testFrame(at: third))); _ = await requests.next()
+        #expect(sink.rates == [true, false, true])
+        #expect(sink.alignments == (frameWasLateBeforePause ? [second] : []))
+        #expect(sink.enqueueTimes == [.zero, second, third])
+        #expect(sink.frames.count == 3 && player.state == .playing)
+    }
     @Test func lateFailureAndReadyCallbackCannotChangeNewSource() async throws {
         let old = TestFrameSource(retainOnStop: true), new = TestFrameSource(), sink = TestVideoSink()
         let player = BackdropVideoPlayer(sink: sink, makeSource: { $0.lastPathComponent == "a.webm" ? old : new })
@@ -150,11 +218,11 @@ import LauncherCore
     }
 }
 
-private func testFrame() throws -> BackdropFrame {
+private func testFrame(at presentationTime: CMTime = .zero) throws -> BackdropFrame {
     var image: CVPixelBuffer?
     guard CVPixelBufferCreate(kCFAllocatorDefault, 64, 48, kCVPixelFormatType_32BGRA, nil, &image) == kCVReturnSuccess,
         let image else { throw LauncherError.io("Cannot create synthetic surface") }
-    return BackdropFrame(pixelBuffer: image, presentationTime: .zero)
+    return BackdropFrame(pixelBuffer: image, presentationTime: presentationTime)
 }
 private final class DecodeCounters: Sendable {
     let values = Mutex((count: 0, invalidated: false))
@@ -193,13 +261,25 @@ private final class TestFrameSource: BackdropFrameSource, Sendable {
     var isDisplayable = false
     var onReady: (@MainActor @Sendable () -> Void)?
     var frames: [BackdropFrame] = []
+    var enqueueTimes: [CMTime] = []
     var rates: [Bool] = []
+    private(set) var currentTime: CMTime = .zero
+    private(set) var alignments: [CMTime] = []
     var preparations = 0
     var hold: TestEvent?
     let entered = TestEvent()
     func prepare() async { preparations += 1; isDisplayable = false; frames.removeAll() }
-    func enqueue(_ frame: BackdropFrame) async throws { entered.signal(); if let hold { try await hold.wait() }; frames.append(frame) }
+    func enqueue(_ frame: BackdropFrame) async throws {
+        enqueueTimes.append(currentTime)
+        entered.signal()
+        if let hold { try await hold.wait() }
+        frames.append(frame)
+    }
     func makeReady() { isDisplayable = true; onReady?() }
     func setPlaying(_ playing: Bool) { rates.append(playing) }
-    func flush() { isDisplayable = false; frames.removeAll() }
+    func align(to time: CMTime) { alignments.append(time); currentTime = time }
+    func advanceClock(by elapsed: CMTime) {
+        if rates.last == true { currentTime = CMTimeAdd(currentTime, elapsed) }
+    }
+    func flush() { isDisplayable = false; frames.removeAll(); currentTime = .zero }
 }
