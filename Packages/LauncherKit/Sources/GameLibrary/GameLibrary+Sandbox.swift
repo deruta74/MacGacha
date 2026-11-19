@@ -191,8 +191,11 @@ extension GameLibrary {
         guard game.family == .genshin, record.ownership == .adopted, !record.uninstallFilesRemoved else { return record }
         var current = record
         guard try await !sandboxListIsManaged(game.id, record: record) else { return record }
-        if current.sandbox == nil, let list = record.sandboxListPath {
-            current.sandbox = try SandboxFiles.detect(in: fs, listPath: list)
+        if current.sandbox == nil {
+            // Legacy records have no list path. Require the editor tree as well as the list before claiming it.
+            if current.sandboxListPath == nil,
+                try fs.itemType(at: SandboxFiles.assets, allowingLeafSymlink: true) != .directory { return record }
+            current.sandbox = try SandboxFiles.detect(in: fs, listPath: current.sandboxListPath ?? SandboxFiles.defaultList)
         }
         guard current.sandbox != nil else { return record }
         try await store.save(current, for: game.id)

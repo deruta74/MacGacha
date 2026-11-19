@@ -2093,6 +2093,45 @@ private final class LibraryLocationProbe: GameLocationProbing, Sendable {
         #expect(try f.fs.itemType(at: SafeRelativePath("GenshinImpact.exe")) == nil)
     }
 
+    @Test(arguments: ["sandbox", "list-only", "manifest-owned"])
+    func legacyAdoptedUninstallDetectsSandboxOffline(files: String) async throws {
+        let f = try LibraryFixture(); try f.advertise(1); try f.seedExisting()
+        _ = try await libraryCollect(await f.library.adopt(game, folder: f.install, voices: ["en-us"]))
+        let record = try #require(try await f.store.load(game.id))
+        try #require(record.sandbox == nil && record.sandboxListPath == nil)
+
+        let list = SandboxFiles.defaultList, editor = Data("sandbox".utf8), foreign = Data("foreign".utf8)
+        let listData = try JSONSerialization.data(withJSONObject: [
+            "remoteName": sandboxEditorPath.description, "md5": md5Library(editor).hex, "fileSize": editor.count,
+        ])
+        try f.fs.writeAtomically(listData, to: list)
+        if files != "list-only" { try f.fs.writeAtomically(editor, to: sandboxEditorPath) }
+        if files == "manifest-owned" {
+            let build = try #require(record.installed)
+            let paths = try await f.store.managedPaths(for: game.id, record: record)
+            try await f.store.prepareManagedPaths(paths.union([list]), target: build, record: record, for: game.id)
+        }
+        let userFile = try SafeRelativePath("user-file.txt")
+        try f.fs.writeAtomically(foreign, to: userFile)
+
+        let offline = MockCDN()
+        try await f.restarted(http: offline).uninstall(game)
+
+        #expect(offline.requestLog.isEmpty)
+        #expect(try await f.store.load(game.id) == nil)
+        #expect(try f.fs.readFile(at: userFile, maxBytes: 100) == foreign)
+        if files == "list-only" {
+            #expect(try f.fs.readFile(at: list, maxBytes: 4096) == listData)
+        } else {
+            #expect(try f.fs.itemType(at: list) == nil)
+        }
+        if files == "manifest-owned" {
+            #expect(try f.fs.readFile(at: sandboxEditorPath, maxBytes: 100) == editor)
+        } else {
+            #expect(try f.fs.itemType(at: SandboxFiles.assets) == nil)
+        }
+    }
+
     @Test(arguments: [false, true])
     func movingGameRetainsSandboxFilesAndVersion(crossVolume: Bool) async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
