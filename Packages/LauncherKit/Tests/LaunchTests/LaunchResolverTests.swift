@@ -83,7 +83,8 @@ func metalHUDOptionsResolveExactly(backend: RuntimeBackend, enabled: Bool) throw
     #expect(value.copyIfPresent.first?.source.description == "HoYoKProtect.sys")
     #expect(value.copyIfPresent.first?.toSystem32 == "HoYoKProtect.sys")
     #expect(value.requiredComponents == [.steamShim])
-    #expect(value.preparation == PreparationRequest(retina: false, steamShim: roots[.steamShim], dxmtExtras: [], nvidiaKeys: false, windowsVersion: .win11))
+    #expect(value.preparation == PreparationRequest(retina: false, steamShim: roots[.steamShim], dxmtExtras: [], nvidiaKeys: false,
+        windowsVersion: .win11, wpfSoftwareRendering: true))
 }
 
 @Test func starRailDefaults() throws {
@@ -113,6 +114,16 @@ func metalHUDOptionsResolveExactly(backend: RuntimeBackend, enabled: Bool) throw
 @Test(arguments: ["genshin", "starrail", "zzz", "genshin-cn", "starrail-cn", "zzz-cn"]) func onlyZZZCNClearsItsWebViewRenderMethod(game: String) throws {
     let expected: Region? = game == "zzz-cn" ? .mainlandChina : nil
     #expect(try resolve(game).preparation.webViewRenderReset == expected)
+}
+
+@Test(arguments: [RuntimeBackend.dxmt, .d3dmetal], [false, true])
+func onlyGenshinEditionsRequireWPFSoftwareRendering(backend: RuntimeBackend, compatibilityPatches: Bool) throws {
+    for game in GameDefinition.all.map(\.id) {
+        var settings = LaunchSettings.defaults(for: game)
+        settings.backend = backend
+        settings.compatibilityPatches = compatibilityPatches
+        #expect(try resolve(game, settings: settings).preparation.wpfSoftwareRendering == (game == "genshin" || game == "genshin-cn"))
+    }
 }
 
 @Test(arguments: ["genshin", "starrail", "zzz"], [Int?.none, 30, 60, 90, 120]) func dxmtFrameLimit(game: String, limit: Int?) throws {

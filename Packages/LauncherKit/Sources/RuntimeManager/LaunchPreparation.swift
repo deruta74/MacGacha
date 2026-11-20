@@ -119,6 +119,7 @@ public struct LaunchPreparation: Sendable {
         }
         let frameRate = try await applyStarRailFrameRate(request, binary: binary, environment: environment)
         try await resetWebViewRender(request, binary: binary, environment: environment)
+        let wpfReady = try await ensureWPFSoftwareRendering(request, binary: binary, environment: environment)
         // reg.exe success only acknowledges wineserver's in-memory state. Wait
         // for the server to save it, then flush the files and directory before
         // the marker's full-sync boundary can certify this provisioning revision.
@@ -143,7 +144,7 @@ public struct LaunchPreparation: Sendable {
             marker.provisioningRevision = Self.provisioningRevision
             try PrefixManager.writeMarker(marker, fs: fs, to: markerPath, pending: SafeRelativePath("\(path)/.macgacha-prefix.pending"))
         }
-        return PreparationOutcome(starRailFrameRate: frameRate)
+        return PreparationOutcome(starRailFrameRate: frameRate, wpfSoftwareRenderingFailed: !wpfReady)
     }
 
     private func applyStarRailFrameRate(_ request: PreparationRequest, binary: URL,
@@ -199,6 +200,43 @@ public struct LaunchPreparation: Sendable {
             }
         } catch {
             if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled { throw LauncherError.cancelled }
+        }
+    }
+
+    // The Miliastra Sandbox editor's WPF renderer hangs on Wine's D3D9/OpenGL route.
+    private func ensureWPFSoftwareRendering(_ request: PreparationRequest, binary: URL, environment: [String: String]) async throws -> Bool {
+        guard request.wpfSoftwareRendering else { return true }
+        let key = "HKCU\\Software\\Microsoft\\Avalon.Graphics", name = "DisableHWAcceleration"
+        do {
+            let query = try await runner.run(binary, arguments: ["reg", "query", key, "/v", name], environment: environment,
+                currentDirectory: nil, timeout: .seconds(10), timeoutWait: timeoutWait)
+            try Task.checkCancellation()
+            if query.exitCode == 0 {
+                guard query.stdout.count <= 1 << 20 else { return false }
+                let lines = String(decoding: query.stdout, as: UTF8.self).split(whereSeparator: \.isNewline)
+                let entries = lines.lazy.map { $0.split(maxSplits: 2, whereSeparator: \.isWhitespace) }
+                guard let fields = entries.first(where: {
+                    $0.count >= 2 && $0[0].caseInsensitiveCompare(name) == .orderedSame
+                }) else { return false }
+                if fields[1] == "REG_DWORD" {
+                    guard fields.count == 3 else { return false }
+                    let text = fields[2].trimmingCharacters(in: .whitespaces)
+                    let value = text.lowercased().hasPrefix("0x") ? UInt32(text.dropFirst(2), radix: 16) : UInt32(text)
+                    guard let value else { return false }
+                    if value == 1 { return true }
+                }
+            } else {
+                let diagnostic = String(decoding: query.stdout + query.stderr, as: UTF8.self).lowercased()
+                guard query.exitCode == 1, diagnostic.contains("unable to find the specified registry key") ||
+                    diagnostic.contains("unable to find the specified registry value") else { return false }
+            }
+            let result = try await runner.run(binary, arguments: ["reg", "add", key, "/v", name, "/t", "REG_DWORD", "/d", "1", "/f"],
+                environment: environment, currentDirectory: nil, timeout: .seconds(10), timeoutWait: timeoutWait)
+            try Task.checkCancellation()
+            return result.exitCode == 0
+        } catch {
+            if Task.isCancelled || error is CancellationError || (error as? LauncherError) == .cancelled { throw LauncherError.cancelled }
+            return false
         }
     }
 

@@ -58,5 +58,10 @@ public enum StarRailFrameRateOutcome: Sendable, Equatable {
 }
 public struct PreparationOutcome: Sendable, Equatable {
     public let starRailFrameRate: StarRailFrameRateOutcome?
-    public init(starRailFrameRate: StarRailFrameRateOutcome? = nil) { self.starRailFrameRate = starRailFrameRate }
+    public let wpfSoftwareRenderingFailed: Bool
+
+    public init(starRailFrameRate: StarRailFrameRateOutcome? = nil, wpfSoftwareRenderingFailed: Bool = false) {
+        self.starRailFrameRate = starRailFrameRate
+        self.wpfSoftwareRenderingFailed = wpfSoftwareRenderingFailed
+    }
 }
