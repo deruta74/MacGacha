@@ -145,7 +145,8 @@ public enum LaunchResolver {
         for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] { environment[key] = proxy }
         if settings.compatibilityPatches && recipe.timeoutFix { environment["WINE_ENABLE_TIMEOUT_FIX"] = "1" }
 
-        let dxmt = settings.backend == .dxmt, starRail = GameDefinition.find(recipe.game)?.family == .starrail
+        let definition = GameDefinition.find(recipe.game)
+        let dxmt = settings.backend == .dxmt, starRail = definition?.family == .starrail
         switch settings.backend {
         case .d3dmetal:
             environment["WINEESYNC"] = "1"
@@ -177,9 +178,10 @@ public enum LaunchResolver {
                 dxmtExtras: dxmt ? (["winemetal.dll"] + (starRail ? ["nvngx.dll"] : [])) : [], nvidiaKeys: dxmt && starRail,
                 crypt32Native: requiredComponents.contains(.crypt32Fix),
                 starRailFrameRate: offersStarRailUnlock(recipe.game) ? (settings.unlockFPS ? .unlock120 : .restore) : nil,
-                starRailRegion: starRail ? (GameDefinition.find(recipe.game)?.region ?? .global) : .global,
-                windowsVersion: [GameFamily.genshin, .zzz].contains(GameDefinition.find(recipe.game)?.family ?? .starrail) ? .win11 : nil,
-                webViewRenderReset: GameDefinition.find(recipe.game).flatMap { $0.family == .zzz && $0.region == .mainlandChina ? $0.region : nil }),
+                starRailRegion: starRail ? (definition?.region ?? .global) : .global,
+                windowsVersion: [GameFamily.genshin, .zzz].contains(definition?.family ?? .starrail) ? .win11 : nil,
+                webViewRenderReset: definition.flatMap { $0.family == .zzz && $0.region == .mainlandChina ? $0.region : nil },
+                wpfSoftwareRendering: definition?.family == .genshin),
             requiredComponents: requiredComponents, componentCopies: componentCopies, displayFallback: displayFallback, fpsInjector: fpsInjector)
     }
 

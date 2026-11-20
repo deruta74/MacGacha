@@ -266,14 +266,86 @@ import TestSupport
             }
         }
     }
-    @Test func otherGamesNeverTouchWebViewValues() async throws {
+    @Test func unrequestedRegistryWorkaroundsAreSkipped() async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url), runner = FakeProcessRunner()
             _ = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine,
                 request: PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false))
             #expect(!runner.invocations.contains { $0.arguments.contains { $0.contains("miHoYo") } })
+            #expect(!runner.invocations.contains { $0.arguments.contains(wpfKey) })
         }
     }
+
+    @Test(arguments: [String?.none, "REG_DWORD    0x0", "REG_SZ    1", "REG_DWORD    0x00000001"])
+    func wpfSoftwareRenderingWritesOnlyMissingOrDifferentValues(initialValue: String?) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let stored = Mutex(initialValue)
+            let query = ["reg", "query", wpfKey, "/v", "DisableHWAcceleration"]
+            let write = ["reg", "add", wpfKey, "/v", "DisableHWAcceleration", "/t", "REG_DWORD", "/d", "1", "/f"]
+            let runner = FakeProcessRunner { call in
+                if call.arguments == query {
+                    guard let value = stored.withLock({ $0 }) else {
+                        return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: Unable to find the specified registry key\r\n".utf8))
+                    }
+                    let listing = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Avalon.Graphics\r\n    disablehwacceleration    \(value)\r\n\r\n"
+                    return ProcessResult(exitCode: 0, stdout: Data(listing.utf8), stderr: Data())
+                }
+                if call.arguments == write { stored.withLock { $0 = "REG_DWORD    0x1" } }
+                return preparationSuccess()
+            }
+            let request = PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, wpfSoftwareRendering: true)
+            for _ in 0..<2 {
+                let result = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: request)
+                #expect(!result.wpfSoftwareRenderingFailed)
+                #expect(runner.invocations.last?.arguments == ["-w"])
+            }
+            let calls = runner.invocations.filter { $0.arguments.contains(wpfKey) }
+            let expected = initialValue == "REG_DWORD    0x00000001" ? [query, query] : [query, write, query]
+            #expect(calls.map(\.arguments) == expected)
+            #expect(calls.allSatisfy { $0.environment["WINEPREFIX"] == fixture.prefix.path })
+        }
+    }
+
+    @Test(arguments: ["queryDenied", "writeDenied", "writeThrows"])
+    func wpfRegistryFailureNeverBlocksPreparation(scenario: String) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let runner = FakeProcessRunner { call in
+                guard call.arguments.contains(wpfKey) else { return preparationSuccess() }
+                if call.arguments.prefix(2) == ["reg", "query"], scenario != "queryDenied" {
+                    return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: Unable to find the specified registry value".utf8))
+                }
+                if scenario == "writeThrows" { throw LauncherError.io("write failed") }
+                return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: Access is denied".utf8))
+            }
+            let request = PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, wpfSoftwareRendering: true)
+            let result = try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: request)
+            #expect(result.wpfSoftwareRenderingFailed)
+            let writes = runner.invocations.filter { $0.arguments.prefix(3) == ["reg", "add", wpfKey] }
+            #expect(writes.count == (scenario == "queryDenied" ? 0 : 1))
+            #expect(runner.invocations.last?.arguments == ["-w"])
+            #expect(try fixture.revision() == LaunchPreparation.provisioningRevision)
+        }
+    }
+
+    @Test(arguments: ["query", "add"]) func cancelledWPFRegistryCommandStillCancelsPreparation(command: String) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
+            let runner = FakeProcessRunner { call in
+                guard call.arguments.contains(wpfKey) else { return preparationSuccess() }
+                if call.arguments.prefix(2) == ["reg", command] { throw LauncherError.cancelled }
+                return ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("reg: Unable to find the specified registry value".utf8))
+            }
+            let request = PreparationRequest(retina: false, steamShim: nil, dxmtExtras: [], nvidiaKeys: false, wpfSoftwareRendering: true)
+            await #expect(throws: LauncherError.cancelled) {
+                try await fixture.preparer(runner).ensure(prefix: fixture.prefix, wineBinary: fixture.wine, request: request)
+            }
+            #expect(runner.invocations.last?.arguments.prefix(3) == ["reg", command, wpfKey])
+            #expect(try fixture.revision() == nil)
+        }
+    }
+
     @Test(arguments: [false, true]) func crypt32RegistryPolicyIsScopedAndUsesPersistenceBarrier(enabled: Bool) async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), fixture = try await PreparationFixture(root: temp.url)
@@ -683,6 +755,8 @@ import TestSupport
         }
     }
 }
+
+private let wpfKey = "HKCU\\Software\\Microsoft\\Avalon.Graphics"
 
 private struct PreparationFixture: Sendable {
     let paths: AppPaths, fs: ContainedFileSystem, wine: URL, prefix: URL, shim: URL

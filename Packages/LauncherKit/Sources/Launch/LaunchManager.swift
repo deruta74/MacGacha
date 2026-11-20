@@ -354,6 +354,9 @@ public actor LaunchManager {
                 note(context, "Star Rail frame-rate setting " + reason)
                 event("Star Rail frame-rate setting is unavailable", game: game.id, metadata: ["reason": reason])
             }
+            if prepared.wpfSoftwareRenderingFailed {
+                event("Could not configure WPF software rendering", game: game.id, level: .warning)
+            }
             let original = context.session, log = context.log, hideHooks = hideHooks, beforeJournalRead = beforeJournalRead
             let (hiddenSnapshot, hideResult) = try await BlockingIO.run {
                 var snapshot = original
