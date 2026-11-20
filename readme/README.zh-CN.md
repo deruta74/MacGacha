@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-0078D4?style=for-the-badge)](README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-555555?style=for-the-badge)](README.ja.md)
 
-> ✨ **[MacGacha 0.3.4](https://github.com/deruta74/MacGacha/releases/tag/v0.3.4) 已发布**：下载速度可自定义，启动器会打开上次的游戏，游戏启动时程序坞图标会显示进度，并修复了绝区零（国服）登录时验证码空白的问题。已经在使用 0.3.1？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
+> ✨ **[MacGacha 0.3.5](https://github.com/deruta74/MacGacha/releases/tag/v0.3.5) 已发布**：支持安装并自动更新原神的千星沙箱编辑器，网络屏蔽游戏服务器时会给出明确提示，并修复了背景视频播放过快的问题。已经在使用 0.3.1？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
 
 面向 Apple Silicon 的原生 macOS 启动器，支持 **《原神》**、**《崩坏：星穹铁道》** 和 **《绝区零》**。它从 HoYoverse 官方服务器安装、更新和校验游戏，管理 Wine / DXMT / D3DMetal 运行环境，并可一键启动各款游戏。
 
@@ -73,6 +73,7 @@ xattr -dr com.apple.quarantine /Applications/MacGacha.app
 - **通知。** MacGacha 在后台时，会在安装、更新或修复完成、失败或因磁盘空间不足而停止时通知你，也会在出现新游戏版本或预下载时通知你。可在设置中关闭。
 - **存储空间。** “存储空间”面板显示每个游戏、其 Wine 前缀和预下载占用的空间，以及 Wine、日志和缓存，并列出可以释放的内容，例如旧的运行环境版本和已删除游戏的前缀。每次删除前都会先确认。
 - **导出祈愿记录（可选）。** 在设置中打开开关后，游戏菜单中的 **导出祈愿记录…** 会将你的祈愿记录保存为 UIGF 4.2 文件，供其他记录工具导入。请先在游戏中打开一次祈愿记录。开关关闭时，MacGacha 不会读取记录链接。
+- **千星沙箱。** 原神菜单中的 **安装千星沙箱** 会添加千星奇域的编辑器（国际服和国服）。编辑或试玩关卡时，游戏会自动打开它。MacGacha 会让它与游戏版本保持一致，有新版本时在后台更新，并在修复游戏时一并修复。点击开始游戏会先停止后台更新。在 Wine 下，打开编辑器时游戏画面有时会变灰，重启游戏即可。
 - **游戏菜单新增。** **打开截图** 会打开游戏的截图文件夹。游戏设置中的 **重置 Wine 前缀…** 会在下次启动时重新创建前缀。右键点击程序坞中的 MacGacha 可直接启动已安装的游戏。
 - **游戏快捷方式。** 游戏菜单中的 **创建快捷方式** 会把带图标的游戏添加到“应用程序”。快捷方式通过 MacGacha 启动游戏而不打开启动器窗口，可在程序坞、启动台和聚焦搜索中使用，只有在游戏需要更新、设置或需要你处理时才会打开启动器。由于不打开窗口，游戏时 MacGacha 在后台占用的内存明显更少。游戏关闭后，MacGacha 也会退出。
 - **MacGacha Wine 11.22。** 我们自行从源代码构建 Wine 及其包含的所有库，推荐用于 DXMT 和 D3DMetal（[发布页](https://github.com/deruta74/MacGacha/releases/tag/wine-11.22-macgacha-1.0)附有完整源代码）。它包含 Wine 官方的 crypt32 修复，因此中国大陆服原神和绝区零不再需要我们的独立修复。[Wine 11.20](https://github.com/deruta74/MacGacha/releases/tag/wine-11.20-macgacha-1.0) 仍可用于回退。Wine 和图形层分别下载。D3DMetal 需要接受 Apple 条款或从你自己的 Game Porting Toolkit 导入。
