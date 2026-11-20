@@ -3,6 +3,7 @@
 import Foundation
 import Observation
 import AVFoundation
+import CoreMedia
 
 public enum BackdropVideoState: Sendable, Equatable { case stopped, preparing, playing, failed }
 
@@ -18,7 +19,7 @@ public enum BackdropVideoState: Sendable, Equatable { case stopped, preparing, p
     @ObservationIgnored private var pump: Task<Void, Never>?
     @ObservationIgnored private var pumpID = UUID()
     @ObservationIgnored private var pending: BackdropFrame?
-    @ObservationIgnored private var didEnqueue = false
+    @ObservationIgnored private var lastEnqueuedTime: CMTime?
     @ObservationIgnored private var needsPreparation = true
     @ObservationIgnored private var restartWhenFinished = false
 
@@ -47,7 +48,7 @@ public enum BackdropVideoState: Sendable, Equatable { case stopped, preparing, p
     public func resume() {
         guard source != nil, isPaused else { return }
         isPaused = false; source?.setPaused(false)
-        if didEnqueue { sink.setPlaying(true); markPlaying(generation) }
+        if lastEnqueuedTime != nil { sink.setPlaying(true); markPlaying(generation) }
         if pump == nil { startPump(generation) } else { restartWhenFinished = true }
     }
     public func stop() {
@@ -56,7 +57,7 @@ public enum BackdropVideoState: Sendable, Equatable { case stopped, preparing, p
         source?.stop(); source = nil
         pump?.cancel(); pump = nil; pending = nil
         sink.onReady = nil; sink.flush()
-        sourceURL = nil; didEnqueue = false; needsPreparation = true; isPaused = false; restartWhenFinished = false; state = .stopped
+        sourceURL = nil; lastEnqueuedTime = nil; needsPreparation = true; isPaused = false; restartWhenFinished = false; state = .stopped
         if let previous { onStateChange?(previous, .stopped) }
     }
     package var workTask: Task<Void, Never>? { pump }
@@ -77,9 +78,10 @@ public enum BackdropVideoState: Sendable, Equatable { case stopped, preparing, p
                     if let pending = self?.takePending() { frame = pending } else { frame = try await source.next() }
                     guard self?.current(token) == true, !Task.isCancelled, let frame else { return }
                     if self?.isPaused == true { self?.pending = frame; return }
+                    self?.alignIfLate(frame.presentationTime)
                     try await sink.enqueue(frame)
                     guard self?.current(token) == true, !Task.isCancelled else { return }
-                    self?.enqueued(token)
+                    self?.enqueued(frame.presentationTime, token: token)
                 }
             } catch {
                 guard self?.current(token) == true, !Task.isCancelled else { return }
@@ -87,12 +89,22 @@ public enum BackdropVideoState: Sendable, Equatable { case stopped, preparing, p
             }
         }
     }
-    private func enqueued(_ token: UUID) {
-        if !didEnqueue { didEnqueue = true; if !isPaused { sink.setPlaying(true) } }
+    private func alignIfLate(_ time: CMTime) {
+        guard let lastEnqueuedTime else { return }
+        let lateness = CMTimeSubtract(sink.currentTime, time)
+        let interval = CMTimeSubtract(time, lastEnqueuedTime)
+        let tolerance = max(CMTime(value: 1, timescale: 10), CMTimeMultiply(interval, multiplier: 2))
+        // After a feed stall, keep upcoming frames spaced at their original cadence.
+        if lateness.isNumeric && lateness > tolerance { sink.align(to: time) }
+    }
+    private func enqueued(_ time: CMTime, token: UUID) {
+        let isFirstFrame = lastEnqueuedTime == nil
+        lastEnqueuedTime = time
+        if isFirstFrame && !isPaused { sink.setPlaying(true) }
         markPlaying(token)
     }
     private func markPlaying(_ token: UUID) {
-        guard current(token), !isPaused, didEnqueue, sink.isDisplayable, state != .playing, let sourceURL else { return }
+        guard current(token), !isPaused, lastEnqueuedTime != nil, sink.isDisplayable, state != .playing, let sourceURL else { return }
         state = .playing; onStateChange?(sourceURL, .playing)
     }
     private func fail(_ token: UUID) {
