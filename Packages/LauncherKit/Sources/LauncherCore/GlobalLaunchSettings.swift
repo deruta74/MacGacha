@@ -6,25 +6,32 @@ import Foundation
 public struct GlobalLaunchSettings: Codable, Equatable, Sendable {
     public var wishHistoryEnabled: Bool
     public var downloadSpeedLimit: Int64?
+    public var downloadWhilePlaying: Bool
+    public var playingDownloadSpeedLimit: Int64
     public var sessionLogsEnabled: Bool
     public var gameModeEnabled: Bool
     public var autoUpdateDependencies: Bool
     public var notificationsEnabled: Bool
     public var genshinFpsRiskAcknowledged: Bool
     public init(sessionLogsEnabled: Bool = true, gameModeEnabled: Bool = true, genshinFpsRiskAcknowledged: Bool = false,
-        autoUpdateDependencies: Bool = true, wishHistoryEnabled: Bool = false, notificationsEnabled: Bool = true, downloadSpeedLimit: Int64? = nil) {
+        autoUpdateDependencies: Bool = true, wishHistoryEnabled: Bool = false, notificationsEnabled: Bool = true, downloadSpeedLimit: Int64? = nil,
+        downloadWhilePlaying: Bool = false, playingDownloadSpeedLimit: Int64 = 10_000_000) {
         self.downloadSpeedLimit = downloadSpeedLimit
+        self.downloadWhilePlaying = downloadWhilePlaying
+        self.playingDownloadSpeedLimit = playingDownloadSpeedLimit
         self.sessionLogsEnabled = sessionLogsEnabled; self.gameModeEnabled = gameModeEnabled
         self.genshinFpsRiskAcknowledged = genshinFpsRiskAcknowledged
         self.autoUpdateDependencies = autoUpdateDependencies
         self.wishHistoryEnabled = wishHistoryEnabled
         self.notificationsEnabled = notificationsEnabled
     }
-    private enum CodingKeys: CodingKey { case sessionLogsEnabled, gameModeEnabled, genshinFpsRiskAcknowledged, autoUpdateDependencies, wishHistoryEnabled, notificationsEnabled, downloadSpeedLimit }
+    private enum CodingKeys: CodingKey { case sessionLogsEnabled, gameModeEnabled, genshinFpsRiskAcknowledged, autoUpdateDependencies, wishHistoryEnabled, notificationsEnabled, downloadSpeedLimit, downloadWhilePlaying, playingDownloadSpeedLimit }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         wishHistoryEnabled = try values.decodeIfPresent(Bool.self, forKey: .wishHistoryEnabled) ?? false
         downloadSpeedLimit = try values.decodeIfPresent(Int64.self, forKey: .downloadSpeedLimit)
+        downloadWhilePlaying = try values.decodeIfPresent(Bool.self, forKey: .downloadWhilePlaying) ?? false
+        playingDownloadSpeedLimit = try values.decodeIfPresent(Int64.self, forKey: .playingDownloadSpeedLimit) ?? 10_000_000
         sessionLogsEnabled = try values.decodeIfPresent(Bool.self, forKey: .sessionLogsEnabled) ?? true
         gameModeEnabled = try values.decodeIfPresent(Bool.self, forKey: .gameModeEnabled) ?? true
         autoUpdateDependencies = try values.decodeIfPresent(Bool.self, forKey: .autoUpdateDependencies) ?? true

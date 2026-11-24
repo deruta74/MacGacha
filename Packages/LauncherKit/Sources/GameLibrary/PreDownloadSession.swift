@@ -21,6 +21,7 @@ struct PreDownloadTransfer: Sendable {
     let hooks: CrashHooks
     let maxConcurrentObjects: Int
     let pipeline: PipelineConfiguration
+    let deliveryWorkController: DeliveryWorkController
 }
 
 /// Owns only cache transfer work. There is no normal completion receipt or
@@ -137,6 +138,8 @@ actor PreDownloadSession {
                         OperationWork.record(.fetchTaskSubmitted)
                         group.addTask {
                             defer { OperationWork.record(.fetchTaskFinished) }
+                            try await prepared.deliveryWorkController.acquire(.transfer)
+                            defer { prepared.deliveryWorkController.release(.transfer) }
                             return try await BlockingIO.run {
                                 let part = try cache.part(object)
                                 try await prepared.fetcher.fetch(object, fs: cache.fs, part: part) { bytes in

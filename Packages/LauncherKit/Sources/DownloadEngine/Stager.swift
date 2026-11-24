@@ -16,6 +16,7 @@ public struct Stager: Sendable {
     private let disk: any DiskSpaceProbe
     private let maxConcurrentObjects: Int
     private let pipeline: PipelineConfiguration
+    private let deliveryWorkController: DeliveryWorkController
     private let crashHooks: CrashHooks
     private let patchApplier: (any WholeFilePatchApplier)?
     private let log: EventLog?
@@ -24,11 +25,12 @@ public struct Stager: Sendable {
     private var verifiedContainers = VerifiedContainers()
 
     public init(plan: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher, journal: OperationJournal,
-        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, crashHooks: CrashHooks = .none, pipeline: PipelineConfiguration = .default, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil) throws {
+        disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, crashHooks: CrashHooks = .none, pipeline: PipelineConfiguration = .default, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil, deliveryWorkController: DeliveryWorkController = DeliveryWorkController()) throws {
         try plan.validate()
         try pipeline.validate()
         guard maxConcurrentObjects > 0 else { throw LauncherError.io("Invalid object concurrency limit") }
         self.plan = plan; self.fs = fs; self.fetcher = fetcher; self.journal = journal
+        self.deliveryWorkController = deliveryWorkController
         self.disk = disk; self.maxConcurrentObjects = maxConcurrentObjects; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log; self.pipeline = pipeline
     }
 
@@ -39,13 +41,13 @@ public struct Stager: Sendable {
     /// fileVerified event is retained. Discarding the iterator cancels workers.
     public func stage(files: [FileTask]) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = StagingSession(plan: plan, files: files, fs: fs, fetcher: fetcher, journal: journal,
-            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, durableFiles: durableFiles, patchApplier: patchApplier, log: log, verifiedContainers: VerifiedContainers())
+            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, durableFiles: durableFiles, patchApplier: patchApplier, log: log, verifiedContainers: VerifiedContainers(), deliveryWorkController: deliveryWorkController)
         return pipelineStream(abandon: { Task { await session.abandon(nil) } }) { try await session.next(register: $0) }
     }
     package func forOperation() throws -> OperationStager {
         let retention = PipelineRootRetention(key: fs.caseFoldedPathKey(for: try SafeRelativePath(".macgacha-staging/.lock")))
         return OperationStager(retention: retention, session: StagingSession(plan: plan, files: [], fs: fs, fetcher: fetcher, journal: journal,
-            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, retention: retention, durableFiles: durableFiles, patchApplier: patchApplier, log: log, verifiedContainers: verifiedContainers, operationWideProgress: true))
+            disk: disk, limit: maxConcurrentObjects, lease: StagingLease(gate: gate), crashHooks: crashHooks, pipeline: pipeline, retention: retention, durableFiles: durableFiles, patchApplier: patchApplier, log: log, verifiedContainers: verifiedContainers, operationWideProgress: true, deliveryWorkController: deliveryWorkController))
     }
 
 }
@@ -115,6 +117,7 @@ private actor StagingSession {
     private let disk: any DiskSpaceProbe
     private let limit: Int
     private let pipeline: PipelineConfiguration
+    private let deliveryWorkController: DeliveryWorkController
     private let transferLimiter: PipelineLimiter
     private let assemblyLimiter: PipelineLimiter
     private let progressTracker: PipelineProgress
@@ -154,7 +157,8 @@ private actor StagingSession {
     private var lastProgress: OperationEvent?
 
     init(plan: InstallPlan, files: [FileTask], fs: ContainedFileSystem, fetcher: ChunkFetcher,
-        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks, pipeline: PipelineConfiguration, retention: PipelineRootRetention = PipelineRootRetention(key: ""), durableFiles: Bool = false, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil, verifiedContainers: VerifiedContainers, operationWideProgress: Bool = false) {
+        journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks, pipeline: PipelineConfiguration, retention: PipelineRootRetention = PipelineRootRetention(key: ""), durableFiles: Bool = false, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil, verifiedContainers: VerifiedContainers, operationWideProgress: Bool = false, deliveryWorkController: DeliveryWorkController) {
+        self.deliveryWorkController = deliveryWorkController
         let ioGate = PipelineIOGate(); self.ioGate = ioGate
         self.plan = plan; self.files = files; self.fs = fs.replacingFileOps(PipelineFileOps(base: fs.fileOps, gate: ioGate)); self.fetcher = fetcher; self.journal = journal
         self.disk = disk; self.limit = limit; self.lease = lease; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log; layout = StagingLayout(id: plan.id)
@@ -395,17 +399,21 @@ private actor StagingSession {
             verifiedContainers.remove(try layout.object(object))
             let fs = fs, fetcher = fetcher, journal = journal, layout = layout, crashHooks = crashHooks
             let limiter = transferLimiter, tracker = progressTracker, mirror = objectMirrors[id] ?? 0
+            let deliveryWorkController = deliveryWorkController
             inFlightObjects.insert(id)
             task = Task {
                 defer { self.inFlightObjects.remove(id) }
                 try await limiter.acquire()
+                do { try await deliveryWorkController.acquire(.transfer) }
+                catch { await limiter.release(); throw error }
                 let fetchedMirror: Int
                 do {
                     fetchedMirror = try await PipelineIOGate.$objectID.withValue(id) {
                         try await fetcher.fetch(object, fs: fs, part: layout.object(object), startingMirror: mirror,
                             progress: { if let event = tracker.update(id, $0) { channel?.send(event) } })
                     }
-                } catch { await limiter.release(); throw error }
+                } catch { deliveryWorkController.release(.transfer); await limiter.release(); throw error }
+                deliveryWorkController.release(.transfer)
                 // The limiter bounds active transfers, not journal latency.
                 // Keep the shared task pending until its recovery hint and
                 // bookkeeping finish, so readers cannot race part replacement.
@@ -445,6 +453,7 @@ private actor StagingSession {
     private func cancelTransfers() { for task in transfers.values { task.cancel() } }
 
     private func nextWindow() throws -> [FileTask] {
+        let objectLimit = deliveryWorkController.isGameplayActive ? 1 : pipeline.prefetchObjects
         var selected: [FileTask] = [], ids = Set<String>(), bytes: Int64 = 0
         while cursor < files.count {
             let file = files[cursor]
@@ -455,10 +464,10 @@ private actor StagingSession {
             let referenced = SpaceBudget.references(file).filter { networkObjects.contains($0) || direct.contains($0) }
             let added = referenced.filter { !ids.contains($0) }
             let size = try added.reduce(Int64(0)) { try SpaceBudget.adding($0, plan.objects[$1]!.transferSize) }
-            if !selected.isEmpty, (ids.count + added.count > pipeline.prefetchObjects || size > pipeline.prefetchBytes - min(bytes, pipeline.prefetchBytes)
-                || selected.count >= pipeline.prefetchObjects) { break }
+            if !selected.isEmpty, (ids.count + added.count > objectLimit || size > pipeline.prefetchBytes - min(bytes, pipeline.prefetchBytes)
+                || selected.count >= objectLimit) { break }
             selected.append(file); ids.formUnion(added); bytes = try SpaceBudget.adding(bytes, size); cursor += 1
-            if bytes >= pipeline.prefetchBytes || ids.count >= pipeline.prefetchObjects { break }
+            if bytes >= pipeline.prefetchBytes || ids.count >= objectLimit { break }
         }
         return selected
     }
@@ -525,6 +534,17 @@ private actor StagingSession {
         step = .done; retention.release(token); lease.release()
     }
 
+    private func acquireAssembly() async throws {
+        try await assemblyLimiter.acquire()
+        do { try await deliveryWorkController.acquire(.assembly) }
+        catch { await assemblyLimiter.release(); throw error }
+    }
+
+    private func releaseAssembly() async {
+        deliveryWorkController.release(.assembly)
+        await assemblyLimiter.release()
+    }
+
     private func stageFile(_ file: FileTask, channel: PipelineChannel) async throws {
         var wholeFileFailures = 0
         let wholeFileAttemptLimit = 2
@@ -539,7 +559,7 @@ private actor StagingSession {
                 for id in direct { try admitMissingPart(id) }
                 try checkCapacity(written: min(file.size, try fs.size(at: layout.file(file.path)) ?? 0))
                 try await fetchObjects(direct, channel: channel)
-                try await assemblyLimiter.acquire()
+                try await acquireAssembly()
                 runningOutputs.insert(file.path)
                 do {
                     try await PipelineIOGate.$output.withValue(file.path) {
@@ -547,8 +567,8 @@ private actor StagingSession {
                             try await self.fetchFallback(id, channel: channel)
                         }
                     }
-                    await assemblyLimiter.release()
-                } catch { await assemblyLimiter.release(); throw error }
+                    await releaseAssembly()
+                } catch { await releaseAssembly(); throw error }
                 }
                 crashHooks.reach(.afterFileStagedBeforeJournal)
                 try await record(.fileStaged(path: file.path))
@@ -598,26 +618,31 @@ private actor StagingSession {
         guard let recipe = file.recipe else { return false }
         if failedContainers.contains(recipe.containerID) { try fallbackFile(file, reason: "digestMismatch"); return false }
         guard !chunkFallbackFiles.contains(file.path) else { return false }
-        if try await !FileRecipeAssembler.sourceMatches(recipe, fs: fs) {
+        try await acquireAssembly()
+        let matches: Bool
+        do { matches = try await FileRecipeAssembler.sourceMatches(recipe, fs: fs) }
+        catch { await releaseAssembly(); throw error }
+        await releaseAssembly()
+        if !matches {
             try fallbackFile(file, reason: "digestMismatch"); return false
         }
         try admitMissingPart(recipe.containerID)
         try checkCapacity()
         try await fetchObjects([recipe.containerID], channel: channel)
-        try await assemblyLimiter.acquire()
+        try await acquireAssembly()
         runningOutputs.insert(file.path)
         do {
             try await PipelineIOGate.$output.withValue(file.path) {
                 try await FileRecipeAssembler.assemble(file, plan: plan, fs: fs, applier: patchApplier, durable: durableFiles)
             }
-            await assemblyLimiter.release()
+            await releaseAssembly()
             return true
         } catch let fallback as RecipeFallback {
-            await assemblyLimiter.release()
+            await releaseAssembly()
             try fs.removeFile(at: layout.file(file.path)); ioGate.removeOutput(file.path); runningOutputs.remove(file.path)
             try fallbackFile(file, reason: fallback.reason)
             return false
-        } catch { await assemblyLimiter.release(); throw error }
+        } catch { await releaseAssembly(); throw error }
     }
 
     private func fetchFallback(_ id: String, channel: PipelineChannel) async throws {

@@ -4,7 +4,7 @@
 /// Scoped work observations for execution diagnostics. No global counters, paths
 /// or timing assumptions; normal operations leave the observer unset.
 package enum OperationWork: Hashable, Sendable {
-    case fetchTaskSubmitted, fetchTaskFinished, ownershipDrainWait, pipelinePullWaiting, sleepStarted
+    case fetchTaskSubmitted, fetchTaskFinished, ownershipDrainWait, pipelinePullWaiting, sleepStarted, deliveryWorkWaiting
     case planValidation, referrerIndexBuild, predictionFile, localRangeHash, assemblyStarted, assemblyFinished, stagingLeaseReleased
 
     @TaskLocal package static var observer: (@Sendable (OperationWork) -> Void)? = nil

@@ -40,6 +40,15 @@ enum PrimaryAction: Sendable, Equatable {
     case setUpRuntimes, needsRosetta, locationUnavailable, play, launching, playing
     case recoveryNeeded(String)
 
+    /// A paused repair, adoption or voice change retains its stricter exclusion.
+    func isDownload(pendingKind: PendingOperation.Kind?) -> Bool {
+        switch self {
+        case .install, .update: true
+        case .resume, .continueInParts: pendingKind == .install || pendingKind == .update
+        default: false
+        }
+    }
+
     static func resolve(_ state: GameState, runtimesReady: Bool,
         launch: LaunchUIState? = nil, missingComponents: Bool = false, rosetta: RosettaStatus = .unknown) -> Self {
         switch launch {

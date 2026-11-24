@@ -113,7 +113,7 @@ extension GameLibrary {
         }
         state.completed = false
         return PreparedPreDownload(transfer: PreDownloadTransfer(state: state, cache: scope.cache,
-            fetcher: settings.fetcher, disk: disk, hooks: hooks, maxConcurrentObjects: settings.maxConcurrentObjects, pipeline: settings.pipeline),
+            fetcher: settings.fetcher, disk: disk, hooks: hooks, maxConcurrentObjects: settings.maxConcurrentObjects, pipeline: settings.pipeline, deliveryWorkController: settings.deliveryWorkController),
             lease: scope.lease, lock: scope.lock)
     }
 

@@ -104,6 +104,37 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Download while playing", isOn: Binding(
+                    get: { model.downloadWhilePlaying },
+                    set: { enabled in
+                        do { try model.setDownloadWhilePlaying(enabled) } catch { model.show(error) }
+                    }
+                ))
+                if model.downloadWhilePlaying {
+                    LabeledContent("Maximum speed while playing") {
+                        HStack(spacing: 6) {
+                            TextField("Maximum speed while playing", value: Binding(
+                                get: { Double(model.playingDownloadSpeedLimit) / 1_000_000 },
+                                set: { value in
+                                    do { try model.setPlayingDownloadSpeedLimit(AppModel.downloadSpeedLimit(megabytesPerSecond: value)) }
+                                    catch { model.show(error) }
+                                }
+                            ), format: .number.precision(.fractionLength(0...1)))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 72)
+                            Text("MB/s", comment: "Unit after the download speed field: megabytes per second")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } footer: {
+                Text("Downloads pause before a game starts unless this is on. While playing, the lower of the two speed limits applies.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Notifications", isOn: Binding(
                     get: { model.notificationsEnabled },
                     set: { model.notificationsEnabled = $0 }

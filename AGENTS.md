@@ -194,6 +194,8 @@ Code must keep these guarantees. A PR that weakens one won't be merged.
 
 ## Current state
 
+- Cross-game downloads: `AppModel+PlayDownloads` coordinates the footer, Dock and shortcut Play paths. By default, pressing Play drains another edition’s eligible transfer and keeps a session-local, one-shot continuation tied to its saved plan. If planning was interrupted before publication, the exact initial request can restart after checking the original installation record and any pre-download offer. Manual pauses and same-edition pre-downloads retain their own resume behavior. With downloads during play enabled, another edition can install, update or pre-download with a separate live speed cap (10 MB/s by default, subject to the lower global cap). Delivery limits new concurrent work while a game holds the launch slot.
+
 - **Done:**
   - wish history export model and package logic: off-by-default global preference, private contained cache discovery with Chromium entry-metadata freshness for Global/CN Genshin/Star Rail/ZZZ, paced bounded API paging, UIGF v4.2 serialization including Star Rail collaboration warps and Genshin Miliastra Wonderland, save-panel data/counts, observable progress and typed localized errors. SwiftUI integration is separate.
   - notification model and production UserNotifications adapter: lazy permission, foreground suppression, queued availability revalidation, compacted durable campaign deduplication, explicit operation outcomes, dependency activation completion, settings API and region/edition selection requests. Settings and launcher selection views are integrated separately;

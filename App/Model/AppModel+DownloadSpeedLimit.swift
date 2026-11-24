@@ -9,17 +9,47 @@ import LauncherCore
     /// The value offered when the limit is first turned on.
     static let defaultDownloadSpeedLimit: Int64 = 10_000_000
     var downloadSpeedLimit: Int64? { globalLaunchSettings.downloadSpeedLimit }
+    var downloadWhilePlaying: Bool { globalLaunchSettings.downloadWhilePlaying }
+    var playingDownloadSpeedLimit: Int64 { globalLaunchSettings.playingDownloadSpeedLimit }
+
+    /// Preparation and recovery retain the game cap until the shared launch reservation ends.
+    var effectiveDownloadSpeedLimit: Int64? {
+        guard launchSlotOwner != nil else { return downloadSpeedLimit }
+        return min(downloadSpeedLimit ?? playingDownloadSpeedLimit, playingDownloadSpeedLimit)
+    }
+
+    func updateGameplayDeliveryPolicy() {
+        gameServices.setDownloadSpeedLimit(effectiveDownloadSpeedLimit)
+        gameServices.setGameplayDeliveryMode(launchSlotOwner != nil)
+    }
+
+    func setDownloadWhilePlaying(_ enabled: Bool) throws {
+        var settings = globalLaunchSettings
+        settings.downloadWhilePlaying = enabled
+        try saveGlobalLaunchSettings(settings)
+    }
+
+    func setPlayingDownloadSpeedLimit(_ bytesPerSecond: Int64) throws {
+        try Self.validateDownloadSpeedLimit(bytesPerSecond)
+        var settings = globalLaunchSettings
+        settings.playingDownloadSpeedLimit = bytesPerSecond
+        try saveGlobalLaunchSettings(settings)
+    }
 
     /// A nil limit means Unlimited.
     func setDownloadSpeedLimit(_ bytesPerSecond: Int64?) throws {
         if let bytesPerSecond {
-            guard Self.downloadSpeedLimitRange.contains(bytesPerSecond), bytesPerSecond % Self.downloadSpeedLimitStep == 0 else {
-                throw LauncherError.io("Invalid download speed limit")
-            }
+            try Self.validateDownloadSpeedLimit(bytesPerSecond)
         }
         var settings = globalLaunchSettings
         settings.downloadSpeedLimit = bytesPerSecond
         try saveGlobalLaunchSettings(settings)
+    }
+
+    private static func validateDownloadSpeedLimit(_ bytesPerSecond: Int64) throws {
+        guard downloadSpeedLimitRange.contains(bytesPerSecond), bytesPerSecond % downloadSpeedLimitStep == 0 else {
+            throw LauncherError.io("Invalid download speed limit")
+        }
     }
 
     /// Rounds a typed megabytes-per-second value to a valid limit.
