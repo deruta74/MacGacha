@@ -108,10 +108,10 @@ struct MacGachaApp: App {
         model.openShortcutURL(url)
     }
 
-    /// Closing the launcher still quits MacGacha, except while a shortcut keeps it hidden
-    /// to supervise the game it started.
+    /// Scheduled work survives closing the window. Explicit Quit still terminates the app.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        !(dockModel?.launchedHidden ?? CommandLine.arguments.contains(GameShortcut.launchArgument))
+        if dockModel?.keepsUpdateQueueRunning == true { return false }
+        return !(dockModel?.launchedHidden ?? CommandLine.arguments.contains(GameShortcut.launchArgument))
     }
 
     /// A Dock click while a shortcut kept the launcher hidden shows it.
