@@ -82,25 +82,11 @@ struct GameFooter: View {
                     }
                 }
                 let line = action == .progress && progressHovered ? state.progressDetail ?? statusLine : statusLine
-                if case .failed = launch, !line.isEmpty {
-                    LaunchFailureNotice(title: line, showsLog: launchLogAvailable) { model.openLaunchLog(game.id) }
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
-
-                } else if !line.isEmpty || launchLogAvailable {
-                HStack(spacing: 8) {
-                    // Hovering the progress capsule swaps the hint for the numbers, as HoYoPlay does.
-                    Text(line)
-                        .monospacedDigit()
-                        .contentTransition(.opacity)
-                    if launchLogAvailable {
-                        Button("Open Log") { model.openLaunchLog(game.id) }
-                            .buttonStyle(.link)
-                            .underline()
+                if !line.isEmpty || launchLogAvailable {
+                    FooterStatusNotice(title: line, isFailure: isLaunchFailure, showsLog: launchLogAvailable) {
+                        model.openLaunchLog(game.id)
                     }
-                }
-                .font(.callout)
-                .foregroundStyle(.white.opacity(0.85))
-                .shadow(color: .black.opacity(0.4), radius: 3)
+                    .transition(.opacity)
                 }
                 if let held = state.spaceShortage?.heldByMacOS {
                     PurgeableSpaceHint(bytes: held)
@@ -206,6 +192,11 @@ struct GameFooter: View {
     private var playTime: PlayTimeSummary? {
         guard let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 else { return nil }
         return summary
+    }
+
+    private var isLaunchFailure: Bool {
+        if case .failed = launch { return true }
+        return false
     }
 
     private var launchLogAvailable: Bool {
@@ -911,30 +902,40 @@ struct OtherRegionNote: View {
     }
 }
 
-/// A failed launch stands out from the quiet status line: the same glass capsule as the facts above it, warm-tinted.
-private struct LaunchFailureNotice: View {
+/// Status and progress share a glass surface. Launch failures keep their warning tint and log action.
+private struct FooterStatusNotice: View {
     let title: String
+    let isFailure: Bool
     let showsLog: Bool
     let openLog: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .accessibilityHidden(true)
-            Text(title)
+            if isFailure {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
+            }
+            if !title.isEmpty {
+                Text(verbatim: title)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentTransition(.opacity)
+            }
             if showsLog {
                 Button("Open Log", action: openLog)
                     .buttonStyle(.link)
                     .underline()
+                    .fixedSize()
             }
         }
-        .font(.callout.weight(.medium))
+        .font(.callout.weight(isFailure ? .medium : .regular))
         .foregroundStyle(.white)
         .padding(.horizontal, 12)
-        .frame(height: 30)
-        .glassEffect(.regular.tint(.orange.opacity(0.25)), in: .capsule)
-        .fixedSize()
+        .padding(.vertical, 6)
+        .frame(minHeight: 30)
+        .glassEffect(isFailure ? .regular.tint(.orange.opacity(0.25)) : .regular,
+            in: .rect(cornerRadius: 15, style: .continuous))
     }
 }
 
