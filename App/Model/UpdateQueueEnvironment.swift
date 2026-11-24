@@ -11,6 +11,7 @@ import Network
     private var pathMonitor: NWPathMonitor?
     private var powerSource: CFRunLoopSource?
     private var wakeObserver: NSObjectProtocol?
+    private var clockObservers: [NSObjectProtocol] = []
     private var onChange: (@MainActor () -> Void)?
 
     var idleSeconds: TimeInterval {
@@ -43,6 +44,11 @@ import Network
         if let source {
             powerSource = source
             CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+        clockObservers = [NSNotification.Name.NSSystemTimeZoneDidChange, .NSSystemClockDidChange].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onChange?() }
+            }
         }
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
@@ -89,6 +95,8 @@ import Network
         powerSource = nil
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
         wakeObserver = nil
+        for observer in clockObservers { NotificationCenter.default.removeObserver(observer) }
+        clockObservers.removeAll()
         permitsNetwork = false
         onAC = nil
     }
