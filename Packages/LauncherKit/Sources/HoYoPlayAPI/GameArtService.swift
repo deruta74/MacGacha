@@ -9,9 +9,9 @@ import DownloadEngine
 /// this actor, with filesystem work delegated to BlockingIO. No failure is surfaced to the user.
 public actor GameArtService {
     private static let ttl: TimeInterval = 6 * 3600
-    // Five cards × (16 backgrounds × 5 assets + icon + logo), plus headroom.
+    // Six cards × (16 backgrounds × 5 assets + icon + logo), plus headroom.
     public static let maximumBackgroundsPerGame = 16
-    public static let maximumAssets = 480
+    public static let maximumAssets = 560
     private static let indexLimit = 512 << 10
     private static func gameIDs(_ region: Region) -> [String: String] {
         Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0.id) })

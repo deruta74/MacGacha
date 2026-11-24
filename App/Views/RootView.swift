@@ -96,8 +96,9 @@ struct RootView: View {
                     VStack(alignment: .trailing, spacing: 12) {
                         Text(game.name).font(.largeTitle.bold()).foregroundStyle(.white)
                         switch card {
-                        case .petitPlanet:
-                            Link(destination: URL(string: "https://planet.hoyoverse.com")!) {
+                        case .petitPlanet, .nexusAnima:
+                            let site = card == .petitPlanet ? "https://planet.hoyoverse.com" : "https://hna.hoyoverse.com"
+                            Link(destination: URL(string: site)!) {
                                 if model.gameArt[game.id]?.reservationOpen == true {
                                     Text("Pre-register")
                                 } else {

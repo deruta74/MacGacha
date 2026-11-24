@@ -47,6 +47,8 @@ extension LauncherGame {
                 tint: .orange, deepTint: .indigo))
             cards.append(Self(id: CatalogGame.petitPlanet.rawValue, name: "Petit Planet",
                 tint: .mint, deepTint: .teal))
+            cards.append(Self(id: CatalogGame.nexusAnima.rawValue, name: "Honkai: Nexus Anima",
+                tint: .cyan, deepTint: .indigo))
         }
         return cards
     }

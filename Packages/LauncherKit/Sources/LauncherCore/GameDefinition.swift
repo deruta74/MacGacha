@@ -81,12 +81,14 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
 /// Global HoYoPlay cards that have no verified Windows launch recipe.
 public enum CatalogGame: String, CaseIterable, Sendable {
     case honkaiImpact = "honkai-impact-3rd"
+    case nexusAnima = "honkai-nexus-anima"
     case petitPlanet = "petit-planet"
 
     public var publisherID: String {
         switch self {
         case .honkaiImpact: "5TIVvvcwtM"
         case .petitPlanet: "viiywh5G2H"
+        case .nexusAnima: "yneO4yGc4x"
         }
     }
 
