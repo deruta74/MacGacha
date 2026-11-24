@@ -35,7 +35,8 @@ struct InstallSheet: View {
     private var verdict: SpaceVerdict? { estimate.map(SpaceVerdict.of) }
     private var immediateVerdict: SpaceVerdict? { estimate.map(SpaceVerdict.immediate) }
     /// Another game's operation holds the one slot; starting here would only fail as busy.
-    private var blocked: Bool { model.isGameOperationRunning }
+    private var blocked: Bool { model.isGameOperationRunning || !model.canOperateGameDuringPlay(game.id, isDownload: true) }
+    private var adoptionBlocked: Bool { model.isGameOperationRunning || !model.canOperateGameDuringPlay(game.id, isDownload: false) }
     private var displayPath: String {
         let path = location.path(percentEncoded: false)
         return path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
@@ -111,7 +112,7 @@ struct InstallSheet: View {
             case .location:
                 location = folder.appendingPathComponent(game.defaultInstallDirectoryName, isDirectory: true)
             case .existing:
-                guard !voices.isEmpty, !blocked else { return }
+                guard !voices.isEmpty, !adoptionBlocked else { return }
                 model.adoptGame(game.id, folder: folder, voices: voices)
                 dismiss()
             }
@@ -148,6 +149,9 @@ struct InstallSheet: View {
     }
 
     @ViewBuilder private var summary: some View {
+        if !model.canOperateGameDuringPlay(game.id, isDownload: true) {
+            Text("Available after the game closes.").foregroundStyle(.secondary)
+        }
         if let estimate {
             LabeledContent("Download", value: String(localized: "about \(ByteSize.text(estimate.download))", comment: "An estimated size"))
             LabeledContent("Needs on disk", value: String(localized: "about \(ByteSize.text(estimate.diskWhole))", comment: "An estimated size"))
@@ -189,7 +193,7 @@ struct InstallSheet: View {
 
     private var existingButton: some View {
         Button("Use an Existing Installation…") { pickMode = .existing; picking = true }
-            .disabled(voices.isEmpty || blocked)
+            .disabled(voices.isEmpty || adoptionBlocked)
             .help("Choose a folder that already has \(game.name). MacGacha checks it and downloads only what's missing.")
     }
 
@@ -275,6 +279,9 @@ struct VoicePacksSheet: View {
                     Text("Added packs are downloaded; removed ones free their space. Keep at least one.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if !model.canOperateGameDuringPlay(game.id, isDownload: false) {
+                        Text("Available after the game closes.").foregroundStyle(.secondary)
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -283,13 +290,14 @@ struct VoicePacksSheet: View {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("Apply") {
-                    guard !model.isGameOperationRunning else { return }
+                    guard !model.isGameOperationRunning, model.canOperateGameDuringPlay(game.id, isDownload: false) else { return }
                     model.setVoices(game.id, voices)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(voices.isEmpty || voices == installed || model.isGameOperationRunning)
-                .help(model.isGameOperationRunning ? Text("Wait for the current download to finish or pause it") : Text(verbatim: ""))
+                .disabled(voices.isEmpty || voices == installed || model.isGameOperationRunning || !model.canOperateGameDuringPlay(game.id, isDownload: false))
+                .help(!model.canOperateGameDuringPlay(game.id, isDownload: false) ? Text("Available after the game closes.")
+                    : model.isGameOperationRunning ? Text("Wait for the current download to finish or pause it") : Text(verbatim: ""))
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)

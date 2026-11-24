@@ -250,6 +250,13 @@ struct GameFooter: View {
                 return String(localized: "Keep MacGacha open — you can pause and resume any time")
             }
         }
+        switch action {
+        case .install, .update, .resume, .continueInParts, .finishUninstall:
+            if !model.canOperateGameDuringPlay(game.id, isDownload: action.isDownload(pendingKind: model.gameRecord(game.id)?.pending?.kind)) {
+                return String(localized: "Available after the game closes.")
+            }
+        default: break
+        }
         if let launchLine { return launchLine }
         if !state.isAutomaticSandboxUpdate, state.activity == nil, let failure = model.sandboxFailure(for: game.id) {
             return String(localized: "Miliastra Sandbox didn't update: \(failure.userMessage)",
@@ -366,6 +373,7 @@ struct GameFooter: View {
 
     /// Set while another game holds the one operation slot and this game is idle.
     private var busyElsewhere: String? {
+        if action == .play, model.canPlayAlongsideGameOperation(game.id) { return nil }
         guard model.isGameOperationRunning, state.activity == nil else { return nil }
         let other = LauncherGame.all.first { $0.id != game.id && model.games[$0.id]?.activity != nil }
         guard let other, case .working(let phase, _, _, _, _) = model.games[other.id]?.activity else {
@@ -419,7 +427,10 @@ struct PrimaryActionButton: View {
 
     /// Another game's operation holds the one slot; starting this one would only fail as busy.
     /// (This game's own running operation shows progress instead of a prominent button.)
-    private var blocked: Bool { model.isGameOperationRunning }
+    private var blockedDuringPlay: Bool {
+        !model.canOperateGameDuringPlay(game.id, isDownload: action.isDownload(pendingKind: model.gameRecord(game.id)?.pending?.kind))
+    }
+    private var blocked: Bool { model.isGameOperationRunning || blockedDuringPlay }
 
     /// Another game holds the one launch slot, from pressing Play until its files are back.
     private var playingElsewhere: Bool {
@@ -459,7 +470,7 @@ struct PrimaryActionButton: View {
                 .help(unavailablePath)
         case .play:
             prominent("Play", alwaysEnabled: true) { model.play(game.id) }
-                .disabled(playingElsewhere)
+                .disabled(playingElsewhere || !model.canPlayAlongsideGameOperation(game.id))
         case .launching:
             launching
         case .playing:
@@ -486,7 +497,9 @@ struct PrimaryActionButton: View {
         .font(.title3)
         .keyboardShortcut(.defaultAction)
         .disabled(blocked && !alwaysEnabled)
-        .help(blocked && !alwaysEnabled ? Text("Wait for the other game's download to finish or pause it") : Text(verbatim: ""))
+        .help(blocked && !alwaysEnabled
+            ? (blockedDuringPlay ? Text("Available after the game closes.") : Text("Wait for the other game's download to finish or pause it"))
+            : Text(verbatim: ""))
     }
 
     private func waiting(_ title: LocalizedStringKey, spinner: Bool = false, symbol: String? = nil) -> some View {
@@ -691,7 +704,9 @@ struct GameMenu: View {
                 Button("Check for Updates", systemImage: "arrow.triangle.2.circlepath") { model.checkForGameUpdate(game.id) }
                     .disabled(model.gameUpdateCheck[game.id] == .checking)
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
+                    .disabled(!model.canOperateGameDuringPlay(game.id, isDownload: false))
                 Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
+                    .disabled(!model.canOperateGameDuringPlay(game.id, isDownload: false))
                 sandboxItems
                 if model.wishHistoryEnabled {
                     Button("Export Wish History…", systemImage: "square.and.arrow.up") { gameSheet = .wishExport(game.id) }
@@ -734,10 +749,10 @@ struct GameMenu: View {
             Divider()
             if model.preDownloadState(for: game.id).canDelete {
                 Button("Delete Pre-download…", systemImage: "xmark.bin") { confirmingPreDownloadDeletion = true }
-                .disabled(model.isGameOperationRunning || isLive)
+                .disabled(model.isGameOperationRunning || isLive || !model.canOperateGameDuringPlay(game.id, isDownload: false))
             }
             Button("Uninstall…", systemImage: "trash", role: .destructive) { confirmingUninstall = true }
-                .disabled(model.isGameOperationRunning || isLive)
+                .disabled(model.isGameOperationRunning || isLive || !model.canOperateGameDuringPlay(game.id, isDownload: false))
         } label: {
             Image(systemName: "ellipsis")
                 .font(.title3)

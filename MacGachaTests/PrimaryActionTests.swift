@@ -9,6 +9,16 @@ import LauncherCore
 @testable import MacGacha
 
 struct PrimaryActionTests {
+    @Test(arguments: [PendingOperation.Kind.install, .update, .repair, .adopt, .voices])
+    func sessionDownloadAdmissionMatchesTheExactPendingWork(_ kind: PendingOperation.Kind) {
+        let delivery = kind == .install || kind == .update
+        #expect(PrimaryAction.install.isDownload(pendingKind: kind))
+        #expect(PrimaryAction.update(to: "2").isDownload(pendingKind: kind))
+        #expect(PrimaryAction.resume.isDownload(pendingKind: kind) == delivery)
+        #expect(PrimaryAction.continueInParts.isDownload(pendingKind: kind) == delivery)
+        #expect(!PrimaryAction.finishUninstall.isDownload(pendingKind: kind))
+    }
+
     @Test func rosettaPrecedenceIsLimitedToInstalledIdleGames() {
         let installed = GameState(status: .installed(tag: "1"))
         for ready in [true, false] {

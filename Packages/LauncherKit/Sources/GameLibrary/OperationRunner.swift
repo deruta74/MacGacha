@@ -25,16 +25,17 @@ public actor OperationRunner {
     private let fileOps: any FileOps
     private let maxConcurrentObjects: Int
     private let pipeline: PipelineConfiguration
+    private let deliveryWorkController: DeliveryWorkController
     private let locationProbe: any GameLocationProbing
 
     public init(store: GameRecordStore, fetcher: ChunkFetcher, disk: any DiskSpaceProbe, log: EventLog?,
         crashHooks: CrashHooks = .none, fileOps: any FileOps = SystemFileOps(),
         identityProvider: any FileSystemIdentityProvider = SystemFileSystemIdentityProvider(),
         maxConcurrentObjects: Int = SpaceBudget.defaultMaxConcurrentObjects, pipeline: PipelineConfiguration = .default,
-        locationProbe: any GameLocationProbing = SystemGameLocationProbe()) {
+        locationProbe: any GameLocationProbing = SystemGameLocationProbe(), deliveryWorkController: DeliveryWorkController = DeliveryWorkController()) {
         self.store = store; self.fetcher = fetcher; self.disk = disk; self.log = log
         self.crashHooks = crashHooks; self.fileOps = fileOps; self.identityProvider = identityProvider
-        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline; self.locationProbe = locationProbe
+        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline; self.deliveryWorkController = deliveryWorkController; self.locationProbe = locationProbe
     }
 
     /// managedPaths is the complete target build's path set, including files
@@ -65,8 +66,8 @@ public actor OperationRunner {
         stream(game, request: .start(.fresh(root, executable, sandboxListPath), plan, .install, target, managedPaths, reservedLocations), approved: approved, lease: lease)
     }
 
-    func preDownloadSettings() -> (fetcher: ChunkFetcher, maxConcurrentObjects: Int, pipeline: PipelineConfiguration) {
-        (fetcher, maxConcurrentObjects, pipeline)
+    func preDownloadSettings() -> (fetcher: ChunkFetcher, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, deliveryWorkController: DeliveryWorkController) {
+        (fetcher, maxConcurrentObjects, pipeline, deliveryWorkController)
     }
 
     public func reconcile(_ game: String) async throws -> GameRecord? {
@@ -108,7 +109,7 @@ public actor OperationRunner {
     private func stream(_ game: String, request: RunnerRequest, approved: Bool, lease: GameOperationLease? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
         let session = RunnerSession(game: game, request: request, approved: approved, store: store, fetcher: fetcher,
             disk: disk, log: log, hooks: crashHooks, fileOps: fileOps, lease: lease, identityProvider: identityProvider,
-            maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, locationProbe: locationProbe)
+            maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, locationProbe: locationProbe, deliveryWorkController: deliveryWorkController)
         return AsyncThrowingStream(unfolding: { try await session.next() })
     }
 }
@@ -144,6 +145,7 @@ private actor RunnerSession {
     private let fileOps: any FileOps
     private let maxConcurrentObjects: Int
     private let pipeline: PipelineConfiguration
+    private let deliveryWorkController: DeliveryWorkController
     private let locationProbe: any GameLocationProbing
     private var lease: GameOperationLease?
     private var iterator: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
@@ -155,11 +157,11 @@ private actor RunnerSession {
 
     init(game: String, request: RunnerRequest, approved: Bool, store: GameRecordStore, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe, log: EventLog?, hooks: CrashHooks, fileOps: any FileOps, lease: GameOperationLease?,
-        identityProvider: any FileSystemIdentityProvider, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, locationProbe: any GameLocationProbing) {
+        identityProvider: any FileSystemIdentityProvider, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, locationProbe: any GameLocationProbing, deliveryWorkController: DeliveryWorkController) {
         self.game = game; self.request = request; self.approved = approved; self.store = store
         self.fetcher = fetcher; self.disk = disk; self.log = log; self.hooks = hooks; self.fileOps = fileOps
         self.lease = lease; self.identityProvider = identityProvider
-        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline; self.locationProbe = locationProbe
+        self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline; self.deliveryWorkController = deliveryWorkController; self.locationProbe = locationProbe
     }
 
     func next() async throws -> OperationEvent? {
@@ -288,7 +290,7 @@ private actor RunnerSession {
         let engine = try InstallOperation(plan: plan, installRoot: current.installPath, fetcher: fetcher, disk: disk,
             mode: .batched(approved: approved), fileOps: fileOps, crashHooks: hooks, writesCompletionReceipt: true,
             requireRequestedPlan: true, expectedRootIdentity: current.installIdentity, identityProvider: identityProvider,
-            maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, patchApplier: HDiff13PatchApplier(), log: log, objectCache: cache)
+            maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, patchApplier: HDiff13PatchApplier(), log: log, objectCache: cache, deliveryWorkController: deliveryWorkController)
         iterator = engine.run(retaining: lease).makeAsyncIterator()
         return false
     }

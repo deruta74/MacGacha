@@ -133,10 +133,11 @@ import RuntimeManager
     func play(_ id: String) {
         guard canBeginGameOrRuntimeOperation() else { return }
         guard !runtimeCatalogUnavailable, runtimeCatalogMutationID == nil, launchSlotOwner == nil, launchTasks.isEmpty,
-            (gameOperation?.id != id || gameOperation?.yieldsToPlay == true),
+            canPlayAlongsideGameOperation(id),
             let game = GameDefinition.all.first(where: { $0.id == id }) else { return }
         if case .recoveryNeeded = launchStates[id] { return }
         let preDownload = gameOperation.flatMap { $0.id == id && $0.isPreDownload ? $0 : nil }
+        let otherDownload = gameOperation.flatMap { $0.id != id && $0.permitsOtherGamePlay && !globalLaunchSettings.downloadWhilePlaying ? $0 : nil }
         let automaticSandbox = gameOperation.flatMap { $0.automaticSandboxVersion != nil ? $0 : nil }
         let sandboxTask = automaticSandbox == nil ? nil : gameTask
         // Reserve before any await, and assume potentially live before spawning.
@@ -156,6 +157,7 @@ import RuntimeManager
             guard let self else { return }
             defer {
                 if self.launchTaskGenerations[id] == generation { self.launchTasks[id] = nil; self.launchTaskGenerations[id] = nil }
+                self.resumeDownloadAfterPlayIfPossible()
             }
             do {
                 if automaticSandbox != nil {
@@ -163,6 +165,7 @@ import RuntimeManager
                     try await self.gameServices.waitForSandboxDrain(id)
                 }
                 if let preDownload { _ = try await self.stopPreDownloadOperation(preDownload) }
+                if let otherDownload { try await self.pauseDownloadForPlay(otherDownload) }
                 await self.reattachOnStart()
                 if let error = self.launchStartupError { throw error }
                 await self.refreshRosetta()
@@ -174,6 +177,14 @@ import RuntimeManager
                 try await self.flushLaunchSettings()
                 guard let record = self.gameRecords[id] else { throw LauncherError.io("Game is not installed") }
                 try await self.recheckGameLocation(id)
+                // Preferences can change during startup/location/settings reads.
+                // Join a toggle's stop before crossing the actual launch boundary.
+                if !self.globalLaunchSettings.downloadWhilePlaying {
+                    if let pause = self.playDownloadPauseTask { await pause.value }
+                    else if let operation = self.gameOperation, operation.id != id, operation.permitsOtherGamePlay {
+                        try await self.pauseDownloadForPlay(operation)
+                    }
+                }
                 for await event in try await services.launch(game: game, record: record) {
                     if Task.isCancelled { return } // Detaches the observer; core supervision survives.
                     await self.handleLaunch(event, id: id)

@@ -11,6 +11,58 @@ import RuntimeManager
 @testable import MacGacha
 
 @Suite @MainActor struct DownloadSpeedLimitModelTests {
+    @Test func gameplayPreferencesPersistAndReservedLaunchUsesTheSmallerCap() async throws {
+        let preferences = SpeedPreferences(), model = try fixture(preferences)
+        #expect(!model.downloadWhilePlaying)
+        #expect(model.playingDownloadSpeedLimit == 10_000_000)
+        try model.setDownloadWhilePlaying(true)
+        try model.setPlayingDownloadSpeedLimit(3_000_000)
+        try model.setDownloadSpeedLimit(8_000_000)
+        #expect(model.effectiveDownloadSpeedLimit == 8_000_000)
+        model.launchSlotOwner = "genshin"
+        #expect(model.effectiveDownloadSpeedLimit == 3_000_000)
+        try model.setDownloadSpeedLimit(1_000_000)
+        #expect(model.effectiveDownloadSpeedLimit == 1_000_000)
+        try model.setDownloadSpeedLimit(nil)
+        #expect(model.effectiveDownloadSpeedLimit == 3_000_000)
+        model.launchSlotOwner = nil
+        #expect(model.effectiveDownloadSpeedLimit == nil)
+        try await model.flushLaunchSettings()
+        let second = try fixture(preferences)
+        await second.reattachOnStart()
+        #expect(second.downloadWhilePlaying)
+        #expect(second.playingDownloadSpeedLimit == 3_000_000)
+    }
+
+    @Test func failedGameplayPreferenceWriteRestoresDurableValuesWhileReserved() async throws {
+        let preferences = SpeedPreferences(), model = try fixture(preferences)
+        try model.setDownloadWhilePlaying(true)
+        try model.setPlayingDownloadSpeedLimit(3_000_000)
+        try await model.flushLaunchSettings()
+        model.launchSlotOwner = "genshin"
+        preferences.failWrites = true
+        try model.setDownloadWhilePlaying(false)
+        try model.setPlayingDownloadSpeedLimit(8_000_000)
+        await #expect(throws: LauncherError.self) { try await model.flushLaunchSettings() }
+        #expect(model.downloadWhilePlaying)
+        #expect(model.playingDownloadSpeedLimit == 3_000_000)
+        #expect(model.effectiveDownloadSpeedLimit == 3_000_000)
+    }
+
+    @Test func reservedLaunchChangesTheLiveLimiterAndExitRestoresUnlimited() async throws {
+        let preferences = SpeedPreferences(), limiter = DownloadRateLimiter()
+        let model = try fixture(preferences, limiter: limiter)
+        try model.setPlayingDownloadSpeedLimit(100_000)
+        try await model.flushLaunchSettings()
+        #expect(!limiter.isLimited)
+        model.launchSlotOwner = "genshin"
+        #expect(limiter.isLimited)
+        #expect(try await limiter.acquire(upTo: 100_000) == 10_000)
+        model.launchSlotOwner = nil
+        #expect(!limiter.isLimited)
+        #expect(try await limiter.acquire(upTo: 100_000) == 100_000)
+    }
+
     @Test func customDecimalLimitsPersistAndSerializeWithOtherGlobalWrites() async throws {
         let preferences = SpeedPreferences(), model = try fixture(preferences)
         #expect(model.downloadSpeedLimit == nil)
@@ -32,13 +84,22 @@ import RuntimeManager
         let preferences = SpeedPreferences(), model = try fixture(preferences)
         for invalid: Int64 in [-1, 0, 5, 99_999, 5_242_880, 10_000_100_000, Int64.max] {
             #expect(throws: LauncherError.self) { try model.setDownloadSpeedLimit(invalid) }
+            #expect(throws: LauncherError.self) { try model.setPlayingDownloadSpeedLimit(invalid) }
         }
         #expect(model.downloadSpeedLimit == nil)
         model.setLanguageRestart(UUID())
         #expect(throws: LauncherError.busy("Application language restart is in progress")) {
             try model.setDownloadSpeedLimit(5_000_000)
         }
+        #expect(throws: LauncherError.busy("Application language restart is in progress")) {
+            try model.setPlayingDownloadSpeedLimit(5_000_000)
+        }
+        #expect(throws: LauncherError.busy("Application language restart is in progress")) {
+            try model.setDownloadWhilePlaying(true)
+        }
         #expect(model.downloadSpeedLimit == nil)
+        #expect(!model.downloadWhilePlaying)
+        #expect(model.playingDownloadSpeedLimit == 10_000_000)
         #expect(preferences.writes == 0)
     }
 

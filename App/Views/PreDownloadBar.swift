@@ -13,7 +13,7 @@ struct PreDownloadBar: View {
     private var overlay: PreDownloadOverlay { model.preDownloadState(for: game.id) }
     /// A paused install or update owns the game until it finishes, so a transfer can't start or resume.
     private var blocked: Bool {
-        model.isGameOperationRunning || gameIsLive || model.gameRecord(game.id)?.pending != nil
+        model.isGameOperationRunning || gameIsLive || !model.canOperateGameDuringPlay(game.id, isDownload: true) || model.gameRecord(game.id)?.pending != nil
     }
 
     var body: some View {
@@ -133,7 +133,7 @@ struct PreDownloadButton: View {
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
             .foregroundStyle(.white)
-            .disabled(model.isGameOperationRunning || gameIsLive || model.gameRecord(game.id)?.pending != nil)
+            .disabled(model.isGameOperationRunning || gameIsLive || !model.canOperateGameDuringPlay(game.id, isDownload: true) || model.gameRecord(game.id)?.pending != nil)
             .help(label)
             .accessibilityLabel(Text(verbatim: label))
             .popover(isPresented: $showingHint, arrowEdge: .top) {

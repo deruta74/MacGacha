@@ -31,7 +31,7 @@ import GameLibrary
     }
 
     private func canOperateSandbox(_ id: String) -> Bool {
-        guard GameDefinition.find(id)?.family == .genshin,
+        guard GameDefinition.find(id)?.family == .genshin, canOperateGameDuringPlay(id, isDownload: false),
             languageRestart == nil, !updater.isInstallingUpdate, !storageCleanupInProgress,
             prefixResetGame == nil, !gameMoveRecoveryReservation, runtimeCatalogMutationID == nil,
             launchStartupError == nil, gameOperation == nil, games[id]?.activity == nil,

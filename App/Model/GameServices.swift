@@ -13,6 +13,7 @@ extension SandboxArchiveExtractor: @retroactive SandboxPackageExtracting {}
 typealias GameEventStream = AsyncThrowingStream<OperationEvent, any Error>
 
 protocol GameServices: Sendable {
+    func setGameplayDeliveryMode(_ active: Bool)
     func setDownloadSpeedLimit(_ bytesPerSecond: Int64?)
     func start() async
     func recoverPendingMoves() async -> [String]
@@ -55,6 +56,7 @@ extension GameServices {
     private func unavailableSandbox() -> GameEventStream {
         GameEventStream { $0.finish(throwing: LauncherError.busy("Sandbox is unavailable")) }
     }
+    func setGameplayDeliveryMode(_ active: Bool) {}
     func setDownloadSpeedLimit(_ bytesPerSecond: Int64?) {}
     func recoverPendingMoves() async -> [String] { [] }
     func move(_ id: String, to folder: URL) async -> GameEventStream {
@@ -74,6 +76,7 @@ extension GameServices {
 /// Construction does no filesystem work. All core work runs on service/core
 /// executors, and API requests and chunk transfers share one host-policy client per region.
 final class LiveGameServices: GameServices, Sendable {
+    private let deliveryWorkController: DeliveryWorkController
     private let downloadRateLimiter: DownloadRateLimiter
     private let libraries: [Region: GameLibrary]
     private let store: GameRecordStore
@@ -82,11 +85,13 @@ final class LiveGameServices: GameServices, Sendable {
 
     init(paths: AppPaths = .standard(), http: (any HTTPClient)? = nil,
         downloadRateLimiter: DownloadRateLimiter = DownloadRateLimiter(),
+        deliveryWorkController: DeliveryWorkController = DeliveryWorkController(),
         disk: any DiskSpaceProbe = SystemDiskSpaceProbe(), retry: RetryPolicy = RetryPolicy(),
         sleeper: any Sleeper = ContinuousSleeper(), log: EventLog? = nil,
         guard operationGuard: (any GameOperationGuard)? = nil, locationProbe: any GameLocationProbing = SystemGameLocationProbe()) {
         let store = GameRecordStore(directory: paths.games), eventLog = log ?? EventLog(directory: paths.logs)
         self.store = store; self.log = eventLog; self.downloadRateLimiter = downloadRateLimiter
+        self.deliveryWorkController = deliveryWorkController
         var libraries: [Region: GameLibrary] = [:], sessions: [Region: DeliveryHTTPSession] = [:]
         for region in Region.allCases {
             let client: any HTTPClient
@@ -94,12 +99,13 @@ final class LiveGameServices: GameServices, Sendable {
             else { let owned = DeliveryHTTPSession(region: region, rateLimiter: downloadRateLimiter); sessions[region] = owned; client = owned.client }
             let fetcher = ChunkFetcher(http: client, retry: retry, sleeper: sleeper)
             libraries[region] = GameLibrary(paths: paths, api: DeliveryAPI(http: client, region: region),
-                runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog, locationProbe: locationProbe),
+                runner: OperationRunner(store: store, fetcher: fetcher, disk: disk, log: eventLog, locationProbe: locationProbe, deliveryWorkController: deliveryWorkController),
                 store: store, disk: disk, log: eventLog, guard: operationGuard, locationProbe: locationProbe,
                 sandboxExtractor: SandboxArchiveExtractor())
         }
         self.libraries = libraries; self.sessions = sessions
     }
+    func setGameplayDeliveryMode(_ active: Bool) { deliveryWorkController.setGameplayActive(active) }
     func setDownloadSpeedLimit(_ bytesPerSecond: Int64?) { downloadRateLimiter.setBytesPerSecond(bytesPerSecond) }
     private func library(for game: GameDefinition) -> GameLibrary { libraries[game.region]! }
 

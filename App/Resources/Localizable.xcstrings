@@ -10472,6 +10472,88 @@
         }
       }
     },
+    "Download while playing" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Während des Spielens herunterladen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descargar mientras juegas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Télécharger pendant le jeu"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unduh saat bermain"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲーム中もダウンロード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임 중 다운로드"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Baixar enquanto joga"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Скачивать во время игры"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ดาวน์โหลดขณะเล่นเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Завантажувати під час гри"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tải xuống khi đang chơi"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏时下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遊戲時下載"
+          }
+        }
+      }
+    },
     "Downloaded again when you switch to that region." : {
       "localizations" : {
         "de" : {
@@ -10880,6 +10962,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在下載⋯已取得紀錄：%lld"
+          }
+        }
+      }
+    },
+    "Downloads pause before a game starts unless this is on. While playing, the lower of the two speed limits applies." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloads werden vor dem Spielstart pausiert, wenn diese Option ausgeschaltet ist. Beim Spielen gilt das niedrigere der beiden Geschwindigkeitslimits."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las descargas se pausan antes de iniciar un juego si esta opción está desactivada. Mientras juegas, se aplica el menor de los dos límites de velocidad."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les téléchargements sont mis en pause avant le lancement du jeu si cette option est désactivée. Pendant le jeu, la plus basse des deux limites de vitesse s’applique."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unduhan dijeda sebelum game dimulai kecuali opsi ini diaktifkan. Saat bermain, batas kecepatan yang lebih rendah dari kedua batas berlaku."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この設定がオフの場合、ゲーム開始前にダウンロードが一時停止します。ゲーム中は2つの速度制限のうち低い方が適用されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 옵션이 꺼져 있으면 게임 시작 전에 다운로드가 일시 정지됩니다. 게임 중에는 두 속도 제한 중 더 낮은 값이 적용됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Os downloads são pausados antes de iniciar um jogo, a menos que esta opção esteja ativada. Enquanto joga, aplica-se o menor dos dois limites de velocidade."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Если эта настройка выключена, скачивания приостанавливаются перед запуском игры. Во время игры действует меньшее из двух ограничений скорости."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "การดาวน์โหลดจะหยุดชั่วคราวก่อนเริ่มเกม เว้นแต่จะเปิดตัวเลือกนี้ ขณะเล่นเกมจะใช้ขีดจำกัดความเร็วที่ต่ำกว่าจากทั้งสองค่า"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Якщо цей параметр вимкнено, завантаження призупиняються перед запуском гри. Під час гри діє менше з двох обмежень швидкості."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Các lượt tải xuống tạm dừng trước khi trò chơi bắt đầu, trừ khi bật tùy chọn này. Khi đang chơi, giới hạn tốc độ thấp hơn trong hai giới hạn sẽ được áp dụng."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭此选项时，下载会在游戏启动前暂停。游戏时采用两个速度上限中较低的一个。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉此選項時，下載會在遊戲啟動前暫停。遊戲時採用兩個速度上限中較低的一個。"
           }
         }
       }
@@ -20764,6 +20928,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "最大速度"
+          }
+        }
+      }
+    },
+    "Maximum speed while playing" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Höchstgeschwindigkeit beim Spielen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Velocidad máxima mientras juegas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vitesse maximale pendant le jeu"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kecepatan maksimum saat bermain"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲーム中の最大速度"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임 중 최대 속도"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Velocidade máxima enquanto joga"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Максимальная скорость во время игры"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ความเร็วสูงสุดขณะเล่นเกม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Максимальна швидкість під час гри"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tốc độ tối đa khi đang chơi"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏时的最大速度"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遊戲時的最高速度"
           }
         }
       }

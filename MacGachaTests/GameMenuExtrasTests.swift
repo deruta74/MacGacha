@@ -56,6 +56,24 @@ import Launch
         #expect(model.dockRunningGame?.id == "genshin")
     }
 
+    @Test(arguments: ["install", "update", "preDownload", "verify", "move", "uninstall"])
+    func dockPlayAcceptsOnlyOtherEditionDelivery(operation: String) async throws {
+        let fixture = try MenuExtrasFixture(), model = fixture.model
+        defer { fixture.remove() }
+        await model.start()
+        let game = try #require(GameDefinition.find("genshin"))
+        model.setGameRecord(game.id, fixture.record(game: game, root: fixture.paths.games))
+        model.setGameState(game.id, GameState(status: .installed(tag: "1")))
+        model.debugLaunchRuntimesReady = true
+        model.gameOperation = GameOperationToken(id: "starrail", generation: UUID(),
+            isVerification: operation == "verify", isUninstall: operation == "uninstall",
+            isDownload: operation == "install" || operation == "update", isPreDownload: operation == "preDownload",
+            isMoving: operation == "move")
+        #expect(model.canPlayFromDock("genshin") == ["install", "update", "preDownload"].contains(operation))
+        model.gameOperation = GameOperationToken(id: "genshin", generation: UUID(), isPreDownload: operation == "preDownload")
+        #expect(model.canPlayFromDock("genshin") == (operation == "preDownload"))
+    }
+
     @Test func staleDockActionDoesNotLaunchAndDelegateMarksRunningGame() async throws {
         let fixture = try MenuExtrasFixture(), model = fixture.model
         defer { fixture.remove() }

@@ -6,6 +6,21 @@ import TestSupport
 @testable import LauncherCore
 
 @Suite(.timeLimit(.minutes(1))) struct GlobalLaunchSettingsTests {
+    @Test func gameplayDownloadsDefaultOffAndPersistWithIndependentCap() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), store = GlobalLaunchSettingsStore(paths: AppPaths(root: temp.url))
+            let legacy = try JSONDecoder().decode(GlobalLaunchSettings.self, from: Data("{}".utf8))
+            #expect(!legacy.downloadWhilePlaying)
+            #expect(legacy.playingDownloadSpeedLimit == 10_000_000)
+            var settings = GlobalLaunchSettings()
+            settings.downloadWhilePlaying = true
+            settings.playingDownloadSpeedLimit = 2_500_000
+            settings.downloadSpeedLimit = 25_000_000
+            try store.save(settings)
+            #expect(try store.load() == settings)
+        }
+    }
+
     @Test func notificationsDefaultOnAndPersistWithoutChangingOtherPreferences() async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), store = GlobalLaunchSettingsStore(paths: AppPaths(root: temp.url))

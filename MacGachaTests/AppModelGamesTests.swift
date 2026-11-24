@@ -16,6 +16,148 @@ import Launch
 
 @Suite(.serialized) @MainActor
 struct AppModelGamesTests {
+    @Test(.timeLimit(.minutes(1)), arguments: ["install", "update"], [false, true])
+    func playDuringInitialResolutionPreservesExactUserRequest(action: String, changedSource: Bool) async throws {
+        let gate = GameReadGate(), fake = FakeGameServices(startGate: gate)
+        let (model, _, _) = try gameFixture(fake: fake)
+        defer { gate.release(); fake.finish() }
+        if action == "update" {
+            fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+            model.setGameRecord("genshin", try await fake.record("genshin"))
+        }
+        let destination = URL(fileURLWithPath: "/tmp/early-play-original-destination")
+        if action == "install" { model.installGame("genshin", voices: ["ja-jp"], at: destination, approved: true) }
+        else { model.updateGame("genshin") }
+        await gate.waitUntilEntered()
+        let token = try #require(model.gameOperation)
+        model.launchSlotOwner = "starrail"; model.liveLaunchGames.insert("starrail")
+        let pause = Task { try await model.pauseDownloadForPlay(token) }
+        await Task.yield()
+        gate.release(); try await pause.value
+        #expect(fake.calls.isEmpty)
+        #expect(model.pausedDownloadForPlay != nil)
+        if changedSource {
+            fake.setStatus(.installed(tag: "2.0"), for: "genshin")
+            var changed = try #require(try await fake.record("genshin"))
+            changed.installed = InstalledBuild(tag: "2.0", buildID: "changed", categories: [], voices: [])
+            fake.setRecord(changed, for: "genshin")
+        }
+        model.launchSlotOwner = nil; model.liveLaunchGames.remove("starrail")
+        model.resumeDownloadAfterPlayIfPossible()
+        if changedSource {
+            try await gamesEventually { !model.isResumingPlayDownload }
+            #expect(fake.calls.isEmpty && model.pausedDownloadForPlay == nil)
+            return
+        }
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        #expect(fake.calls.last?.action == action)
+        if action == "install" {
+            #expect(fake.calls.last?.voices == ["ja-jp"] && fake.calls.last?.approved == true)
+            #expect(model.gameOperation?.installPath == destination)
+        }
+        model.pauseGame("genshin"); await model.gameTask?.value
+    }
+
+    @Test(.timeLimit(.minutes(1))) func unrelatedPausePreservesAutomaticResumeWatch() async throws {
+        let (model, fake, _) = try gameFixture(); defer { fake.finish() }
+        await model.reattachOnStart()
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        var record = try #require(try await fake.record("genshin"))
+        let pending = PendingOperation(kind: .update, planID: try SafeIdentifier("saved-plan"),
+            planDigest: try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)), target: try #require(record.installed))
+        record.pending = pending; fake.setRecord(record, for: "genshin"); model.setGameRecord("genshin", record)
+        let token = GameOperationToken(id: "genshin", generation: UUID(), isDownload: true)
+        model.pausedDownloadForPlay = PlayPausedDownload(token: token, plan: .game(pending))
+        model.runtimeCatalogMutationID = "blocked"
+        model.resumeDownloadAfterPlayIfPossible()
+        model.pauseGame("zzz")
+        model.runtimeCatalogMutationID = nil
+        try await gamesEventually { fake.calls.last?.action == "resume" }
+        #expect(fake.calls.last?.action == "resume")
+        model.pauseGame("genshin"); await model.gameTask?.value
+    }
+
+    @Test(.timeLimit(.minutes(1))) func staleResumeReadFailureCannotClearReplacementContinuation() async throws {
+        let (model, fake, _) = try gameFixture()
+        await model.reattachOnStart()
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        let record = try #require(try await fake.record("genshin"))
+        let pending = PendingOperation(kind: .update, planID: try SafeIdentifier("saved-plan"),
+            planDigest: try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)), target: try #require(record.installed))
+        let old = GameOperationToken(id: "genshin", generation: UUID(), isDownload: true)
+        let replacement = GameOperationToken(id: "genshin", generation: UUID(), isDownload: true)
+        model.pausedDownloadForPlay = PlayPausedDownload(token: old, plan: .game(pending))
+        let gate = GameReadGate()
+        fake.failNextRecordRead(gate: gate)
+        model.resumeDownloadAfterPlayIfPossible(); await gate.waitUntilEntered()
+        model.launchSlotOwner = "starrail"; model.liveLaunchGames.insert("starrail")
+        model.pausedDownloadForPlay = PlayPausedDownload(token: replacement, plan: .game(pending))
+        model.resumeDownloadAfterPlayIfPossible()
+        gate.release()
+        try await gamesEventually { !model.isResumingPlayDownload }
+        #expect(model.pausedDownloadForPlay?.token == replacement)
+        #expect(model.lastError == nil)
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: ["install", "update", "resume"])
+    func differentEditionDeliveryStartsDuringOptInSession(action: String) async throws {
+        let (model, fake, _) = try gameFixture(); defer { fake.finish() }
+        await model.reattachOnStart()
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        var record = try #require(try await fake.record("genshin"))
+        record.pending = PendingOperation(kind: .update, planID: try SafeIdentifier("delivery-plan"),
+            planDigest: try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)), target: try #require(record.installed))
+        fake.setRecord(record, for: "genshin"); model.setGameRecord("genshin", record)
+        model.globalLaunchSettings.downloadWhilePlaying = true
+        model.launchSlotOwner = "starrail"; model.liveLaunchGames.insert("starrail"); model.launchStates["starrail"] = .running
+        switch action {
+        case "install": model.installGame("genshin", voices: [], at: gameLocation, approved: false)
+        case "update": model.updateGame("genshin")
+        default: model.resumeGame("genshin")
+        }
+        let worker = try #require(model.gameTask)
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        #expect(model.gameOperation?.permitsOtherGamePlay == true)
+        #expect(fake.calls.last?.action == action)
+        model.pauseGame("genshin"); await worker.value
+        model.updateGame("starrail")
+        #expect(model.gameOperation == nil)
+        model.verifyGame("genshin")
+        #expect(model.gameOperation == nil)
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func automaticResumeRequiresUnchangedPendingPlan(changed: Bool) async throws {
+        let (model, fake, _) = try gameFixture(); defer { fake.finish() }
+        await model.reattachOnStart()
+        fake.setStatus(.installed(tag: "1.0"), for: "genshin")
+        var record = try #require(try await fake.record("genshin"))
+        let pending = PendingOperation(kind: .update, planID: try SafeIdentifier("delivery-plan"),
+            planDigest: try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)), target: try #require(record.installed))
+        record.pending = pending; fake.setRecord(record, for: "genshin"); model.setGameRecord("genshin", record)
+        model.updateGame("genshin")
+        var opened = fake.opened.stream.makeAsyncIterator(); _ = await opened.next()
+        let token = try #require(model.gameOperation)
+        model.launchSlotOwner = "starrail"; model.liveLaunchGames.insert("starrail")
+        try await model.pauseDownloadForPlay(token)
+        #expect(model.pausedDownloadForPlay != nil)
+        if changed {
+            record.pending = PendingOperation(kind: .update, planID: pending.planID,
+                planDigest: try Digest(algorithm: .sha256, hex: String(repeating: "b", count: 64)), target: pending.target)
+            fake.setRecord(record, for: "genshin")
+        }
+        model.launchSlotOwner = nil; model.liveLaunchGames.remove("starrail")
+        model.resumeDownloadAfterPlayIfPossible()
+        try await gamesEventually { !model.isResumingPlayDownload }
+        #expect((model.gameOperation?.id == "genshin") == !changed)
+        if !changed {
+            _ = await opened.next()
+            #expect(fake.calls.last?.action == "resume")
+            model.pauseGame("genshin"); await model.gameTask?.value
+        } else { #expect(fake.calls.count == 1) }
+        #expect(model.pausedDownloadForPlay == nil)
+    }
+
     @Test(.timeLimit(.minutes(1)), arguments: [PendingOperation.Kind.install, .update, .repair])
     func resumedActivePlanNotifiesItsActualKind(kind: PendingOperation.Kind) async throws {
         let center = TestGameNotificationCenter(), fake = FakeGameServices()
@@ -1082,13 +1224,15 @@ private struct GameCall: Sendable, Equatable {
 }
 private final class FakeGameServices: GameServices, Sendable {
     let opened = AsyncStream<Void>.makeStream()
+    private let startGate: GameReadGate?
     private let approvalTerminalRead: GameReadGate?
     private let snapshotRead: GameReadGate?
     private let idleDrain: GameReadGate?
     private let locationRead: GameReadGate?
     private let moveRecoveryRead: GameReadGate?
     private let estimateReads: [Set<String>: GameReadGate]
-    init(approvalTerminalRead: GameReadGate? = nil, snapshotRead: GameReadGate? = nil, idleDrain: GameReadGate? = nil, locationRead: GameReadGate? = nil, moveRecoveryRead: GameReadGate? = nil, estimateReads: [Set<String>: GameReadGate] = [:]) {
+    init(startGate: GameReadGate? = nil, approvalTerminalRead: GameReadGate? = nil, snapshotRead: GameReadGate? = nil, idleDrain: GameReadGate? = nil, locationRead: GameReadGate? = nil, moveRecoveryRead: GameReadGate? = nil, estimateReads: [Set<String>: GameReadGate] = [:]) {
+        self.startGate = startGate
         self.approvalTerminalRead = approvalTerminalRead; self.snapshotRead = snapshotRead
         self.estimateReads = estimateReads; self.idleDrain = idleDrain; self.locationRead = locationRead; self.moveRecoveryRead = moveRecoveryRead
     }
@@ -1096,6 +1240,7 @@ private final class FakeGameServices: GameServices, Sendable {
         var statuses: [String: GameStatus] = [:]
         var records: [String: GameRecord] = [:]
         var nextRecordRead: GameReadGate?
+        var nextRecordFailure = false
         var nextCacheInfoRead: GameReadGate?
         var locations: [String: URL] = [:]
         var locationReads: [String] = []
@@ -1129,6 +1274,7 @@ private final class FakeGameServices: GameServices, Sendable {
         await locationRead?.wait()
         return captured
     }
+    func failNextRecordRead(gate: GameReadGate) { state.withLock { $0.nextRecordRead = gate; $0.nextRecordFailure = true } }
     func gateNextRecordRead(_ gate: GameReadGate) { state.withLock { $0.nextRecordRead = gate } }
     func gateNextCacheInfoRead(_ gate: GameReadGate) { state.withLock { $0.nextCacheInfoRead = gate } }
     func setRecord(_ record: GameRecord, for id: String) { state.withLock { $0.records[id] = record } }
@@ -1145,14 +1291,19 @@ private final class FakeGameServices: GameServices, Sendable {
     var startCount: Int { state.withLock { $0.starts } }
     var statusCount: Int { state.withLock { $0.statusReads } }
     var terminated: Int { state.withLock { $0.terminations } }
-    func start() async { state.withLock { $0.starts += 1 }
+    func start() async { await startGate?.wait(); state.withLock { $0.starts += 1 }
     }
     func waitUntilIdle(_ id: String) async throws { await idleDrain?.wait() }
     func checkForUpdate(_ id: String) async throws -> GameStatus { await status(id) }
     func status(_ id: String) async -> GameStatus { state.withLock { $0.statusReads += 1; return $0.statuses[id] ?? .notInstalled } }
     func record(_ id: String) async throws -> GameRecord? {
-        let gate = state.withLock { let value = $0.nextRecordRead; $0.nextRecordRead = nil; return value }
+        let (gate, fail) = state.withLock {
+            let value = ($0.nextRecordRead, $0.nextRecordFailure)
+            $0.nextRecordRead = nil; $0.nextRecordFailure = false
+            return value
+        }
         await gate?.wait()
+        if fail { throw LauncherError.io("Stale read failed") }
         await snapshotRead?.wait()
         if let record = state.withLock({ $0.records[id] }) { return record }
         let status = state.withLock { $0.statuses[id] ?? .notInstalled }

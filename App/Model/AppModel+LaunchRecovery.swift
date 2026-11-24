@@ -127,6 +127,7 @@ import Launch
             }
         }
         launchRecoveryConflicts.remove(id)
+        resumeDownloadAfterPlayIfPossible()
     }
 
     private func observationGeneration(_ id: String) -> UUID {

@@ -61,6 +61,7 @@ struct PreDownloadOverlay: Sendable, Equatable {
         beginPreDownload(id, resume: true, expectedPlanID: expectedPlanID, expectedPlanDigest: expectedPlanDigest)
     }
     func pausePreDownload(_ id: String) {
+        cancelPlayDownloadResume(for: id)
         guard gameOperation?.id == id, gameOperation?.isPreDownload == true, gameOperation?.isUninstall == false else { return }
         gameTask?.cancel()
     }
@@ -82,12 +83,13 @@ struct PreDownloadOverlay: Sendable, Equatable {
         await task.value
     }
 
-    private func reservePreDownload(_ id: String, deleting: Bool = false) -> GameOperationToken? {
-        guard canBeginGameOrRuntimeOperation(), GameDefinition.find(id) != nil else { return nil }
+    private func reservePreDownload(_ id: String, deleting: Bool = false, initialRequest: PlayUnplannedDownload? = nil) -> GameOperationToken? {
+        guard canBeginGameOrRuntimeOperation(), canOperateGameDuringPlay(id, isDownload: !deleting), GameDefinition.find(id) != nil else { return nil }
         guard gameOperation == nil else { show(LauncherError.busy("another game operation is running")); return nil }
         guard launchSlotOwner != id, launchTasks[id] == nil, !liveLaunchGames.contains(id) else { return nil }
         if case .recoveryNeeded = launchStates[id] { return nil }
-        let token = GameOperationToken(id: id, generation: UUID(), isUninstall: deleting, isPreDownload: true, installPath: gameRecords[id]?.installPath)
+        let token = GameOperationToken(id: id, generation: UUID(), isUninstall: deleting, unplannedDownload: initialRequest, isPreDownload: true, installPath: gameRecords[id]?.installPath)
+        cancelPlayDownloadResume(for: id)
         gameOperation = token; gameRevisions[id] = token.generation; preDownloadRevisions[id] = token.generation
         gameUpdateCheck[id] = nil
         gameProgress = GameProgress(); dismissError()
@@ -99,8 +101,16 @@ struct PreDownloadOverlay: Sendable, Equatable {
         return token
     }
 
-    private func beginPreDownload(_ id: String, resume: Bool, expectedPlanID: String? = nil, expectedPlanDigest: Digest? = nil) {
-        guard let token = reservePreDownload(id) else { return }
+    func restartUnplannedPreDownload(_ id: String, initial: PlayUnplannedDownload) {
+        beginPreDownload(id, resume: false, expectedInitial: initial)
+    }
+
+    private func beginPreDownload(_ id: String, resume: Bool, expectedPlanID: String? = nil, expectedPlanDigest: Digest? = nil,
+        expectedInitial: PlayUnplannedDownload? = nil) {
+        let offer = preDownloadState(for: id).info
+        let initial = !resume && offer.state == .available && offer.planID == nil
+            ? PlayUnplannedDownload(request: .preDownload(offer), record: gameRecords[id]) : nil
+        guard let token = reservePreDownload(id, initialRequest: initial) else { return }
         let services = gameServices, startup = ensureGameStartup()
         let savedID = expectedPlanID ?? preDownloads[id]?.info.planID?.rawValue
         gameTask = Task { [weak self] in
@@ -114,6 +124,13 @@ struct PreDownloadOverlay: Sendable, Equatable {
                     let initial = try? await services.preDownloadInfo(id, refresh: false)
                     notifyCompletion = initial.map { $0.state != .ready } ?? false
                 }
+                if let expectedInitial, case .preDownload(let offer) = expectedInitial.request {
+                    let record = try await services.record(id)
+                    let current = try await services.preDownloadInfo(id, refresh: false)
+                    guard record == expectedInitial.record, current == offer, record?.pending == nil, record?.uninstalling != true else {
+                        throw LauncherError.cancelled
+                    }
+                }
                 if let expectedPlanDigest {
                     let info = try await services.preDownloadInfo(id, refresh: false)
                     guard info.state == .paused, info.planID?.rawValue == savedID, info.planDigest == expectedPlanDigest else {
@@ -122,6 +139,7 @@ struct PreDownloadOverlay: Sendable, Equatable {
                 }
                 try await self?.recheckGameLocation(id)
                 self?.gameLocationPauseReasons[id] = nil
+                try Task.checkCancellation()
                 let stream = if resume { await services.resumePreDownload(id, expectedPlanID: savedID) }
                     else { await services.preDownload(id) }
                 events: for try await event in stream {
@@ -196,6 +214,7 @@ struct PreDownloadOverlay: Sendable, Equatable {
             // cannot hold every unrelated game/runtime operation indefinitely.
             show(error)
         }
+        resumeDownloadAfterPlayIfPossible()
     }
 
     func stopPreDownloadOperation(_ token: GameOperationToken) async throws -> GameStopOutcome {

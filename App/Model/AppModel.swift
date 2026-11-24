@@ -128,6 +128,11 @@ final class AppModel {
     var sandboxStates: [String: SandboxState] = [:]
     @ObservationIgnored var automaticSandboxAttempts: [String: Set<String>] = [:]
     @ObservationIgnored var automaticSandboxYieldingToPlay: UUID?
+    var pausedDownloadForPlay: PlayPausedDownload?
+    var isResumingPlayDownload = false
+    @ObservationIgnored var playDownloadPauseTask: Task<Void, Never>?
+    @ObservationIgnored var playDownloadResumeWatchID: UUID?
+    @ObservationIgnored var playDownloadResumeInvalidations: [String: UUID] = [:]
     /// Chained sandbox maintenance may fail after the game itself updates successfully.
     var sandboxFailures: [String: LauncherError] = [:]
     @ObservationIgnored var gameUpdateCheckTasks: [String: Task<Void, Never>] = [:]
@@ -303,7 +308,10 @@ final class AppModel {
     var durableGlobalLaunchSettings = GlobalLaunchSettings()
     var launchSettingsCache: [String: LaunchSettings] = [:]
     var globalLaunchSettings = GlobalLaunchSettings() {
-        didSet { gameServices.setDownloadSpeedLimit(globalLaunchSettings.downloadSpeedLimit) }
+        didSet {
+            updateGameplayDeliveryPolicy()
+            if oldValue.downloadWhilePlaying != globalLaunchSettings.downloadWhilePlaying { downloadWhilePlayingChanged() }
+        }
     }
     var wishHistoryExportingGame: String?
     var wishHistoryProgress: WishHistoryProgress?
@@ -314,7 +322,9 @@ final class AppModel {
     var knownEndedLaunchGames: Set<String> = []
     var liveLaunchGames: Set<String> = []
     /// Includes preparation and file-only recovery, even after verified game end.
-    var launchSlotOwner: String?
+    var launchSlotOwner: String? {
+        didSet { updateGameplayDeliveryPolicy() }
+    }
     @ObservationIgnored var launchObservationGenerations: [String: UUID] = [:]
     @ObservationIgnored var launchRecoveryConflicts: Set<String> = []
     @ObservationIgnored var recoveryRetryTasks: [String: Task<Void, Never>] = [:]

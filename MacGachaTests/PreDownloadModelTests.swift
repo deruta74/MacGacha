@@ -12,6 +12,132 @@ import GameLibrary
 @testable import MacGacha
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct PreDownloadModelTests {
+    @Test func defaultPreferenceRefusesNewDownloadWhileAnotherGameRuns() async throws {
+        let (model, service) = try fixture(); defer { service.finish() }
+        await model.start()
+        model.launchSlotOwner = "starrail"; model.liveLaunchGames.insert("starrail")
+        model.launchStates["starrail"] = .running
+        model.startPreDownload("genshin")
+        #expect(model.gameOperation == nil)
+        await model.gameTask?.value
+    }
+
+    @Test(arguments: [false, true]) func playBeforePredownloadPlanExistsPreservesUnchangedOffer(changedOffer: Bool) async throws {
+        let gate = PreDownloadModelGate(), service = try PreDownloadModelServices(start: gate)
+        let model = try makeModel(service, defaults: nil)
+        defer { service.finish() }
+        let offer = PreDownloadInfo(state: .available, version: "2.0", bytes: 100)
+        service.setInfo(offer)
+        model.preDownloads["genshin"] = PreDownloadOverlay(info: offer)
+        model.setGameRecord("genshin", try await service.record("genshin"))
+        model.startPreDownload("genshin"); await gate.waitForEntry()
+        let token = try #require(model.gameOperation)
+        model.launchSlotOwner = "starrail"; model.liveLaunchGames.insert("starrail")
+        let pause = Task { try await model.pauseDownloadForPlay(token) }
+        await Task.yield(); await gate.release(); try await pause.value
+        #expect(service.calls.isEmpty && model.pausedDownloadForPlay != nil)
+        if changedOffer { service.setInfo(PreDownloadInfo(state: .available, version: "3.0", bytes: 200)) }
+        model.launchSlotOwner = nil; model.liveLaunchGames.remove("starrail")
+        model.resumeDownloadAfterPlayIfPossible()
+        if changedOffer {
+            for await resuming in Observations({ model.isResumingPlayDownload }) { if !resuming { break } }
+            #expect(service.calls.isEmpty && model.pausedDownloadForPlay == nil)
+            return
+        }
+        await service.waitForOpen()
+        #expect(service.calls == ["start"])
+        model.pausePreDownload("genshin"); await model.gameTask?.value
+    }
+
+    @Test func differentGamePlayDrainsThenResumesOnlyItsAutomaticPause() async throws {
+        let gate = PreDownloadModelGate(), launch = PreDownloadModelLaunchServices()
+        let service = try PreDownloadModelServices(drain: gate)
+        let model = try makeModel(service, defaults: nil, launchServices: launch)
+        defer { service.finish() }
+        await model.start(); model.startPreDownload("genshin"); await service.waitForOpen()
+        model.play("starrail")
+        await gate.waitForEntry()
+        #expect(model.launchSlotOwner == "starrail" && launch.count == 0)
+        #expect(model.gameOperation?.id == "genshin")
+        await gate.release(); await model.launchTasks["starrail"]?.value
+        await service.waitForOpen()
+        #expect(launch.count == 1)
+        #expect(service.calls == ["start", "resume:cache-plan"])
+        #expect(model.gameOperation?.id == "genshin")
+        model.pausePreDownload("genshin"); await model.gameTask?.value
+    }
+
+    @Test func optInLeavesDifferentGameDownloadRunningOnPlay() async throws {
+        let launch = PreDownloadModelLaunchServices(), service = try PreDownloadModelServices()
+        let model = try makeModel(service, defaults: nil, launchServices: launch)
+        defer { service.finish() }
+        await model.start(); model.globalLaunchSettings.downloadWhilePlaying = true
+        model.startPreDownload("genshin"); await service.waitForOpen()
+        let token = model.gameOperation
+        model.play("starrail"); await model.launchTasks["starrail"]?.value
+        #expect(launch.count == 1 && model.gameOperation == token)
+        #expect(service.calls == ["start"] && model.pausedDownloadForPlay == nil)
+        model.pausePreDownload("genshin"); await model.gameTask?.value
+    }
+
+    @Test(arguments: [true, false]) func newTransferRequiresOptInAndAlwaysRefusesItsRunningEdition(enabled: Bool) async throws {
+        let (model, service) = try fixture(); defer { service.finish() }
+        await model.start(); model.globalLaunchSettings.downloadWhilePlaying = enabled
+        model.launchSlotOwner = "starrail"; model.liveLaunchGames.insert("starrail")
+        model.launchStates["starrail"] = .running
+        #expect(!model.canOperateGameDuringPlay("starrail", isDownload: true))
+        #expect(!model.canOperateGameDuringPlay("genshin", isDownload: false))
+        model.startPreDownload("genshin")
+        #expect((model.gameOperation?.id == "genshin") == enabled)
+        if enabled { await service.waitForOpen(); model.pausePreDownload("genshin"); await model.gameTask?.value }
+        model.launchStates["starrail"] = .recoveryNeeded("test")
+        #expect(!model.canOperateGameDuringPlay("genshin", isDownload: true))
+    }
+
+    @Test func disablingDuringSessionPausesAndEnablingResumesExactDownload() async throws {
+        let (model, service) = try fixture(); defer { service.finish() }
+        await model.start(); model.globalLaunchSettings.downloadWhilePlaying = true
+        model.launchSlotOwner = "starrail"; model.liveLaunchGames.insert("starrail")
+        model.launchStates["starrail"] = .running
+        model.startPreDownload("genshin"); await service.waitForOpen()
+        model.globalLaunchSettings.downloadWhilePlaying = false
+        await model.playDownloadPauseTask?.value
+        #expect(model.gameOperation == nil && model.pausedDownloadForPlay != nil)
+        #expect(model.isBusyForUpdates)
+        model.globalLaunchSettings.downloadWhilePlaying = true
+        await service.waitForOpen()
+        #expect(service.calls == ["start", "resume:cache-plan"])
+        model.pausePreDownload("genshin"); await model.gameTask?.value
+    }
+
+    @Test func enablingWhileAutomaticPauseDrainsResumesAfterDrain() async throws {
+        let gate = PreDownloadModelGate()
+        let (model, service) = try fixture(drain: gate); defer { service.finish() }
+        await model.start(); model.globalLaunchSettings.downloadWhilePlaying = true
+        model.launchSlotOwner = "starrail"; model.liveLaunchGames.insert("starrail"); model.launchStates["starrail"] = .running
+        model.startPreDownload("genshin"); await service.waitForOpen()
+        model.globalLaunchSettings.downloadWhilePlaying = false
+        await gate.waitForEntry()
+        model.globalLaunchSettings.downloadWhilePlaying = true
+        await gate.release(); await model.playDownloadPauseTask?.value
+        await service.waitForOpen()
+        #expect(service.calls == ["start", "resume:cache-plan"])
+        model.pausePreDownload("genshin"); await model.gameTask?.value
+    }
+
+    @Test func explicitPauseDuringPlayDrainCancelsAutomaticResume() async throws {
+        let gate = PreDownloadModelGate(), launch = PreDownloadModelLaunchServices()
+        let service = try PreDownloadModelServices(drain: gate)
+        let model = try makeModel(service, defaults: nil, launchServices: launch)
+        defer { service.finish() }
+        await model.start(); model.startPreDownload("genshin"); await service.waitForOpen()
+        model.play("starrail"); await gate.waitForEntry()
+        model.pausePreDownload("genshin")
+        await gate.release(); await model.launchTasks["starrail"]?.value
+        #expect(model.pausedDownloadForPlay == nil && model.gameOperation == nil)
+        #expect(service.calls == ["start"])
+    }
+
     @Test func resumeOfAlreadyReadyPredownloadDoesNotRepeatCompletion() async throws {
         let center = TestGameNotificationCenter(), service = try PreDownloadModelServices()
         defer { service.finish() }
@@ -326,12 +452,14 @@ private final class PreDownloadModelServices: GameServices, Sendable {
         var infoReads = 0
     }
     private let state: Mutex<State>
-    private let base = PreviewGameServices(states: ["genshin": GameState(status: .installed(tag: "1.0"))])
+    private let base = PreviewGameServices(states: ["genshin": GameState(status: .installed(tag: "1.0")), "starrail": GameState(status: .installed(tag: "1.0"))])
     private let opened = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private let startGate: PreDownloadModelGate?
     private let drain: PreDownloadModelGate?, resolve: PreDownloadModelGate?, infoRead: PreDownloadModelGate?
     private let busyAfterDrain: Bool
-    init(drain: PreDownloadModelGate? = nil, resolve: PreDownloadModelGate? = nil, infoRead: PreDownloadModelGate? = nil,
+    init(start: PreDownloadModelGate? = nil, drain: PreDownloadModelGate? = nil, resolve: PreDownloadModelGate? = nil, infoRead: PreDownloadModelGate? = nil,
         busyAfterDrain: Bool = false) throws {
+        self.startGate = start
         self.drain = drain; self.resolve = resolve; self.infoRead = infoRead
         self.busyAfterDrain = busyAfterDrain
         state = Mutex(State(info: try preDownloadModelInfo(.available), paused: try preDownloadModelInfo(.paused, downloaded: 25)))
@@ -342,7 +470,7 @@ private final class PreDownloadModelServices: GameServices, Sendable {
     func emit(_ event: OperationEvent) { state.withLock { $0.continuation }?.yield(event) }
     func finish() { state.withLock { $0.continuation }?.finish() }
     func waitForOpen() async { var iterator = opened.stream.makeAsyncIterator(); _ = await iterator.next() }
-    func start() async {}
+    func start() async { await startGate?.wait() }
     func waitUntilIdle(_ id: String) async throws {
         await drain?.wait()
         if busyAfterDrain { throw LauncherError.busy("another game's refresh owns the lease") }
