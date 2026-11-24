@@ -106,7 +106,8 @@ public actor GameArtService {
             // Art fetched in another language is stale however fresh it is, and so is an index from
             // before background lists, so an app update shows every background without waiting.
             if age >= 0 && age < Self.ttl && (index.language ?? .enUS) == language,
-                index.games.values.allSatisfy({ $0.backgrounds != nil && (region != .global || $0.reservationOpen != nil) }) { return cached() }
+                (region != .global || index.catalogCardCount == CatalogGame.allCases.count),
+                index.games.values.allSatisfy({ $0.backgrounds != nil }) { return cached() }
             let http = http; let log = log; let timeout = requestTimeout
             let urls = Self.apiURLs(region: region, language: language)
             let gamesData = try await Self.deadline(timeout) { try await Self.json(urls.games, http: http, log: log) }
@@ -169,7 +170,8 @@ public actor GameArtService {
             }
             try Task.checkCancellation()
             let retained = Set(selected.values.flatMap(\.urls).map(\.absoluteString))
-            let next = ArtIndex(fetchedAt: now(), language: language, region: region, games: selected, assets: files.filter { retained.contains($0.key) })
+            let next = ArtIndex(fetchedAt: now(), language: language, region: region, catalogCardCount: CatalogGame.allCases.count,
+                games: selected, assets: files.filter { retained.contains($0.key) })
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let bytes = try encoder.encode(next)
             guard bytes.count <= Self.indexLimit else { return cached() }
@@ -402,6 +404,8 @@ private struct ArtIndex: Codable, Sendable {
     var language: HoYoPlayLanguage? = nil
     /// Nil belongs to the legacy Global cache.
     var region: Region? = nil
+    /// Refresh older Global indexes when an update expands the catalog.
+    var catalogCardCount: Int? = nil
     var games: [String: RemoteArt] = [:]
     var assets: [String: AssetRecord] = [:]
 }
