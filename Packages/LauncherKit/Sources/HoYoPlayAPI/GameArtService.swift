@@ -9,9 +9,9 @@ import DownloadEngine
 /// this actor, with filesystem work delegated to BlockingIO. No failure is surfaced to the user.
 public actor GameArtService {
     private static let ttl: TimeInterval = 6 * 3600
-    // Three games × (16 backgrounds × 5 assets + icon + logo), plus headroom.
+    // Five cards × (16 backgrounds × 5 assets + icon + logo), plus headroom.
     public static let maximumBackgroundsPerGame = 16
-    public static let maximumAssets = 320
+    public static let maximumAssets = 480
     private static let indexLimit = 512 << 10
     private static func gameIDs(_ region: Region) -> [String: String] {
         Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0.id) })
@@ -106,7 +106,7 @@ public actor GameArtService {
             // Art fetched in another language is stale however fresh it is, and so is an index from
             // before background lists, so an app update shows every background without waiting.
             if age >= 0 && age < Self.ttl && (index.language ?? .enUS) == language,
-                index.games.values.allSatisfy({ $0.backgrounds != nil }) { return cached() }
+                index.games.values.allSatisfy({ $0.backgrounds != nil && (region != .global || $0.reservationOpen != nil) }) { return cached() }
             let http = http; let log = log; let timeout = requestTimeout
             let urls = Self.apiURLs(region: region, language: language)
             let gamesData = try await Self.deadline(timeout) { try await Self.json(urls.games, http: http, log: log) }
@@ -121,6 +121,7 @@ public actor GameArtService {
             for (id, remote) in requested.sorted(by: { $0.key < $1.key }) {
                 let old = index.games[id] ?? RemoteArt()
                 var next = RemoteArt()
+                next.reservationOpen = remote.reservationOpen ?? false
                 for key in RemoteArt.images {
                     let url = remote[keyPath: key]
                     if let url, await asset(url, video: false, fs: fs, root: root, files: &files, attempted: &attempted) {
@@ -161,6 +162,10 @@ public actor GameArtService {
                 }
                 next.backgrounds = backgrounds
                 selected[id] = next
+            }
+            // A successful publisher refresh may remove the reservation listing.
+            for card in CatalogGame.allCases where requested[card.rawValue] == nil {
+                selected[card.rawValue]?.reservationOpen = false
             }
             try Task.checkCancellation()
             let retained = Set(selected.values.flatMap(\.urls).map(\.absoluteString))
@@ -206,8 +211,8 @@ public actor GameArtService {
     private nonisolated func readIndex(_ fs: ContainedFileSystem, root: SafeRelativePath) throws -> ArtIndex {
         let data = try fs.readFile(at: SafeRelativePath("\(root)/art-index.json"), maxBytes: Self.indexLimit)
         var saved = try JSONDecoder().decode(ArtIndex.self, from: data)
-        guard (saved.region ?? .global) == region, saved.assets.count <= Self.maximumAssets, saved.games.count <= 3, saved.games.values.allSatisfy({ $0.layers.count <= Self.maximumBackgroundsPerGame }), saved.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
-            saved.games.keys.allSatisfy({ Self.gameIDs(region).values.contains($0) }) else { throw LauncherError.io("Invalid art index") }
+        guard (saved.region ?? .global) == region, saved.assets.count <= Self.maximumAssets, saved.games.values.allSatisfy({ $0.layers.count <= Self.maximumBackgroundsPerGame }), saved.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
+            saved.games.keys.allSatisfy({ CatalogGame.artRegion(for: $0) == region }) else { throw LauncherError.io("Invalid art index") }
         saved.assets = saved.assets.filter { key, record in
             guard let url = URL(string: key), Self.allowedAsset(url, region: region), record.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
                 ["png", "jpg", "webp", "webm"].contains(URL(fileURLWithPath: record.file).pathExtension),
@@ -242,7 +247,7 @@ public actor GameArtService {
                     let clip = local(layer.video, video: true)
                     return GameBackground(id: layer.id, image: local(layer.background), video: clip,
                         theme: local(layer.theme), highlights: highlights)
-                })
+                }, reservationOpen: remote.reservationOpen == true)
         }
     }
 
@@ -356,13 +361,20 @@ public actor GameArtService {
         let basic = try JSONDecoder().decode(Envelope<Basic>.self, from: basic)
         guard games.retcode ?? 0 == 0, basic.retcode ?? 0 == 0 else { throw LauncherError.io("Art API refused request") }
         let gameIDs = Self.gameIDs(region)
+        func cardID(_ game: Game) -> String? {
+            if region == .global, let card = CatalogGame.allCases.first(where: { $0.publisherID == game.id }) {
+                return card.rawValue
+            }
+            return game.biz.flatMap { gameIDs[$0] }
+        }
         var result: [String: RemoteArt] = [:]
         for game in games.data.games {
-            guard let id = game.biz.flatMap({ gameIDs[$0] }) else { continue }
-            result[id] = RemoteArt(background: game.display?.background?.url, icon: game.display?.icon?.url, logo: game.display?.logo?.url)
+            guard let id = cardID(game) else { continue }
+            result[id] = RemoteArt(background: game.display?.background?.url, icon: game.display?.icon?.url, logo: game.display?.logo?.url,
+                reservationOpen: game.display_status == "LAUNCHER_GAME_DISPLAY_STATUS_RESERVATION_ENABLED")
         }
         for game in basic.data.game_info_list {
-            guard let id = game.game.biz.flatMap({ gameIDs[$0] }), let layer = game.backgrounds?.first else { continue }
+            guard let id = cardID(game.game), let layer = game.backgrounds?.first else { continue }
             var art = result[id] ?? RemoteArt()
             art.background = layer.background?.url ?? art.background
             if layer.type == "BACKGROUND_TYPE_VIDEO" { art.video = layer.video?.url; art.theme = layer.theme?.url }
@@ -396,6 +408,7 @@ private struct ArtIndex: Codable, Sendable {
 private struct RemoteArt: Codable, Sendable {
     var background: URL?; var icon: URL?; var logo: URL?; var video: URL?; var theme: URL?
     static let images: [WritableKeyPath<RemoteArt, URL?> & Sendable] = [\.background, \.icon, \.logo]
+    var reservationOpen: Bool?
     var backgrounds: [RemoteBackground]?
     var layers: [RemoteBackground] {
         backgrounds ?? (background == nil && video == nil ? [] : [RemoteBackground(
@@ -436,7 +449,7 @@ private enum ArtFailure: String, Error {
     case sizeLimit = "size-limit"
 }
 private struct Display: Decodable { let icon: Link?; let logo: Link?; let background: Link? }
-private struct Game: Decodable { let biz: String?; let display: Display? }
+private struct Game: Decodable { let id: String?; let biz: String?; let display: Display?; let display_status: String? }
 private struct Games: Decodable { let games: [Game] }
 private struct Basic: Decodable { let game_info_list: [BasicGame] }
 private struct BasicGame: Decodable { let game: Game; let backgrounds: [Layer]? }

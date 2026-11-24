@@ -519,3 +519,25 @@ func highlightsBrowserLinksAreValidatedAlsoWhenDecoded(value: String) throws {
     let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
     #expect(!names.contains { $0.hasPrefix(".incoming-") })
 }
+
+@Test
+func catalogCardsKeepTheirArtworkAndReservationStatusAcrossRestarts() async throws {
+    let temp = try TempDir(), cdn = MockCDN()
+    try artFixtures(cdn)
+    func game(_ id: String, _ biz: String, _ icon: String) -> [String: Any] {
+        ["id": id, "biz": biz, "display": ["icon": ["url": "https://fastcdn.hoyoverse.com/" + icon]],
+         "display_status": id == "viiywh5G2H" ? "LAUNCHER_GAME_DISPLAY_STATUS_RESERVATION_ENABLED" : ""]
+    }
+    let games = [game("5TIVvvcwtM", "bh3_global", "icon"), game("viiywh5G2H", "hyg_global", "logo"),
+        game("g0mMIvshDb", "bh3_global", "jp"), game("g", "hk4e_global", "icon"),
+        game("s", "hkrpg_global", "icon"), game("z", "nap_global", "icon")]
+    cdn.serve(apiGames, data: try JSONSerialization.data(withJSONObject: ["data": ["games": games]]))
+    cdn.serve("jp", data: png)
+    let service = GameArtService(cacheDirectory: temp.url, http: cdn)
+    let cards = await service.refresh()
+    #expect(cards.count == 5)
+    #expect(cards["honkai-impact-3rd"]?.icon == cards["genshin"]?.icon)
+    #expect(cards["petit-planet"]?.reservationOpen == true)
+    #expect(await GameArtService(cacheDirectory: temp.url, http: cdn).loadCached() == cards)
+    #expect(GameDefinition.find("honkai-impact-3rd") == nil && GameDefinition.find("petit-planet") == nil)
+}

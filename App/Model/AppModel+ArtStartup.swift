@@ -39,7 +39,7 @@ enum ArtCacheState: Sendable, Equatable {
 
     nonisolated static func hasUsableArt(_ art: [String: GameArt], in region: Region) async -> Bool {
         (try? await BlockingIO.run {
-            for (id, game) in art where GameDefinition.find(id)?.region == region {
+            for (id, game) in art where CatalogGame.artRegion(for: id) == region {
                 let images = game.backgrounds.compactMap(\.image) + [game.background].compactMap { $0 }
                 for image in images where image.isFileURL {
                     guard let fs = try? ContainedFileSystem(root: image.deletingLastPathComponent()),

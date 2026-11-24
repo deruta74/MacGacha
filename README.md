@@ -55,6 +55,7 @@ Later versions arrive through **Check for Updates…** in the MacGacha menu, so 
 ## Roadmap
 
 **Done**
+- The Global catalog includes Petit Planet pre-registration and an App Store link for Honkai Impact 3rd.
 - **One-click Play.** Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game and minimizes itself to the Dock. When the game closes, it comes back and puts back any game files it hid. Accepted in all three games on D3DMetal and DXMT.
 - **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space". **Check for Updates** in a game's menu looks for a new version right away.
 - **Smaller updates and pre-download.** Genshin Impact and Honkai: Star Rail update with HoYoverse's patch files, the way HoYoPlay does. Genshin 7.1 to 7.2 with English voice is 8.4 GB instead of 22.7 GB. When HoYoverse offers the next version early, **Pre-download** fetches it ahead of release, and the installed version stays playable. Pressing Play pauses the pre-download, and you resume it after playing. On release day the update installs from the downloaded files. A file that can't be patched is downloaded normally.

@@ -41,8 +41,8 @@ struct GameRail: View {
     @Binding var panel: Panel?
 
     var body: some View {
-        VStack(spacing: 12) {
-            ForEach(model.visibleGames) { game in
+        VStack(spacing: 8) {
+            ForEach(LauncherGame.cards(in: model.region)) { game in
                 Button {
                     selectedID = game.id
                 } label: {

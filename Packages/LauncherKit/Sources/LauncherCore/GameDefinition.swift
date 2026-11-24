@@ -77,3 +77,20 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
             GameDefinition(id: "zzz-cn", biz: "nap_cn", region: .mainlandChina, gameID: "x6znKlJ0xK", voices: voices, family: .zzz)]
     }()
 }
+
+/// Global HoYoPlay cards that have no verified Windows launch recipe.
+public enum CatalogGame: String, CaseIterable, Sendable {
+    case honkaiImpact = "honkai-impact-3rd"
+    case petitPlanet = "petit-planet"
+
+    public var publisherID: String {
+        switch self {
+        case .honkaiImpact: "5TIVvvcwtM"
+        case .petitPlanet: "viiywh5G2H"
+        }
+    }
+
+    public static func artRegion(for id: String) -> Region? {
+        Self(rawValue: id) == nil ? GameDefinition.find(id)?.region : .global
+    }
+}
