@@ -211,13 +211,13 @@ public actor LaunchManager {
             pair.continuation.yield(.stage(.lock))
             pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "\(Self.name(busy)) is running"), logURL: nil,
                 unverifiedBuild: (recipeOverrides[game.id] ?? Recipes.recipe(for: game.id))?.isVerified(build: gameBuild) != true,
-                diagnosis: LaunchDiagnosis(reason: .busy, previous: nil, attempted: nil))))
+                diagnosis: LaunchDiagnosis(reason: .busy, previous: nil, attempted: nil), lockBlocker: .runningGame(busy))))
             pair.continuation.finish(); return pair.stream
         }
         if recovering || !guardRecoveries.isEmpty {
             event("Launch failed", game: game.id, level: .error, metadata: Self.failureMetadata(LauncherError.busy("Launch slot unavailable"), stage: .lock))
             pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "Launch recovery is in progress"), logURL: nil, unverifiedBuild: false,
-                diagnosis: LaunchDiagnosis(reason: .busy, previous: nil, attempted: nil))))
+                diagnosis: LaunchDiagnosis(reason: .busy, previous: nil, attempted: nil), lockBlocker: .recoveryInProgress)))
             pair.continuation.finish(); return pair.stream
         }
         retries = retries.filter { $0.value.game != game.id }

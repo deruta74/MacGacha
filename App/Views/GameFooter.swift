@@ -303,7 +303,7 @@ struct GameFooter: View {
         case .uninstallPaused: return String(localized: "Uninstall didn't finish")
         case .locationUnavailable:
             // The drive name comes from the saved path, so it is known while the drive is away.
-            return model.gameLocationHint(for: game.id) ?? String(localized: "Install location unavailable — connect the drive it's on")
+            return model.gameLocationHint(for: game.id) ?? LaunchFailureInfo.locationUnavailableLine
         }
     }
 
@@ -335,7 +335,7 @@ struct GameFooter: View {
             if let note { return note }
             return String(localized: "Keep MacGacha open while you play — it restores the game's files when you quit")
         case .failed(let failure):
-            return failureLine(failure)
+            return failure.footerLine(gameName: game.name, locationHint: model.gameLocationHint(for: game.id))
         case .recoveryNeeded(let reason): return reason
         case nil:
             if let note { return note }
@@ -344,21 +344,6 @@ struct GameFooter: View {
                 return String(localized: "Waiting for \(other.name) to put its files back", comment: "The argument is another game's name")
             }
             return String(localized: "\(other.name) is running — quit it to play this one", comment: "The argument is another game's name")
-        }
-    }
-
-    /// Names the step that failed in plain words. Checks and locks already carry a message meant for people.
-    private func failureLine(_ failure: LaunchFailureInfo) -> String {
-        if failure.diagnosis?.reason != nil, failure.diagnosis?.reason != .unknown { return LaunchDiagnosticText.explanation(failure) }
-        return switch failure.stage {
-        case .preflight, .lock: failure.message
-        case .watch where failure.cause == .antiCheatOffline:
-            // The game closes itself when its anti-cheat can't reach HoYoverse at startup.
-            String(localized: "\(game.name) couldn't reach its servers. School or work Wi-Fi may be blocking them", comment: "Launch failure; the argument is the game's name")
-        case .watch: String(localized: "\(game.name) closed during startup", comment: "The argument is the game's name")
-        case .prepare, .snapshot: String(localized: "Couldn't prepare Wine for \(game.name)", comment: "The argument is the game's name")
-        case .proxy: String(localized: "Couldn't start the network helper for \(game.name)", comment: "The argument is the game's name")
-        case .spawn, .restore, .report: String(localized: "\(game.name) couldn't start", comment: "The argument is the game's name")
         }
     }
 

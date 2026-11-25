@@ -135,6 +135,19 @@ import RuntimeManager
         if let history = try? await launchServices.successfulLaunches() { successfulLaunches = history }
     }
 
+    func hasLaunchDetails(_ id: String) -> Bool {
+        if case .failed(let failure) = launchStates[id], failure.diagnosis != nil { return true }
+        return successfulLaunches[id] != nil
+    }
+
+    func launchChangedValues(previous: LaunchConfiguration, attempted: LaunchConfiguration) -> [LaunchChangedValue] {
+        LaunchDiagnosticText.changedValues(previous: previous, attempted: attempted, manifest: manifest)
+    }
+
+    func launchConfigurationDisplay(_ configuration: LaunchConfiguration) -> LaunchConfigurationDisplay {
+        LaunchDiagnosticText.configurationDisplay(configuration, manifest: manifest)
+    }
+
     func canRetrySuccessfulLaunch(_ id: String) -> Bool {
         guard case .failed(let failure) = launchStates[id], failure.diagnosis?.retryID != nil else { return false }
         return canBeginGameOrRuntimeOperation() && launchSlotOwner == nil && launchTasks.isEmpty &&
@@ -270,7 +283,7 @@ import RuntimeManager
             if sessionLogsEnabled { launchLogURLs[id] = failure.logURL ?? launchLogURLs[id] }
             else { launchLogURLs[id] = nil }
             recordLaunchFailure(LaunchFailureInfo(stage: failure.stage,
-                message: LauncherError.io(failure.message).userMessage,
+                message: LaunchFailureInfo.safeMessage(for: failure),
                 hasLog: sessionLogsEnabled && launchLogURLs[id] != nil, unverifiedBuild: failure.unverifiedBuild,
                 cause: failure.cause, diagnosis: failure.diagnosis), id: id)
             _ = await refreshLaunchSession(id)

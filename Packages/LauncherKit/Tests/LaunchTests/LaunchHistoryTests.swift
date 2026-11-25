@@ -41,8 +41,7 @@ import GameLibrary
                 let valid = try fs.readFile(at: file, maxBytes: 1 << 20)
                 var state = try #require(JSONSerialization.jsonObject(with: valid) as? [String: Any])
                 var games = try #require(state["games"] as? [String: Any])
-                games["hi3-jp"] = try #require(games[qualified.game])
-                var invalid = try #require(games["hi3-jp"] as? [String: Any])
+                var invalid = try #require(games[qualified.game] as? [String: Any])
                 var config = try #require(invalid["configuration"] as? [String: Any])
                 config["recipeVersion"] = 0
                 invalid["configuration"] = config
