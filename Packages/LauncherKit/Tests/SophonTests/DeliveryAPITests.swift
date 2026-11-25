@@ -368,9 +368,9 @@ func testBranch(password: String = "selector-password") -> GameBranch {
         branch: "main", tag: "1.2.3", categories: [])
 }
 func json(_ object: [String: Any]) -> Data { try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) }
-func branchesJSON(preDownload: Any = NSNull(), branch: String = "main") -> Data {
+func branchesJSON(preDownload: Any = NSNull(), branch: String = "main", otherBiz: String = "other_global") -> Data {
     json(["retcode": 0, "data": ["game_branches": [
-        ["game": ["id": "other", "biz": "other_global"], "main": NSNull()],
+        ["game": ["id": "other", "biz": otherBiz], "main": NSNull()],
         ["game": ["id": "test-id", "biz": "test_global"], "main": [
             "package_id": "selector-package", "password": "selector-password", "branch": branch, "tag": "1.2.3",
             "categories": [
@@ -380,11 +380,11 @@ func branchesJSON(preDownload: Any = NSNull(), branch: String = "main") -> Data 
             ]], "pre_download": preDownload]
     ]]])
 }
-func configJSON(overrides: [String: String] = [:]) -> Data {
+func configJSON(overrides: [String: String] = [:], otherBiz: String = "other_global") -> Data {
     var entry: [String: Any] = ["game": ["id": "test-id", "biz": "test_global"], "installation_dir": "Test Game", "exe_file_name": "bin/Test.exe"]
     for (key, value) in overrides { entry[key] = value }
     return json(["retcode": 0, "data": ["launch_configs": [
-        ["game": ["id": "other", "biz": "other_global"], "installation_dir": "Other", "exe_file_name": "Other.exe"], entry]]])
+        ["game": ["id": "other", "biz": otherBiz], "installation_dir": "Other", "exe_file_name": "Other.exe"], entry]]])
 }
 func buildJSON(statsSize: Any = "100", prefix: String = "https://cdn.hoyoverse.com/manifest%2Fpath",
     manifestSuffix: String = "", chunkSuffix: String = "", compression: Int = 1, encryption: Int = 0, descriptorPassword: String = "") -> Data {

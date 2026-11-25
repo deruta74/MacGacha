@@ -11,6 +11,7 @@ public enum DeliveryHostPolicy {
     public static func allows(_ url: URL, region: Region) -> Bool {
         guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
               let host = url.host?.lowercased() else { return false }
+        if region == .global && host == "autopatchglb.honkaiimpact3.com" { return true }
         return region.deliveryDomains.contains {
             host == $0 || host.hasSuffix("." + $0)
         }

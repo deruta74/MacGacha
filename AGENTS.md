@@ -57,6 +57,8 @@ The README's Roadmap section is the user-facing status. Update it when a feature
 
 App data lives in `~/Library/Application Support/MacGacha/`: `Games/`, `Runtimes/`, `Prefixes/`, `Logs/`, `consent.json`. The bundle ID is `com.lo7ted.macgacha`.
 
+The opt-in Sophon test `MACGACHA_LIVE_HI3=1` checks Europe & Americas Windows delivery by publisher game ID, including both manifests. The Windows launch recipe is still unverified.
+
 ## Build and test
 
 ```bash

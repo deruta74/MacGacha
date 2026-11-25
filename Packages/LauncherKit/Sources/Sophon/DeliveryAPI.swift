@@ -15,21 +15,21 @@ public struct DeliveryAPI: Sendable {
         self.http = http; self.region = region; self.timeout = timeout; self.log = log
     }
 
-    public func branch(biz: String) async throws -> GameBranch {
-        try await branches(biz: biz).main
+    public func branch(biz: String, gameID: String? = nil) async throws -> GameBranch {
+        try await branches(biz: biz, gameID: gameID).main
     }
 
-    public func branches(biz: String) async throws -> (main: GameBranch, preDownload: GameBranch?) {
+    public func branches(biz: String, gameID: String? = nil) async throws -> (main: GameBranch, preDownload: GameBranch?) {
         let data: BranchesWire = try await json(endpoint("getGameBranches"))
-        guard let entry = data.game_branches.first(where: { $0.game.biz == biz }), let main = entry.main else {
+        guard let entry = data.game_branches.first(where: { $0.game.matches(biz, id: gameID) }), let main = entry.main else {
             throw LauncherError.io("delivery branch unavailable")
         }
         return (main.model(game: entry.game), entry.pre_download?.model(game: entry.game))
     }
 
-    public func config(biz: String) async throws -> GameConfig {
+    public func config(biz: String, gameID: String? = nil) async throws -> GameConfig {
         let data: ConfigsWire = try await json(endpoint("getGameConfigs"))
-        guard let entry = data.launch_configs.first(where: { $0.game.biz == biz }) else {
+        guard let entry = data.launch_configs.first(where: { $0.game.matches(biz, id: gameID) }) else {
             throw LauncherError.io("delivery config unavailable")
         }
         do {
@@ -213,7 +213,14 @@ private struct Envelope<T: Decodable & Sendable>: Decodable, Sendable {
         data = try c.decode(T.self, forKey: .data)
     }
 }
-private struct GameWire: Decodable, Sendable { let id: String; let biz: String }
+private struct GameWire: Decodable, Sendable {
+    let id: String
+    let biz: String
+
+    func matches(_ requestedBiz: String, id requestedID: String?) -> Bool {
+        biz == requestedBiz && (requestedID == nil || requestedID == id)
+    }
+}
 private struct BranchesWire: Decodable, Sendable {
     struct Entry: Decodable, Sendable { let game: GameWire; let main: Main?; let pre_download: Main? }
     struct Main: Decodable, Sendable {
