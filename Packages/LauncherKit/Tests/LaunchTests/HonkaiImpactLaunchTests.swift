@@ -46,7 +46,7 @@ import Testing
             let recipe = try #require(Recipes.recipe(for: edition.id))
             #expect(recipe.executable == base.executable && recipe.wrapper == .steamShim)
             #expect(recipe.hidden == base.hidden && recipe.copyIfPresent.count == 1)
-            #expect(recipe.verifiedBuilds == (edition.id == "hi3" ? ["9.1.0"] : []))
+            #expect(recipe.verifiedBuilds == ["9.1.0"])
             let settings = LaunchSettings.defaults(for: edition.id)
             let launch = try LaunchResolver.resolve(recipe: recipe, settings: settings,
                 installRoot: URL(filePath: "/games/\(edition.defaultInstallDirectoryName)"), prefix: URL(filePath: "/prefix"),
@@ -61,11 +61,13 @@ import Testing
     func resolvesSteamShimAndGenericSettings(backend: RuntimeBackend) throws {
         let recipe = try #require(Recipes.recipe(for: "hi3"))
         let shim = URL(filePath: "/steam-shim")
-        let bundle = "d3dmetal-wine11.22mg1.0-gptk4.0b3"
+        let bundle = backend == .d3dmetal ? "d3dmetal-wine11.22mg1.0-gptk4.0b3" : "dxmt-wine11.22mg1.0-dxmt0.80"
         var settings = LaunchSettings.defaults(for: "hi3")
         #expect(settings.backend == .d3dmetal && !settings.directX12)
         settings.backend = backend
-        #expect(recipe.isVerified(build: "9.1.0", settings: settings, runtimeBundleID: bundle) == (backend == .d3dmetal))
+        #expect(recipe.isVerified(build: "9.1.0", settings: settings, runtimeBundleID: bundle))
+        var unpatched = settings; unpatched.compatibilityPatches = false
+        #expect(!recipe.isVerified(build: "9.1.0", settings: unpatched, runtimeBundleID: bundle))
         #expect(!recipe.isVerified(build: "9.0.0", settings: settings, runtimeBundleID: bundle))
         #expect(!recipe.isVerified(build: "9.1.0", settings: settings, runtimeBundleID: Crypt32Fix.bundleID))
         settings.directX12 = true

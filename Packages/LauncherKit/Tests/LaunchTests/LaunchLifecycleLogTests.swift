@@ -77,8 +77,7 @@ import TestSupport
         for game in Recipes.games {
             let recipe = try #require(Recipes.recipe(for: game))
             let edition = try #require(GameDefinition.find(game))
-            let unverifiedServer = edition.honkaiImpactServer.map { $0 != .europeAmericas } ?? false
-            #expect(recipe.verifiedBuilds.isEmpty == (edition.region == .mainlandChina || unverifiedServer))
+            #expect(recipe.verifiedBuilds.isEmpty == (edition.region == .mainlandChina))
             for build in recipe.verifiedBuilds {
                 let parts = build.split(separator: ".", omittingEmptySubsequences: false)
                 #expect(parts.count >= 2)

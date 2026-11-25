@@ -99,9 +99,10 @@ import LauncherCore
             settings.backend = backend == "d3dmetal" ? .d3dmetal : .dxmt
             settings.compatibilityPatches = patches
             let log = try SessionLog.create(paths: AppPaths(root: temp.url), game: "hi3",
-                header: ["gameBuild": "9.1.0", "backend": backend, "runtimeBundle": "d3dmetal-wine11.22mg1.0-gptk4.0b3"],
+                header: ["gameBuild": "9.1.0", "backend": backend, "runtimeBundle": backend == "d3dmetal"
+                    ? "d3dmetal-wine11.22mg1.0-gptk4.0b3" : "dxmt-wine11.22mg1.0-dxmt0.80"],
                 now: Date(), timeZone: .current, maxBytes: 4096, launchSettings: settings)
-            let label = backend == "d3dmetal" && patches ? "verified build" : "unverified build"
+            let label = patches ? "verified build" : "unverified build"
             #expect(try readTestLog(log).contains("buildVerification: \(label)\n"))
         }
     }
