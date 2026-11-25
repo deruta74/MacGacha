@@ -686,6 +686,12 @@ struct GameMenu: View {
                 Button("Try Restoring Again", systemImage: "arrow.clockwise") { model.retryRecovery(game.id) }
             }
             if isInstalled {
+                if model.updateQueue.entries.contains(where: { $0.id == game.id }) {
+                    Button("Remove from queue", systemImage: "minus.circle") { model.removeQueuedUpdate(game.id) }
+                } else {
+                    Button("Queue Update", systemImage: "text.badge.plus") { model.enqueueUpdate(game.id) }
+                        .disabled(model.gameRecord(game.id)?.pending != nil || model.gameOperation?.id == game.id)
+                }
                 Button("Game Settings…", systemImage: "slider.horizontal.3") { gameSheet = .settings(game.id) }
                 if model.hasLaunchDetails(game.id) {
                     Button("Launch Details…", systemImage: "clock.arrow.circlepath") { gameSheet = .launchDetails(game.id) }

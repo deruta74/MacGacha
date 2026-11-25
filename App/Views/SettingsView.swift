@@ -134,6 +134,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            UpdateQueueSettings()
             Section {
                 Toggle("Notifications", isOn: Binding(
                     get: { model.notificationsEnabled },

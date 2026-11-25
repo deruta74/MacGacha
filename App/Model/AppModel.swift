@@ -218,6 +218,16 @@ final class AppModel {
     var prefixResetGame: String?
     @ObservationIgnored let prefixResetter: any WinePrefixResetting
     var gameMoveRecoveryReservation = false
+    var updateQueue = UpdateQueue()
+    var updateQueueNetworkAllowed = false
+    var updateQueueOnAC: Bool?
+    var updateQueueIdleSeconds: TimeInterval = 0
+    @ObservationIgnored let updateQueueEnvironment = UpdateQueueEnvironment()
+    @ObservationIgnored let updateQueueSignals: (@MainActor () -> (network: Bool, onAC: Bool?, idle: TimeInterval))?
+    @ObservationIgnored var updateQueueTimer: Task<Void, Never>?
+    @ObservationIgnored var updateQueueTask: Task<Void, Never>?
+    @ObservationIgnored var updateQueueTaskIsAutomatic = false
+    @ObservationIgnored var updateQueueWatchID: UUID?
     var gameOperation: GameOperationToken?
     private(set) var languageRestart: UUID?
     func setLanguageRestart(_ value: UUID?) { languageRestart = value }
@@ -263,7 +273,7 @@ final class AppModel {
     @ObservationIgnored private var requestModes: [String: ConsentMode] = [:]
     @ObservationIgnored private var progressTimes: [String: ContinuousClock.Instant] = [:]
     @ObservationIgnored private var started = false
-    @ObservationIgnored private var startupFinished = false
+    @ObservationIgnored private(set) var startupFinished = false
     @ObservationIgnored private var startupWaiters: [CheckedContinuation<Void, Never>] = []
     /// A shortcut started this process: the launcher window stays hidden until something needs it.
     var launchedHidden = false
@@ -385,7 +395,9 @@ final class AppModel {
         relaunch: @escaping @MainActor ([String]) async throws -> Void = { _ in },
         terminateAfterLanguageRestart: @escaping @MainActor () -> Void = {},
         launchArguments: [String] = ProcessInfo.processInfo.arguments,
-        prefixResetter: (any WinePrefixResetting)? = nil) {
+        prefixResetter: (any WinePrefixResetting)? = nil,
+        updateQueueSignals: (@MainActor () -> (network: Bool, onAC: Bool?, idle: TimeInterval))? = nil) {
+        self.updateQueueSignals = updateQueueSignals
         self.wishHistoryExporter = wishHistoryExporter
         self.storageService = storageService ?? StorageInventory(paths: paths)
         self.storageCacheDirectory = storageCacheDirectory
@@ -422,6 +434,9 @@ final class AppModel {
         self.honkaiServerPreference = gameServer
             ?? defaults?.string(forKey: Self.honkaiServerKey).flatMap(HonkaiImpactServer.init(rawValue:))
         if let gameServer { defaults?.set(gameServer.rawValue, forKey: Self.honkaiServerKey) }
+        if let data = defaults?.data(forKey: "updateQueue.v1"), let storedQueue = try? JSONDecoder().decode(UpdateQueue.self, from: data) {
+            self.updateQueue = storedQueue
+        }
         let preferred = Self.persistedRegion(defaults: defaults, locale: locale)
         defaults?.set(preferred.rawValue, forKey: "region")
         self.region = Self.initialRegion(defaults: defaults, locale: locale)
@@ -467,7 +482,10 @@ final class AppModel {
         } else { state.timing = nil }
         games[id] = state
     }
-    func setGameRecord(_ id: String, _ record: GameRecord?) { gameRecords[id] = record }
+    func setGameRecord(_ id: String, _ record: GameRecord?) {
+        gameRecords[id] = record
+        queuedUpdateRecordChanged(id, record: record)
+    }
     func setRosetta(_ status: RosettaStatus) { rosetta = status }
     func setRosettaInstallInProgress(_ inProgress: Bool) { rosettaInstallInProgress = inProgress }
     func setArtCacheState(_ state: ArtCacheState, in region: Region) {
@@ -595,6 +613,7 @@ final class AppModel {
         notificationTask?.cancel(); notificationActivationTask?.cancel()
         eventsHydrationTask?.cancel(); eventsExpiryTask?.cancel(); eventsWindowTask?.cancel()
         volumeEventTask?.cancel()
+        updateQueueTimer?.cancel(); updateQueueTask?.cancel()
         gameTask?.cancel(); gameStartupTask?.cancel(); gameActivationTask?.cancel()
     }
 
@@ -631,6 +650,8 @@ final class AppModel {
         scheduleRuntimeCatalogRefresh()
         updater.start { [weak self] in self?.isBusyForUpdates ?? true }
         startupFinished = true
+        startUpdateQueueMonitoring()
+        evaluateUpdateQueue()
         let waiters = startupWaiters; startupWaiters = []
         for waiter in waiters { waiter.resume() }
     }
