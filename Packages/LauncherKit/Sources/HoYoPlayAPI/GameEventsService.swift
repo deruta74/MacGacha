@@ -118,11 +118,12 @@ public actor GameEventsService {
             let games = try JSONDecoder().decode(EventsEnvelope<EventsGames>.self,
                 from: await json(Self.apiURL("getGames", region: region, language: language)))
             guard games.retcode == 0, games.data.games.count <= 100 else { return cached() }
-            let registry = Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0.id) })
+            let registry = Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0) })
             var requested: [String: String] = [:]
             for game in games.data.games {
-                guard let id = registry[game.biz], !game.id.isEmpty, game.id.utf8.count <= 128 else { continue }
-                requested[id] = game.id
+                guard let edition = registry[game.biz], !game.id.isEmpty, game.id.utf8.count <= 128,
+                    edition.requiredPublisherID.map({ $0 == game.id }) ?? true else { continue }
+                requested[edition.id] = game.id
             }
             for (id, remoteID) in requested.sorted(by: { $0.key < $1.key }) {
                 do {

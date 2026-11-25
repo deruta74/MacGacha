@@ -95,18 +95,16 @@ struct RootView: View {
                 if let card = CatalogGame(rawValue: game.id) {
                     VStack(alignment: .trailing, spacing: 12) {
                         Text(game.name).font(.largeTitle.bold()).foregroundStyle(.white)
-                        switch card {
-                        case .petitPlanet, .nexusAnima:
-                            let site = card == .petitPlanet ? "https://planet.hoyoverse.com" : "https://hna.hoyoverse.com"
-                            Link(destination: URL(string: site)!) {
-                                if model.gameArt[game.id]?.reservationOpen == true {
-                                    Text("Pre-register")
-                                } else {
-                                    Text("Official website")
-                                }
+                        let site = switch card {
+                        case .petitPlanet: "https://planet.hoyoverse.com"
+                        case .nexusAnima: "https://hna.hoyoverse.com"
+                        }
+                        Link(destination: URL(string: site)!) {
+                            if model.gameArt[game.id]?.reservationOpen == true {
+                                Text("Pre-register")
+                            } else {
+                                Text("Official website")
                             }
-                        case .honkaiImpact:
-                            Link("View in App Store", destination: URL(string: "https://apps.apple.com/app/id1336342304")!)
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -216,7 +214,7 @@ struct RootView: View {
         guard GameDefinition.find(selectedID) != nil else { return }
         switch defaults.string(forKey: "MacGachaDebugSheet") {
         case "install": gameSheet = .install(selectedID)
-        case "voices": gameSheet = .voices(selectedID)
+        case "voices" where GameDefinition.find(selectedID)?.voices.isEmpty == false: gameSheet = .voices(selectedID)
         case "settings": gameSheet = .settings(selectedID)
         case "setup": gameSheet = .setup(selectedID)
         case "rosetta": gameSheet = .rosetta(selectedID)

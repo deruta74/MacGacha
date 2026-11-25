@@ -42,6 +42,7 @@ enum AdoptEditionValidator {
                 conflicts = GameDefinition.all.contains { $0.biz == value && $0.id != game.id }
             case "game_id":
                 conflicts = GameDefinition.all.contains { $0.gameID == value && $0.id != game.id }
+                    || (game.family == .honkaiImpact && otherHonkaiImpactServers.contains(value))
             case "launcher_id":
                 conflicts = Region.allCases.contains { $0.launcherID == value && $0 != game.region }
             default: continue
@@ -56,6 +57,9 @@ enum AdoptEditionValidator {
     private static let bilibiliBusinesses = Set(GameDefinition.all.map {
         String($0.biz.split(separator: "_")[0]) + "_bilibili"
     })
+
+    // Other bh3_global IDs in HoYoPlay's Global getGameBranches response.
+    private static let otherHonkaiImpactServers: Set<String> = ["g0mMIvshDb", "uxB4MC7nzC", "bxPTXSET5t", "wkE5P5WsIf"]
 
     private static func uapcBusinesses(_ text: String) -> [String] {
         guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return [] }

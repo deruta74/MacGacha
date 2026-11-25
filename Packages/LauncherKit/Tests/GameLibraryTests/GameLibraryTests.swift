@@ -14,6 +14,52 @@ import TestSupport
 extension SandboxArchiveExtractor: SandboxPackageExtracting {}
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
+    @Test func honkaiImpactUsesItsExactServerAcrossTheGameLifecycle() async throws {
+        let f = try LibraryFixture(), game = try #require(GameDefinition.find("hi3"))
+        let executable = try SafeRelativePath("BH3.exe")
+        try f.advertiseHonkaiImpact(version: "9.0.0")
+        let estimate = try await f.library.estimate(game, voices: [], at: f.install)
+        #expect(estimate.download > 0)
+        let installed = try await libraryCollect(await f.library.install(game, voices: [], at: f.install, approved: true))
+        #expect(installed.last == .phase(.completed))
+        #expect(try await f.store.load(game.id)?.executable == executable)
+        #expect(try await f.store.load(game.id)?.installed?.voices == [])
+        #expect(try f.fs.readFile(at: executable, maxBytes: 100) == Data("9.0.0".utf8))
+
+        try f.advertiseHonkaiImpact(version: "9.1.0")
+        #expect(try await f.library.checkForUpdate(game) == .updateAvailable(from: "9.0.0", to: "9.1.0"))
+        let start = f.cdn.requestLog.count
+        let updated = try await libraryCollect(await f.library.update(game, approved: true))
+        #expect(updated.last == .phase(.completed))
+        let requests = f.cdn.requestLog.dropFirst(start).map(\.path)
+        #expect(requests.contains { $0.hasPrefix("hi3-chunks/") })
+        #expect(!requests.contains { $0.hasSuffix("getPatchBuild") })
+        #expect(try f.fs.readFile(at: executable, maxBytes: 100) == Data("9.1.0".utf8))
+
+        try f.fs.writeAtomically(Data("wrong".utf8), to: executable)
+        let verified = try await libraryCollect(await f.library.verify(game, mode: .full))
+        #expect(verified.last == .phase(.completed))
+        #expect(try f.fs.readFile(at: executable, maxBytes: 100) == Data("9.1.0".utf8))
+        try await f.library.uninstall(game)
+        #expect(try await f.store.load(game.id) == nil)
+
+        let config = try SafeRelativePath("config.ini")
+        let ini = Data(#"""
+            [General]
+            cps=hyp_hoyoverse
+            channel=1
+            uapc={"bh3_global":{"uapc":""}}
+            """#.utf8)
+        try f.fs.createRootDurably()
+        try f.fs.writeAtomically(Data("9.1.0".utf8), to: executable)
+        try f.fs.writeAtomically(ini, to: config)
+        let adopted = try await libraryCollect(await f.library.adopt(game, folder: f.install, voices: []))
+        #expect(adopted.last == .phase(.completed))
+        #expect(try await f.store.load(game.id)?.ownership == .adopted)
+        try await f.library.uninstall(game)
+        #expect(try f.fs.readFile(at: config, maxBytes: 100) == ini)
+    }
+
     @Test func localVolumeStatusUsesCachedBranchWithoutNetwork() async throws {
         let f = try LibraryFixture(); try f.advertise(1); try await f.installGame()
         try f.advertise(2)
@@ -1006,6 +1052,46 @@ private struct LibraryFixture: ~Copyable {
             store: store, disk: disk, log: nil, guard: operationGuard, locationProbe: locationProbe, sandboxExtractor: SandboxArchiveExtractor())
     }
     func installGame() async throws { _ = try await libraryCollect(await library.install(game, voices: ["en-us"], at: install, approved: true)) }
+
+    func advertiseHonkaiImpact(version: String) throws {
+        let wrong = ["id": "g0mMIvshDb", "biz": "bh3_global"]
+        let correct = ["id": "5TIVvvcwtM", "biz": "bh3_global"]
+        let category: [String: Any] = ["category_id": "base", "matching_field": "game",
+            "type": "CATEGORY_TYPE_RESOURCE", "scenarios": ["CATEGORY_SCENARIO_FULL"]]
+        let main: [String: Any] = ["package_id": "synthetic", "password": "synthetic", "branch": "main",
+            "tag": version, "diff_tags": ["9.0.0"], "categories": [category]]
+        var otherMain = main
+        otherMain["tag"] = "other"
+        cdn.serve("hyp/hyp-connect/api/getGameBranches", data: try jsonData(["game_branches": [
+            ["game": wrong, "main": otherMain], ["game": correct, "main": main]
+        ]]))
+        cdn.serve("hyp/hyp-connect/api/getGameConfigs", data: try jsonData(["launch_configs": [
+            ["game": wrong, "installation_dir": "Wrong edition", "exe_file_name": "Other.exe", "enable_ldiff": true],
+            ["game": correct, "installation_dir": "Honkai Impact 3rd", "exe_file_name": "BH3.exe", "enable_ldiff": false]
+        ]]))
+
+        let decoded = Data(version.utf8), checksum = md5Library(decoded), compressed = rawZstd(decoded)
+        cdn.serve("hi3-chunks/\(checksum.hex)", data: compressed)
+        var chunk = ProtobufWriter()
+        chunk.string(1, checksum.hex); chunk.string(2, checksum.hex)
+        chunk.varint(4, UInt64(compressed.count)); chunk.varint(5, UInt64(decoded.count))
+        var file = ProtobufWriter()
+        file.string(1, "BH3.exe"); file.bytes(2, chunk.data)
+        file.varint(4, UInt64(decoded.count)); file.string(5, checksum.hex)
+        var manifest = ProtobufWriter(); manifest.bytes(1, file.data)
+        let manifestBody = rawZstd(manifest.data)
+        cdn.serve("hi3-manifests/\(version)", data: manifestBody)
+        let descriptor: [String: Any] = [
+            "category_id": "base", "matching_field": "game",
+            "manifest": ["id": version, "checksum": md5Library(manifest.data).hex,
+                "compressed_size": String(manifestBody.count), "uncompressed_size": String(manifest.data.count)],
+            "manifest_download": ["url_prefix": "https://cdn.hoyoverse.com/hi3-manifests", "url_suffix": "", "compression": 1, "encryption": 0, "password": ""],
+            "chunk_download": ["url_prefix": "https://cdn.hoyoverse.com/hi3-chunks", "url_suffix": "", "compression": 1, "encryption": 0, "password": ""],
+            "stats": ["compressed_size": String(compressed.count), "uncompressed_size": String(decoded.count)]
+        ]
+        cdn.serve("downloader/sophon_chunk/api/getBuild", data: try jsonData(["build_id": version, "tag": version, "manifests": [descriptor]]))
+    }
+
     func seedExisting() throws {
         for (path, body) in syntheticFiles(1) { try fs.writeAtomically(Data(body.utf8), to: SafeRelativePath(path)) }
         try fs.writeAtomically(Data("bad".utf8), to: SafeRelativePath("GenshinImpact.exe"))

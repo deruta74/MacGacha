@@ -28,22 +28,22 @@ import TestSupport
         }
         let reopened = GameRecordStore(directory: paths.games)
         #expect(try await reopened.records() == expected)
-        #expect(Set(expected.values.map(\.installPath)).count == 6)
-        #expect(try await reopened.gameDirectories().count == 6)
+        #expect(Set(expected.values.map(\.installPath)).count == GameDefinition.all.count)
+        #expect(try await reopened.gameDirectories().count == GameDefinition.all.count)
     }
 
     @Test func globalDefinitionsCarryRegionAndHYPIdentifiers() {
-        #expect(GameDefinition.inRegion(.global).map(\.region) == [.global, .global, .global])
-        #expect(GameDefinition.inRegion(.global).map(\.gameID) == ["gopR6Cufr3", "4ziysqXOQ8", "U5hbdsT9W7"])
+        #expect(GameDefinition.inRegion(.global).map(\.region) == [.global, .global, .global, .global])
+        #expect(GameDefinition.inRegion(.global).map(\.gameID) == ["gopR6Cufr3", "4ziysqXOQ8", "U5hbdsT9W7", "5TIVvvcwtM"])
         let cn = GameDefinition(id: "genshin-cn", biz: "hk4e_cn", region: .mainlandChina, gameID: "1Z8W5NHUQb", voices: [])
         #expect(cn.region == .mainlandChina && cn.gameID == "1Z8W5NHUQb")
         #expect(GameDefinition.find(cn.id)?.biz == cn.biz)
     }
     @Test func gameDefinitionsCoverGlobalGamesAndVoices() {
-        #expect(GameDefinition.inRegion(.global).map(\.id) == ["genshin", "starrail", "zzz"])
-        #expect(GameDefinition.inRegion(.global).map(\.biz) == ["hk4e_global", "hkrpg_global", "nap_global"])
+        #expect(GameDefinition.inRegion(.global).map(\.id) == ["genshin", "starrail", "zzz", "hi3"])
+        #expect(GameDefinition.inRegion(.global).map(\.biz) == ["hk4e_global", "hkrpg_global", "nap_global", "bh3_global"])
         for game in GameDefinition.all {
-            #expect(game.voices.map(\.code) == ["zh-cn", "en-us", "ja-jp", "ko-kr"])
+            #expect(game.voices.map(\.code) == (game.id == "hi3" ? [] : ["zh-cn", "en-us", "ja-jp", "ko-kr"]))
             #expect(game.voices.allSatisfy { !$0.name.isEmpty })
         }
     }

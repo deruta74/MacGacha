@@ -752,7 +752,7 @@ struct AppModelGamesTests {
 
     @Test func editionRegistryAndInstallFoldersAreEditionSpecific() throws {
         #expect(LauncherGame.all.map(\.id) == GameDefinition.all.map(\.id))
-        #expect(LauncherGame.all.count == 6)
+        #expect(LauncherGame.all.count == 7)
         let style = try #require(LauncherGame.all.first)
         for definition in GameDefinition.inRegion(.mainlandChina) {
             let game = LauncherGame(id: definition.id, name: "Unrelated interface name", tint: style.tint, deepTint: style.deepTint)
@@ -932,14 +932,15 @@ struct AppModelGamesTests {
 
     @Test func startAndActivationRefreshAreThrottledForTenMinutes() async throws {
         let (model, fake, clock) = try gameFixture()
+        let editions = model.visibleGames.count
         await model.start()
-        #expect(fake.startCount == 1 && fake.statusCount == 3)
+        #expect(fake.startCount == 1 && fake.statusCount == editions)
         await model.start(); await model.refreshGames()
-        #expect(fake.startCount == 1 && fake.statusCount == 3)
-        clock.advance(.seconds(599)); await model.refreshGames(); #expect(fake.statusCount == 3)
+        #expect(fake.startCount == 1 && fake.statusCount == editions)
+        clock.advance(.seconds(599)); await model.refreshGames(); #expect(fake.statusCount == editions)
         clock.advance(.seconds(1))
         NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
-        try await gamesEventually { fake.statusCount == 6 }
+        try await gamesEventually { fake.statusCount == 2 * editions }
     }
 
     @Test func progressKeepsPhaseThrottlesAndUsesFiveSecondSpeed() async throws {

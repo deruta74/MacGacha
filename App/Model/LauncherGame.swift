@@ -27,6 +27,9 @@ extension LauncherGame {
         case .zzz:
             name = definition.region == .global ? String(localized: "Zenless Zone Zero") : String(localized: "绝区零", comment: "Mainland China edition; keep the official Chinese name in every language")
             tint = Color(red: 0.85, green: 0.93, blue: 0.30); deepTint = Color(red: 0.10, green: 0.10, blue: 0.10)
+        case .honkaiImpact:
+            name = String(localized: "Honkai Impact 3rd", comment: "Official name of the Honkai Impact 3rd Global edition")
+            tint = .orange; deepTint = .indigo
         }
         return LauncherGame(id: definition.id, name: name, tint: tint, deepTint: deepTint)
     }
@@ -43,8 +46,6 @@ extension LauncherGame {
     static func cards(in region: Region) -> [Self] {
         var cards = games(in: region)
         if region == .global {
-            cards.append(Self(id: CatalogGame.honkaiImpact.rawValue, name: "Honkai Impact 3rd",
-                tint: .orange, deepTint: .indigo))
             cards.append(Self(id: CatalogGame.petitPlanet.rawValue, name: "Petit Planet",
                 tint: .mint, deepTint: .teal))
             cards.append(Self(id: CatalogGame.nexusAnima.rawValue, name: "Honkai: Nexus Anima",

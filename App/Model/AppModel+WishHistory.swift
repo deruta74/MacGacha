@@ -19,9 +19,13 @@ import HoYoPlayAPI
     }
 
     /// Memory-only eligibility. Views hide the menu item while the switch is off.
+    func offersWishHistory(_ id: String) -> Bool {
+        wishHistoryEnabled && GameDefinition.find(id).map(WishHistoryExporter.supports) == true
+    }
+
     func canExportWishHistory(_ id: String) -> Bool {
-        wishHistoryEnabled && wishHistoryExportingGame == nil && languageRestart == nil
-            && GameDefinition.find(id) != nil && gameRecords[id]?.installed != nil
+        offersWishHistory(id) && wishHistoryExportingGame == nil && languageRestart == nil
+            && gameRecords[id]?.installed != nil
             && gameOperation?.id != id && gameLocationURL(for: id) != nil
     }
 

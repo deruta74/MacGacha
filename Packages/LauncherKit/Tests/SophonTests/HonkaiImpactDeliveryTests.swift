@@ -24,13 +24,19 @@ func honkaiImpactGlobalWindowsManifests() async throws {
     defer { http.invalidate() }
     let api = DeliveryAPI(http: http)
     let id = "5TIVvvcwtM"
-    let branch = try await api.branch(biz: "bh3_global", gameID: id)
+    let branches = try await api.branches(biz: "bh3_global", gameID: id)
+    let branch = branches.main
     let config = try await api.config(biz: "bh3_global", gameID: id)
     #expect(branch.gameID == id)
     #expect(config.executable.description == "BH3.exe")
+    #expect(!config.enableLdiff)
+    let voiceCount = branch.categories.filter(\.isAudio).count
+    #expect(voiceCount == 0)
     let build = try await api.build(branch)
     #expect(build.tag == branch.tag)
     let categories = try SophonPlanner.selectCategories(branch, build: build, voices: [])
+    #expect(categories.count == build.categories.count)
+    print("HI3 main version \(branch.tag), \(categories.count) full categories, \(voiceCount) voice categories, pre-download offered: \(branches.preDownload != nil)")
     var target: [PlannedCategory] = []
     for category in categories {
         let manifest = try await api.manifest(category).manifest

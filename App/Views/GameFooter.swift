@@ -696,10 +696,12 @@ struct GameMenu: View {
                     .disabled(model.gameUpdateCheck[game.id] == .checking)
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
                     .disabled(!model.canOperateGameDuringPlay(game.id, isDownload: false))
-                Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
-                    .disabled(!model.canOperateGameDuringPlay(game.id, isDownload: false))
+                if GameDefinition.find(game.id)?.voices.isEmpty == false {
+                    Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
+                        .disabled(!model.canOperateGameDuringPlay(game.id, isDownload: false))
+                }
                 sandboxItems
-                if model.wishHistoryEnabled {
+                if model.offersWishHistory(game.id) {
                     Button("Export Wish History…", systemImage: "square.and.arrow.up") { gameSheet = .wishExport(game.id) }
                         .disabled(!model.canExportWishHistory(game.id))
                 }

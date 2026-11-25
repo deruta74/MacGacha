@@ -16,7 +16,7 @@ import TestSupport
             try AdoptEditionValidator.validate(game, in: fs)
         }
     }
-    @Test(arguments: GameDefinition.all.map(\.id))
+    @Test(arguments: GameDefinition.inRegion(.mainlandChina).map(\.id) + ["genshin", "starrail", "zzz"])
     func oppositeEditionIsRefused(id: String) async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), game = try #require(GameDefinition.find(id))
@@ -24,6 +24,39 @@ import TestSupport
             let fs = try ContainedFileSystem(root: temp.url)
             try seed(other, fs: fs)
             #expect(throws: LauncherError.gameEditionMismatch) { try AdoptEditionValidator.validate(game, in: fs) }
+        }
+    }
+
+    @Test func honkaiImpactUsesExactUAPCKeysAndGenericBilibiliRefusal() async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url)
+            let game = try #require(GameDefinition.find("hi3"))
+            try fs.writeAtomically(Data("exe".utf8), to: SafeRelativePath("BH3.exe"))
+            let config = try SafeRelativePath("config.ini")
+            for (biz, expected) in [("bh3_global", nil), ("hk4e_global", LauncherError.gameEditionMismatch),
+                ("bh3_bilibili", LauncherError.gameDistributionUnsupported)] {
+                let ini = "[General]\ncps=hyp_hoyoverse\nchannel=1\nuapc={\"\(biz)\":{\"uapc\":\"\"}}"
+                try fs.writeAtomically(Data(ini.utf8), to: config)
+                if let expected {
+                    #expect(throws: expected) { try AdoptEditionValidator.validate(game, in: fs) }
+                } else { try AdoptEditionValidator.validate(game, in: fs) }
+            }
+        }
+    }
+
+    @Test(arguments: ["g0mMIvshDb", "uxB4MC7nzC", "bxPTXSET5t", "wkE5P5WsIf", "5TIVvvcwtM", "8"])
+    func honkaiImpactRefusesOtherExplicitPublisherIDsButAcceptsLegacyMetadata(id: String) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url)
+            let game = try #require(GameDefinition.find("hi3"))
+            try fs.writeAtomically(Data("exe".utf8), to: SafeRelativePath(game.executableName))
+            let ini = "[General]\ncps=hyp_hoyoverse\nchannel=1\ngame_id=\(id)\nuapc={\"bh3_global\":{\"uapc\":\"\"}}"
+            try fs.writeAtomically(Data(ini.utf8), to: SafeRelativePath("config.ini"))
+            if id == game.gameID || id == "8" {
+                try AdoptEditionValidator.validate(game, in: fs)
+            } else {
+                #expect(throws: LauncherError.gameEditionMismatch) { try AdoptEditionValidator.validate(game, in: fs) }
+            }
         }
     }
     @Test(arguments: ["channel=14", "cps=bilibili", "cps=BILIBILI", "cps=bilibili_PC", "game_biz=hkrpg_bilibili",

@@ -25,12 +25,16 @@ public enum Recipes {
         case .zzz:
             hidden = ["\(data)/Plugins/x86_64/vulkan-1.dll"]
             wrapper = .steamShim; hosts = []; verified = ["3.3.0"]
+        case .honkaiImpact:
+            hidden = ["\(data)/Plugins/crashreport.exe", "\(data)/Plugins/vulkan-1.dll"]
+            wrapper = .steamShim; hosts = []; verified = ["9.1.0"]
         }
         return (game.id, LaunchRecipe(game: game.id, recipeVersion: 1,
             verifiedBuilds: game.region == .global ? verified : [], executable: try! SafeRelativePath(game.executableName),
             wrapper: wrapper, blockedHosts: hosts, hidden: hidden.map { try! SafeRelativePath($0) },
             copyIfPresent: game.family == .starrail ? [] : [(try! SafeRelativePath("HoYoKProtect.sys"), "HoYoKProtect.sys")],
-            timeoutFix: game.family != .starrail, supportsDirectX12: game.family == .zzz,
-            gameLogPaths: LaunchLogFiles.gameLogPaths(for: game.id)))
+            timeoutFix: game.family == .genshin || game.family == .zzz, supportsDirectX12: game.family == .zzz,
+            gameLogPaths: LaunchLogFiles.gameLogPaths(for: game.id),
+            verifiedD3DMetalBundleID: game.family == .honkaiImpact ? "d3dmetal-wine11.22mg1.0-gptk4.0b3" : nil))
     })
 }

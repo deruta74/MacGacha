@@ -13,7 +13,7 @@ import Launch
     @Test func forcedReadBypassesThrottleForOnlyRequestedGame() async throws {
         let fake = UpdateCheckServices(), model = fixture(fake)
         await model.refreshGames()
-        #expect(fake.normalReads.count == 3)
+        #expect(fake.normalReads.count == GameDefinition.inRegion(.global).count)
         fake.result = .success(.updateAvailable(from: "1.0", to: "2.0"))
         model.checkForGameUpdate("genshin")
         await model.gameUpdateCheckTasks["genshin"]?.value
@@ -21,7 +21,7 @@ import Launch
         #expect(model.games["genshin"]?.status == .updateAvailable(from: "1.0", to: "2.0"))
         #expect(model.gameUpdateCheck["genshin"] == .updateAvailable)
         await model.refreshGames()
-        #expect(fake.normalReads.count == 3)
+        #expect(fake.normalReads.count == GameDefinition.inRegion(.global).count)
     }
 
     @Test func upToDateUsesInjectedDateAndOtherStatusApplicationsClearResult() async {

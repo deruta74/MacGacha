@@ -48,7 +48,7 @@ struct WishHistoryLink: Sendable, Equatable, CustomStringConvertible, CustomDebu
     var customMirror: Mirror { Mirror(self, children: EmptyCollection<Mirror.Child>()) }
 
     init?(_ raw: String, game: GameDefinition) {
-        guard raw.utf8.count <= 16_384, let url = URLComponents(string: raw),
+        guard WishHistoryExporter.supports(game), raw.utf8.count <= 16_384, let url = URLComponents(string: raw),
             url.scheme == "https", url.port == nil || url.port == 443,
             url.user == nil, url.password == nil, let items = url.queryItems else { return nil }
         var apiPaths = Self.banners(game).map { Self.path(game, banner: $0) }
@@ -111,6 +111,7 @@ struct WishHistoryLink: Sendable, Equatable, CustomStringConvertible, CustomDebu
         case .genshin: ["100", "200", "301", "302", "400", "500", "1000", "2000"]
         case .starrail: ["1", "2", "11", "12", "21", "22"]
         case .zzz: ["1", "2", "3", "5", "102", "103"]
+        case .honkaiImpact: []
         }
     }
 }

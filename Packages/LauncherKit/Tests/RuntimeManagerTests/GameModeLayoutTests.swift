@@ -15,7 +15,7 @@ private struct LayoutRegistration: GameModeRegistering { func register(_ app: UR
         let icons = try FixedGameModeIcon()
         let manager = GameModeHelper(paths: f.store.paths, icons: icons, registration: LayoutRegistration())
         let helper = try await manager.prepare(bundle: bundle, game: game, componentIDs: f.bundle.components.map(\.rawValue))
-        let names = ["genshin": "Genshin Impact", "starrail": "Honkai: Star Rail", "zzz": "Zenless Zone Zero",
+        let names = ["genshin": "Genshin Impact", "starrail": "Honkai: Star Rail", "zzz": "Zenless Zone Zero", "hi3": "Honkai Impact 3rd",
             "genshin-cn": "原神", "starrail-cn": "崩坏：星穹铁道", "zzz-cn": "绝区零"]
         #expect(game.gameApplicationName == names[game.id])
         #expect(helper.root.path.contains("/\(game.id)/\(game.id).app/Contents"))

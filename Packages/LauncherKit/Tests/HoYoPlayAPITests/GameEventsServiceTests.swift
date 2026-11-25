@@ -140,15 +140,16 @@ import TestSupport
     func everySupportedEditionUsesItsRemoteIDAndOneFailureIsIndependent(region: Region) async throws {
         let temp = try TempDir(), http = EventsHTTP(region: region), clock = EventsDate()
         let games = GameDefinition.inRegion(region)
-        http.games = try JSONSerialization.data(withJSONObject: ["retcode": 0, "data": ["games": games.enumerated().map {
-            ["biz": $0.element.biz, "id": "remote-\($0.offset)"]
-        }]])
+        let remoteIDs = games.enumerated().map { $0.element.id == "hi3" ? "5TIVvvcwtM" : "remote-\($0.offset)" }
+        var entries = zip(games, remoteIDs).map { ["biz": $0.0.biz, "id": $0.1] }
+        if region == .global { entries.append(["biz": "bh3_global", "id": "other-server"]) }
+        http.games = try JSONSerialization.data(withJSONObject: ["retcode": 0, "data": ["games": entries]])
         let service = GameEventsService(cacheDirectory: temp.url.appendingPathComponent("Events"), region: region, http: http, now: { clock.now })
         let first = await service.refresh()
         #expect(Set(first.keys) == Set(games.map(\.id)))
-        #expect(http.requests.count == 4)
-        let remoteIDs = Set(http.requests.compactMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "game_id" }?.value })
-        #expect(remoteIDs == ["remote-0", "remote-1", "remote-2"])
+        #expect(http.requests.count == games.count + 1)
+        let requestedIDs = Set(http.requests.compactMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "game_id" }?.value })
+        #expect(requestedIDs == Set(remoteIDs))
         clock.advance(60)
         http.failedID = "remote-1"
         http.content = content([])

@@ -2,7 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
 
-public enum GameFamily: String, Sendable, Hashable, CaseIterable { case genshin, starrail, zzz }
+public enum GameFamily: String, Sendable, Hashable, CaseIterable { case genshin, starrail, zzz, honkaiImpact }
 
 public struct VoiceOption: Sendable, Hashable {
     public let code: String
@@ -25,15 +25,19 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
     public static func find(_ id: String) -> Self? { all.first { $0.id == id } }
     public static func inRegion(_ region: Region) -> [Self] { all.filter { $0.region == region } }
 
+    /// HoYoPlay lists multiple HI3 servers under the same business ID.
+    package var requiredPublisherID: String? { family == .honkaiImpact ? gameID : nil }
+
     public var executableName: String {
         switch family {
         case .genshin: region == .global ? "GenshinImpact.exe" : "YuanShen.exe"
         case .starrail: "StarRail.exe"
         case .zzz: "ZenlessZoneZero.exe"
+        case .honkaiImpact: "BH3.exe"
         }
     }
     public var dataDirectoryName: String { String(executableName.dropLast(4)) + "_Data" }
-    /// In-game camera output, relative to the installation root in both regions.
+    /// In-game camera output, relative to the installation root.
     public var screenshotsPath: SafeRelativePath {
         // Fixed registry literals are validated once at their use boundary.
         try! SafeRelativePath(family == .starrail ? "StarRail_Data/ScreenShots" : "ScreenShot")
@@ -44,6 +48,7 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
         case (.genshin, .global): "Genshin Impact"
         case (.starrail, .global): "Honkai: Star Rail"
         case (.zzz, .global): "Zenless Zone Zero"
+        case (.honkaiImpact, _): "Honkai Impact 3rd"
         case (.genshin, .mainlandChina): "原神"
         case (.starrail, .mainlandChina): "崩坏星穹铁道"
         case (.zzz, .mainlandChina): "绝区零"
@@ -60,6 +65,7 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
         case (.genshin, .global): "Genshin Impact"
         case (.starrail, .global): "Star Rail"
         case (.zzz, .global): "ZenlessZoneZero"
+        case (.honkaiImpact, _): "Honkai Impact 3rd"
         case (.genshin, .mainlandChina): "原神"
         case (.starrail, .mainlandChina): "崩坏：星穹铁道"
         case (.zzz, .mainlandChina): "绝区零"
@@ -72,6 +78,7 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
         return [GameDefinition(id: "genshin", biz: "hk4e_global", region: .global, gameID: "gopR6Cufr3", voices: voices, family: .genshin),
             GameDefinition(id: "starrail", biz: "hkrpg_global", region: .global, gameID: "4ziysqXOQ8", voices: voices, family: .starrail),
             GameDefinition(id: "zzz", biz: "nap_global", region: .global, gameID: "U5hbdsT9W7", voices: voices, family: .zzz),
+            GameDefinition(id: "hi3", biz: "bh3_global", region: .global, gameID: "5TIVvvcwtM", voices: [], family: .honkaiImpact),
             GameDefinition(id: "genshin-cn", biz: "hk4e_cn", region: .mainlandChina, gameID: "1Z8W5NHUQb", voices: voices, family: .genshin),
             GameDefinition(id: "starrail-cn", biz: "hkrpg_cn", region: .mainlandChina, gameID: "64kMb5iAWu", voices: voices, family: .starrail),
             GameDefinition(id: "zzz-cn", biz: "nap_cn", region: .mainlandChina, gameID: "x6znKlJ0xK", voices: voices, family: .zzz)]
@@ -80,13 +87,11 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
 
 /// Global HoYoPlay cards that have no verified Windows launch recipe.
 public enum CatalogGame: String, CaseIterable, Sendable {
-    case honkaiImpact = "honkai-impact-3rd"
     case nexusAnima = "honkai-nexus-anima"
     case petitPlanet = "petit-planet"
 
     public var publisherID: String {
         switch self {
-        case .honkaiImpact: "5TIVvvcwtM"
         case .petitPlanet: "viiywh5G2H"
         case .nexusAnima: "yneO4yGc4x"
         }

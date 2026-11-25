@@ -521,7 +521,7 @@ func highlightsBrowserLinksAreValidatedAlsoWhenDecoded(value: String) throws {
 }
 
 @Test
-func catalogCardsKeepTheirArtworkAndReservationStatusAcrossRestarts() async throws {
+func honkaiImpactArtworkMatchesTheExactServerAndCatalogCardsKeepReservationStatus() async throws {
     let temp = try TempDir(), cdn = MockCDN()
     try artFixtures(cdn)
     func game(_ id: String, _ biz: String, _ icon: String) -> [String: Any] {
@@ -532,13 +532,62 @@ func catalogCardsKeepTheirArtworkAndReservationStatusAcrossRestarts() async thro
         game("yneO4yGc4x", "abc_global", "logo"), game("g0mMIvshDb", "bh3_global", "jp"), game("g", "hk4e_global", "icon"),
         game("s", "hkrpg_global", "icon"), game("z", "nap_global", "icon")]
     cdn.serve(apiGames, data: try JSONSerialization.data(withJSONObject: ["data": ["games": games]]))
+    let basic = [("5TIVvvcwtM", "europe-americas", "preferred"), ("g0mMIvshDb", "japan", "jp")].map { id, slide, image in
+        ["game": ["id": id, "biz": "bh3_global"],
+         "backgrounds": [["id": slide, "background": ["url": "https://fastcdn.hoyoverse.com/" + image]]]] as [String: Any]
+    }
+    cdn.serve(apiBasic, data: try JSONSerialization.data(withJSONObject: ["data": ["game_info_list": basic]]))
     cdn.serve("jp", data: png)
     let service = GameArtService(cacheDirectory: temp.url, http: cdn)
     let cards = await service.refresh()
     #expect(cards.count == 6)
-    #expect(cards["honkai-impact-3rd"]?.icon == cards["genshin"]?.icon)
+    let hi3 = try #require(cards["hi3"])
+    #expect(hi3.icon == cards["genshin"]?.icon)
+    #expect(hi3.backgrounds.map(\.id) == ["europe-americas"])
+    #expect(cdn.requestLog.allSatisfy { $0.path != "jp" })
     #expect(cards["petit-planet"]?.reservationOpen == true)
     #expect(cards["honkai-nexus-anima"]?.reservationOpen == true)
     #expect(await GameArtService(cacheDirectory: temp.url, http: cdn).loadCached() == cards)
     #expect(GameDefinition.find("honkai-impact-3rd") == nil && GameDefinition.find("petit-planet") == nil)
+}
+
+@Test
+func legacyHonkaiImpactArtHydratesOfflineAndRefreshesTheCatalogCount() async throws {
+    let temp = try TempDir(), cdn = MockCDN()
+    try artFixtures(cdn)
+    let root = temp.url.appendingPathComponent("GameArt")
+    let first = await GameArtService(cacheDirectory: root, http: cdn).refresh()
+    let otherArt = try #require(first["genshin"])
+    try await BlockingIO.run {
+        let fs = try ContainedFileSystem(root: root)
+        let path = try SafeRelativePath("art-index.json")
+        let data = try fs.readFile(at: path, maxBytes: 512 << 10)
+        var index = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var games = try #require(index["games"] as? [String: Any])
+        let legacy = try #require(games["genshin"] as? [String: Any])
+        games["honkai-impact-3rd"] = legacy
+        index["games"] = games
+        index["catalogCardCount"] = 3
+        try fs.writeAtomically(JSONSerialization.data(withJSONObject: index), to: path)
+    }
+    let offline = MockCDN()
+    offline.enqueueFault(apiGames, .transportError)
+    let service = GameArtService(cacheDirectory: root, http: offline)
+    let restored = await service.loadCached()
+    #expect(restored.filter { $0.key != "hi3" } == first)
+    #expect(restored["hi3"] == otherArt)
+    #expect(await service.cachedIcon(for: "hi3") != nil)
+    #expect(offline.requestLog.isEmpty)
+    #expect(await service.refresh() == restored)
+    #expect(!offline.requestLog.isEmpty)
+
+    let refreshed = await GameArtService(cacheDirectory: root, http: cdn).refresh()
+    #expect(refreshed["hi3"] == otherArt)
+    let index = try await BlockingIO.run {
+        let fs = try ContainedFileSystem(root: root)
+        return try fs.readFile(at: SafeRelativePath("art-index.json"), maxBytes: 512 << 10)
+    }
+    let published = try #require(JSONSerialization.jsonObject(with: index) as? [String: Any])
+    #expect(published["catalogCardCount"] as? Int == 2)
+    #expect((published["games"] as? [String: Any])?["honkai-impact-3rd"] == nil)
 }

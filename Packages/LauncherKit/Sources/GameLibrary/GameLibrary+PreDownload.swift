@@ -28,7 +28,7 @@ extension GameLibrary {
         if !refresh { return try cache.info(saved, installed: installed, edition: game.id) }
         if record.pending != nil { return PreDownloadInfo(state: .unavailable, canDelete: saved != nil) }
         let branches: (main: GameBranch, preDownload: GameBranch?)
-        do { branches = try await api.branches(biz: game.biz) }
+        do { branches = try await api.branches(biz: game.biz, gameID: game.requiredPublisherID) }
         catch {
             if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
             return try cache.info(saved, installed: installed, edition: game.id)
@@ -37,7 +37,9 @@ extension GameLibrary {
         var discoveryFailed = false
         if let future = branches.preDownload, future.diffTags.contains(installed.tag), future.tag != installed.tag {
             do {
-                if try await api.config(biz: game.biz).enableLdiff { offered = try await discoverPreDownload(game, record: record, branch: future) }
+                if try await api.config(biz: game.biz, gameID: game.requiredPublisherID).enableLdiff {
+                    offered = try await discoverPreDownload(game, record: record, branch: future)
+                }
             } catch {
                 if Task.isCancelled || error is CancellationError { throw LauncherError.cancelled }
                 discoveryFailed = true
@@ -104,9 +106,11 @@ extension GameLibrary {
             state = saved
         } else {
             guard let installed = scope.record.installed else { throw LauncherError.io("game is not installed") }
-            let branches = try await api.branches(biz: game.biz)
+            let branches = try await api.branches(biz: game.biz, gameID: game.requiredPublisherID)
             guard let future = branches.preDownload, future.diffTags.contains(installed.tag), future.tag != installed.tag,
-                try await api.config(biz: game.biz).enableLdiff else { throw LauncherError.io("pre-download unavailable") }
+                try await api.config(biz: game.biz, gameID: game.requiredPublisherID).enableLdiff else {
+                throw LauncherError.io("pre-download unavailable")
+            }
             let plan = try await discoverPreDownload(game, record: scope.record, branch: future)
             state = try scope.cache.replace(plan)
             hooks.reach(.afterPreDownloadPlanStored)

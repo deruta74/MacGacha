@@ -21,7 +21,8 @@ import TestSupport
         }
     }
 
-    @Test(arguments: GameDefinition.all) func everyEditionUsesExactEndpointAndBannerParameters(game: LauncherCore.GameDefinition) async throws {
+    @Test(arguments: GameDefinition.all.filter(WishHistoryExporter.supports))
+    func everyEligibleEditionUsesExactEndpointAndBannerParameters(game: LauncherCore.GameDefinition) async throws {
         let temp = try TempDir(); try await cache(temp.url, game: game)
         let http = WishHTTP { _, _ in Self.page([]) }, sleep = WishSleeps()
         let exporter = WishHistoryExporter(http: http, sleep: { try await sleep.wait($0) })
@@ -44,7 +45,7 @@ import TestSupport
         #expect(result.countsByGame == [game.id: 0])
     }
 
-    @Test(arguments: GameDefinition.all.map(\.id), [false, true])
+    @Test(arguments: GameDefinition.all.filter(WishHistoryExporter.supports).map(\.id), [false, true])
     func officialCachedWebpageLinksAreConvertedToOnlyTheEditionAPI(gameID: String, latest: Bool) async throws {
         let temp = try TempDir(), root = temp.url, game = GameDefinition.find(gameID)!
         let family = game.family == .genshin ? "hk4e" : game.family == .starrail ? "hkrpg" : "nap"

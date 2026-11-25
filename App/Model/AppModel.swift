@@ -411,6 +411,9 @@ final class AppModel {
         self.paths = paths; self.manifest = manifest; self.gameServices = gameServices; self.purgeableSpace = purgeable
         self.services = services ?? LiveRuntimeServices(paths: paths)
         self.defaults = defaults; self.now = now
+        if defaults?.string(forKey: Self.selectedGameKey) == "honkai-impact-3rd" {
+            defaults?.set("hi3", forKey: Self.selectedGameKey)
+        }
         let preferred = Self.persistedRegion(defaults: defaults, locale: locale)
         defaults?.set(preferred.rawValue, forKey: "region")
         self.region = Self.initialRegion(defaults: defaults, locale: locale)
@@ -1137,7 +1140,7 @@ extension AppModel {
             let status: GameStatus = switch game.family {
             case .genshin: .installed(tag: "7.1.0")
             case .starrail: .paused(.update)
-            case .zzz: .notInstalled
+            case .zzz, .honkaiImpact: .notInstalled
             }
             return (game.id, GameState(status: status))
         })

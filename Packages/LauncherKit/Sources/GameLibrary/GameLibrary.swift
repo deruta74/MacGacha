@@ -131,9 +131,7 @@ public actor GameLibrary {
         guard let installed = record.installed else { return .unknown }
         let latest: GameBranch?
         if localOnly {
-            latest = (try? await store.readState("branch.json", for: game.id, maxBytes: 2 << 20))
-                .flatMap { try? JSONDecoder().decode(GameBranch.self, from: $0) }
-                .flatMap { $0.biz == game.biz ? $0 : nil }
+            latest = await cachedBranch(game)
         } else if fresh { latest = try await branch(game, cachedFallback: false) }
         else { latest = try? await branch(game, cachedFallback: true) }
         if let latest, latest.tag != installed.tag { return .updateAvailable(from: installed.tag, to: latest.tag) }
@@ -325,6 +323,7 @@ public actor GameLibrary {
             let target = try await resolve(game, voices: installed.voices)
             return try await updateStream(game, record: record, installed: installed, target: target, kind: .update, approved: approved, lease: lease, configuration: configuration)
         case .voices(let voices):
+            guard !game.voices.isEmpty else { throw LauncherError.io("Voice packs are unavailable") }
             guard let record, let installed = record.installed else { throw LauncherError.io("game is not installed") }
             let target: LibraryTarget
             if voices.isSubset(of: installed.voices) {
@@ -439,11 +438,10 @@ public actor GameLibrary {
     private func branch(_ game: GameDefinition, cachedFallback: Bool) async throws -> GameBranch {
         let value: GameBranch
         do {
-            value = try await api.branch(biz: game.biz)
+            value = try await api.branch(biz: game.biz, gameID: game.requiredPublisherID)
         } catch {
             if Task.isCancelled { throw LauncherError.cancelled }
-            if cachedFallback, let data = try? await store.readState("branch.json", for: game.id, maxBytes: 2 << 20),
-                let value = try? JSONDecoder().decode(GameBranch.self, from: data), value.biz == game.biz { return value }
+            if cachedFallback, let cached = await cachedBranch(game) { return cached }
             throw error
         }
         do {
@@ -451,6 +449,13 @@ public actor GameLibrary {
         } catch {
             try await cacheFailure(error, game: game, kind: "branch", action: "write")
         }
+        return value
+    }
+
+    private func cachedBranch(_ game: GameDefinition) async -> GameBranch? {
+        guard let data = try? await store.readState("branch.json", for: game.id, maxBytes: 2 << 20),
+            let value = try? JSONDecoder().decode(GameBranch.self, from: data), value.biz == game.biz,
+            game.requiredPublisherID.map({ $0 == value.gameID }) ?? true else { return nil }
         return value
     }
 

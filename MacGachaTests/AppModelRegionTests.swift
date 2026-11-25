@@ -44,9 +44,13 @@ import RuntimeManager
     @Test func visibleGamesHaveEditionNamesOrderAndSharedTints() throws {
         let model = model()
         #expect(LauncherGame.all.map(\.id) == GameDefinition.all.map(\.id))
-        #expect(model.visibleGames.map(\.id) == ["genshin", "starrail", "zzz"])
+        #expect(model.visibleGames.map(\.id) == ["genshin", "starrail", "zzz", "hi3"])
+        #expect(LauncherGame.cards(in: .global).map(\.id) == [
+            "genshin", "starrail", "zzz", "hi3", "petit-planet", "honkai-nexus-anima"
+        ])
         model.region = .mainlandChina
         #expect(model.visibleGames.map(\.id) == ["genshin-cn", "starrail-cn", "zzz-cn"])
+        #expect(LauncherGame.cards(in: .mainlandChina) == model.visibleGames)
         #expect(model.visibleGames.allSatisfy { $0.region == .mainlandChina })
         for (global, cn) in zip(LauncherGame.games(in: .global), model.visibleGames) {
             #expect(global.tint == cn.tint && global.deepTint == cn.deepTint)
@@ -54,6 +58,19 @@ import RuntimeManager
         #expect(model.visibleGames[0].name == "原神")
         #expect(model.visibleGames[1].name == "崩坏：星穹铁道")
         #expect(model.visibleGames[2].name == "绝区零")
+    }
+
+    @Test func legacyHonkaiImpactSelectionMigratesBeforeTheRailLoads() throws {
+        let name = "MacGacha-HI3Selection-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("honkai-impact-3rd", forKey: AppModel.selectedGameKey)
+        let first = model(defaults: defaults)
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "hi3")
+        #expect(first.visibleGames.contains { $0.id == defaults.string(forKey: AppModel.selectedGameKey) })
+        defaults.set("petit-planet", forKey: AppModel.selectedGameKey)
+        _ = model(defaults: defaults)
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "petit-planet")
     }
 
     @Test(arguments: [OtherRegionActivity.downloading, .updating, .verifying, .playing, .restoring])
@@ -111,7 +128,7 @@ import RuntimeManager
         #expect(model.otherRegionActivity == nil)
     }
 
-    @Test func remoteRefreshIsLazyAndThrottledPerRegionWhileRecordsCoverSix() async {
+    @Test func remoteRefreshIsLazyAndThrottledPerRegionWhileRecordsCoverEveryEdition() async {
         let services = RegionGameServices(), model = model(services: services)
         await model.start()
         #expect(Set(await services.statusReads) == Set(GameDefinition.inRegion(.global).map(\.id)))
@@ -123,7 +140,7 @@ import RuntimeManager
         #expect(model.games["starrail-cn"]?.status == .installed(tag: "1.0"))
         model.region = .global
         await model.regionLoadTasks[.global]?.value
-        #expect(await services.statusReads.count == 6)
+        #expect(await services.statusReads.count == GameDefinition.all.count)
     }
 
     @Test func artLoadsBothCachesButRefreshesOnlySelectedRegionAndKeepsBoth() async {

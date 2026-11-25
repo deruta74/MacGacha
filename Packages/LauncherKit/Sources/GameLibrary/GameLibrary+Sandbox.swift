@@ -141,7 +141,7 @@ extension GameLibrary {
     }
 
     func gameConfig(_ game: GameDefinition) async throws -> GameConfig {
-        let config = try await api.config(biz: game.biz)
+        let config = try await api.config(biz: game.biz, gameID: game.requiredPublisherID)
         sandboxConfigurations[game.id] = config
         return config
     }

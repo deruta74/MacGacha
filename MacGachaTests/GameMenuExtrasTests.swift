@@ -42,7 +42,7 @@ import Launch
             model.setGameState(game.id, GameState(status: .installed(tag: "1")))
         }
         model.debugLaunchRuntimesReady = true
-        #expect(model.dockGames.map(\.id) == ["genshin", "starrail", "zzz"])
+        #expect(model.dockGames.map(\.id) == ["genshin", "starrail", "zzz", "hi3"])
         #expect(model.dockGames.allSatisfy { $0.canPlay })
         model.setGameState("starrail", GameState(status: .updateAvailable(from: "1", to: "2")))
         #expect(model.dockGames.first { $0.id == "starrail" }?.canPlay == false)

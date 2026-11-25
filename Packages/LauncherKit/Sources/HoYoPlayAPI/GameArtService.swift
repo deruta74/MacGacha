@@ -13,9 +13,6 @@ public actor GameArtService {
     public static let maximumBackgroundsPerGame = 16
     public static let maximumAssets = 560
     private static let indexLimit = 512 << 10
-    private static func gameIDs(_ region: Region) -> [String: String] {
-        Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0.id) })
-    }
     private nonisolated let snapshot = Mutex<[String: GameArt]>([:])
     private let fileOps: any FileOps
     private let directory: URL
@@ -213,8 +210,16 @@ public actor GameArtService {
     private nonisolated func readIndex(_ fs: ContainedFileSystem, root: SafeRelativePath) throws -> ArtIndex {
         let data = try fs.readFile(at: SafeRelativePath("\(root)/art-index.json"), maxBytes: Self.indexLimit)
         var saved = try JSONDecoder().decode(ArtIndex.self, from: data)
-        guard (saved.region ?? .global) == region, saved.assets.count <= Self.maximumAssets, saved.games.values.allSatisfy({ $0.layers.count <= Self.maximumBackgroundsPerGame }), saved.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
-            saved.games.keys.allSatisfy({ CatalogGame.artRegion(for: $0) == region }) else { throw LauncherError.io("Invalid art index") }
+        guard (saved.region ?? .global) == region, saved.assets.count <= Self.maximumAssets,
+            saved.games.values.allSatisfy({ $0.layers.count <= Self.maximumBackgroundsPerGame }),
+            saved.fetchedAt.timeIntervalSinceReferenceDate.isFinite else { throw LauncherError.io("Invalid art index") }
+        // The old catalog card already used the exact Europe & Americas publisher ID.
+        if region == .global, let legacy = saved.games.removeValue(forKey: "honkai-impact-3rd") {
+            if saved.games["hi3"] == nil { saved.games["hi3"] = legacy }
+        }
+        guard saved.games.keys.allSatisfy({ CatalogGame.artRegion(for: $0) == region }) else {
+            throw LauncherError.io("Invalid art index")
+        }
         saved.assets = saved.assets.filter { key, record in
             guard let url = URL(string: key), Self.allowedAsset(url, region: region), record.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
                 ["png", "jpg", "webp", "webm"].contains(URL(fileURLWithPath: record.file).pathExtension),
@@ -362,12 +367,15 @@ public actor GameArtService {
         let games = try JSONDecoder().decode(Envelope<Games>.self, from: games)
         let basic = try JSONDecoder().decode(Envelope<Basic>.self, from: basic)
         guard games.retcode ?? 0 == 0, basic.retcode ?? 0 == 0 else { throw LauncherError.io("Art API refused request") }
-        let gameIDs = Self.gameIDs(region)
+        let editions = GameDefinition.inRegion(region)
         func cardID(_ game: Game) -> String? {
             if region == .global, let card = CatalogGame.allCases.first(where: { $0.publisherID == game.id }) {
                 return card.rawValue
             }
-            return game.biz.flatMap { gameIDs[$0] }
+            if let publisherID = game.id, let edition = editions.first(where: { $0.requiredPublisherID == publisherID }) {
+                return edition.id
+            }
+            return editions.first { $0.requiredPublisherID == nil && $0.biz == game.biz }?.id
         }
         var result: [String: RemoteArt] = [:]
         for game in games.data.games {
@@ -404,7 +412,7 @@ private struct ArtIndex: Codable, Sendable {
     var language: HoYoPlayLanguage? = nil
     /// Nil belongs to the legacy Global cache.
     var region: Region? = nil
-    /// Refresh older Global indexes when an update expands the catalog.
+    /// Refresh older Global indexes when the set of catalog-only cards changes.
     var catalogCardCount: Int? = nil
     var games: [String: RemoteArt] = [:]
     var assets: [String: AssetRecord] = [:]
