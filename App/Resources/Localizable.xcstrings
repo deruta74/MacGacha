@@ -3148,88 +3148,6 @@
         }
       }
     },
-    "Add installed games from their menu. Updates run in order while MacGacha is open. Automatic checks use official version metadata, only for selected installed games, while this Mac is idle and no game is running. Low Data Mode pauses queued work. A failed or manually paused update waits for Retry." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Füge installierte Spiele über ihr Menü hinzu. Updates werden der Reihe nach ausgeführt, solange MacGacha geöffnet ist. Automatische Prüfungen verwenden offizielle Versionsdaten und erfolgen nur für ausgewählte installierte Spiele, während dieser Mac im Leerlauf ist und kein Spiel läuft. Der Datensparmodus pausiert die Warteschlange. Fehlgeschlagene oder manuell pausierte Updates warten auf „Erneut versuchen“."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Añade juegos instalados desde su menú. Las actualizaciones se ejecutan en orden mientras MacGacha está abierto. Las comprobaciones automáticas usan datos oficiales de versión, solo para los juegos instalados seleccionados, mientras este Mac está inactivo y no hay juegos en ejecución. El modo de datos reducidos pausa la cola. Una actualización fallida o pausada manualmente espera a que pulses Reintentar."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ajoutez des jeux installés depuis leur menu. Les mises à jour s’exécutent dans l’ordre tant que MacGacha est ouvert. Les vérifications automatiques utilisent les métadonnées de version officielles, uniquement pour les jeux installés sélectionnés, lorsque ce Mac est inactif et qu’aucun jeu n’est lancé. Le mode Faibles données met la file en pause. Une mise à jour ayant échoué ou suspendue manuellement attend que vous choisissiez Réessayer."
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tambahkan game yang terpasang dari menunya. Pembaruan berjalan berurutan selama MacGacha terbuka. Pemeriksaan otomatis menggunakan metadata versi resmi, hanya untuk game terpasang yang dipilih, saat Mac ini tidak digunakan dan tidak ada game yang berjalan. Mode Data Rendah menjeda antrean. Pembaruan yang gagal atau dijeda secara manual menunggu Coba Lagi."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "インストール済みのゲームをメニューから追加できます。MacGachaが起動している間、順番に更新します。自動確認は公式のバージョン情報を使用し、選択したインストール済みのゲームだけを対象に、このMacが操作されておらず、ゲームが実行されていないときに行います。省データモードではキューが一時停止します。失敗した更新や手動で一時停止した更新は、再試行するまで待機します。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "설치된 게임의 메뉴에서 게임을 추가하세요. MacGacha가 열려 있는 동안 업데이트가 순서대로 실행됩니다. 자동 확인은 공식 버전 정보를 사용하며, 이 Mac을 사용하지 않고 실행 중인 게임이 없을 때 선택한 설치된 게임만 확인합니다. 저데이터 모드에서는 대기열이 일시 정지됩니다. 실패했거나 수동으로 일시 정지한 업데이트는 다시 시도할 때까지 기다립니다."
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Adicione jogos instalados pelo menu de cada jogo. As atualizações são executadas em ordem enquanto o MacGacha está aberto. As verificações automáticas usam metadados oficiais de versão, apenas para os jogos instalados selecionados, enquanto este Mac está ocioso e nenhum jogo está em execução. O Modo de Economia de Dados pausa a fila. Uma atualização que falhou ou foi pausada manualmente aguarda Tentar Novamente."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Добавляйте установленные игры через их меню. Обновления выполняются по порядку, пока MacGacha открыт. Автоматические проверки используют официальные данные о версиях только для выбранных установленных игр, когда этот Mac не используется и ни одна игра не запущена. Режим экономии данных приостанавливает очередь. После ошибки или ручной паузы обновление ждёт нажатия «Повторить»."
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Додавайте встановлені ігри через їхнє меню. Оновлення виконуються по черзі, поки MacGacha відкрито. Автоматичні перевірки використовують офіційні дані про версії лише для вибраних встановлених ігор, коли цей Mac не використовується й жодна гра не запущена. Режим економії даних призупиняє чергу. Після помилки чи ручної паузи оновлення чекає натискання «Повторити»."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从游戏菜单添加已安装的游戏。MacGacha 运行时，更新会按顺序执行。自动检查使用官方版本信息，仅检查选定的已安装游戏，且仅在此 Mac 空闲、没有游戏运行时进行。低数据模式会暂停队列。失败或手动暂停的更新会等待您点击“重试”。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "從遊戲選單加入已安裝的遊戲。MacGacha 執行時，更新會依序進行。自動檢查使用官方版本資訊，僅檢查選取的已安裝遊戲，且僅在此 Mac 閒置、沒有遊戲執行時進行。低數據模式會暫停佇列。失敗或手動暫停的更新會等待您點選「重試」。"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Thêm trò chơi đã cài đặt từ menu của trò chơi. Các bản cập nhật chạy theo thứ tự khi MacGacha đang mở. Kiểm tra tự động sử dụng thông tin phiên bản chính thức, chỉ dành cho trò chơi đã cài đặt được chọn, khi máy Mac này không được sử dụng và không có trò chơi nào đang chạy. Chế độ dữ liệu thấp sẽ tạm dừng hàng đợi. Bản cập nhật bị lỗi hoặc được tạm dừng thủ công sẽ chờ bạn chọn Thử Lại."
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "เพิ่มเกมที่ติดตั้งแล้วจากเมนูของเกม อัปเดตจะทำงานตามลำดับขณะที่ MacGacha เปิดอยู่ การตรวจสอบอัตโนมัติใช้ข้อมูลเวอร์ชันอย่างเป็นทางการ เฉพาะเกมที่ติดตั้งแล้วและเลือกไว้ เมื่อ Mac เครื่องนี้ไม่มีการใช้งานและไม่มีเกมทำงานอยู่ โหมดประหยัดข้อมูลจะหยุดคิวชั่วคราว อัปเดตที่ล้มเหลวหรือหยุดด้วยตนเองจะรอให้เลือกลองอีกครั้ง"
-          }
-        }
-      }
-    },
     "Added packs are downloaded; removed ones free their space. Keep at least one." : {
       "localizations" : {
         "de" : {
@@ -14914,88 +14832,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "有可用的遊戲更新"
-          }
-        }
-      }
-    },
-    "Game update queue" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Spielupdate-Warteschlange"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cola de actualizaciones de juegos"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "File de mises à jour des jeux"
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Antrean pembaruan game"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲームの更新キュー"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게임 업데이트 대기열"
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fila de atualizações de jogos"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Очередь обновлений игр"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Черга оновлень ігор"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "游戏更新队列"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "遊戲更新佇列"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hàng đợi cập nhật trò chơi"
-          }
-        },
-        "th" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "คิวอัปเดตเกม"
           }
         }
       }
@@ -47365,6 +47201,1236 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "詳情"
+          }
+        }
+      }
+    },
+    "Add games from their menu, or choose Install Later when you install one. Queued downloads run in order while MacGacha is open, also with its window closed." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Füge Spiele über ihr Menü hinzu oder wähle beim Installieren „Später installieren“. Solange MacGacha geöffnet ist, laufen die Downloads der Warteschlange der Reihe nach, auch bei geschlossenem Fenster."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añade juegos desde su menú o elige «Instalar más tarde» al instalar uno. Mientras MacGacha esté abierto, las descargas de la cola se hacen en orden, también con la ventana cerrada."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajoutez des jeux depuis leur menu, ou choisissez « Installer plus tard » lors de l’installation. Tant que MacGacha est ouvert, les téléchargements de la file s’enchaînent dans l’ordre, même fenêtre fermée."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tambahkan game dari menunya, atau pilih Instal nanti saat menginstal. Selama MacGacha terbuka, unduhan dalam antrean berjalan berurutan, juga saat jendelanya ditutup."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲームのメニューから追加するか、インストール時に「後でインストール」を選びます。MacGacha が開いている間、ウインドウを閉じていても、キューのダウンロードは順番に実行されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임 메뉴에서 추가하거나 설치할 때 ‘나중에 설치’를 선택하세요. MacGacha가 열려 있는 동안에는 창을 닫아도 대기열의 다운로드가 순서대로 진행됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adicione jogos pelo menu deles ou escolha \"Instalar mais tarde\" ao instalar. Enquanto o MacGacha estiver aberto, os downloads da fila são feitos em ordem, mesmo com a janela fechada."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавляйте игры из их меню или выберите «Установить позже» при установке. Пока MacGacha открыт, загрузки из очереди идут по порядку, даже если окно закрыто."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เพิ่มเกมจากเมนูของเกม หรือเลือก “ติดตั้งภายหลัง” ตอนติดตั้ง ขณะที่ MacGacha เปิดอยู่ การดาวน์โหลดในคิวจะทำตามลำดับ แม้ปิดหน้าต่างแล้วก็ตาม"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Додавайте ігри з їхнього меню або виберіть «Встановити пізніше» під час установлення. Поки MacGacha відкритий, завантаження з черги йдуть по черзі, навіть якщо вікно закрите."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thêm trò chơi từ menu của nó, hoặc chọn Cài đặt sau khi cài đặt. Khi MacGacha đang mở, các lượt tải trong hàng đợi sẽ chạy theo thứ tự, kể cả khi đã đóng cửa sổ."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从游戏菜单添加，或在安装时选择“稍后安装”。只要 MacGacha 在运行，排队的下载就会按顺序进行，关闭窗口后也是如此。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從遊戲選單新增，或在安裝時選擇「稍後安裝」。只要 MacGacha 在執行，排隊的下載就會依序進行，關閉視窗後也是如此。"
+          }
+        }
+      }
+    },
+    "Cancel Scheduled Install" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geplante Installation abbrechen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelar instalación programada"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annuler l’installation planifiée"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Batalkan Instalasi Terjadwal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "予約したインストールをキャンセル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "예약된 설치 취소"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelar instalação agendada"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отменить отложенную установку"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ยกเลิกการติดตั้งที่ตั้งเวลาไว้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Скасувати відкладене встановлення"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hủy cài đặt đã lên lịch"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消预约安装"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消預約安裝"
+          }
+        }
+      }
+    },
+    "For the chosen games, MacGacha checks HoYoverse's official version information every six hours and queues an update when one comes out. Checks and these updates wait until no game is running and this Mac is idle." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Für die gewählten Spiele prüft MacGacha alle sechs Stunden die offiziellen Versionsdaten von HoYoverse und stellt ein Update in die Warteschlange, sobald eines erscheint. Prüfungen und diese Updates warten, bis kein Spiel läuft und dieser Mac nicht benutzt wird."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Para los juegos elegidos, MacGacha consulta cada seis horas la información de versiones oficial de HoYoverse y añade una actualización a la cola cuando sale. Las comprobaciones y estas actualizaciones esperan a que no haya ningún juego abierto y este Mac esté inactivo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pour les jeux choisis, MacGacha consulte les informations de version officielles de HoYoverse toutes les six heures et ajoute une mise à jour à la file dès sa sortie. Les vérifications et ces mises à jour attendent qu’aucun jeu ne tourne et que ce Mac soit inactif."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Untuk game yang dipilih, MacGacha memeriksa info versi resmi HoYoverse setiap enam jam dan menambahkan pembaruan ke antrean saat tersedia. Pemeriksaan dan pembaruan ini menunggu sampai tidak ada game yang berjalan dan Mac ini tidak dipakai."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選んだゲームについて、MacGacha は 6 時間ごとに HoYoverse の公式バージョン情報を確認し、新しいバージョンが出たらアップデートをキューに追加します。確認とこれらのアップデートは、ゲームが実行されておらずこの Mac がアイドル状態になるまで待ちます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 게임에 대해 MacGacha는 6시간마다 HoYoverse의 공식 버전 정보를 확인하고, 새 버전이 나오면 업데이트를 대기열에 추가합니다. 확인과 이 업데이트는 실행 중인 게임이 없고 이 Mac이 유휴 상태가 될 때까지 기다립니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Para os jogos escolhidos, o MacGacha verifica as informações de versão oficiais da HoYoverse a cada seis horas e coloca uma atualização na fila quando ela sai. As verificações e essas atualizações esperam até que nenhum jogo esteja aberto e este Mac esteja ocioso."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Для выбранных игр MacGacha каждые шесть часов проверяет официальные данные HoYoverse о версиях и ставит обновление в очередь, когда оно выходит. Проверки и такие обновления ждут, пока не запущена ни одна игра и Mac не используется."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "สำหรับเกมที่เลือก MacGacha จะตรวจสอบข้อมูลเวอร์ชันอย่างเป็นทางการของ HoYoverse ทุกหกชั่วโมง และเพิ่มการอัปเดตลงคิวเมื่อมีเวอร์ชันใหม่ การตรวจสอบและการอัปเดตเหล่านี้จะรอจนกว่าไม่มีเกมที่กำลังเล่นอยู่และ Mac เครื่องนี้ไม่ได้ใช้งาน"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Для вибраних ігор MacGacha кожні шість годин перевіряє офіційні дані HoYoverse про версії й ставить оновлення в чергу, коли воно виходить. Перевірки й такі оновлення чекають, доки не запущено жодної гри й Mac не використовується."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Với các trò chơi đã chọn, MacGacha kiểm tra thông tin phiên bản chính thức của HoYoverse mỗi sáu giờ và thêm bản cập nhật vào hàng đợi khi có. Việc kiểm tra và các bản cập nhật này chờ đến khi không có trò chơi nào đang chạy và máy Mac này không được sử dụng."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对于所选游戏，MacGacha 每六小时检查一次 HoYoverse 官方版本信息，有新版本时将更新加入队列。检查和这些更新会等到没有游戏运行且这台 Mac 空闲时进行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "對於所選遊戲，MacGacha 每六小時檢查一次 HoYoverse 官方版本資訊，有新版本時將更新加入佇列。檢查和這些更新會等到沒有遊戲執行且這台 Mac 閒置時進行。"
+          }
+        }
+      }
+    },
+    "Hours and idle time only decide when a download starts. A download that has started keeps going when you come back or the hours end." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeitfenster und Leerlaufzeit bestimmen nur, wann ein Download beginnt. Ein begonnener Download läuft weiter, wenn du zurückkommst oder das Zeitfenster endet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El horario y el tiempo de inactividad solo deciden cuándo empieza una descarga. Una descarga ya iniciada sigue cuando vuelves o termina el horario."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les horaires et le temps d’inactivité décident seulement du début d’un téléchargement. Un téléchargement commencé continue quand vous revenez ou que les horaires se terminent."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jam dan waktu diam hanya menentukan kapan unduhan dimulai. Unduhan yang sudah dimulai tetap berjalan saat kamu kembali atau jamnya berakhir."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "時間帯とアイドル時間はダウンロードを開始するタイミングだけを決めます。開始したダウンロードは、戻ってきたときや時間帯が終わっても続きます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시간대와 유휴 시간은 다운로드를 시작하는 시점만 정합니다. 이미 시작된 다운로드는 돌아오거나 시간대가 끝나도 계속됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O horário e o tempo ocioso só decidem quando um download começa. Um download já iniciado continua quando você volta ou o horário termina."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Часы и время простоя определяют только начало загрузки. Начавшаяся загрузка продолжится, когда вы вернётесь или часы закончатся."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ช่วงเวลาและเวลาที่ไม่ได้ใช้งานกำหนดเพียงว่าการดาวน์โหลดจะเริ่มเมื่อใด การดาวน์โหลดที่เริ่มแล้วจะดำเนินต่อเมื่อคุณกลับมาหรือเมื่อหมดช่วงเวลา"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Години й час простою визначають лише початок завантаження. Розпочате завантаження триватиме, коли ви повернетеся або години закінчаться."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Khung giờ và thời gian không sử dụng chỉ quyết định khi nào bắt đầu tải. Lượt tải đã bắt đầu sẽ tiếp tục khi bạn quay lại hoặc khi hết khung giờ."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "时间段和空闲时间只决定下载何时开始。已开始的下载在你回来或时间段结束后仍会继续。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "時段和閒置時間只決定下載何時開始。已開始的下載在你回來或時段結束後仍會繼續。"
+          }
+        }
+      }
+    },
+    "Install a game to choose it here." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installiere ein Spiel, um es hier auszuwählen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instala un juego para elegirlo aquí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installez un jeu pour le choisir ici."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instal game untuk memilihnya di sini."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲームをインストールすると、ここで選べます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임을 설치하면 여기에서 선택할 수 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instale um jogo para escolhê-lo aqui."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Установите игру, чтобы выбрать её здесь."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ติดตั้งเกมเพื่อเลือกได้ที่นี่"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Установіть гру, щоб вибрати її тут."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cài đặt một trò chơi để chọn ở đây."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装游戏后即可在此选择。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝遊戲後即可在此選擇。"
+          }
+        }
+      }
+    },
+    "Limit speed of scheduled downloads" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geschwindigkeit geplanter Downloads begrenzen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Limitar la velocidad de las descargas programadas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Limiter la vitesse des téléchargements planifiés"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Batasi kecepatan unduhan terjadwal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "予約ダウンロードの速度を制限"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "예약된 다운로드 속도 제한"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Limitar a velocidade dos downloads agendados"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ограничить скорость загрузок по расписанию"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "จำกัดความเร็วการดาวน์โหลดที่ตั้งเวลาไว้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обмежити швидкість завантажень за розкладом"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giới hạn tốc độ tải đã lên lịch"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "限制计划下载的速度"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "限制排程下載的速度"
+          }
+        }
+      }
+    },
+    "MacGacha can keep this Mac awake only while it's connected to power, and can't wake it from sleep." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha kann diesen Mac nur am Stromnetz wach halten und ihn nicht aus dem Ruhezustand wecken."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha solo puede mantener activo este Mac mientras está conectado a la corriente, y no puede despertarlo del reposo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha ne peut garder ce Mac éveillé que s’il est branché sur secteur, et ne peut pas le sortir de la veille."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha hanya bisa menjaga Mac ini tetap aktif saat terhubung ke daya, dan tidak bisa membangunkannya dari mode tidur."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha がこの Mac をスリープさせずにおけるのは電源に接続している間だけで、スリープから復帰させることはできません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha는 전원에 연결되어 있을 때만 이 Mac이 잠자기 상태가 되지 않게 할 수 있으며, 잠자기 상태에서 깨울 수는 없습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O MacGacha só consegue manter este Mac acordado enquanto ele estiver ligado à energia, e não consegue despertá-lo do repouso."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha может не давать Mac уснуть только при подключённом питании и не может разбудить его из сна."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha ทำให้ Mac เครื่องนี้ไม่เข้าสู่โหมดพักได้เฉพาะเมื่อเสียบไฟอยู่ และไม่สามารถปลุกเครื่องจากโหมดพักได้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha може не давати Mac заснути лише з підключеним живленням і не може розбудити його зі сну."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha chỉ có thể giữ máy Mac này thức khi đang cắm sạc, và không thể đánh thức máy khỏi chế độ ngủ."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅在接通电源时，MacGacha 才能让这台 Mac 保持唤醒，且无法将其从睡眠中唤醒。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "僅在接上電源時，MacGacha 才能讓這台 Mac 保持喚醒，且無法將其從睡眠中喚醒。"
+          }
+        }
+      }
+    },
+    "Not enough free space to install in one go." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht genug freier Speicher, um in einem Durchgang zu installieren."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No hay espacio libre suficiente para instalar de una vez."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas assez d’espace libre pour installer en une seule fois."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ruang kosong tidak cukup untuk menginstal sekaligus."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空き容量が足りず、一度にインストールできません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "여유 공간이 부족해 한 번에 설치할 수 없습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não há espaço livre suficiente para instalar de uma vez."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недостаточно места, чтобы установить за один раз."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "พื้นที่ว่างไม่พอสำหรับติดตั้งในครั้งเดียว"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недостатньо місця, щоб установити за один раз."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không đủ dung lượng trống để cài đặt một lần."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可用空间不足，无法一次性安装。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可用空間不足，無法一次安裝完成。"
+          }
+        }
+      }
+    },
+    "Now" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jetzt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ahora"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maintenant"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sekarang"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今すぐ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지금"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agora"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сейчас"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ตอนนี้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Зараз"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ngay bây giờ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即"
+          }
+        }
+      }
+    },
+    "Quiet downloads use fewer threads and the efficiency cores, so the fans stay quiet. Downloads you start yourself run at full speed." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leise Downloads nutzen weniger Threads und die Effizienzkerne, damit die Lüfter leise bleiben. Downloads, die du selbst startest, laufen mit voller Geschwindigkeit."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las descargas silenciosas usan menos hilos y los núcleos de eficiencia, así los ventiladores no hacen ruido. Las descargas que inicias tú van a toda velocidad."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les téléchargements silencieux utilisent moins de threads et les cœurs à haute efficacité, pour que les ventilateurs restent discrets. Les téléchargements que vous lancez vous-même vont à pleine vitesse."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unduhan senyap memakai lebih sedikit thread dan inti efisiensi, sehingga kipas tetap tenang. Unduhan yang kamu mulai sendiri berjalan dengan kecepatan penuh."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "静音ダウンロードではスレッドを減らし高効率コアを使うため、ファンが静かなままです。自分で開始したダウンロードはフルスピードで実行されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저소음 다운로드는 더 적은 스레드와 효율 코어를 사용해 팬 소음을 줄입니다. 직접 시작한 다운로드는 최대 속도로 진행됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Os downloads silenciosos usam menos threads e os núcleos de eficiência, para que as ventoinhas fiquem silenciosas. Os downloads que você inicia vão na velocidade máxima."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Тихие загрузки используют меньше потоков и энергоэффективные ядра, поэтому вентиляторы не шумят. Загрузки, которые вы запускаете сами, идут на полной скорости."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "การดาวน์โหลดแบบเงียบใช้เธรดน้อยลงและใช้คอร์ประสิทธิภาพพลังงาน พัดลมจึงเงียบ การดาวน์โหลดที่คุณเริ่มเองจะทำงานเต็มความเร็ว"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Тихі завантаження використовують менше потоків і енергоефективні ядра, тому вентилятори не шумлять. Завантаження, які ви запускаєте самі, йдуть на повній швидкості."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tải xuống yên tĩnh dùng ít luồng hơn và các nhân hiệu suất, nên quạt luôn êm. Các lượt tải bạn tự bắt đầu vẫn chạy hết tốc độ."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "静音下载使用更少的线程和能效核心，让风扇保持安静。你手动开始的下载仍以全速进行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "靜音下載使用較少的執行緒和節能核心，讓風扇保持安靜。你手動開始的下載仍以全速進行。"
+          }
+        }
+      }
+    },
+    "Schedule" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Planen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Programar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Planifier"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jadwalkan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "予約"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "예약"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agendar"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запланировать"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ตั้งเวลา"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запланувати"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lên lịch"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预约"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預約"
+          }
+        }
+      }
+    },
+    "Scheduled Downloads" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geplante Downloads"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descargas programadas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Téléchargements planifiés"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unduhan Terjadwal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "予約ダウンロード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "예약된 다운로드"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloads agendados"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузки по расписанию"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "การดาวน์โหลดที่ตั้งเวลาไว้"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Завантаження за розкладом"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tải đã lên lịch"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "计划下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "排程下載"
+          }
+        }
+      }
+    },
+    "Start at" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beginnen um"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empezar a las"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Commencer à"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mulai pada"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始日時"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작 시간"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Começar às"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Начать"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เริ่มเวลา"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Почати"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bắt đầu lúc"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始时间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始時間"
+          }
+        }
+      }
+    },
+    "The download starts at this time once nobody has used this Mac for a few minutes. Keep it on and connected to power. It waits if the Mac is asleep." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Download beginnt zu dieser Zeit, sobald dieser Mac einige Minuten nicht benutzt wurde. Lass ihn eingeschaltet und am Stromnetz. Schläft der Mac, wartet der Download."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La descarga empieza a esta hora cuando nadie haya usado este Mac durante unos minutos. Déjalo encendido y conectado a la corriente. Si el Mac está en reposo, la descarga espera."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le téléchargement commence à cette heure dès que personne n’a utilisé ce Mac depuis quelques minutes. Laissez-le allumé et branché sur secteur. Si le Mac est en veille, il attend."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unduhan dimulai pada waktu ini setelah Mac ini tidak dipakai selama beberapa menit. Biarkan tetap menyala dan terhubung ke daya. Jika Mac sedang tidur, unduhan menunggu."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この時刻以降、数分間この Mac が使われていなければダウンロードが始まります。電源を入れたまま電源に接続しておいてください。Mac がスリープ中は待機します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 시간 이후 몇 분 동안 이 Mac을 사용하지 않으면 다운로드가 시작됩니다. 전원을 켠 채 전원에 연결해 두세요. Mac이 잠자기 상태이면 기다립니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O download começa neste horário quando ninguém tiver usado este Mac por alguns minutos. Deixe-o ligado e conectado à energia. Se o Mac estiver em repouso, o download espera."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "В это время загрузка начнётся, если Mac не используется несколько минут. Оставьте его включённым и подключённым к питанию. Если Mac спит, загрузка подождёт."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "การดาวน์โหลดจะเริ่มในเวลานี้เมื่อไม่มีใครใช้ Mac เครื่องนี้มาสองสามนาที เปิดเครื่องและเสียบไฟไว้ หาก Mac อยู่ในโหมดพัก การดาวน์โหลดจะรอ"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "У цей час завантаження почнеться, якщо Mac не використовується кілька хвилин. Залиште його ввімкненим і підключеним до живлення. Якщо Mac спить, завантаження зачекає."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lượt tải bắt đầu vào thời điểm này khi không ai dùng máy Mac này trong vài phút. Hãy để máy bật và cắm sạc. Nếu máy Mac đang ngủ, lượt tải sẽ chờ."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "到这个时间后，只要这台 Mac 几分钟无人使用，下载就会开始。请保持开机并接通电源。如果 Mac 处于睡眠状态，下载会等待。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "到這個時間後，只要這台 Mac 幾分鐘無人使用，下載就會開始。請保持開機並接上電源。如果 Mac 處於睡眠狀態，下載會等待。"
+          }
+        }
+      }
+    },
+    "When" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wann"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cuándo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quand"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kapan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タイミング"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시점"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quando"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Когда"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เมื่อใด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Коли"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Khi nào"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "时间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "時間"
           }
         }
       }

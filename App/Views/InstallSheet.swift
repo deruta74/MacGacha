@@ -17,6 +17,9 @@ struct InstallSheet: View {
     @State private var picking = false
     @State private var pickMode = PickMode.location
     @State private var confirmingParts = false
+    @State private var later = false
+    @State private var startDate = InstallSheet.defaultStartDate()
+    @State private var scheduling = false
 
     private enum PickMode { case location, existing }
 
@@ -86,6 +89,22 @@ struct InstallSheet: View {
                     }
                 }
                 Section {
+                    Picker("When", selection: $later) {
+                        Text("Now").tag(false)
+                        Text(verbatim: model.installLaterLabel).tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    if later {
+                        DatePicker("Start at", selection: $startDate, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                    }
+                } footer: {
+                    if later {
+                        Text("The download starts at this time once nobody has used this Mac for a few minutes. Keep it on and connected to power. It waits if the Mac is asleep.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Section {
                     summary
                 } footer: {
                     if immediateVerdict == .batchedOnly {
@@ -124,7 +143,7 @@ struct InstallSheet: View {
             }
         }
         .confirmationDialog("Install in parts?", isPresented: $confirmingParts) {
-            Button("Install in Parts") { start(approved: true) }
+            Button("Install in Parts") { if later { schedule(approved: true) } else { start(approved: true) } }
         } message: {
             Text("\(game.name) can't be played until the install finishes.")
         }
@@ -210,7 +229,11 @@ struct InstallSheet: View {
     }
 
     @ViewBuilder private var installButton: some View {
-        if immediateVerdict == .batchedOnly {
+        if later {
+            Button("Schedule") { if immediateVerdict == .batchedOnly { confirmingParts = true } else { schedule(approved: false) } }
+                .keyboardShortcut(.defaultAction)
+                .disabled(scheduling || startDate <= Date() || (immediateVerdict != .whole && immediateVerdict != .batchedOnly))
+        } else if immediateVerdict == .batchedOnly {
             Button("Install in Parts…") { confirmingParts = true }
                 .keyboardShortcut(.defaultAction)
                 .disabled(blocked)
@@ -226,6 +249,23 @@ struct InstallSheet: View {
         guard !blocked, immediateVerdict == .whole || (approved && immediateVerdict == .batchedOnly) else { return }
         model.installGame(game.id, voices: voices, at: location, approved: approved)
         dismiss()
+    }
+
+    private func schedule(approved: Bool) {
+        guard !scheduling, immediateVerdict == .whole || (approved && immediateVerdict == .batchedOnly) else { return }
+        scheduling = true
+        Task {
+            defer { scheduling = false }
+            do {
+                try await model.scheduleInstall(game.id, voices: voices, at: location, approved: approved, startDate: startDate)
+                dismiss()
+            } catch { model.show(error) }
+        }
+    }
+
+    /// The next 2:00, a quiet hour for most people.
+    private static func defaultStartDate(now: Date = Date(), calendar: Calendar = .current) -> Date {
+        calendar.nextDate(after: now, matching: DateComponents(hour: 2, minute: 0), matchingPolicy: .nextTime) ?? now.addingTimeInterval(3600)
     }
 
     /// Location refusals are shown beside the location; network trouble offers a retry.
