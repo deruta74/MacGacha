@@ -228,6 +228,7 @@ struct RootView: View {
         case "setup": gameSheet = .setup(selectedID)
         case "rosetta": gameSheet = .rosetta(selectedID)
         case "wishExport": gameSheet = .wishExport(selectedID)
+        case "launchDetails": gameSheet = .launchDetails(selectedID)
         default: break
         }
     }

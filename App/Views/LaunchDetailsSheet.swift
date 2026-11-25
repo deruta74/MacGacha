@@ -3,6 +3,7 @@
 import Launch
 import SwiftUI
 
+/// Why the last launch failed, what changed since the last good session, and a one-time retry with that setup.
 struct LaunchDetailsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -14,79 +15,46 @@ struct LaunchDetailsSheet: View {
         return nil
     }
     private var successful: SuccessfulLaunch? { failure?.diagnosis?.previous ?? model.successfulLaunches[game.id] }
+    private var changes: [LaunchChangedValue] {
+        guard let previous = successful?.configuration, let attempted = failure?.diagnosis?.attempted else { return [] }
+        return model.launchChangedValues(previous: previous, attempted: attempted)
+    }
+    private var offersRetry: Bool { failure?.diagnosis?.retryID != nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Launch Details").font(.title3.bold())
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Launch Details").font(.title3.bold())
+                Text(verbatim: model.editionDisplayName(game)).foregroundStyle(.secondary)
+            }
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 18) {
                     if let failure {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Probable cause").font(.headline)
-                            Text(LaunchDiagnosticText.explanation(failure))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        if let previous = successful?.configuration, let attempted = failure.diagnosis?.attempted {
-                            let changes = model.launchChangedValues(previous: previous, attempted: attempted)
-                            if !changes.isEmpty {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Changed values").font(.headline)
-                                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-                                        GridRow {
-                                            Color.clear.frame(width: 0, height: 1).accessibilityHidden(true)
-                                            Text("Previous").font(.caption.bold())
-                                            Text("Attempted").font(.caption.bold())
-                                        }
-                                        ForEach(changes, id: \.field) { change in
-                                            GridRow(alignment: .top) {
-                                                Text(change.label).foregroundStyle(.secondary)
-                                                Text(change.previous)
-                                                Text(change.attempted)
-                                            }
-                                            .font(.callout)
-                                        }
-                                    }
-                                    .textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                        } else if let attempted = failure.diagnosis?.attempted {
-                            configuration(attempted)
-                        }
+                        Label(LaunchDiagnosticText.explanation(failure), systemImage: "exclamationmark.triangle.fill")
+                            .symbolRenderingMode(.multicolor)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !changes.isEmpty { changedValues }
                     }
-                    Divider()
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Last successful launch").font(.headline)
-                        if let successful {
-                            Text(successful.endedAt, format: .dateTime.year().month().day().hour().minute())
-                                .foregroundStyle(.secondary)
-                            configuration(successful.configuration)
-                            Text("Recorded after a normal session of at least two minutes.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else if loading {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text("No successful launch recorded for this edition.")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    if failure != nil {
-                        Text("Verify files or check Dependencies. Game updates cannot be undone here.")
-                            .font(.callout).foregroundStyle(.secondary)
-                        if failure?.diagnosis?.retryID != nil {
-                            Text("Uses the previous installed configuration once, without changing saved settings.")
-                                .font(.callout).foregroundStyle(.secondary)
-                        }
-                    }
+                    lastSuccessful
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 370)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxHeight: 460)
+            if failure != nil {
+                Text(offersRetry
+                    ? String(localized: "Uses the previous installed configuration once, without changing saved settings.")
+                    : String(localized: "Verify files or check Dependencies. Game updates cannot be undone here."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 if failure?.hasLog == true { Button("Open Log") { model.openLaunchLog(game.id) } }
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-                if failure?.diagnosis?.retryID != nil {
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(offersRetry ? .cancelAction : .defaultAction)
+                if offersRetry {
                     Button("Try Previous Configuration Once") {
                         model.retrySuccessfulLaunch(game.id)
                         dismiss()
@@ -97,20 +65,76 @@ struct LaunchDetailsSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(width: 500)
         .task { await model.refreshLaunchHistory(); loading = false }
     }
 
-    private func configuration(_ configuration: LaunchConfiguration) -> some View {
-        let display = model.launchConfigurationDisplay(configuration)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("Game build: \(display.gameBuild)")
-            Text("Runtime: \(display.runtime)")
-            Text("Components: \(display.components)")
-            Text("Graphics backend: \(display.backend)")
+    /// Previous → attempted, one row per value that differs.
+    private var changedValues: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Changed values").font(.headline)
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 8) {
+                GridRow {
+                    Text(verbatim: "").gridColumnAlignment(.trailing)
+                    Text("Previous")
+                    Text("Attempted")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                Divider().gridCellUnsizedAxes(.horizontal)
+                ForEach(changes, id: \.field) { change in
+                    GridRow {
+                        Text(verbatim: change.label).foregroundStyle(.secondary)
+                        Text(verbatim: change.previous)
+                        Text(verbatim: change.attempted).fontWeight(.medium)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .font(.callout)
+            .textSelection(.enabled)
         }
-        .font(.callout)
-        .textSelection(.enabled)
-        .fixedSize(horizontal: false, vertical: true)
+        .padding(12)
+        .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 10, style: .continuous))
+    }
+
+    private var lastSuccessful: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Last successful launch").font(.headline)
+                Spacer()
+                if let successful {
+                    Text(successful.endedAt, format: .dateTime.day().month().year().hour().minute())
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let successful {
+                let display = model.launchConfigurationDisplay(successful.configuration)
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 6) {
+                    row("Game build", display.gameBuild)
+                    row("Graphics", display.backend)
+                    row("Runtime", display.runtime)
+                    row("Components", display.components)
+                }
+                .font(.callout)
+                .textSelection(.enabled)
+                Text("Recorded after a normal session of at least two minutes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if loading {
+                ProgressView().controlSize(.small)
+            } else {
+                Text("No successful launch recorded for this edition.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func row(_ label: LocalizedStringKey, _ value: String) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+            Text(verbatim: value).fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

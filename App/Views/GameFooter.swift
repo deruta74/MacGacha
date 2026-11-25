@@ -89,14 +89,12 @@ struct GameFooter: View {
                 }
                 let line = action == .progress && progressHovered ? state.progressDetail ?? statusLine : statusLine
                 if !line.isEmpty || launchLogAvailable {
-                    FooterStatusNotice(title: line, isFailure: isLaunchFailure, showsLog: launchLogAvailable) {
+                    FooterStatusNotice(title: line, isFailure: isLaunchFailure, showsLog: launchLogAvailable,
+                        showsDetails: isLaunchFailure && model.hasLaunchDetails(game.id),
+                        openDetails: { gameSheet = .launchDetails(game.id) }) {
                         model.openLaunchLog(game.id)
                     }
                     .transition(.opacity)
-                }
-                if isLaunchFailure {
-                    Button("Launch Details…") { gameSheet = .launchDetails(game.id) }
-                        .buttonStyle(.bordered)
                 }
                 if let held = state.spaceShortage?.heldByMacOS {
                     PurgeableSpaceHint(bytes: held)
@@ -689,7 +687,9 @@ struct GameMenu: View {
             }
             if isInstalled {
                 Button("Game Settings…", systemImage: "slider.horizontal.3") { gameSheet = .settings(game.id) }
-                Button("Launch Details…", systemImage: "clock.arrow.circlepath") { gameSheet = .launchDetails(game.id) }
+                if model.hasLaunchDetails(game.id) {
+                    Button("Launch Details…", systemImage: "clock.arrow.circlepath") { gameSheet = .launchDetails(game.id) }
+                }
             }
             if isInstalled, !waitingForApproval, !model.isGameOperationRunning, !isLive {
                 Button("Check for Updates", systemImage: "arrow.triangle.2.circlepath") { model.checkForGameUpdate(game.id) }
@@ -909,6 +909,8 @@ private struct FooterStatusNotice: View {
     let title: String
     let isFailure: Bool
     let showsLog: Bool
+    var showsDetails = false
+    var openDetails: () -> Void = {}
     let openLog: () -> Void
 
     var body: some View {
@@ -923,6 +925,13 @@ private struct FooterStatusNotice: View {
                     .monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.opacity)
+            }
+            if showsDetails {
+                Button("Details", action: openDetails)
+                    .buttonStyle(.link)
+                    .underline()
+                    .fixedSize()
+                    .accessibilityLabel(Text("Launch Details"))
             }
             if showsLog {
                 Button("Open Log", action: openLog)
