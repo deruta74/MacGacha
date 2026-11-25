@@ -69,11 +69,16 @@ struct GameFooter: View {
                 if showsPreDownload {
                     PreDownloadBar(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
                 }
-                if let installedVersion {
+                if installedVersion != nil || showsServerPicker {
                     HStack(spacing: 8) {
-                        InfoCapsule(text: installedVersion, systemImage: nil)
-                            .accessibilityLabel(Text("Version \(installedVersion)", comment: "A dependency's version or build number, e.g. Version 11.0-1"))
-                        if let playTime {
+                        if showsServerPicker {
+                            HonkaiServerPicker()
+                        }
+                        if let installedVersion {
+                            InfoCapsule(text: installedVersion, systemImage: nil)
+                                .accessibilityLabel(Text("Version \(installedVersion)", comment: "A dependency's version or build number, e.g. Version 11.0-1"))
+                        }
+                        if installedVersion != nil, let playTime {
                             InfoCapsule(text: TimeText.duration(playTime.totalSeconds), systemImage: "clock")
                                 .help(TimeText.lastSession(playTime))
                                 .accessibilityLabel(Text(verbatim: TimeText.played(playTime.totalSeconds)))
@@ -188,6 +193,9 @@ struct GameFooter: View {
         default: return nil
         }
     }
+
+    /// Honkai Impact 3rd has one card for five servers, as in HoYoPlay.
+    private var showsServerPicker: Bool { HonkaiImpactServer(rawValue: game.id) != nil }
 
     private var playTime: PlayTimeSummary? {
         guard let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 else { return nil }
