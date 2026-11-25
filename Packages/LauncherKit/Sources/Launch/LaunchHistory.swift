@@ -121,7 +121,11 @@ public struct LaunchHistoryStore: Sendable {
     }
 
     public func load() throws -> [String: SuccessfulLaunch] {
-        try loadState(in: ContainedFileSystem(root: paths.root))?.games ?? [:]
+        do {
+            return try loadState(in: ContainedFileSystem(root: paths.root))?.games ?? [:]
+        } catch LauncherError.io {
+            return [:]
+        }
     }
 
     /// A missing file has no history. A rejected snapshot returns nil so the
@@ -132,8 +136,6 @@ public struct LaunchHistoryStore: Sendable {
         do {
             bytes = try fs.readFile(at: file, maxBytes: Self.maxBytes)
         } catch LauncherError.fileTooLarge {
-            return nil
-        } catch LauncherError.io {
             return nil
         }
         guard let state = try? JSONDecoder().decode(State.self, from: bytes),

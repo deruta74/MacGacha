@@ -191,10 +191,12 @@ public actor LaunchManager {
     /// Also serves failures before the app reaches the core launch boundary.
     public func diagnose(game: String, gameBuild: String, gameBuildID: String? = nil, reason: LaunchFailureReason, attempted: LaunchConfiguration? = nil, allowRetry: Bool = true) async -> LaunchDiagnosis {
         let previous = try? await successfulLaunches()[game]
+        let diagnosis = LaunchDiagnosis(reason: reason, previous: previous, attempted: attempted)
         var retryID: UUID?
         if allowRetry, let previous, previous.configuration.gameBuild == gameBuild, previous.configuration.gameBuildID == gameBuildID,
             previous.configuration.recipeVersion == (recipeOverrides[game] ?? Recipes.recipe(for: game))?.recipeVersion,
-            (attempted.map { previous.configuration != $0 } ?? (reason == .runtime)), ![.busy, .rosetta, .location, .gameFiles, .network].contains(reason),
+            (diagnosis.comparison.map { !$0.changes.isEmpty } ?? (reason == .runtime)),
+            ![.busy, .rosetta, .location, .gameFiles, .network].contains(reason),
             (try? await runtimes.selection(for: previous.configuration)) != nil {
             let id = UUID(); retryID = id
             retries = retries.filter { $0.value.game != game }

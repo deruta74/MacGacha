@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Darwin
 import Foundation
 import Testing
 import Synchronization
@@ -115,6 +116,32 @@ import GameLibrary
         #expect(fixture.spawner.calls.isEmpty)
     }
 
+    @Test(.enabled(if: geteuid() != 0))
+    func unreadableHistoryIsPreservedOnWrite() async throws {
+        let fixture = try await ManagerFixture.make(initialGame: false)
+        var session = try await fixture.saveSnapshot(state: .running, processes: [])
+        session.reachedRunning = true
+        session.reachedReady = true
+        session.confirmedRunningSeconds = 120
+        session.configuration = try configuration()
+        session.verifiedEndedAt = Date(timeIntervalSince1970: 500)
+        let original = session
+        session.verifiedEndedAt = Date(timeIntervalSince1970: 600)
+        let later = session
+        try await BlockingIO.run {
+            let store = LaunchHistoryStore(paths: fixture.paths)
+            try store.recordVerifiedSession(original, normal: true)
+            let fs = try ContainedFileSystem(root: fixture.paths.root)
+            let file = try fs.openForWriting(at: SafeRelativePath("LaunchHistory/last-successful.json"), truncate: false)
+            defer { try? file.close() }
+            try #require(fchmod(file.fileDescriptor, 0) == 0)
+            #expect(try store.load().isEmpty)
+            #expect(throws: LauncherError.self) { try store.recordVerifiedSession(later, normal: true) }
+            try #require(fchmod(file.fileDescriptor, 0o600) == 0)
+            #expect(try store.load()[original.game]?.endedAt == original.verifiedEndedAt)
+        }
+    }
+
     @Test(arguments: [false, true], [119.0, 120.0])
     func historyRequiresReadyAndQualifiedNormalEnd(ready: Bool, seconds: Double) async throws {
         let f = try await ManagerFixture.make(initialGame: false)
@@ -158,6 +185,14 @@ import GameLibrary
         #expect(baseline.configuration.gameBuild == "4.6.0")
         let restarted = f.manager()
         #expect(try await restarted.successfulLaunches()[f.game.id] == baseline)
+        let prior = baseline.configuration
+        let earlyAttempt = LaunchConfiguration(gameBuild: prior.gameBuild, gameBuildID: prior.gameBuildID, bundleID: prior.bundleID,
+            runtimeProfileID: prior.runtimeProfileID, runtimeDigest: prior.runtimeDigest, componentIDs: prior.componentIDs,
+            compatibilityComponentIDs: prior.compatibilityComponentIDs, recipeVersion: prior.recipeVersion, settings: prior.settings)
+        let earlyFailure = await restarted.diagnose(game: f.game.id, gameBuild: prior.gameBuild, gameBuildID: prior.gameBuildID,
+            reason: .unknown, attempted: earlyAttempt)
+        #expect(earlyFailure.comparison?.changes.isEmpty == true)
+        #expect(earlyFailure.retryID == nil)
         var changed = baseline.configuration.settings; changed.metalHUD = true
         let saved = changed
         try await BlockingIO.run { try LaunchSettingsStore(paths: f.paths).save(saved, for: f.game.id) }
