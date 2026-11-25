@@ -19,6 +19,7 @@ import LauncherCore
     func configureNotifications() {
         notifications.onResponse = { [weak self] id in
             guard let self, let game = GameDefinition.find(id) else { return }
+            self.rememberHonkaiServer(for: id)
             self.notificationSelection = GameNotificationSelection(gameID: id)
             self.region = game.region
             self.notificationReveal()
@@ -73,7 +74,7 @@ import LauncherCore
                         return
                     }
                 }
-                let notification = GameNotification(id: UUID().uuidString, gameID: gameID, kind: kind, title: kind.title, body: game.name)
+                let notification = GameNotification(id: UUID().uuidString, gameID: gameID, kind: kind, title: kind.title, body: self.editionDisplayName(game))
                 do { try await self.notifications.deliver(notification) }
                 catch {
                     if let marker { try await history.release(marker) }

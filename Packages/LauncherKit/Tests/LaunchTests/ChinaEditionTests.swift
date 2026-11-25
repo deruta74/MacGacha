@@ -38,9 +38,9 @@ import TestSupport
     @Test func definitionsAndRecipesCoverExactlyTheSameEditions() {
         #expect(Set(Recipes.games) == Set(GameDefinition.all.map(\.id)))
         #expect(Set(LaunchLogFiles.games) == Set(GameDefinition.all.map(\.id)))
-        #expect(GameDefinition.all.count == 7)
+        #expect(GameDefinition.all.count == 11)
         #expect(Set(GameDefinition.all.map(\.biz)).count == 7)
-        #expect(Set(GameDefinition.all.map(\.gameID)).count == 7)
+        #expect(Set(GameDefinition.all.map(\.gameID)).count == 11)
     }
 
     @Test(arguments: ["genshin-cn", "starrail-cn", "zzz-cn"])

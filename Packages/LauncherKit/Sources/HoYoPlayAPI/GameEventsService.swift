@@ -95,8 +95,8 @@ public actor GameEventsService {
         let data = try? await BlockingIO.run { try fs.readFile(at: SafeRelativePath("\(root)/events-index.json"), maxBytes: Self.indexLimit) }
         guard !hydrated, !Task.isCancelled else { return }
         hydrated = true
-        guard let data,
-            let saved = try? JSONDecoder().decode([String: GameEventsSnapshot].self, from: data), saved.count <= 3 else { return }
+        guard let data, let saved = try? JSONDecoder().decode([String: GameEventsSnapshot].self, from: data),
+            saved.count <= GameDefinition.inRegion(region).count else { return }
         let valid = saved.filter { id, entry in
             GameDefinition.find(id)?.region == region && entry.region == region && entry.language == language
                 && entry.fetchedAt.timeIntervalSinceReferenceDate.isFinite && entry.posts.count <= Self.postLimit
@@ -118,12 +118,19 @@ public actor GameEventsService {
             let games = try JSONDecoder().decode(EventsEnvelope<EventsGames>.self,
                 from: await json(Self.apiURL("getGames", region: region, language: language)))
             guard games.retcode == 0, games.data.games.count <= 100 else { return cached() }
-            let registry = Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0) })
+            let editions = GameDefinition.inRegion(region)
             var requested: [String: String] = [:]
             for game in games.data.games {
-                guard let edition = registry[game.biz], !game.id.isEmpty, game.id.utf8.count <= 128,
-                    edition.requiredPublisherID.map({ $0 == game.id }) ?? true else { continue }
+                guard !game.id.isEmpty, game.id.utf8.count <= 128,
+                    let edition = editions.first(where: {
+                        $0.biz == game.biz && ($0.requiredPublisherID.map { $0 == game.id } ?? true)
+                    }) else { continue }
                 requested[edition.id] = game.id
+                if edition.honkaiImpactServer == .europeAmericas {
+                    for config in (game.game_server_configs ?? []).prefix(32) {
+                        if let server = config.server { requested[server.rawValue] = server.gameID }
+                    }
+                }
             }
             for (id, remoteID) in requested.sorted(by: { $0.key < $1.key }) {
                 do {
@@ -201,7 +208,10 @@ public actor GameEventsService {
 
 private struct EventsEnvelope<T: Decodable>: Decodable { let retcode: Int; let data: T }
 private struct EventsGames: Decodable { let games: [EventsGame] }
-private struct EventsGame: Decodable { let id: String; let biz: String }
+private struct EventsGame: Decodable {
+    let id: String; let biz: String
+    let game_server_configs: [HonkaiServerConfig]?
+}
 private struct EventsContent: Decodable { let content: EventsPosts }
 private struct EventsPosts: Decodable { let posts: [EventsPost] }
 private struct EventsPost: Decodable { let type: String; let title: String; let date: String; let link: String? }

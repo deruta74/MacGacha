@@ -44,11 +44,12 @@ struct GameRail: View {
         VStack(spacing: 8) {
             ScrollView(.vertical) {
                 VStack(spacing: 8) {
-                    ForEach(LauncherGame.cards(in: model.region)) { game in
+                    ForEach(model.launcherCards) { game in
                         Button {
+                            model.rememberHonkaiServer(for: game.id)
                             selectedID = game.id
                         } label: {
-                            GameIcon(game: game, art: model.gameArt[game.id], selected: game.id == selectedID)
+                            GameIcon(game: game, art: model.launcherArt(for: game.id), selected: game.id == selectedID)
                         }
                         .buttonStyle(.plain)
                         .help(game.name)

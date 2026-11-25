@@ -44,8 +44,8 @@ import RuntimeManager
     @Test func visibleGamesHaveEditionNamesOrderAndSharedTints() throws {
         let model = model()
         #expect(LauncherGame.all.map(\.id) == GameDefinition.all.map(\.id))
-        #expect(model.visibleGames.map(\.id) == ["genshin", "starrail", "zzz", "hi3"])
-        #expect(LauncherGame.cards(in: .global).map(\.id) == [
+        #expect(model.visibleGames.map(\.id) == ["genshin", "starrail", "zzz"] + HonkaiImpactServer.allCases.map(\.rawValue))
+        #expect(model.launcherCards.map(\.id) == [
             "genshin", "starrail", "zzz", "hi3", "petit-planet", "honkai-nexus-anima"
         ])
         model.region = .mainlandChina
@@ -67,10 +67,81 @@ import RuntimeManager
         defaults.set("honkai-impact-3rd", forKey: AppModel.selectedGameKey)
         let first = model(defaults: defaults)
         #expect(defaults.string(forKey: AppModel.selectedGameKey) == "hi3")
+        #expect(first.selectedHonkaiServer == .europeAmericas)
+        #expect(defaults.string(forKey: AppModel.honkaiServerKey) == "hi3")
         #expect(first.visibleGames.contains { $0.id == defaults.string(forKey: AppModel.selectedGameKey) })
         defaults.set("petit-planet", forKey: AppModel.selectedGameKey)
         _ = model(defaults: defaults)
         #expect(defaults.string(forKey: AppModel.selectedGameKey) == "petit-planet")
+    }
+
+    @Test func honkaiServerListUsesTheOnlyInstalledServerAndKeepsOneCard() throws {
+        let model = model()
+        #expect(model.honkaiServers.map(\.id) == ["hi3", "hi3-jp", "hi3-kr", "hi3-sea", "hi3-tw"])
+        #expect(model.honkaiServers.map(\.description) == ["Europe & Americas Servers", "JP Server", "KR Server", "SEA Server", "Traditional Chinese Server"])
+        #expect(model.selectedHonkaiServer == .europeAmericas)
+        let japan = try #require(GameDefinition.find("hi3-jp"))
+        let korea = try #require(GameDefinition.find("hi3-kr"))
+        func installed(_ game: GameDefinition) throws -> GameRecord {
+            GameRecord(installPath: URL(filePath: "/inert/\(game.id)"), ownership: .created,
+                executable: try SafeRelativePath(game.executableName),
+                installed: InstalledBuild(tag: "9.1.0", buildID: "synthetic", categories: [], voices: []),
+                installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: 2))
+        }
+        model.setGameRecord(japan.id, try installed(japan))
+        #expect(model.selectedHonkaiServer == .japan)
+        #expect(model.honkaiServers.filter(\.isInstalled).map(\.id) == [japan.id])
+        #expect(model.launcherGame(for: "hi3").id == japan.id)
+        #expect(model.launcherCards.map(\.id) == ["genshin", "starrail", "zzz", japan.id, "petit-planet", "honkai-nexus-anima"])
+        model.setGameRecord(korea.id, try installed(korea))
+        #expect(model.selectedHonkaiServer == .europeAmericas)
+        model.selectHonkaiServer(.korea)
+        #expect(model.launcherGame(for: "hi3").id == korea.id)
+        let selection = self.model()
+        selection.setGameRecord(japan.id, try installed(japan))
+        selection.rememberHonkaiServer(for: selection.launcherGame(for: "hi3").id)
+        selection.setGameRecord(japan.id, nil)
+        #expect(selection.selectedHonkaiServer == .japan)
+    }
+
+    @Test(arguments: HonkaiImpactServer.allCases)
+    func globalSelectionRemembersTheSpecificHonkaiServer(server: HonkaiImpactServer) throws {
+        let name = "MacGacha-HI3Server-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("invalid", forKey: AppModel.honkaiServerKey)
+        defaults.set(server.rawValue, forKey: AppModel.selectedGameKey)
+        let first = model(defaults: defaults)
+        #expect(first.selectedHonkaiServer == server)
+        #expect(first.launcherGame(for: server.rawValue).id == server.rawValue)
+        first.selectHonkaiServer(.traditionalChinese)
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "hi3-tw")
+        defaults.set("genshin", forKey: AppModel.selectedGameKey)
+        let second = model(defaults: defaults)
+        #expect(second.selectedHonkaiServer == .traditionalChinese)
+        #expect(second.launcherGame(for: "genshin").id == "genshin")
+    }
+
+    @Test func honkaiSelectionUsesServerArtworkAndCachedDescriptionsWithFallbacks() throws {
+        let model = model()
+        let defaultIcon = URL(filePath: "/shared-icon")
+        let defaultBackground = GameBackground(id: "europe", image: URL(filePath: "/europe-background"))
+        let japanBackground = GameBackground(id: "japan", image: URL(filePath: "/japan-background"))
+        model.applyArt(["hi3": GameArt(icon: defaultIcon, backgrounds: [defaultBackground]),
+            "hi3-jp": GameArt(backgrounds: [japanBackground])], in: .global, honkaiDescriptions: ["hi3-jp": "日本サーバー"])
+        #expect(model.honkaiServers.first { $0.server == .japan }?.description == "日本サーバー")
+        #expect(model.honkaiServers.first { $0.server == .korea }?.description == "KR Server")
+        #expect(model.launcherArt(for: "hi3-jp")?.backgrounds == [japanBackground])
+        #expect(model.launcherArt(for: "hi3-jp")?.icon == defaultIcon)
+        #expect(model.launcherArt(for: "hi3-tw")?.backgrounds == [defaultBackground])
+        let game = try #require(LauncherGame.all.first { $0.id == "hi3-jp" })
+        #expect(model.editionDisplayName(game).contains("日本サーバー"))
+        let event = GameEvent(title: "Europe", date: "", link: nil)
+        let date = Date()
+        model.applyEvents(["hi3": GameEventsSnapshot(posts: [event], region: .global, language: .enUS, fetchedAt: date),
+            "hi3-jp": GameEventsSnapshot(posts: [], region: .global, language: .enUS, fetchedAt: date)], in: .global)
+        #expect(model.launcherEvents(for: "hi3-jp").isEmpty)
+        #expect(model.launcherEvents(for: "hi3-tw") == [event])
     }
 
     @Test(arguments: [OtherRegionActivity.downloading, .updating, .verifying, .playing, .restoring])

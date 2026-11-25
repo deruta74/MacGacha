@@ -5,13 +5,15 @@ import DownloadEngine
 import LauncherCore
 
 public enum DeliveryHostPolicy {
+    private static let honkaiImpactHosts = Set(HonkaiImpactServer.allCases.map(\.deliveryHost))
+
     public static func allows(_ url: URL) -> Bool {
         allows(url, region: .global)
     }
     public static func allows(_ url: URL, region: Region) -> Bool {
         guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
               let host = url.host?.lowercased() else { return false }
-        if region == .global && host == "autopatchglb.honkaiimpact3.com" { return true }
+        if honkaiImpactHosts.contains(host) { return region == .global && (url.port == nil || url.port == 443) }
         return region.deliveryDomains.contains {
             host == $0 || host.hasSuffix("." + $0)
         }

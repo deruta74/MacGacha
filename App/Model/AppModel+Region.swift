@@ -77,7 +77,7 @@ enum OtherRegionActivity: Sendable, Equatable {
             guard !Task.isCancelled else { return }
             let updated = await provider.refresh()
             if !Task.isCancelled {
-                self?.applyArt(updated, in: region)
+                self?.applyArt(updated, in: region, honkaiDescriptions: provider.cachedHonkaiServerDescriptions())
                 self?.setArtCacheState(await Self.hasUsableArt(updated, in: region) ? .usable : .none, in: region)
                 self?.artRefreshFinished.insert(region)
                 self?.updateArtReveal()
@@ -93,7 +93,7 @@ enum OtherRegionActivity: Sendable, Equatable {
             artHydrationTasks[region] = Task { [weak self] in
                 let cached = await provider.loadCached()
                 guard !Task.isCancelled else { return }
-                self?.applyArt(cached, in: region)
+                self?.applyArt(cached, in: region, honkaiDescriptions: provider.cachedHonkaiServerDescriptions())
                 self?.setArtCacheState(await Self.hasUsableArt(cached, in: region) ? .usable : .none, in: region)
             }
         }

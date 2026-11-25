@@ -126,6 +126,32 @@ struct AppModelGamesTests {
         #expect(model.gameOperation == nil)
     }
 
+    @Test(.timeLimit(.minutes(1))) func switchingHonkaiServersKeepsTheOtherServersPlayAndUpdate() async throws {
+        let (model, fake, _) = try gameFixture()
+        defer { fake.finish() }
+        await model.reattachOnStart()
+        let playing = "hi3-jp", updating = "hi3-kr"
+        fake.setStatus(.installed(tag: "9.0.0"), for: updating)
+        model.setGameRecord(updating, try await fake.record(updating))
+        model.globalLaunchSettings.downloadWhilePlaying = true
+        model.launchSlotOwner = playing
+        model.liveLaunchGames.insert(playing)
+        model.launchStates[playing] = .ready
+        model.updateGame(updating)
+        let worker = try #require(model.gameTask)
+        var opened = fake.opened.stream.makeAsyncIterator()
+        _ = await opened.next()
+        model.selectHonkaiServer(.traditionalChinese)
+        #expect(model.launcherGame(for: playing).id == "hi3-tw")
+        #expect(model.honkaiServers.first { $0.id == playing }?.isRunning == true)
+        #expect(model.honkaiServers.first { $0.id == updating }?.isOperating == true)
+        #expect(model.honkaiServers.first { $0.id == updating }?.isInstalled == true)
+        #expect(model.launchSlotOwner == playing && model.gameOperation?.id == updating)
+        #expect(fake.calls.last?.action == "update" && fake.calls.last?.id == updating && !worker.isCancelled)
+        model.pauseGame(updating)
+        await worker.value
+    }
+
     @Test(.timeLimit(.minutes(1)), arguments: [false, true])
     func automaticResumeRequiresUnchangedPendingPlan(changed: Bool) async throws {
         let (model, fake, _) = try gameFixture(); defer { fake.finish() }
@@ -752,7 +778,7 @@ struct AppModelGamesTests {
 
     @Test func editionRegistryAndInstallFoldersAreEditionSpecific() throws {
         #expect(LauncherGame.all.map(\.id) == GameDefinition.all.map(\.id))
-        #expect(LauncherGame.all.count == 7)
+        #expect(LauncherGame.all.count == 11)
         let style = try #require(LauncherGame.all.first)
         for definition in GameDefinition.inRegion(.mainlandChina) {
             let game = LauncherGame(id: definition.id, name: "Unrelated interface name", tint: style.tint, deepTint: style.deepTint)

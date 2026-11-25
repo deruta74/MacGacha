@@ -13,7 +13,7 @@ import LauncherCore
         guard canCreateShortcut(id), let game = LauncherGame.all.first(where: { $0.id == id }) else {
             throw LauncherError.busy("Shortcut unavailable")
         }
-        let url = try await shortcutWriter.write(gameID: id, name: game.name)
+        let url = try await shortcutWriter.write(gameID: id, name: editionDisplayName(game))
         EventLog(directory: paths.logs).post(.info, "shortcut", "Game shortcut created", metadata: ["game": id])
         return url
     }
@@ -57,7 +57,10 @@ import LauncherCore
     /// Shows the launcher on a game, for example when a shortcut can't start it directly.
     func revealLauncher(selecting id: String?) {
         launchedHidden = false
-        if let id { notificationSelection = GameNotificationSelection(gameID: id) }
+        if let id {
+            rememberHonkaiServer(for: id)
+            notificationSelection = GameNotificationSelection(gameID: id)
+        }
         notificationReveal()
     }
 

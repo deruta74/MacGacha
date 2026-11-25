@@ -35,14 +35,27 @@ enum AdoptEditionValidator {
             if try fs.itemType(at: SafeRelativePath(other)) != nil { throw LauncherError.gameEditionMismatch }
         }
         guard present else { throw LauncherError.gameEditionUnknown }
+        if game.honkaiImpactServer != nil {
+            let path = try SafeRelativePath("pkg_area_name")
+            if let type = try fs.itemType(at: path) {
+                guard type == .regularFile else { throw LauncherError.unsafePath("Unsafe game metadata") }
+                if let size = try fs.size(at: path), size <= 256,
+                    let name = String(data: try fs.readFile(at: path, maxBytes: 256), encoding: .utf8) {
+                    entries.append(("package_name", name.trimmingCharacters(in: .whitespacesAndNewlines)))
+                }
+            }
+        }
         for (key, value) in entries where !value.isEmpty {
             let conflicts: Bool
             switch key {
             case "game_biz", "biz":
-                conflicts = GameDefinition.all.contains { $0.biz == value && $0.id != game.id }
+                conflicts = value != game.biz && GameDefinition.all.contains { $0.biz == value }
             case "game_id":
                 conflicts = GameDefinition.all.contains { $0.gameID == value && $0.id != game.id }
-                    || (game.family == .honkaiImpact && otherHonkaiImpactServers.contains(value))
+            case "package_name", "pkg_area_name":
+                conflicts = game.honkaiImpactServer.map { selected in
+                    selected.packageName != value && HonkaiImpactServer.allCases.contains { $0.packageName == value }
+                } ?? false
             case "launcher_id":
                 conflicts = Region.allCases.contains { $0.launcherID == value && $0 != game.region }
             default: continue
@@ -51,15 +64,11 @@ enum AdoptEditionValidator {
         }
         // Sophon installs need not have launcher metadata. With no positive conflict,
         // accept the selected edition; normal Sophon verification still checks its files.
-        // No reliable region-specific manifest sample is currently known for shared images.
     }
 
     private static let bilibiliBusinesses = Set(GameDefinition.all.map {
         String($0.biz.split(separator: "_")[0]) + "_bilibili"
     })
-
-    // Other bh3_global IDs in HoYoPlay's Global getGameBranches response.
-    private static let otherHonkaiImpactServers: Set<String> = ["g0mMIvshDb", "uxB4MC7nzC", "bxPTXSET5t", "wkE5P5WsIf"]
 
     private static func uapcBusinesses(_ text: String) -> [String] {
         guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return [] }

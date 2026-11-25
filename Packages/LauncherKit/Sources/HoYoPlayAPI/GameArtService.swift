@@ -9,11 +9,11 @@ import DownloadEngine
 /// this actor, with filesystem work delegated to BlockingIO. No failure is surfaced to the user.
 public actor GameArtService {
     private static let ttl: TimeInterval = 6 * 3600
-    // Six cards × (16 backgrounds × 5 assets + icon + logo), plus headroom.
+    // Ten Global art sources × (16 backgrounds × 5 assets + icon + logo), plus headroom.
     public static let maximumBackgroundsPerGame = 16
-    public static let maximumAssets = 560
+    public static let maximumAssets = 960
     private static let indexLimit = 512 << 10
-    private nonisolated let snapshot = Mutex<[String: GameArt]>([:])
+    private nonisolated let snapshot = Mutex((art: [String: GameArt](), serverDescriptions: [String: String]()))
     private let fileOps: any FileOps
     private let directory: URL
     private let language: HoYoPlayLanguage
@@ -27,7 +27,7 @@ public actor GameArtService {
     private var hydrated = false
     /// The app drains hydration/refresh and reserves new readers before cleanup.
     public func invalidateStorageCache() {
-        hydrated = false; index = ArtIndex(); snapshot.withLock { $0 = [:] }
+        hydrated = false; index = ArtIndex(); snapshot.withLock { $0 = ([:], [:]) }
     }
     private var flight: (id: UUID, task: Task<[String: GameArt], Never>)?
 
@@ -45,7 +45,11 @@ public actor GameArtService {
 
     /// The last hydrated snapshot. Never performs file I/O or network requests.
     /// First refresh also loads a persisted index, including when offline.
-    public nonisolated func cached() -> [String: GameArt] { snapshot.withLock { $0 } }
+    public nonisolated func cached() -> [String: GameArt] { snapshot.withLock { $0.art } }
+
+    public nonisolated func cachedHonkaiServerDescriptions() -> [String: String] {
+        snapshot.withLock { $0.serverDescriptions }
+    }
 
     /// Hydrates persisted art without network I/O, so startup can display it before
     /// a stale index triggers slower network refreshes. Runs off the main actor.
@@ -65,7 +69,7 @@ public actor GameArtService {
         guard !hydrated, !Task.isCancelled else { return }
         hydrated = true
         if let saved { index = saved }
-        snapshot.withLock { $0 = buildArt(index) }
+        _ = publish(index)
     }
 
     /// A local-only read for helper icons. Revalidate the disk index and image
@@ -103,14 +107,14 @@ public actor GameArtService {
             // Art fetched in another language is stale however fresh it is, and so is an index from
             // before background lists, so an app update shows every background without waiting.
             if age >= 0 && age < Self.ttl && (index.language ?? .enUS) == language,
-                (region != .global || index.catalogCardCount == CatalogGame.allCases.count),
+                (region != .global || (index.catalogCardCount == CatalogGame.allCases.count && index.honkaiServerDescriptions != nil)),
                 index.games.values.allSatisfy({ $0.backgrounds != nil }) { return cached() }
             let http = http; let log = log; let timeout = requestTimeout
             let urls = Self.apiURLs(region: region, language: language)
             let gamesData = try await Self.deadline(timeout) { try await Self.json(urls.games, http: http, log: log) }
             let basicData = try await Self.deadline(timeout) { try await Self.json(urls.basic, http: http, log: log) }
-            let requested: [String: RemoteArt]
-            do { requested = try Self.parse(gamesData, basicData, region: region) }
+            let requested: [String: RemoteArt], serverDescriptions: [String: String]
+            do { (requested, serverDescriptions) = try Self.parse(gamesData, basicData, region: region) }
             catch { throw ArtFailure.invalidAPIResponse }
             guard !requested.isEmpty else { throw ArtFailure.noSupportedGames }
             var selected = index.games
@@ -168,13 +172,14 @@ public actor GameArtService {
             try Task.checkCancellation()
             let retained = Set(selected.values.flatMap(\.urls).map(\.absoluteString))
             let next = ArtIndex(fetchedAt: now(), language: language, region: region, catalogCardCount: CatalogGame.allCases.count,
-                games: selected, assets: files.filter { retained.contains($0.key) })
+                games: selected, assets: files.filter { retained.contains($0.key) },
+                honkaiServerDescriptions: region == .global ? serverDescriptions : nil)
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let bytes = try encoder.encode(next)
             guard bytes.count <= Self.indexLimit else { return cached() }
             try await BlockingIO.run { try fs.writeAtomically(bytes, to: SafeRelativePath("\(root)/art-index.json")) }
             index = next
-            let art = buildArt(next); snapshot.withLock { $0 = art }
+            let art = publish(next)
             try? await BlockingIO.run { try self.prune(fs, root: root, index: next) }
             return art
         } catch {
@@ -220,6 +225,9 @@ public actor GameArtService {
         guard saved.games.keys.allSatisfy({ CatalogGame.artRegion(for: $0) == region }) else {
             throw LauncherError.io("Invalid art index")
         }
+        saved.honkaiServerDescriptions = saved.honkaiServerDescriptions?.filter {
+            region == .global && HonkaiImpactServer(rawValue: $0.key) != nil && HonkaiServerConfig.displayDescription($0.value) == $0.value
+        }
         saved.assets = saved.assets.filter { key, record in
             guard let url = URL(string: key), Self.allowedAsset(url, region: region), record.fetchedAt.timeIntervalSinceReferenceDate.isFinite,
                 ["png", "jpg", "webp", "webm"].contains(URL(fileURLWithPath: record.file).pathExtension),
@@ -236,6 +244,13 @@ public actor GameArtService {
             } catch { return false }
         }
         return saved
+    }
+
+    private func publish(_ index: ArtIndex) -> [String: GameArt] {
+        let art = buildArt(index)
+        let descriptions = (index.language ?? .enUS) == language ? index.honkaiServerDescriptions ?? [:] : [:]
+        snapshot.withLock { $0 = (art, descriptions) }
+        return art
     }
 
     private func buildArt(_ index: ArtIndex) -> [String: GameArt] {
@@ -363,7 +378,7 @@ public actor GameArtService {
         }
     }
 
-    private static func parse(_ games: Data, _ basic: Data, region: Region) throws -> [String: RemoteArt] {
+    private static func parse(_ games: Data, _ basic: Data, region: Region) throws -> ([String: RemoteArt], [String: String]) {
         let games = try JSONDecoder().decode(Envelope<Games>.self, from: games)
         let basic = try JSONDecoder().decode(Envelope<Basic>.self, from: basic)
         guard games.retcode ?? 0 == 0, basic.retcode ?? 0 == 0 else { throw LauncherError.io("Art API refused request") }
@@ -378,8 +393,16 @@ public actor GameArtService {
             return editions.first { $0.requiredPublisherID == nil && $0.biz == game.biz }?.id
         }
         var result: [String: RemoteArt] = [:]
+        var serverDescriptions: [String: String] = [:]
         for game in games.data.games {
             guard let id = cardID(game) else { continue }
+            if region == .global, id == HonkaiImpactServer.europeAmericas.rawValue {
+                for config in (game.game_server_configs ?? []).prefix(32) {
+                    if let server = config.server, let description = HonkaiServerConfig.displayDescription(config.i18n_description) {
+                        serverDescriptions[server.rawValue] = description
+                    }
+                }
+            }
             result[id] = RemoteArt(background: game.display?.background?.url, icon: game.display?.icon?.url, logo: game.display?.logo?.url,
                 reservationOpen: game.display_status == "LAUNCHER_GAME_DISPLAY_STATUS_RESERVATION_ENABLED")
         }
@@ -401,7 +424,7 @@ public actor GameArtService {
             }
             result[id] = art
         }
-        return result
+        return (result, serverDescriptions)
     }
 }
 
@@ -416,6 +439,8 @@ private struct ArtIndex: Codable, Sendable {
     var catalogCardCount: Int? = nil
     var games: [String: RemoteArt] = [:]
     var assets: [String: AssetRecord] = [:]
+    /// A nil value refreshes Global indexes from before getGames server descriptions were cached.
+    var honkaiServerDescriptions: [String: String]? = nil
 }
 private struct RemoteArt: Codable, Sendable {
     var background: URL?; var icon: URL?; var logo: URL?; var video: URL?; var theme: URL?
@@ -461,7 +486,10 @@ private enum ArtFailure: String, Error {
     case sizeLimit = "size-limit"
 }
 private struct Display: Decodable { let icon: Link?; let logo: Link?; let background: Link? }
-private struct Game: Decodable { let id: String?; let biz: String?; let display: Display?; let display_status: String? }
+private struct Game: Decodable {
+    let id: String?; let biz: String?; let display: Display?; let display_status: String?
+    let game_server_configs: [HonkaiServerConfig]?
+}
 private struct Games: Decodable { let games: [Game] }
 private struct Basic: Decodable { let game_info_list: [BasicGame] }
 private struct BasicGame: Decodable { let game: Game; let backgrounds: [Layer]? }

@@ -16,7 +16,6 @@ import Testing
         #expect(game.unityLogProductName == "Honkai Impact 3rd")
         #expect(game.screenshotsPath.description == "ScreenShot")
         #expect(game.voices.isEmpty)
-        #expect(GameDefinition.all.filter { $0.family == .honkaiImpact } == [game])
         let recipe = try #require(Recipes.recipe(for: game.id))
         #expect(recipe.verifiedBuilds == ["9.1.0"])
         #expect(recipe.executable.description == "BH3.exe" && recipe.wrapper == .steamShim)
@@ -30,6 +29,32 @@ import Testing
             "AppData/LocalLow/Cognosphere/Honkai Impact 3rd/Player.log",
             "AppData/LocalLow/Cognosphere/Honkai Impact 3rd/output_log.txt"
         ])
+    }
+
+    @Test func allServersUseSeparateIdentitiesAndTheSameRecipe() throws {
+        let editions = GameDefinition.inRegion(.global).filter { $0.family == .honkaiImpact }
+        #expect(editions.map(\.id) == ["hi3", "hi3-jp", "hi3-kr", "hi3-sea", "hi3-tw"])
+        #expect(editions.map(\.gameID) == ["5TIVvvcwtM", "g0mMIvshDb", "uxB4MC7nzC", "bxPTXSET5t", "wkE5P5WsIf"])
+        #expect(editions.map(\.defaultInstallDirectoryName) == [
+            "Honkai Impact 3rd", "Houkai3rd", "Honkai Impact 3rd kr", "Honkai Impact 3", "Honkai Impact 3rd asia"
+        ])
+        #expect(editions.map(\.unityLogProductName) == ["Honkai Impact 3rd", "崩壊3rd", "붕괴3rd", "Honkai Impact 3", "崩壊3rd"])
+        #expect(editions.allSatisfy { $0.voices.isEmpty && $0.biz == "bh3_global" })
+        #expect(GameDefinition.inRegion(.mainlandChina).allSatisfy { $0.family != .honkaiImpact })
+        let base = try #require(Recipes.recipe(for: "hi3"))
+        for edition in editions {
+            let recipe = try #require(Recipes.recipe(for: edition.id))
+            #expect(recipe.executable == base.executable && recipe.wrapper == .steamShim)
+            #expect(recipe.hidden == base.hidden && recipe.copyIfPresent.count == 1)
+            #expect(recipe.verifiedBuilds == (edition.id == "hi3" ? ["9.1.0"] : []))
+            let settings = LaunchSettings.defaults(for: edition.id)
+            let launch = try LaunchResolver.resolve(recipe: recipe, settings: settings,
+                installRoot: URL(filePath: "/games/\(edition.defaultInstallDirectoryName)"), prefix: URL(filePath: "/prefix"),
+                wineBinary: URL(filePath: "/wine"), proxyPort: 1234,
+                componentRoots: [.steamShim: URL(filePath: "/steam-shim")], baseEnvironment: [:])
+            #expect(launch.preparation.windowsVersion == .win11 && launch.requiredComponents == [.steamShim])
+            #expect(launch.environment["WINEESYNC"] == "1")
+        }
     }
 
     @Test(arguments: [RuntimeBackend.d3dmetal, .dxmt])

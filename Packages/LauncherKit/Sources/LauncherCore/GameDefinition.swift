@@ -27,6 +27,9 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
 
     /// HoYoPlay lists multiple HI3 servers under the same business ID.
     package var requiredPublisherID: String? { family == .honkaiImpact ? gameID : nil }
+    public var honkaiImpactServer: HonkaiImpactServer? {
+        family == .honkaiImpact ? HonkaiImpactServer(rawValue: id) : nil
+    }
 
     public var executableName: String {
         switch family {
@@ -48,7 +51,7 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
         case (.genshin, .global): "Genshin Impact"
         case (.starrail, .global): "Honkai: Star Rail"
         case (.zzz, .global): "Zenless Zone Zero"
-        case (.honkaiImpact, _): "Honkai Impact 3rd"
+        case (.honkaiImpact, _): (honkaiImpactServer ?? .europeAmericas).installDirectoryName
         case (.genshin, .mainlandChina): "原神"
         case (.starrail, .mainlandChina): "崩坏星穹铁道"
         case (.zzz, .mainlandChina): "绝区零"
@@ -65,7 +68,7 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
         case (.genshin, .global): "Genshin Impact"
         case (.starrail, .global): "Star Rail"
         case (.zzz, .global): "ZenlessZoneZero"
-        case (.honkaiImpact, _): "Honkai Impact 3rd"
+        case (.honkaiImpact, _): (honkaiImpactServer ?? .europeAmericas).unityLogProductName
         case (.genshin, .mainlandChina): "原神"
         case (.starrail, .mainlandChina): "崩坏：星穹铁道"
         case (.zzz, .mainlandChina): "绝区零"
@@ -77,9 +80,9 @@ public struct GameDefinition: Sendable, Hashable, Identifiable {
             VoiceOption(code: "ja-jp", name: "Japanese"), VoiceOption(code: "ko-kr", name: "Korean")]
         return [GameDefinition(id: "genshin", biz: "hk4e_global", region: .global, gameID: "gopR6Cufr3", voices: voices, family: .genshin),
             GameDefinition(id: "starrail", biz: "hkrpg_global", region: .global, gameID: "4ziysqXOQ8", voices: voices, family: .starrail),
-            GameDefinition(id: "zzz", biz: "nap_global", region: .global, gameID: "U5hbdsT9W7", voices: voices, family: .zzz),
-            GameDefinition(id: "hi3", biz: "bh3_global", region: .global, gameID: "5TIVvvcwtM", voices: [], family: .honkaiImpact),
-            GameDefinition(id: "genshin-cn", biz: "hk4e_cn", region: .mainlandChina, gameID: "1Z8W5NHUQb", voices: voices, family: .genshin),
+            GameDefinition(id: "zzz", biz: "nap_global", region: .global, gameID: "U5hbdsT9W7", voices: voices, family: .zzz)]
+            + HonkaiImpactServer.allCases.map(\.definition)
+            + [GameDefinition(id: "genshin-cn", biz: "hk4e_cn", region: .mainlandChina, gameID: "1Z8W5NHUQb", voices: voices, family: .genshin),
             GameDefinition(id: "starrail-cn", biz: "hkrpg_cn", region: .mainlandChina, gameID: "64kMb5iAWu", voices: voices, family: .starrail),
             GameDefinition(id: "zzz-cn", biz: "nap_cn", region: .mainlandChina, gameID: "x6znKlJ0xK", voices: voices, family: .zzz)]
     }()

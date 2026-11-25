@@ -7,6 +7,39 @@ import TestSupport
 @testable import GameLibrary
 
 @Suite struct AdoptEditionTests {
+    @Test(arguments: HonkaiImpactServer.allCases)
+    func honkaiImpactRefusesAnotherServersAreaMarker(selected: HonkaiImpactServer) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir(), fs = try ContainedFileSystem(root: temp.url)
+            let game = try #require(GameDefinition.find(selected.rawValue))
+            try fs.writeAtomically(Data("exe".utf8), to: SafeRelativePath(game.executableName))
+            let config = try SafeRelativePath("config.ini")
+            let ini = #"""
+                [General]
+                cps=hyp_hoyoverse
+                channel=1
+                uapc={"bh3_global":{"uapc":""}}
+                """#
+            try fs.writeAtomically(Data(ini.utf8), to: config)
+            try AdoptEditionValidator.validate(game, in: fs)
+            let marker = try SafeRelativePath("pkg_area_name")
+            for actual in HonkaiImpactServer.allCases {
+                try fs.writeAtomically(Data(actual.packageName.utf8), to: marker)
+                if actual == selected {
+                    try AdoptEditionValidator.validate(game, in: fs)
+                } else {
+                    #expect(throws: LauncherError.gameEditionMismatch) { try AdoptEditionValidator.validate(game, in: fs) }
+                }
+            }
+            for bytes in [Data("unknown".utf8), Data([0xff]), Data(repeating: 0xff, count: 257)] {
+                try fs.writeAtomically(bytes, to: marker)
+                try AdoptEditionValidator.validate(game, in: fs)
+            }
+            try fs.writeAtomically(Data((ini + "\ngame_id=\(selected.gameID)").utf8), to: config)
+            try AdoptEditionValidator.validate(game, in: fs)
+        }
+    }
+
     @Test(arguments: GameDefinition.all.map(\.id))
     func matchingEditionIsAccepted(id: String) async throws {
         try await BlockingIO.run {

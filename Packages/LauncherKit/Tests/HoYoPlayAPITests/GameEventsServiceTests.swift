@@ -140,16 +140,29 @@ import TestSupport
     func everySupportedEditionUsesItsRemoteIDAndOneFailureIsIndependent(region: Region) async throws {
         let temp = try TempDir(), http = EventsHTTP(region: region), clock = EventsDate()
         let games = GameDefinition.inRegion(region)
-        let remoteIDs = games.enumerated().map { $0.element.id == "hi3" ? "5TIVvvcwtM" : "remote-\($0.offset)" }
-        var entries = zip(games, remoteIDs).map { ["biz": $0.0.biz, "id": $0.1] }
+        let remoteIDs = games.enumerated().map { $0.element.honkaiImpactServer?.gameID ?? "remote-\($0.offset)" }
+        var entries: [[String: Any]] = []
+        for (game, id) in zip(games, remoteIDs) {
+            var entry: [String: Any] = ["biz": game.biz, "id": id]
+            if let server = game.honkaiImpactServer {
+                guard server == .europeAmericas else { continue }
+                entry["game_server_configs"] = (HonkaiImpactServer.allCases.map(\.gameID) + ["other-server"]).map { ["game_id": $0] }
+            }
+            entries.append(entry)
+        }
         if region == .global { entries.append(["biz": "bh3_global", "id": "other-server"]) }
         http.games = try JSONSerialization.data(withJSONObject: ["retcode": 0, "data": ["games": entries]])
-        let service = GameEventsService(cacheDirectory: temp.url.appendingPathComponent("Events"), region: region, http: http, now: { clock.now })
+        let cache = temp.url.appendingPathComponent("Events")
+        let service = GameEventsService(cacheDirectory: cache, region: region, http: http, now: { clock.now })
         let first = await service.refresh()
         #expect(Set(first.keys) == Set(games.map(\.id)))
         #expect(http.requests.count == games.count + 1)
         let requestedIDs = Set(http.requests.compactMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "game_id" }?.value })
         #expect(requestedIDs == Set(remoteIDs))
+        let offline = EventsHTTP(region: region)
+        let reloaded = GameEventsService(cacheDirectory: cache, region: region, http: offline, now: { clock.now })
+        #expect(await reloaded.loadCached() == first)
+        #expect(offline.requests.isEmpty)
         clock.advance(60)
         http.failedID = "remote-1"
         http.content = content([])

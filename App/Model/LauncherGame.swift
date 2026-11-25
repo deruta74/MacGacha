@@ -43,8 +43,8 @@ extension LauncherGame {
 
 
 extension LauncherGame {
-    static func cards(in region: Region) -> [Self] {
-        var cards = games(in: region)
+    static func cards(in region: Region, honkaiServer: HonkaiImpactServer = .europeAmericas) -> [Self] {
+        var cards = games(in: region).filter { HonkaiImpactServer(rawValue: $0.id) == nil || $0.id == honkaiServer.rawValue }
         if region == .global {
             cards.append(Self(id: CatalogGame.petitPlanet.rawValue, name: "Petit Planet",
                 tint: .mint, deepTint: .teal))

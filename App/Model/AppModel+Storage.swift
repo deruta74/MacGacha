@@ -97,7 +97,7 @@ import Launch
             if let inactive = candidate.region {
                 await artServices[inactive]?.invalidateStorageCache()
                 await eventsServices[inactive]?.invalidateStorageCache()
-                applyArt([:], in: inactive); applyEvents([:], in: inactive)
+                applyArt([:], in: inactive, honkaiDescriptions: [:]); applyEvents([:], in: inactive)
                 artHydrationTasks[inactive] = nil
             }
         }

@@ -122,6 +122,8 @@ final class AppModel {
     }
     private(set) var games: [String: GameState] = Dictionary(uniqueKeysWithValues: GameDefinition.all.map { ($0.id, GameState(status: .unknown)) })
     private(set) var gameRecords: [String: GameRecord] = [:]
+    var honkaiServerPreference: HonkaiImpactServer?
+    private(set) var honkaiServerDescriptions: [String: String]
     var preDownloads: [String: PreDownloadOverlay] = [:]
     @ObservationIgnored var preDownloadRevisions: [String: UUID] = [:]
     var gameUpdateCheck: [String: GameUpdateCheckResult] = [:]
@@ -414,12 +416,17 @@ final class AppModel {
         if defaults?.string(forKey: Self.selectedGameKey) == "honkai-impact-3rd" {
             defaults?.set("hi3", forKey: Self.selectedGameKey)
         }
+        let gameServer = defaults?.string(forKey: Self.selectedGameKey).flatMap(HonkaiImpactServer.init(rawValue:))
+        self.honkaiServerPreference = gameServer
+            ?? defaults?.string(forKey: Self.honkaiServerKey).flatMap(HonkaiImpactServer.init(rawValue:))
+        if let gameServer { defaults?.set(gameServer.rawValue, forKey: Self.honkaiServerKey) }
         let preferred = Self.persistedRegion(defaults: defaults, locale: locale)
         defaults?.set(preferred.rawValue, forKey: "region")
         self.region = Self.initialRegion(defaults: defaults, locale: locale)
         self.artServices = Region.allCases.reduce(into: [.global: artService]) { result, region in
             result[region] = artServices[region] ?? result[region] ?? EmptyGameArtProvider()
         }
+        self.honkaiServerDescriptions = self.artServices[.global]?.cachedHonkaiServerDescriptions() ?? [:]
         self.gameArt = self.artServices.reduce(into: [:]) { result, provider in
             result.merge(provider.value.cached().filter { CatalogGame.artRegion(for: $0.key) == provider.key }) { _, new in new }
         }
@@ -492,9 +499,10 @@ final class AppModel {
         }
     }
 
-    func applyArt(_ art: [String: GameArt], in region: Region) {
+    func applyArt(_ art: [String: GameArt], in region: Region, honkaiDescriptions: [String: String]? = nil) {
         gameArt = gameArt.filter { CatalogGame.artRegion(for: $0.key) != region }
             .merging(art.filter { CatalogGame.artRegion(for: $0.key) == region }) { _, new in new }
+        if region == .global, let honkaiDescriptions { honkaiServerDescriptions = honkaiDescriptions }
     }
 
     static func live() -> AppModel {

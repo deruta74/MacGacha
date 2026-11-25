@@ -38,7 +38,7 @@ struct RootView: View {
 
     /// The rail shows one region; a selection from the other region falls back to its first game.
     private var game: LauncherGame {
-        LauncherGame.cards(in: model.region).first { $0.id == selectedID } ?? model.visibleGames[0]
+        model.launcherGame(for: selectedID)
     }
 
     /// Reduce Motion only changes the default; an explicit choice always wins.
@@ -58,7 +58,7 @@ struct RootView: View {
     }
 
     private var selectionInputs: SelectionInputs {
-        SelectionInputs(region: model.region, gameID: game.id, backgrounds: model.gameArt[game.id]?.backgrounds ?? [],
+        SelectionInputs(region: model.region, gameID: game.id, backgrounds: model.launcherArt(for: game.id)?.backgrounds ?? [],
             animated: animated.wrappedValue, reduceMotion: reduceMotion)
     }
 
@@ -112,7 +112,7 @@ struct RootView: View {
                     .padding(24)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 } else {
-                    GameFooter(game: game, art: model.gameArt[game.id], highlights: shownSlide?.highlights,
+                    GameFooter(game: game, art: model.launcherArt(for: game.id), highlights: shownSlide?.highlights,
                         images: images, panel: $panel, gameSheet: $gameSheet, animated: animated,
                         slideHasVideo: shownSlide?.video != nil)
                         // A fresh footer per game, so a confirmation opened for one game can't act on another.
@@ -121,7 +121,7 @@ struct RootView: View {
                 }
             }
         }
-        .animation(.smooth(duration: 0.35), value: selectedID)
+        .animation(.smooth(duration: 0.35), value: game.id)
         .onChange(of: selectionInputs, initial: true) { old, new in
             if old.gameID != new.gameID || old.region != new.region { shownSlide = nil }
             images.preload(new.backgrounds.flatMap { [$0.image, $0.theme, $0.highlights?.image, $0.highlights?.hoverImage].compactMap { $0 } })
@@ -183,6 +183,11 @@ struct RootView: View {
         }
         // A sheet belongs to one game; once its region is hidden it must not act on it.
         .onChange(of: model.region) { gameSheet = nil }
+        .onChange(of: model.selectedHonkaiServer) { old, new in
+            guard selectedID == old.rawValue else { return }
+            gameSheet = nil
+            selectedID = new.rawValue
+        }
         // Clicking a notification selects its game. The model has already switched the region.
         // A click that launched the app arrives before this view exists, so it is read on appear too.
         .onChange(of: model.notificationSelection, initial: true) { _, selection in
@@ -203,7 +208,9 @@ struct RootView: View {
     /// or `-MacGachaDebugSettings YES`) opens a state directly, for screenshots without clicking through the UI.
     private func applyDebugLaunchArguments() {
         let defaults = UserDefaults.standard
-        if let id = defaults.string(forKey: "MacGachaDebugGame"), LauncherGame.cards(in: model.region).contains(where: { $0.id == id }) {
+        if let id = defaults.string(forKey: "MacGachaDebugGame"),
+            model.launcherCards.contains(where: { $0.id == id }) || GameDefinition.find(id)?.region == model.region {
+            model.rememberHonkaiServer(for: id)
             selectedID = id
         }
         if let name = defaults.string(forKey: "MacGachaDebugPanel") {

@@ -33,17 +33,17 @@ import TestSupport
     }
 
     @Test func globalDefinitionsCarryRegionAndHYPIdentifiers() {
-        #expect(GameDefinition.inRegion(.global).map(\.region) == [.global, .global, .global, .global])
-        #expect(GameDefinition.inRegion(.global).map(\.gameID) == ["gopR6Cufr3", "4ziysqXOQ8", "U5hbdsT9W7", "5TIVvvcwtM"])
+        #expect(GameDefinition.inRegion(.global).allSatisfy { $0.region == .global })
+        #expect(GameDefinition.inRegion(.global).map(\.gameID) == ["gopR6Cufr3", "4ziysqXOQ8", "U5hbdsT9W7"] + HonkaiImpactServer.allCases.map(\.gameID))
         let cn = GameDefinition(id: "genshin-cn", biz: "hk4e_cn", region: .mainlandChina, gameID: "1Z8W5NHUQb", voices: [])
         #expect(cn.region == .mainlandChina && cn.gameID == "1Z8W5NHUQb")
         #expect(GameDefinition.find(cn.id)?.biz == cn.biz)
     }
     @Test func gameDefinitionsCoverGlobalGamesAndVoices() {
-        #expect(GameDefinition.inRegion(.global).map(\.id) == ["genshin", "starrail", "zzz", "hi3"])
-        #expect(GameDefinition.inRegion(.global).map(\.biz) == ["hk4e_global", "hkrpg_global", "nap_global", "bh3_global"])
+        #expect(GameDefinition.inRegion(.global).map(\.id) == ["genshin", "starrail", "zzz"] + HonkaiImpactServer.allCases.map(\.rawValue))
+        #expect(Set(GameDefinition.inRegion(.global).map(\.biz)) == ["hk4e_global", "hkrpg_global", "nap_global", "bh3_global"])
         for game in GameDefinition.all {
-            #expect(game.voices.map(\.code) == (game.id == "hi3" ? [] : ["zh-cn", "en-us", "ja-jp", "ko-kr"]))
+            #expect(game.voices.map(\.code) == (game.family == .honkaiImpact ? [] : ["zh-cn", "en-us", "ja-jp", "ko-kr"]))
             #expect(game.voices.allSatisfy { !$0.name.isEmpty })
         }
     }

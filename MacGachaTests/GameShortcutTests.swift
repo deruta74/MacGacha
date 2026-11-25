@@ -7,6 +7,34 @@ import RuntimeManager
 @testable import MacGacha
 
 struct GameShortcutTests {
+    @Test(arguments: HonkaiImpactServer.allCases)
+    func honkaiShortcutIdentitiesRouteToTheExactServer(server: HonkaiImpactServer) throws {
+        let url = try #require(GameShortcut.playURL(server.rawValue))
+        #expect(GameShortcut.gameID(from: url) == server.rawValue)
+    }
+
+    @Test func honkaiShortcutReusesItsDestinationWhenTheDescriptionChanges() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("HI3Shortcuts-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let original = try GameShortcut.write(gameID: "hi3-jp", name: "Honkai Impact 3rd (JP Server)", icns: nil,
+            hostBundleID: "test", hostPath: "/Applications/MacGacha.app", in: directory)
+        let updated = try GameShortcut.write(gameID: "hi3-jp", name: "崩壊3rd（日本サーバー）", icns: nil,
+            hostBundleID: "test", hostPath: "/Applications/MacGacha.app", in: directory)
+        #expect(updated == original)
+        let fs = try ContainedFileSystem(root: directory)
+        let legacy = try SafeRelativePath("崩壊3rd.app")
+        let legacyPlist = try SafeRelativePath("\(legacy)/Contents/Info.plist")
+        try fs.writeAtomically(GameShortcut.infoPlist(gameID: "hi3", name: "崩壊3rd", hasIcon: false), to: legacyPlist)
+        let migrated = try GameShortcut.write(gameID: "hi3", name: "Honkai Impact 3rd (Europe & Americas Servers)", icns: nil,
+            hostBundleID: "test", hostPath: "/Applications/MacGacha.app", in: directory)
+        #expect(migrated == legacy.resolved(against: directory))
+        #expect(try fs.itemType(at: SafeRelativePath("崩壊3rd（日本サーバー）.app")) == nil)
+        #expect(try fs.itemType(at: SafeRelativePath("Honkai Impact 3rd (Europe & Americas Servers).app")) == nil)
+        let data = try fs.readFile(at: legacyPlist, maxBytes: 4096)
+        let plist = try #require(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        #expect(plist["CFBundleDisplayName"] as? String == "Honkai Impact 3rd (Europe & Americas Servers)")
+    }
+
     @Test func acceptsOnlyPlayURLsForKnownGames() throws {
         #expect(GameShortcut.gameID(from: try #require(URL(string: "macgacha://play/genshin"))) == "genshin")
         #expect(GameShortcut.gameID(from: try #require(URL(string: "MacGacha://Play/zzz-cn"))) == "zzz-cn")
@@ -92,6 +120,14 @@ struct GameShortcutTests {
         #expect(model.shortcutTask == nil)
         #expect(model.launchedHidden)
         #expect(reveals == 0)
+    }
+
+    @Test func honkaiShortcutRevealsTheExactServer() async {
+        let model = model(hidden: true) {}
+        await model.start()
+        await model.playFromShortcut("hi3-sea")
+        #expect(model.notificationSelection?.gameID == "hi3-sea")
+        #expect(model.selectedHonkaiServer == .southeastAsia)
     }
 
     @Test func errorsOpenAHiddenLauncher() {
