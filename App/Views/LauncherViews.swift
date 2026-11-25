@@ -41,19 +41,26 @@ struct GameRail: View {
     @Binding var panel: Panel?
 
     var body: some View {
-        VStack(spacing: 12) {
-            ForEach(model.visibleGames) { game in
-                Button {
-                    selectedID = game.id
-                } label: {
-                    GameIcon(game: game, art: model.gameArt[game.id], selected: game.id == selectedID)
+        VStack(spacing: 8) {
+            ScrollView(.vertical) {
+                VStack(spacing: 8) {
+                    ForEach(LauncherGame.cards(in: model.region)) { game in
+                        Button {
+                            selectedID = game.id
+                        } label: {
+                            GameIcon(game: game, art: model.gameArt[game.id], selected: game.id == selectedID)
+                        }
+                        .buttonStyle(.plain)
+                        .help(game.name)
+                        .accessibilityLabel(game.name)
+                        .accessibilityAddTraits(game.id == selectedID ? .isSelected : [])
+                    }
                 }
-                .buttonStyle(.plain)
-                .help(game.name)
-                .accessibilityLabel(game.name)
-                .accessibilityAddTraits(game.id == selectedID ? .isSelected : [])
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity)
             }
-            Spacer(minLength: 24)
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollIndicators(.hidden)
             RailButton(title: "Dependencies", symbol: "shippingbox", marked: model.hasUnansweredDependencyOffer) { panel = .dependencies }
             RailButton(title: "Storage", symbol: "internaldrive") { panel = .storage }
             RailButton(title: "Diagnostics", symbol: "stethoscope") { panel = .diagnostics }

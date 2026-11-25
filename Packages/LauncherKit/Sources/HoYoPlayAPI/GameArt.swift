@@ -3,6 +3,7 @@
 import Foundation
 
 public struct GameArt: Sendable, Equatable, Codable {
+    public let reservationOpen: Bool
     public let backgrounds: [GameBackground]
     public let background: URL?
     public let video: URL?
@@ -11,13 +12,14 @@ public struct GameArt: Sendable, Equatable, Codable {
     public let logo: URL?
 
     public init(background: URL? = nil, video: URL? = nil,
-        theme: URL? = nil, icon: URL? = nil, logo: URL? = nil, backgrounds: [GameBackground] = []) {
+        theme: URL? = nil, icon: URL? = nil, logo: URL? = nil, backgrounds: [GameBackground] = [], reservationOpen: Bool = false) {
+        self.reservationOpen = reservationOpen
         self.backgrounds = backgrounds
         self.background = background; self.video = video
         self.theme = theme; self.icon = icon; self.logo = logo
     }
 
-    private enum CodingKeys: String, CodingKey { case backgrounds, background, video, theme, icon, logo }
+    private enum CodingKeys: String, CodingKey { case reservationOpen, backgrounds, background, video, theme, icon, logo }
 
     // Values encoded before background lists existed decode with an empty list.
     public init(from decoder: any Decoder) throws {
@@ -27,6 +29,7 @@ public struct GameArt: Sendable, Equatable, Codable {
             theme: try container.decodeIfPresent(URL.self, forKey: .theme),
             icon: try container.decodeIfPresent(URL.self, forKey: .icon),
             logo: try container.decodeIfPresent(URL.self, forKey: .logo),
-            backgrounds: try container.decodeIfPresent([GameBackground].self, forKey: .backgrounds) ?? [])
+            backgrounds: try container.decodeIfPresent([GameBackground].self, forKey: .backgrounds) ?? [],
+            reservationOpen: try container.decodeIfPresent(Bool.self, forKey: .reservationOpen) ?? false)
     }
 }

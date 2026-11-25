@@ -38,7 +38,7 @@ struct RootView: View {
 
     /// The rail shows one region; a selection from the other region falls back to its first game.
     private var game: LauncherGame {
-        model.visibleGames.first { $0.id == selectedID } ?? model.visibleGames[0]
+        LauncherGame.cards(in: model.region).first { $0.id == selectedID } ?? model.visibleGames[0]
     }
 
     /// Reduce Motion only changes the default; an explicit choice always wins.
@@ -92,12 +92,35 @@ struct RootView: View {
                     .padding(.top, 40) // below the window's traffic lights
                     .padding(.bottom, 12)
                     .frame(maxHeight: .infinity)
-                GameFooter(game: game, art: model.gameArt[game.id], highlights: shownSlide?.highlights,
-                    images: images, panel: $panel, gameSheet: $gameSheet, animated: animated,
-                    slideHasVideo: shownSlide?.video != nil)
-                    // A fresh footer per game, so a confirmation opened for one game can't act on another.
-                    .id(game.id)
+                if let card = CatalogGame(rawValue: game.id) {
+                    VStack(alignment: .trailing, spacing: 12) {
+                        Text(game.name).font(.largeTitle.bold()).foregroundStyle(.white)
+                        switch card {
+                        case .petitPlanet, .nexusAnima:
+                            let site = card == .petitPlanet ? "https://planet.hoyoverse.com" : "https://hna.hoyoverse.com"
+                            Link(destination: URL(string: site)!) {
+                                if model.gameArt[game.id]?.reservationOpen == true {
+                                    Text("Pre-register")
+                                } else {
+                                    Text("Official website")
+                                }
+                            }
+                        case .honkaiImpact:
+                            Link("View in App Store", destination: URL(string: "https://apps.apple.com/app/id1336342304")!)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                } else {
+                    GameFooter(game: game, art: model.gameArt[game.id], highlights: shownSlide?.highlights,
+                        images: images, panel: $panel, gameSheet: $gameSheet, animated: animated,
+                        slideHasVideo: shownSlide?.video != nil)
+                        // A fresh footer per game, so a confirmation opened for one game can't act on another.
+                        .id(game.id)
+                        .padding(24)
+                }
             }
         }
         .animation(.smooth(duration: 0.35), value: selectedID)
@@ -182,7 +205,7 @@ struct RootView: View {
     /// or `-MacGachaDebugSettings YES`) opens a state directly, for screenshots without clicking through the UI.
     private func applyDebugLaunchArguments() {
         let defaults = UserDefaults.standard
-        if let id = defaults.string(forKey: "MacGachaDebugGame"), LauncherGame.all.contains(where: { $0.id == id }) {
+        if let id = defaults.string(forKey: "MacGachaDebugGame"), LauncherGame.cards(in: model.region).contains(where: { $0.id == id }) {
             selectedID = id
         }
         if let name = defaults.string(forKey: "MacGachaDebugPanel") {
@@ -190,6 +213,7 @@ struct RootView: View {
         }
         if defaults.bool(forKey: "MacGachaDebugSettings") { openSettings() }
         if let path = defaults.string(forKey: "MacGachaDebugSnapshot") { Self.snapshotWindows(to: path) }
+        guard GameDefinition.find(selectedID) != nil else { return }
         switch defaults.string(forKey: "MacGachaDebugSheet") {
         case "install": gameSheet = .install(selectedID)
         case "voices": gameSheet = .voices(selectedID)

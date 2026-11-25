@@ -418,7 +418,7 @@ final class AppModel {
             result[region] = artServices[region] ?? result[region] ?? EmptyGameArtProvider()
         }
         self.gameArt = self.artServices.reduce(into: [:]) { result, provider in
-            result.merge(provider.value.cached().filter { GameDefinition.find($0.key)?.region == provider.key }) { _, new in new }
+            result.merge(provider.value.cached().filter { CatalogGame.artRegion(for: $0.key) == provider.key }) { _, new in new }
         }
         let stored = defaults?.string(forKey: "installRoot")
         self.installRoot = stored.flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
@@ -490,8 +490,8 @@ final class AppModel {
     }
 
     func applyArt(_ art: [String: GameArt], in region: Region) {
-        gameArt = gameArt.filter { GameDefinition.find($0.key)?.region != region }
-            .merging(art.filter { GameDefinition.find($0.key)?.region == region }) { _, new in new }
+        gameArt = gameArt.filter { CatalogGame.artRegion(for: $0.key) != region }
+            .merging(art.filter { CatalogGame.artRegion(for: $0.key) == region }) { _, new in new }
     }
 
     static func live() -> AppModel {
