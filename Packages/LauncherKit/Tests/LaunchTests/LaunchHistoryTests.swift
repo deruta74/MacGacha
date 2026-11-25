@@ -9,6 +9,113 @@ import GameLibrary
 @testable import Launch
 
 @Suite struct LaunchHistoryTests {
+    enum Corruption: CaseIterable {
+        case garbage, wrongSchema, oversized, invalidEditionEntry
+    }
+
+    @Test(arguments: Corruption.allCases)
+    func corruptHistoryIsEmptyAndReplacedByTheNextQualifiedSession(corruption: Corruption) async throws {
+        let fixture = try await ManagerFixture.make(initialGame: false)
+        var session = try await fixture.saveSnapshot(state: .running, processes: [])
+        session.reachedRunning = true
+        session.reachedReady = true
+        session.confirmedRunningSeconds = 120
+        session.configuration = try configuration()
+        session.verifiedEndedAt = Date(timeIntervalSince1970: 500)
+        let qualified = session
+        let log = EventLog(directory: fixture.paths.logs)
+        try await BlockingIO.run {
+            let store = LaunchHistoryStore(paths: fixture.paths, log: log)
+            let fs = try ContainedFileSystem(root: fixture.paths.root)
+            let file = try SafeRelativePath("LaunchHistory/last-successful.json")
+            try store.recordVerifiedSession(qualified, normal: true)
+            let bytes: Data
+            switch corruption {
+            case .garbage:
+                bytes = Data([0xff, 0x00])
+            case .wrongSchema:
+                bytes = Data(#"{"schemaVersion":2,"games":{}}"#.utf8)
+            case .oversized:
+                bytes = Data(repeating: 0x20, count: (1 << 20) + 1)
+            case .invalidEditionEntry:
+                let valid = try fs.readFile(at: file, maxBytes: 1 << 20)
+                var state = try #require(JSONSerialization.jsonObject(with: valid) as? [String: Any])
+                var games = try #require(state["games"] as? [String: Any])
+                games["hi3-jp"] = try #require(games[qualified.game])
+                var invalid = try #require(games["hi3-jp"] as? [String: Any])
+                var config = try #require(invalid["configuration"] as? [String: Any])
+                config["recipeVersion"] = 0
+                invalid["configuration"] = config
+                games["hi3-jp"] = invalid
+                state["games"] = games
+                bytes = try JSONSerialization.data(withJSONObject: state)
+            }
+            try fs.writeAtomically(bytes, to: file)
+
+            #expect(try store.load().isEmpty)
+            #expect(try store.load().isEmpty)
+            try store.recordVerifiedSession(qualified, normal: true)
+            try store.recordVerifiedSession(qualified, normal: true)
+            let repaired = try LaunchHistoryStore(paths: fixture.paths).load()
+            #expect(Set(repaired.keys) == [qualified.game])
+            #expect(repaired[qualified.game]?.configuration == qualified.configuration)
+        }
+        await log.flush()
+        try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: fixture.paths.logs)
+            let bytes = try fs.readFile(at: SafeRelativePath("macgacha.log"), maxBytes: 4096)
+            let lines = String(decoding: bytes, as: UTF8.self).split(separator: "\n")
+            let line = try #require(lines.first)
+            #expect(lines.count == 1)
+            #expect(line.contains("Invalid launch history replaced"))
+            #expect(line.contains("warning"))
+            #expect(!line.contains("last-successful.json"))
+        }
+    }
+
+    @Test func honkaiImpactServersKeepSeparateBaselinesAndRetryCapabilities() async throws {
+        let fixture = try await ManagerFixture.make(initialGame: false)
+        let manager = fixture.manager()
+        let servers = HonkaiImpactServer.allCases.map(\.rawValue)
+        let sessionIDs = try await BlockingIO.run {
+            let store = LaunchHistoryStore(paths: fixture.paths)
+            var sessionIDs: [String: UUID] = [:]
+            for id in servers {
+                let recipe = try #require(Recipes.recipe(for: id))
+                let settings = LaunchSettings.defaults(for: id)
+                let configuration = LaunchConfiguration(gameBuild: "9.1.0", gameBuildID: "\(id)-build",
+                    selection: fixture.runtime.selected, recipeVersion: recipe.recipeVersion, settings: settings)
+                let sessionID = UUID()
+                var session = LaunchSession(sessionID: sessionID, game: id, installRoot: fixture.installRoot,
+                    installIdentity: try ContainedFileSystem(root: fixture.installRoot).rootIdentity(), prefix: fixture.prefix,
+                    bundleID: configuration.bundleID, runtimeDigest: configuration.runtimeDigest, wineBinary: fixture.bundle.wineBinary,
+                    wineserver: fixture.bundle.root.appendingPathComponent("bin/wineserver"), componentIDs: configuration.componentIDs,
+                    recipeVersion: recipe.recipeVersion, settings: settings, reachedRunning: true, reachedReady: true,
+                    confirmedRunningSeconds: 120, verifiedEndedAt: Date(timeIntervalSince1970: 500))
+                session.configuration = configuration
+                try store.recordVerifiedSession(session, normal: true)
+                sessionIDs[id] = sessionID
+            }
+            return sessionIDs
+        }
+        let history = try await manager.successfulLaunches()
+        #expect(history.mapValues(\.sessionID) == sessionIDs)
+        for id in servers {
+            let wrongID = try #require(servers.first { $0 != id })
+            let wrongGame = try #require(GameDefinition.find(wrongID))
+            let diagnosis = await manager.diagnose(game: id, gameBuild: "9.1.0", gameBuildID: "\(id)-build", reason: .runtime)
+            #expect(diagnosis.previous?.sessionID == sessionIDs[id])
+            let token = try #require(diagnosis.retryID)
+            let otherDiagnosis = await manager.diagnose(game: wrongGame.id, gameBuild: "9.1.0", gameBuildID: "\(id)-build", reason: .runtime)
+            #expect(otherDiagnosis.retryID == nil)
+            await #expect(throws: LaunchConfigurationError.self) {
+                try await manager.retryLastSuccessful(game: wrongGame, installRoot: fixture.installRoot,
+                    gameBuild: "9.1.0", gameBuildID: "\(id)-build", retryID: token)
+            }
+        }
+        #expect(fixture.spawner.calls.isEmpty)
+    }
+
     @Test(arguments: [false, true], [119.0, 120.0])
     func historyRequiresReadyAndQualifiedNormalEnd(ready: Bool, seconds: Double) async throws {
         let f = try await ManagerFixture.make(initialGame: false)

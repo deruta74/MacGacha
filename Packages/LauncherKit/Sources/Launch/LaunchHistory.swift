@@ -111,35 +111,65 @@ extension LaunchSession {
 /// Blocking API: callers must use BlockingIO.
 public struct LaunchHistoryStore: Sendable {
     private struct State: Codable { var schemaVersion = 1; var games: [String: SuccessfulLaunch] = [:] }
+    private static let maxBytes = 1 << 20
     private let paths: AppPaths
+    private let log: EventLog?
     private let file = try! SafeRelativePath("LaunchHistory/last-successful.json")
-    public init(paths: AppPaths) { self.paths = paths }
-    public func load() throws -> [String: SuccessfulLaunch] {
-        let fs = try ContainedFileSystem(root: paths.root)
-        guard try fs.itemType(at: file) != nil else { return [:] }
-        let state = try JSONDecoder().decode(State.self, from: fs.readFile(at: file, maxBytes: 1 << 20))
-        guard state.schemaVersion == 1, state.games.count <= GameDefinition.all.count else { throw LauncherError.journalCorrupt("Invalid launch history") }
-        for (game, value) in state.games {
-            try value.configuration.validate(game: game)
-            guard value.endedAt.timeIntervalSinceReferenceDate.isFinite else { throw LauncherError.journalCorrupt("Invalid launch history date") }
-        }
-        return state.games
+    public init(paths: AppPaths, log: EventLog? = nil) {
+        self.paths = paths
+        self.log = log
     }
+
+    public func load() throws -> [String: SuccessfulLaunch] {
+        try loadState(in: ContainedFileSystem(root: paths.root))?.games ?? [:]
+    }
+
+    /// A missing file has no history. A rejected snapshot returns nil so the
+    /// writer can log its replacement once, even if display read it repeatedly.
+    private func loadState(in fs: ContainedFileSystem) throws -> State? {
+        guard try fs.itemType(at: file) != nil else { return State() }
+        let bytes: Data
+        do {
+            bytes = try fs.readFile(at: file, maxBytes: Self.maxBytes)
+        } catch LauncherError.fileTooLarge {
+            return nil
+        } catch LauncherError.io {
+            return nil
+        }
+        guard let state = try? JSONDecoder().decode(State.self, from: bytes),
+            state.schemaVersion == 1, state.games.count <= GameDefinition.all.count else { return nil }
+        do {
+            for (game, value) in state.games {
+                try value.configuration.validate(game: game)
+                guard value.endedAt.timeIntervalSinceReferenceDate.isFinite else { return nil }
+            }
+        } catch {
+            return nil
+        }
+        return state
+    }
+
     public func recordVerifiedSession(_ session: LaunchSession, normal: Bool) throws {
         guard session.qualifiesSuccessfulLaunch(normal: normal),
             let configuration = session.configuration, let endedAt = session.verifiedEndedAt else { return }
         try configuration.validate(game: session.game)
         guard endedAt.timeIntervalSinceReferenceDate.isFinite else { throw LauncherError.journalCorrupt("Invalid launch history date") }
-        let fs = try ContainedFileSystem(root: paths.root)
-        try fs.createRootDurably(); try fs.createDirectoryDurably(at: SafeRelativePath("LaunchHistory"))
+        let root = try ContainedFileSystem(root: paths.root)
+        try root.createRootDurably()
+        let fs = try root.pinRoot()
+        try fs.createDirectoryDurably(at: SafeRelativePath("LaunchHistory"))
         let lock = try InstallLock(fs: fs, path: SafeRelativePath("LaunchHistory/.lock"))
         defer { withExtendedLifetime(lock) {} }
-        var state = State(); state.games = try load()
+        let stored = try loadState(in: fs)
+        var state = stored ?? State()
         if let previous = state.games[session.game], previous.endedAt > endedAt { return }
         state.games[session.game] = SuccessfulLaunch(sessionID: session.sessionID, endedAt: endedAt, configuration: configuration)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let bytes = try encoder.encode(state)
-        guard bytes.count <= 1 << 20 else { throw LauncherError.journalCorrupt("Launch history exceeds limit") }
+        guard bytes.count <= Self.maxBytes else { throw LauncherError.journalCorrupt("Launch history exceeds limit") }
         try fs.writeLaunchAtomically(bytes, to: file)
+        if stored == nil {
+            (log ?? EventLog(directory: paths.logs)).post(.warning, "launch", "Invalid launch history replaced")
+        }
     }
 }

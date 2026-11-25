@@ -891,8 +891,8 @@ public actor LaunchManager {
             try await persist(context.session)
         }
         do {
-            let paths = paths, session = context.session
-            try await BlockingIO.run { try LaunchHistoryStore(paths: paths).recordVerifiedSession(session, normal: normal) }
+            let paths = paths, session = context.session, log = eventLog
+            try await BlockingIO.run { try LaunchHistoryStore(paths: paths, log: log).recordVerifiedSession(session, normal: normal) }
         } catch { event("Launch history recording unavailable", game: context.session.game, level: .warning) }
         // This checkpoint remains in the journal until accounting and file recovery
         // both finish. A crash cannot replace the interval with a later detection.
