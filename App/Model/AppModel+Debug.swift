@@ -226,6 +226,9 @@ extension AppModel {
             message: String(localized: "The game closed during startup."), hasLog: true, unverifiedBuild: false))
         case "launchOffline": state = .failed(LaunchFailureInfo(stage: .watch,
             message: String(localized: "The game closed during startup."), hasLog: true, unverifiedBuild: false, cause: .antiCheatOffline))
+        case "launchDiagnosed": state = .failed(LaunchFailureInfo(stage: .watch,
+            message: String(localized: "The game closed during startup."), hasLog: true, unverifiedBuild: false,
+            diagnosis: debugLaunchDiagnosis()))
         case "recoveryNeeded": state = .recoveryNeeded(String(localized: "MacGacha is putting the game's files back. You can play when it's done."))
         default: state = nil
         }
@@ -242,6 +245,30 @@ extension AppModel {
         if name == "playing" || name == "launching" { model.liveLaunchGames.insert(owner) }
         if recoveryNotice, let notice = debugRecoveryNotice(in: region) { model.recoveryNotices = [notice] }
         return model
+    }
+
+    /// A failed attempt after a runtime and backend switch, compared with a good D3DMetal session.
+    private static func debugLaunchDiagnosis() -> LaunchDiagnosis? {
+        guard let digest = try? Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)),
+            let newDigest = try? Digest(algorithm: .sha256, hex: String(repeating: "b", count: 64)) else { return nil }
+        var settings = LaunchSettings.defaults(for: "genshin")
+        settings.backend = .d3dmetal
+        let previous = LaunchConfiguration(gameBuild: "7.1.0", bundleID: "d3dmetal-wine11.20mg1.0-gptk4.0b3",
+            runtimeProfileID: "d3dmetal-wine11.20mg1.0-gptk4.0b3", runtimeDigest: digest,
+            componentIDs: ["wine-11.20-macgacha-1.0", "d3dmetal-4.0b3"], compatibilityComponentIDs: [:], recipeVersion: 1,
+            settings: settings, gameModeEnabled: true)
+        settings.backend = .dxmt
+        let attempted = LaunchConfiguration(gameBuild: "7.2.0", bundleID: "dxmt-wine11.22mg1.0-dxmt0.80",
+            runtimeProfileID: "dxmt-wine11.22mg1.0-dxmt0.80", runtimeDigest: newDigest,
+            componentIDs: ["wine-11.22-macgacha-1.0", "dxmt-0.80"], compatibilityComponentIDs: [:], recipeVersion: 1,
+            settings: settings, gameModeEnabled: true)
+        guard let configuration = try? JSONEncoder().encode(previous),
+            let wrapped = try? JSONSerialization.jsonObject(with: configuration) else { return nil }
+        let object: [String: Any] = ["sessionID": "C2579465-61CA-4445-8C35-F00FF1395516",
+            "endedAt": Date(timeIntervalSinceReferenceDate: 816_000_000).timeIntervalSinceReferenceDate, "configuration": wrapped]
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+            let successful = try? JSONDecoder().decode(SuccessfulLaunch.self, from: data) else { return nil }
+        return LaunchDiagnosis(reason: .unknown, previous: successful, attempted: attempted, retryID: UUID())
     }
 
     private static func debugRecoveryNotice(in region: Region) -> RecoveryNotice? {

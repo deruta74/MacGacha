@@ -6,7 +6,6 @@ import Foundation
 import Synchronization
 import Testing
 import LauncherCore
-import Launch
 import GameLibrary
 import DownloadEngine
 import RuntimeManager
@@ -14,6 +13,156 @@ import RuntimeManager
 
 @Suite(.serialized) @MainActor
 struct AppModelLaunchTests {
+    @Test func previousConfigurationRetryUsesOrdinaryReservationAndDedicatedService() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        await fixture.model.reattachOnStart()
+        let records = PreviewGameServices(states: ["genshin": GameState(status: .installed(tag: "1"))])
+        fixture.model.setGameRecord("genshin", try await records.record("genshin"))
+        let token = UUID()
+        let failure = LaunchFailureInfo(stage: .preflight, message: "Safe failure", hasLog: false, unverifiedBuild: false,
+            diagnosis: LaunchDiagnosis(reason: .runtime, previous: nil, attempted: nil, retryID: token))
+        fixture.model.launchStates["genshin"] = .failed(failure)
+        #expect(fixture.model.canRetrySuccessfulLaunch("genshin"))
+        fixture.model.launchSlotOwner = "zzz"
+        #expect(!fixture.model.canRetrySuccessfulLaunch("genshin"))
+        fixture.model.retrySuccessfulLaunch("genshin")
+        #expect(await fixture.services.retryRequests.isEmpty)
+        fixture.model.launchSlotOwner = nil
+        let before = fixture.model.launchSettings(for: "genshin")
+        fixture.model.retrySuccessfulLaunch("genshin")
+        #expect(fixture.model.launchSlotOwner == "genshin")
+        await fixture.model.launchTasks["genshin"]?.value
+        #expect(await fixture.services.retryRequests == [token])
+        #expect(fixture.model.launchSettings(for: "genshin") == before)
+        #expect(!fixture.model.canRetrySuccessfulLaunch("genshin"))
+    }
+
+    @Test func diagnosticsKeepUnknownFailuresUnknownAndUseTypedEvidence() {
+        let unknown = LaunchFailureInfo(stage: .preflight, message: "Private path or unrelated error", hasLog: false, unverifiedBuild: false)
+        #expect(LaunchDiagnosticText.explanation(unknown) == String(localized: "The cause could not be determined."))
+        let runtime = LaunchFailureInfo(stage: .preflight, message: "Private path", hasLog: false, unverifiedBuild: false,
+            diagnosis: LaunchDiagnosis(reason: .runtime, previous: nil, attempted: nil))
+        #expect(LaunchDiagnosticText.explanation(runtime) == String(localized: "The selected runtime is unavailable. Check Dependencies."))
+    }
+
+    @Test func footerKeepsSpecificLockAndBusyMessages() {
+        let running = "Honkai Impact 3rd is running"
+        let recovery = "Launch recovery is in progress"
+        let busy = LaunchDiagnosis(reason: .busy, previous: nil, attempted: nil)
+        let blocked = LaunchFailureInfo(stage: .lock, message: running, hasLog: false, unverifiedBuild: false, diagnosis: busy)
+        let recovering = LaunchFailureInfo(stage: .preflight, message: recovery, hasLog: false, unverifiedBuild: false, diagnosis: busy)
+        let unspecified = LaunchFailureInfo(stage: .lock, message: running, hasLog: false, unverifiedBuild: false)
+        #expect(blocked.footerLine(gameName: "Genshin Impact") == running)
+        #expect(recovering.footerLine(gameName: "Genshin Impact") == recovery)
+        #expect(unspecified.footerLine(gameName: "Genshin Impact") == running)
+    }
+
+    @Test(arguments: [LaunchLockBlocker.runningGame("hi3-jp"), .recoveryInProgress])
+    func launchEventsCarrySpecificBusyMessagesThroughSanitization(blocker: LaunchLockBlocker) async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        let diagnosis = LaunchDiagnosis(reason: .busy, previous: nil, attempted: nil)
+        await fixture.model.handleLaunch(.failed(LaunchFailure(stage: .lock, message: "private payload", logURL: nil,
+            unverifiedBuild: false, diagnosis: diagnosis, lockBlocker: blocker)), id: "genshin")
+        let game = try #require(LauncherGame.all.first { $0.id == "hi3-jp" })
+        let expected = switch blocker {
+        case .runningGame: String(localized: "\(game.name) is running")
+        case .recoveryInProgress: String(localized: "Launch recovery is in progress")
+        }
+        guard case .failed(let failure) = fixture.model.launchState(for: "genshin") else {
+            Issue.record("Missing launch failure")
+            return
+        }
+        #expect(failure.footerLine(gameName: "Genshin Impact") == expected)
+    }
+
+    @Test func footerUsesPlayWordingForAnUnavailableDrive() {
+        let failure = LaunchFailureInfo(stage: .preflight, message: LauncherError.installVolumeUnavailable.userMessage,
+            hasLog: false, unverifiedBuild: false, diagnosis: LaunchDiagnosis(reason: .location, previous: nil, attempted: nil))
+        #expect(failure.footerLine(gameName: "Genshin Impact") == LaunchFailureInfo.locationUnavailableLine)
+        #expect(failure.footerLine(gameName: "Genshin Impact", locationHint: "Connect Games SSD to play") == "Connect Games SSD to play")
+        #expect(LaunchDiagnosticText.explanation(failure) == LaunchFailureInfo.locationUnavailableLine)
+    }
+
+    @Test func launchDetailsRequireDiagnosisOrSuccessfulHistoryForTheSameEdition() throws {
+        struct Baseline: Encodable {
+            let sessionID = UUID()
+            let endedAt = Date(timeIntervalSince1970: 500)
+            let configuration: LaunchConfiguration
+        }
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        let model = fixture.model
+        let id = "hi3-jp"
+        var failure = LaunchFailureInfo(stage: .preflight, message: "Safe failure", hasLog: true, unverifiedBuild: false)
+        model.launchStates[id] = .failed(failure)
+        #expect(!model.hasLaunchDetails(id))
+        failure.diagnosis = LaunchDiagnosis(reason: .unknown, previous: nil, attempted: nil)
+        model.launchStates[id] = .failed(failure)
+        #expect(model.hasLaunchDetails(id))
+        model.launchStates[id] = .running
+        #expect(!model.hasLaunchDetails(id))
+        let configuration = LaunchConfiguration(gameBuild: "9.1.0", bundleID: "wine-a", runtimeProfileID: "profile",
+            runtimeDigest: try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)), componentIDs: ["dxmt-a"],
+            compatibilityComponentIDs: [:], recipeVersion: 1, settings: .defaults(for: id))
+        model.successfulLaunches[id] = try JSONDecoder().decode(SuccessfulLaunch.self, from: JSONEncoder().encode(Baseline(configuration: configuration)))
+        #expect(model.hasLaunchDetails(id))
+        #expect(!model.hasLaunchDetails("hi3"))
+    }
+
+    @Test func diagnosticDiffShowsEveryChangedValueIncludingIndividualSettings() throws {
+        let digest = try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64))
+        var settings = LaunchSettings.defaults(for: "genshin")
+        let previous = LaunchConfiguration(gameBuild: "1", gameBuildID: "old-build", bundleID: "old-wine", runtimeProfileID: "profile", runtimeDigest: digest,
+            componentIDs: ["old-component"], compatibilityComponentIDs: [:], recipeVersion: 1, settings: settings, gameModeEnabled: true)
+        settings.backend = .dxmt; settings.metalHUD = true; settings.retina = true; settings.unlockTarget = 240
+        let attempted = LaunchConfiguration(gameBuild: "2", gameBuildID: "new-build", bundleID: "new-wine", runtimeProfileID: "profile", runtimeDigest: digest,
+            componentIDs: ["new-component"], compatibilityComponentIDs: [:], recipeVersion: 1, settings: settings, gameModeEnabled: false)
+        let changes = LaunchDiagnosticText.changedValues(previous: previous, attempted: attempted)
+        #expect(Set(changes.map(\.field)) == ["game", "runtime", "components", "backend", "metalHUD", "retina", "unlockTarget", "gameMode"])
+        #expect(changes.first { $0.field == "game" }?.previous == "1")
+        #expect(changes.first { $0.field == "game" }?.attempted == "2")
+        #expect(changes.first { $0.field == "runtime" }?.attempted == "new-wine")
+        #expect(changes.first { $0.field == "backend" }?.previous == "D3DMetal")
+        #expect(changes.first { $0.field == "backend" }?.attempted == "DXMT")
+        #expect(changes.first { $0.field == "unlockTarget" }?.attempted == 240.formatted())
+        #expect(LaunchDiagnosticText.changedValues(previous: previous, attempted: previous).isEmpty)
+    }
+
+    @Test func comparisonUsesCatalogNamesAndDisambiguatesSameTagAndBundleWithoutDigests() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        let model = fixture.model
+        let manifest = try await BundledRuntimeManifest.load()
+        model.manifest = manifest
+        let bundleID = "d3dmetal-wine11.22mg1.0-gptk4.0b3"
+        let bundle = try #require(manifest.bundles.first { $0.id.rawValue == bundleID })
+        let priorDisplay = DisplayChoice(id: UUID().uuidString, name: "Studio Display")
+        let newDisplay = DisplayChoice(id: UUID().uuidString, name: "External Monitor")
+        let priorDigest = try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64))
+        let newDigest = try Digest(algorithm: .sha256, hex: String(repeating: "b", count: 64))
+        var oldSettings = LaunchSettings.defaults(for: "hi3-tw")
+        oldSettings.display = priorDisplay
+        var newSettings = oldSettings
+        newSettings.display = newDisplay
+        let previous = LaunchConfiguration(gameBuild: "9.1.0", gameBuildID: "original-build", bundleID: bundleID,
+            runtimeProfileID: "profile", runtimeDigest: priorDigest, componentIDs: ["wine-11.20-macgacha-1.0"],
+            compatibilityComponentIDs: [:], recipeVersion: 1, settings: oldSettings)
+        let attempted = LaunchConfiguration(gameBuild: "9.1.0", gameBuildID: "hotfix-build", bundleID: bundleID,
+            runtimeProfileID: "profile", runtimeDigest: newDigest, componentIDs: ["wine-11.22-macgacha-1.0"],
+            compatibilityComponentIDs: [.steamShim: "steam-shim-proton-10.0-4"], recipeVersion: 1, settings: newSettings)
+        let rows = Dictionary(uniqueKeysWithValues: model.launchChangedValues(previous: previous, attempted: attempted).map { ($0.field, $0) })
+        #expect(rows["game"]?.previous == "9.1.0\noriginal-build")
+        #expect(rows["game"]?.attempted == "9.1.0\nhotfix-build")
+        #expect(rows["runtime"]?.previous == bundle.displayName)
+        #expect(rows["runtime"]?.attempted == bundle.displayName + "\n" + String(localized: "Same version, different files"))
+        #expect(rows["components"]?.previous == "Wine 11.20-macgacha-1.0")
+        #expect(rows["components"]?.attempted == "Wine 11.22-macgacha-1.0")
+        let shim = AppModel.kindName(.steamShim)
+        #expect(rows["helpers"]?.attempted == "\(shim) proton-10.0-4")
+        #expect(rows["display"]?.previous == priorDisplay.name)
+        #expect(rows["display"]?.attempted == newDisplay.name)
+        #expect(model.launchConfigurationDisplay(attempted) == LaunchConfigurationDisplay(gameBuild: "9.1.0",
+            runtime: bundle.displayName, components: "Wine 11.22-macgacha-1.0", backend: "D3DMetal"))
+    }
+
     @Test(arguments: GameDefinition.all.map(\.id)) func metalHUDPersistsOnlyForItsEdition(game: String) async throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
         let model = fixture.model
@@ -469,6 +618,11 @@ private actor LaunchModelServices: LaunchServices, GameOperationGuard {
         currentSession = launchSession
         let events = scriptedEvents
         return AsyncStream { continuation in events.forEach { continuation.yield($0) }; continuation.finish() }
+    }
+    var retryRequests: [UUID] = []
+    func retryLastSuccessful(game: GameDefinition, record: GameRecord, retryID: UUID) async throws -> AsyncStream<LaunchEvent> {
+        retryRequests.append(retryID)
+        return try await launch(game: game, record: record)
     }
     var ended = false
     var recoveryCalls = 0

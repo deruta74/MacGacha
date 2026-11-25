@@ -13,14 +13,23 @@ public enum LaunchFailureCause: String, Sendable, Equatable {
     case antiCheatOffline
 }
 
+public enum LaunchLockBlocker: Sendable, Equatable {
+    case runningGame(String)
+    case recoveryInProgress
+}
+
 public struct LaunchFailure: Error, Sendable {
     public let stage: LaunchStage
     public let message: String
     public let logURL: URL?
     public let unverifiedBuild: Bool
     public let cause: LaunchFailureCause?
-    public init(stage: LaunchStage, message: String, logURL: URL?, unverifiedBuild: Bool, cause: LaunchFailureCause? = nil) {
-        self.stage = stage; self.message = message; self.logURL = logURL; self.unverifiedBuild = unverifiedBuild; self.cause = cause
+    public let diagnosis: LaunchDiagnosis?
+    public let lockBlocker: LaunchLockBlocker?
+    public init(stage: LaunchStage, message: String, logURL: URL?, unverifiedBuild: Bool, cause: LaunchFailureCause? = nil,
+        diagnosis: LaunchDiagnosis? = nil, lockBlocker: LaunchLockBlocker? = nil) {
+        self.stage = stage; self.message = message; self.logURL = logURL; self.unverifiedBuild = unverifiedBuild
+        self.cause = cause; self.diagnosis = diagnosis; self.lockBlocker = lockBlocker
     }
 }
 

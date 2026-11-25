@@ -300,6 +300,7 @@ final class AppModel {
     var launchStates: [String: LaunchUIState] = [:] {
         didSet { dockStartingIndicator.setStarting(launchStates.values.contains { $0.showsDockStarting }) }
     }
+    var successfulLaunches: [String: SuccessfulLaunch] = [:]
     var playTimeSummaries: [String: PlayTimeSummary] = [:]
     @ObservationIgnored var playTimeStartupTask: Task<Void, Never>?
     @ObservationIgnored var playTimeRefreshRevision = UUID()
@@ -1102,7 +1103,7 @@ final class AppModel {
         if launchedHidden { revealLauncher(selecting: nil) }
     }
     private static func id(_ component: InstalledComponent) -> String { "\(component.kind.idPrefix)-\(component.version)" }
-    static func kindName(_ kind: ComponentKind) -> String {
+    nonisolated static func kindName(_ kind: ComponentKind) -> String {
         switch kind {
         case .wine: "Wine"; case .dxmt: "DXMT"; case .d3dmetal: "D3DMetal"
         case .surroundAudio: String(localized: "Wine surround audio", comment: "Runtime component name")

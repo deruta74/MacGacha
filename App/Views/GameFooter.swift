@@ -9,7 +9,7 @@ import SwiftUI
 
 /// Sheets that act on one game, opened from its footer.
 enum GameSheet: Identifiable, Hashable {
-    case install(String), voices(String), settings(String), setup(String), rosetta(String), wishExport(String)
+    case install(String), voices(String), settings(String), setup(String), rosetta(String), wishExport(String), launchDetails(String)
 
     var id: String {
         switch self {
@@ -19,6 +19,7 @@ enum GameSheet: Identifiable, Hashable {
         case .setup(let game): "setup-\(game)"
         case .rosetta(let game): "rosetta-\(game)"
         case .wishExport(let game): "wish-export-\(game)"
+        case .launchDetails(let game): "launch-details-\(game)"
         }
     }
 }
@@ -88,7 +89,9 @@ struct GameFooter: View {
                 }
                 let line = action == .progress && progressHovered ? state.progressDetail ?? statusLine : statusLine
                 if !line.isEmpty || launchLogAvailable {
-                    FooterStatusNotice(title: line, isFailure: isLaunchFailure, showsLog: launchLogAvailable) {
+                    FooterStatusNotice(title: line, isFailure: isLaunchFailure, showsLog: launchLogAvailable,
+                        showsDetails: isLaunchFailure && model.hasLaunchDetails(game.id),
+                        openDetails: { gameSheet = .launchDetails(game.id) }) {
                         model.openLaunchLog(game.id)
                     }
                     .transition(.opacity)
@@ -298,7 +301,7 @@ struct GameFooter: View {
         case .uninstallPaused: return String(localized: "Uninstall didn't finish")
         case .locationUnavailable:
             // The drive name comes from the saved path, so it is known while the drive is away.
-            return model.gameLocationHint(for: game.id) ?? String(localized: "Install location unavailable — connect the drive it's on")
+            return model.gameLocationHint(for: game.id) ?? LaunchFailureInfo.locationUnavailableLine
         }
     }
 
@@ -330,7 +333,7 @@ struct GameFooter: View {
             if let note { return note }
             return String(localized: "Keep MacGacha open while you play — it restores the game's files when you quit")
         case .failed(let failure):
-            return failureLine(failure)
+            return failure.footerLine(gameName: game.name, locationHint: model.gameLocationHint(for: game.id))
         case .recoveryNeeded(let reason): return reason
         case nil:
             if let note { return note }
@@ -339,20 +342,6 @@ struct GameFooter: View {
                 return String(localized: "Waiting for \(other.name) to put its files back", comment: "The argument is another game's name")
             }
             return String(localized: "\(other.name) is running — quit it to play this one", comment: "The argument is another game's name")
-        }
-    }
-
-    /// Names the step that failed in plain words. Checks and locks already carry a message meant for people.
-    private func failureLine(_ failure: LaunchFailureInfo) -> String {
-        switch failure.stage {
-        case .preflight, .lock: failure.message
-        case .watch where failure.cause == .antiCheatOffline:
-            // The game closes itself when its anti-cheat can't reach HoYoverse at startup.
-            String(localized: "\(game.name) couldn't reach its servers. School or work Wi-Fi may be blocking them", comment: "Launch failure; the argument is the game's name")
-        case .watch: String(localized: "\(game.name) closed during startup", comment: "The argument is the game's name")
-        case .prepare, .snapshot: String(localized: "Couldn't prepare Wine for \(game.name)", comment: "The argument is the game's name")
-        case .proxy: String(localized: "Couldn't start the network helper for \(game.name)", comment: "The argument is the game's name")
-        case .spawn, .restore, .report: String(localized: "\(game.name) couldn't start", comment: "The argument is the game's name")
         }
     }
 
@@ -698,6 +687,9 @@ struct GameMenu: View {
             }
             if isInstalled {
                 Button("Game Settings…", systemImage: "slider.horizontal.3") { gameSheet = .settings(game.id) }
+                if model.hasLaunchDetails(game.id) {
+                    Button("Launch Details…", systemImage: "clock.arrow.circlepath") { gameSheet = .launchDetails(game.id) }
+                }
             }
             if isInstalled, !waitingForApproval, !model.isGameOperationRunning, !isLive {
                 Button("Check for Updates", systemImage: "arrow.triangle.2.circlepath") { model.checkForGameUpdate(game.id) }
@@ -917,6 +909,8 @@ private struct FooterStatusNotice: View {
     let title: String
     let isFailure: Bool
     let showsLog: Bool
+    var showsDetails = false
+    var openDetails: () -> Void = {}
     let openLog: () -> Void
 
     var body: some View {
@@ -931,6 +925,13 @@ private struct FooterStatusNotice: View {
                     .monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.opacity)
+            }
+            if showsDetails {
+                Button("Details", action: openDetails)
+                    .buttonStyle(.link)
+                    .underline()
+                    .fixedSize()
+                    .accessibilityLabel(Text("Launch Details"))
             }
             if showsLog {
                 Button("Open Log", action: openLog)

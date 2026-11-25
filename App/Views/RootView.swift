@@ -157,6 +157,8 @@ struct RootView: View {
             case .settings(let id):
                 // 500 pt in the default 720 pt window.
                 GameSettingsSheet(game: Self.game(id), maxHeight: max(320, windowHeight - 220))
+            case .launchDetails(let id):
+                LaunchDetailsSheet(game: Self.game(id))
             case .wishExport(let id):
                 WishExportSheet(game: Self.game(id))
             case .setup(let id):
@@ -226,6 +228,7 @@ struct RootView: View {
         case "setup": gameSheet = .setup(selectedID)
         case "rosetta": gameSheet = .rosetta(selectedID)
         case "wishExport": gameSheet = .wishExport(selectedID)
+        case "launchDetails": gameSheet = .launchDetails(selectedID)
         default: break
         }
     }

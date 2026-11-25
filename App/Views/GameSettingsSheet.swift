@@ -202,19 +202,19 @@ struct GameSettingsSheet: View {
                     Toggle("Metal HUD", isOn: settings.metalHUD)
                     if settings.wrappedValue.metalHUD {
                         Picker("Contents", selection: settings.metalHUDContents) {
-                            ForEach(MetalHUDContents.allCases, id: \.self) { Text(Self.name(of: $0)).tag($0) }
+                            ForEach(MetalHUDContents.allCases, id: \.self) { Text(MetalHUDDisplayName.name(of: $0)).tag($0) }
                         }
                         if settings.wrappedValue.metalHUDContents == .custom {
                             ForEach(MetalHUDElement.allCases, id: \.self) { element in
-                                Toggle(Self.name(of: element), isOn: hudElement(element))
+                                Toggle(MetalHUDDisplayName.name(of: element), isOn: hudElement(element))
                                     .padding(.leading, 12)
                             }
                         }
                         Picker("Position", selection: settings.metalHUDPosition) {
-                            ForEach(MetalHUDPosition.allCases, id: \.self) { Text(Self.name(of: $0)).tag($0) }
+                            ForEach(MetalHUDPosition.allCases, id: \.self) { Text(MetalHUDDisplayName.name(of: $0)).tag($0) }
                         }
                         Picker("Size", selection: settings.metalHUDSize) {
-                            ForEach(MetalHUDSize.allCases, id: \.self) { Text(Self.name(of: $0)).tag($0) }
+                            ForEach(MetalHUDSize.allCases, id: \.self) { Text(MetalHUDDisplayName.name(of: $0)).tag($0) }
                         }
                         .pickerStyle(.segmented)
                     }
@@ -341,55 +341,6 @@ struct GameSettingsSheet: View {
                 settings.wrappedValue = value
             }
         )
-    }
-
-    private static func name(of contents: MetalHUDContents) -> String {
-        switch contents {
-        case .standard: String(localized: "Standard", comment: "Metal HUD contents or size: Apple's default")
-        case .fpsOnly: String(localized: "FPS Only", comment: "Metal HUD contents")
-        case .full: String(localized: "Full", comment: "Metal HUD contents: every main metric")
-        case .custom: String(localized: "Custom")
-        }
-    }
-
-    private static func name(of element: MetalHUDElement) -> String {
-        switch element {
-        case .device: String(localized: "Device and macOS version", comment: "Metal HUD element")
-        case .rosetta: String(localized: "Rosetta", comment: "Metal HUD element: whether the game runs through Rosetta")
-        case .layersize: String(localized: "Resolution", comment: "Metal HUD element: the game's render size")
-        case .memory: String(localized: "Memory", comment: "Metal HUD element")
-        case .refreshrate: String(localized: "Refresh rate", comment: "Metal HUD element: display refresh rate")
-        case .thermal: String(localized: "Thermal state", comment: "Metal HUD element")
-        case .gamemode: String(localized: "Game Mode", comment: "Metal HUD element: whether macOS Game Mode is on")
-        case .fps: String(localized: "FPS", comment: "Metal HUD element: frames per second")
-        case .fpsgraph: String(localized: "FPS graph", comment: "Metal HUD element")
-        case .frameinterval: String(localized: "Frame time", comment: "Metal HUD element: time between frames")
-        case .frameintervalgraph: String(localized: "Frame time graph", comment: "Metal HUD element")
-        case .gputime: String(localized: "GPU time", comment: "Metal HUD element: GPU time per frame")
-        case .presentdelay: String(localized: "Present delay", comment: "Metal HUD element: delay before a frame reaches the screen")
-        }
-    }
-
-    private static func name(of position: MetalHUDPosition) -> String {
-        switch position {
-        case .topLeft: String(localized: "Top Left", comment: "Metal HUD position")
-        case .topCenter: String(localized: "Top Center", comment: "Metal HUD position")
-        case .topRight: String(localized: "Top Right", comment: "Metal HUD position")
-        case .centerLeft: String(localized: "Center Left", comment: "Metal HUD position")
-        case .centered: String(localized: "Center", comment: "Metal HUD position")
-        case .centerRight: String(localized: "Center Right", comment: "Metal HUD position")
-        case .bottomLeft: String(localized: "Bottom Left", comment: "Metal HUD position")
-        case .bottomCenter: String(localized: "Bottom Center", comment: "Metal HUD position")
-        case .bottomRight: String(localized: "Bottom Right", comment: "Metal HUD position")
-        }
-    }
-
-    private static func name(of size: MetalHUDSize) -> String {
-        switch size {
-        case .small: String(localized: "Small", comment: "Metal HUD size")
-        case .standard: String(localized: "Standard", comment: "Metal HUD contents or size: Apple's default")
-        case .large: String(localized: "Large", comment: "Metal HUD size")
-        }
     }
 
     private var patchesFooter: String {
