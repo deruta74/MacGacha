@@ -7,7 +7,7 @@ import GameLibrary
 
 @MainActor extension AppModel {
     var keepsUpdateQueueRunning: Bool {
-        updateQueue.enabled && (nextQueuedUpdate != nil || hasAutomaticQueueDiscovery)
+        updateQueue.enabled && (updateQueue.entries.contains { !$0.paused } || hasAutomaticQueueDiscovery)
     }
 
     private var hasAutomaticQueueDiscovery: Bool {
@@ -33,10 +33,108 @@ import GameLibrary
         }
     }
 
-    func queueFailure(for id: String) -> UpdateQueueFailure? { updateQueueFailures[id] }
+    func queueFailure(for id: String) -> UpdateQueueFailure? {
+        if let approval = updateQueue.entries.first(where: { $0.id == id })?.approval {
+            return .approvalRequired(required: approval.required, available: approval.available)
+        }
+        return updateQueueFailures[id]
+    }
+
+    var installLaterLabel: String { String(localized: "Install Later") }
+
+    func scheduledInstall(for id: String) -> ScheduledInstallState? {
+        guard let entry = updateQueue.entries.first(where: { $0.id == id }), let request = entry.plannedInstall else { return nil }
+        return ScheduledInstallState(request: request, isHeld: entry.paused,
+            isRunning: gameOperation?.id == id && gameOperation?.isQueuedUpdate == true, failure: queueFailure(for: id))
+    }
+
+    private var canEditUpdateQueue: Bool {
+        (updateQueueStore == nil || updateQueueLoaded) && languageRestart == nil && !updateQueueShuttingDown
+    }
+
+    func scheduleInstall(_ id: String, voices: Set<String>, at location: URL, approved: Bool, startDate: Date) async throws {
+        guard canEditUpdateQueue else { throw LauncherError.busy("Queue settings are unavailable during startup or restart") }
+        guard GameDefinition.find(id) != nil, location.isFileURL, location.host == nil || location.host == "localhost",
+            startDate.timeIntervalSinceReferenceDate.isFinite else { throw LauncherError.io("Invalid scheduled install") }
+        guard gameRecords[id] == nil, gameOperation?.id != id, !updateQueue.entries.contains(where: { $0.id == id }) else {
+            throw LauncherError.busy("This edition already has an installation or queued work")
+        }
+        let request = UpdateQueue.PlannedInstall(startDate: startDate, location: location, voices: voices, approved: approved)
+        updateQueueUncommittedInstalls.insert(id)
+        defer {
+            updateQueueUncommittedInstalls.remove(id)
+            refreshUpdateQueueEnvironment()
+        }
+        saveUpdateQueue { $0.entries.append(.init(id: id, ownershipID: UUID(), plannedInstall: request)) }
+        await flushUpdateQueueWrites()
+        if let updateQueuePersistenceFailure {
+            updateQueue.entries.removeAll { $0.id == id && $0.plannedInstall == request }
+            throw updateQueuePersistenceFailure
+        }
+    }
+
+    func cancelScheduledInstall(_ id: String) {
+        guard scheduledInstall(for: id) != nil else { return }
+        removeQueuedUpdate(id)
+    }
+
+    var keepMacAwakeForScheduledDownloads: Bool { updateQueue.keepMacAwakeForScheduledDownloads }
+
+    var keepMacAwakeForScheduledDownloadsLabel: String {
+        String(localized: "Keep this Mac awake for scheduled downloads")
+    }
+
+    var scheduledDownloadsSleepExplanation: String {
+        String(localized: "The display can sleep. Closing the lid still puts this Mac to sleep.")
+    }
+
+    func setKeepMacAwakeForScheduledDownloads(_ enabled: Bool) {
+        saveUpdateQueue { $0.keepMacAwakeForScheduledDownloads = enabled }
+    }
+
+    var updateQueueSleepHint: UpdateQueueSleepHint? {
+        guard keepAwakeCandidate(at: eventsNow()) != nil else { return nil }
+        if updateQueueOnAC == false { return .onBattery }
+        if updateQueueOnAC == nil { return .powerUnknown }
+        if !keepMacAwakeForScheduledDownloads { return .disabled }
+        return isKeepingMacAwakeForQueue ? nil : .unavailable
+    }
+
+    private func keepAwakeCandidate(at date: Date) -> String? {
+        guard updateQueue.enabled, !updateQueueShuttingDown else { return nil }
+        if let token = gameOperation, token.isScheduledQueueDownload,
+            updateQueue.entries.contains(where: { $0.id == token.id && !$0.paused }) {
+            return token.id
+        }
+        return updateQueue.entries.first {
+            !$0.paused && !updateQueueUncommittedInstalls.contains($0.id) && ($0.plannedInstall != nil || (updateQueue.scheduled && updateQueue.isInsideDailyWindow(at: date)))
+        }?.id
+    }
+
+    private func refreshQueuePowerAssertion() {
+        guard keepMacAwakeForScheduledDownloads, updateQueueOnAC == true,
+            let game = keepAwakeCandidate(at: eventsNow()), let name = queueEditionDisplayName(game) else {
+            releaseQueuePowerAssertion()
+            return
+        }
+        guard updateQueueAssertionGame != game else { return }
+        releaseQueuePowerAssertion()
+        let reason = String(localized: "MacGacha is waiting to download \(name)")
+        if updateQueuePowerAssertion?.acquire(reason: reason) == true {
+            updateQueueAssertionGame = game
+            isKeepingMacAwakeForQueue = true
+        }
+    }
+
+    private func releaseQueuePowerAssertion() {
+        guard updateQueueAssertionGame != nil else { return }
+        updateQueuePowerAssertion?.release()
+        updateQueueAssertionGame = nil
+        isKeepingMacAwakeForQueue = false
+    }
 
     func saveUpdateQueue(_ edit: (inout UpdateQueue) -> Void) {
-        guard updateQueueStore == nil || updateQueueLoaded else { return }
+        guard canEditUpdateQueue else { return }
         let wasAutomatic = updateQueue.automatic, previousGames = updateQueue.automaticGames
         edit(&updateQueue)
         if updateQueue.automatic && (!wasAutomatic || updateQueue.automaticGames != previousGames) { updateQueue.lastDiscovery = nil }
@@ -58,10 +156,11 @@ import GameLibrary
             !updateQueue.entries.contains(where: { $0.id == id }),
             !(gameOperation?.id == id && gameOperation?.isQueuedUpdate == true) else { return }
         updateQueueFailures[id] = nil
-        saveUpdateQueue { $0.entries.append(.init(id: id, source: gameRecords[id])) }
+        saveUpdateQueue { $0.entries.append(.init(id: id, source: gameRecords[id], ownershipID: UUID())) }
     }
 
     func removeQueuedUpdate(_ id: String) {
+        guard canEditUpdateQueue else { return }
         updateQueueFailures[id] = nil
         saveUpdateQueue { $0.entries.removeAll { $0.id == id } }
         if gameOperation?.id == id, gameOperation?.isQueuedUpdate == true { gameTask?.cancel() }
@@ -83,10 +182,25 @@ import GameLibrary
 
     var updateQueueWaiting: UpdateQueueWaiting? {
         guard keepsUpdateQueueRunning, gameOperation?.isQueuedUpdate != true else { return nil }
+        let date = updateQueueObservedDate ?? eventsNow()
+        if let entry = nextQueuedUpdate ?? updateQueue.entries.first(where: { !$0.paused }) {
+            return queueWaiting(entry, at: date)
+        }
+        return queueWaiting(nil, at: date)
+    }
+
+    func queueWaiting(for id: String) -> UpdateQueueWaiting? {
+        guard let entry = updateQueue.entries.first(where: { $0.id == id && !$0.paused }),
+            !(gameOperation?.id == id && gameOperation?.isQueuedUpdate == true) else { return nil }
+        return queueWaiting(entry, at: updateQueueObservedDate ?? eventsNow())
+    }
+
+    private func queueWaiting(_ entry: UpdateQueue.Entry?, at date: Date) -> UpdateQueueWaiting? {
+        if let start = entry?.plannedInstall?.startDate, start > date { return .scheduledInstall(start) }
         if !updateQueueNetworkAllowed { return .connection }
         if updateQueue.requiresAC && updateQueueOnAC != true { return .acPower }
-        if !updateQueue.permits(at: eventsNow(), onAC: updateQueueOnAC) { return .dailyWindow }
-        let needsIdle = updateQueue.requiresIdle || (nextQueuedUpdate?.automatic ?? hasAutomaticQueueDiscovery)
+        if entry?.plannedInstall == nil, !updateQueue.isInsideDailyWindow(at: date) { return .dailyWindow }
+        let needsIdle = updateQueue.requiresIdle || entry?.plannedInstall != nil || (entry?.automatic ?? hasAutomaticQueueDiscovery)
         if needsIdle && updateQueueIdleSeconds < queueIdleThreshold { return .idle }
         return nil
     }
@@ -100,10 +214,14 @@ import GameLibrary
         }
     }
 
-    func retryQueuedUpdate(_ id: String) {
+    func retryQueuedUpdate(_ id: String, approved: Bool = false) {
+        guard canEditUpdateQueue,
+            let entry = updateQueue.entries.first(where: { $0.id == id && $0.paused }), gameOperation?.id != id else { return }
         updateQueueFailures[id] = nil
         saveUpdateQueue { queue in
             guard let index = queue.entries.firstIndex(where: { $0.id == id }) else { return }
+            if approved, entry.approval != nil { queue.entries[index].approvedRetry = true }
+            queue.entries[index].approval = nil
             queue.entries[index].paused = false
         }
     }
@@ -147,6 +265,16 @@ import GameLibrary
         }
     }
 
+    func flushUpdateQueueWrites() async {
+        while let write = updateQueueWriteTask { await write.value }
+    }
+
+    func stopUpdateQueuePreparation() async {
+        let preparation = updateQueueTask
+        preparation?.cancel()
+        await preparation?.value
+    }
+
     private func reportUpdateQueuePersistenceFailure(_ error: any Error) {
         let failure = launcherError(error)
         updateQueuePersistenceFailure = failure
@@ -159,13 +287,14 @@ import GameLibrary
         let discovery = updateQueueTask
         discovery?.cancel()
         updateQueueEnvironment.stop()
+        releaseQueuePowerAssertion()
         let transfer = gameOperation?.isQueuedUpdate == true ? gameTask : nil
         transfer?.cancel()
         guard discovery != nil || transfer != nil || updateQueueWriteTask != nil else { return nil }
         return Task {
             await discovery?.value
             await transfer?.value
-            await updateQueueWriteTask?.value
+            await flushUpdateQueueWrites()
         }
     }
 
@@ -177,11 +306,15 @@ import GameLibrary
             }
             return
         }
-        updateQueueEnvironment.start { [weak self] in self?.refreshUpdateQueueEnvironment() }
+        if updateQueueSignals == nil {
+            updateQueueEnvironment.start { [weak self] in self?.refreshUpdateQueueEnvironment() }
+        }
         guard updateQueueTimer == nil else { return }
         let delay = nextUpdateQueueDelay()
         updateQueueTimer = Task { [weak self] in
-            do { guard let sleep = self?.eventsSleep else { return }; try await sleep(.seconds(delay)) } catch { return }
+            guard let sleep = self?.eventsSleep else { return }
+            do { try await sleep(.seconds(delay)) }
+            catch { return }
             guard let self, !Task.isCancelled else { return }
             self.updateQueueTimer = nil
             self.evaluateUpdateQueue()
@@ -200,29 +333,35 @@ import GameLibrary
     }
 
     private func queueCanContinue(automatic: Bool) -> Bool {
-        guard !updateQueueShuttingDown, updateQueue.enabled, (!automatic || updateQueue.automatic) else { return false }
+        guard !updateQueueShuttingDown, languageRestart == nil, updateQueue.enabled,
+            !automatic || (updateQueue.automatic && automaticQueueHasNoGameSession) else { return false }
         let signals = queueSignals()
         return signals.network && (!updateQueue.requiresAC || signals.onAC == true)
     }
 
-    func queueEnvironmentPermits(automatic: Bool) -> Bool {
+    private func queueEnvironmentPermits(automatic: Bool, install: UpdateQueue.PlannedInstall? = nil) -> Bool {
         guard queueCanContinue(automatic: automatic) else { return false }
         let signals = queueSignals()
-        guard updateQueue.permits(at: eventsNow(), onAC: signals.onAC),
-            !(updateQueue.requiresIdle || automatic) || signals.idle >= queueIdleThreshold else { return false }
-        if automatic {
-            guard launchSlotOwner == nil, launchTasks.isEmpty, liveLaunchGames.isEmpty,
-                !launchStates.values.contains(where: {
-                    switch $0 { case .starting, .running, .ready, .recoveryNeeded: true; default: false }
-                }) else { return false }
-        }
+        let date = eventsNow()
+        guard install.map({ $0.startDate <= date }) ?? updateQueue.isInsideDailyWindow(at: date),
+            !(updateQueue.requiresIdle || automatic || install != nil) || signals.idle >= queueIdleThreshold else { return false }
         return true
+    }
+
+    private var automaticQueueHasNoGameSession: Bool {
+        launchSlotOwner == nil && launchTasks.isEmpty && liveLaunchGames.isEmpty &&
+            !launchStates.values.contains {
+                switch $0 {
+                case .starting, .running, .ready, .recoveryNeeded: true
+                default: false
+                }
+            }
     }
 
     func queuedPlayContinuationPermitted(_ token: GameOperationToken) -> Bool {
         guard token.isQueuedUpdate else { return true }
         guard let entry = updateQueue.entries.first(where: { $0.id == token.id }), !entry.paused else { return false }
-        return (!entry.automatic || updateQueue.automaticGames.contains(entry.id)) && queueEnvironmentPermits(automatic: entry.automatic)
+        return (!entry.automatic || updateQueue.automaticGames.contains(entry.id)) && queueEnvironmentPermits(automatic: entry.automatic, install: entry.plannedInstall)
     }
 
     func evaluateUpdateQueue() {
@@ -231,6 +370,8 @@ import GameLibrary
         updateQueueNetworkAllowed = signals.0
         updateQueueOnAC = signals.1
         updateQueueIdleSeconds = signals.2
+        updateQueueObservedDate = eventsNow()
+        refreshQueuePowerAssertion()
         watchUpdateQueueReservations()
         if !queueCanContinue(automatic: updateQueueTaskIsAutomatic) { updateQueueTask?.cancel() }
         if let token = gameOperation, token.isQueuedUpdate {
@@ -255,69 +396,113 @@ import GameLibrary
             }
         }
         if let entry = nextQueuedUpdate {
-            guard queueEnvironmentPermits(automatic: entry.automatic),
+            guard queueEnvironmentPermits(automatic: entry.automatic, install: entry.plannedInstall),
                 canOperateGameDuringPlay(entry.id, isDownload: true), gameUpdateCheckTasks[entry.id] == nil else { return }
             updateQueueTaskIsAutomatic = entry.automatic
             updateQueueTask = Task { [weak self] in
                 guard let self else { return }
                 defer { self.updateQueueTask = nil; self.refreshUpdateQueueEnvironment() }
-                do {
-                    try await self.gameServices.waitUntilIdle(entry.id)
-                    let record = try await self.gameServices.record(entry.id)
-                    try Task.checkCancellation()
-                    guard self.nextQueuedUpdate == entry, self.queueEnvironmentPermits(automatic: entry.automatic),
-                        self.gameOperation == nil, self.canOperateGameDuringPlay(entry.id, isDownload: true) else { return }
-                    guard record?.installed != nil, record?.uninstalling == false else {
-                        self.holdQueuedUpdate(entry.id, failure: .installationChanged); return
-                    }
-                    self.setGameRecord(entry.id, record)
-                    if let pending = record?.pending {
-                        guard entry.pending == pending, pending.kind == .update,
-                            record?.installIdentity == entry.source?.installIdentity,
-                            record?.installPath == entry.source?.installPath else { self.holdQueuedUpdate(entry.id, failure: .pendingOperation); return }
-                        self.beginQueuedGame(entry.id, pending: pending)
-                    } else {
-                        guard record?.installIdentity == entry.source?.installIdentity,
-                            record?.installPath == entry.source?.installPath,
-                            record?.installed == entry.source?.installed else { self.holdQueuedUpdate(entry.id, failure: .installationChanged); return }
-                        let status = try await self.gameServices.checkForUpdate(entry.id)
-                        try Task.checkCancellation()
-                        guard self.nextQueuedUpdate == entry,
-                            self.queueEnvironmentPermits(automatic: entry.automatic), self.gameOperation == nil else { return }
-                        if case .updateAvailable = status { self.beginQueuedGame(entry.id, initial: .init(request: .update, record: record)) }
-                        else if case .installed = status { self.removeQueuedUpdate(entry.id) }
-                        else { self.holdQueuedUpdate(entry.id, failure: .installationChanged) }
-                    }
-                } catch {
-                    if !Task.isCancelled, self.updateQueue.entries.contains(entry) {
-                        self.holdQueuedUpdate(entry.id, failure: .operation(launcherError(error)))
-                    }
-                }
+                await self.prepareQueuedEntry(entry)
             }
         } else {
             discoverQueuedUpdatesIfNeeded()
         }
     }
 
+    private func prepareQueuedEntry(_ selected: UpdateQueue.Entry) async {
+        var entry = selected
+        do {
+            // A migrated entry may predate ownership identifiers. A fresh
+            // publication must always have a matching durable queue intent.
+            if entry.ownershipID == nil, let index = updateQueue.entries.firstIndex(of: entry) {
+                entry.ownershipID = UUID()
+                updateQueue.entries[index] = entry
+                persistUpdateQueue()
+            }
+            await flushUpdateQueueWrites()
+            try Task.checkCancellation()
+            guard queueEntryCanStart(entry) else { return }
+            if let updateQueuePersistenceFailure { throw updateQueuePersistenceFailure }
+
+            try await gameServices.waitUntilIdle(entry.id)
+            let record = try await gameServices.record(entry.id)
+            try Task.checkCancellation()
+            guard queueEntryCanStart(entry) else { return }
+            setGameRecord(entry.id, record)
+            if let record, let pending = record.pending {
+                guard entry.ownsPlan(in: record) else {
+                    holdQueuedUpdate(entry.id, failure: .pendingOperation)
+                    return
+                }
+                beginQueuedGame(entry.id, pending: pending)
+                return
+            }
+            // Completion retains the publication owner, so it can be
+            // recognized even if the app never observed the pending plan.
+            if let record, let installed = record.installed, !record.uninstalling, entry.matchesLocation(record),
+                entry.ownsPublication(in: record) || (record.deliveryQueueOwner == nil && entry.pending?.target == installed) {
+                removeQueuedUpdate(entry.id)
+                return
+            }
+            if let request = entry.plannedInstall {
+                guard record == nil, entry.pending == nil else {
+                    holdQueuedUpdate(entry.id, failure: .installationChanged)
+                    return
+                }
+                beginQueuedGame(entry.id, initial: .init(request: .install(request.voices, request.location, entry.spaceApproved), record: nil))
+                return
+            }
+            guard let record, entry.matchesLocation(record), record.installed != nil, !record.uninstalling,
+                record.installed == entry.source?.installed, entry.pending == nil else {
+                holdQueuedUpdate(entry.id, failure: .installationChanged)
+                return
+            }
+            let status = try await gameServices.checkForUpdate(entry.id)
+            try Task.checkCancellation()
+            guard queueEntryCanStart(entry) else { return }
+            switch status {
+            case .updateAvailable: beginQueuedGame(entry.id, initial: .init(request: .update, record: record))
+            case .installed: removeQueuedUpdate(entry.id)
+            case .locationUnavailable: holdQueuedUpdate(entry.id, failure: .operation(.installVolumeUnavailable))
+            default: holdQueuedUpdate(entry.id, failure: .installationChanged)
+            }
+        } catch {
+            if !Task.isCancelled, queueEntryCanStart(entry) {
+                holdQueuedUpdate(entry.id, failure: .operation(launcherError(error)))
+            }
+        }
+    }
+
+    private func queueEntryCanStart(_ entry: UpdateQueue.Entry) -> Bool {
+        nextQueuedUpdate == entry && gameOperation == nil && !isRuntimeOperationRunning &&
+            queueEnvironmentPermits(automatic: entry.automatic, install: entry.plannedInstall) &&
+            canBeginGameOrRuntimeOperation(reportBusy: false) && canOperateGameDuringPlay(entry.id, isDownload: true)
+    }
+
     func recordQueueFailure(_ id: String, _ failure: UpdateQueueFailure) {
         updateQueueFailures[id] = failure
         updateQueueLog?.post(.warning, "update-queue", "Queued work failed",
-            metadata: ["game": id, "case": failure.logCase])
+            metadata: ["game": GameDefinition.find(id)?.id ?? "unknown", "case": failure.logCase])
     }
 
     func holdQueuedUpdate(_ id: String, failure: UpdateQueueFailure) {
         guard let index = updateQueue.entries.firstIndex(where: { $0.id == id }) else { return }
         updateQueue.entries[index].paused = true
+        if case .approvalRequired(let required, let available) = failure {
+            updateQueue.entries[index].approval = .init(required: required, available: available)
+        }
         recordQueueFailure(id, failure)
         persistUpdateQueue()
     }
 
-    func queuedUpdateRecordChanged(_ id: String, record: GameRecord?) {
-        guard gameOperation?.id == id, gameOperation?.isQueuedUpdate == true,
-            let index = updateQueue.entries.firstIndex(where: { $0.id == id }) else { return }
-        guard updateQueue.entries[index].pending != record?.pending else { return }
-        updateQueue.entries[index].pending = record?.pending
-        updateQueue.entries[index].planID = record?.pending?.planID.rawValue
+    func recordQueuedPlan(_ token: GameOperationToken, record: GameRecord?) {
+        guard token.isQueuedUpdate, gameOperation == token,
+            let index = updateQueue.entries.firstIndex(where: { $0.id == token.id }),
+            let record, let pending = record.pending, updateQueue.entries[index].pending == nil,
+            updateQueue.entries[index].ownsPlan(in: record) else { return }
+        if updateQueue.entries[index].source == nil { updateQueue.entries[index].source = record }
+        updateQueue.entries[index].pending = pending
+        updateQueue.entries[index].planID = pending.planID.rawValue
         persistUpdateQueue()
     }
 
@@ -330,14 +515,17 @@ import GameLibrary
             persistUpdateQueue()
         } else if case .needsApproval(let required, let available) = activity {
             holdQueuedUpdate(token.id, failure: .approvalRequired(required: required, available: available))
-        } else if case .failed = outcome, let failure {
+        } else if let failure {
             holdQueuedUpdate(token.id, failure: .operation(failure))
         }
         Task { [weak self] in self?.refreshUpdateQueueEnvironment() }
     }
 
     private var nextQueuedUpdate: UpdateQueue.Entry? {
-        updateQueue.entries.first { !$0.paused }
+        let date = eventsNow()
+        return updateQueue.entries.first { entry in
+            !entry.paused && !updateQueueUncommittedInstalls.contains(entry.id) && (entry.plannedInstall.map { $0.startDate <= date } ?? updateQueue.isInsideDailyWindow(at: date))
+        }
     }
 
     private func watchUpdateQueueReservations() {
@@ -348,7 +536,7 @@ import GameLibrary
             _ = isStarting; _ = gameOperation; _ = launchSlotOwner; _ = launchTasks; _ = liveLaunchGames; _ = launchStates
             _ = languageRestart; _ = storageCleanupInProgress; _ = prefixResetGame
             _ = gameMoveRecoveryReservation; _ = runtimeCatalogMutationID; _ = isRuntimeOperationRunning
-            _ = globalLaunchSettings; _ = updater.isInstallingUpdate
+            _ = globalLaunchSettings; _ = updater.isInstallingUpdate; _ = gameUpdateCheck
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.updateQueueWatchID == generation else { return }
@@ -360,20 +548,30 @@ import GameLibrary
 
     /// No UI polling: sleep to the next wall-clock/discovery deadline where possible.
     func nextUpdateQueueDelay() -> TimeInterval {
-        let date = eventsNow(), calendar = Calendar.current
+        let date = eventsNow()
         if gameOperation?.isQueuedUpdate == true { return 30 }
-        if !updateQueueNetworkAllowed || (updateQueue.requiresAC && updateQueueOnAC != true) { return 3600 }
-        if nextQueuedUpdate == nil, !updateQueue.automatic { return 3600 }
-        if updateQueue.scheduled, !updateQueue.permits(at: date, onAC: true), updateQueue.enabled {
-            let parts = DateComponents(hour: updateQueue.startMinute / 60, minute: updateQueue.startMinute % 60)
-            if let next = calendar.nextDate(after: date, matching: parts, matchingPolicy: .nextTime) {
-                return max(1, date.distance(to: next))
+
+        var deadlines = updateQueue.entries.compactMap { entry -> Date? in
+            guard !entry.paused, let start = entry.plannedInstall?.startDate, start > date else { return nil }
+            return start
+        }
+        if updateQueue.scheduled, updateQueue.startMinute != updateQueue.endMinute,
+            hasAutomaticQueueDiscovery || updateQueue.entries.contains(where: { !$0.paused && $0.plannedInstall == nil }) {
+            let minute = updateQueue.isInsideDailyWindow(at: date) ? updateQueue.endMinute : updateQueue.startMinute
+            let wallTime = DateComponents(hour: minute / 60, minute: minute % 60, second: 0)
+            if let boundary = Calendar.current.nextDate(after: date, matching: wallTime, matchingPolicy: .nextTime) {
+                deadlines.append(boundary)
             }
         }
-        if nextQueuedUpdate == nil, let checked = updateQueue.lastDiscovery {
-            return max(30, min(6 * 3600, checked.addingTimeInterval(6 * 3600).timeIntervalSince(date)))
+
+        if updateQueueNetworkAllowed, !updateQueue.requiresAC || updateQueueOnAC == true {
+            if nextQueuedUpdate != nil { deadlines.append(date.addingTimeInterval(30)) }
+            if hasAutomaticQueueDiscovery, updateQueue.isInsideDailyWindow(at: date) {
+                let discoveryAt = updateQueue.lastDiscovery?.addingTimeInterval(6 * 3600) ?? date
+                deadlines.append(max(date.addingTimeInterval(30), discoveryAt))
+            }
         }
-        return 30
+        return max(1, deadlines.min().map { date.distance(to: $0) } ?? 3600)
     }
 
     private func discoverQueuedUpdatesIfNeeded() {
@@ -396,13 +594,13 @@ import GameLibrary
                     let record = try await self.gameServices.record(game.id)
                     guard record?.installed != nil, record?.pending == nil, record?.uninstalling == false else { continue }
                     let status = try await self.gameServices.checkForUpdate(game.id)
-                    guard self.updateQueue.automatic, self.updateQueue.automaticGames.contains(game.id),
+                    let current = try await self.gameServices.record(game.id)
+                    guard !Task.isCancelled, self.updateQueue.automatic, self.updateQueue.automaticGames.contains(game.id),
                         self.queueEnvironmentPermits(automatic: true), self.gameOperation == nil,
-                        !self.updateQueue.entries.contains(where: { $0.id == game.id }),
-                        try await self.gameServices.record(game.id) == record else { continue }
+                        !self.updateQueue.entries.contains(where: { $0.id == game.id }), current == record else { continue }
+                    self.updateQueueFailures[game.id] = nil
                     if case .updateAvailable = status {
-                        self.updateQueueFailures[game.id] = nil
-                        self.updateQueue.entries.append(.init(id: game.id, source: record, automatic: true))
+                        self.updateQueue.entries.append(.init(id: game.id, source: record, automatic: true, ownershipID: UUID()))
                         self.persistUpdateQueue()
                     }
                 } catch {

@@ -61,7 +61,10 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
             var continuation: LanguageRestartContinuation?
             if let operation {
                 switch try await stopGameOperation(operation) {
-                case .resume(let planID): continuation = .init(restartID: id, gameID: operation.id, action: .resume, planID: planID)
+                case .resume(let planID):
+                    if !operation.isQueuedUpdate {
+                        continuation = .init(restartID: id, gameID: operation.id, action: .resume, planID: planID)
+                    }
                 case .preDownload(let planID, let planDigest):
                     continuation = .init(restartID: id, gameID: operation.id, action: .preDownload, planID: planID, planDigest: planDigest)
                 case .verify: continuation = .init(restartID: id, gameID: operation.id, action: .verify, planID: nil)
@@ -74,6 +77,8 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
                 else { try await gameServices.waitUntilIdle(previous.id) }
             }
             try await flushLaunchSettings()
+            await stopUpdateQueuePreparation()
+            await flushUpdateQueueWrites()
             try Task.checkCancellation()
             if let continuation {
                 guard let defaults else { throw LauncherError.languageRestartFailed }
@@ -105,7 +110,8 @@ struct LanguageRestartContinuation: Codable, Equatable, Sendable {
             setGameRecord(continuation.gameID, record)
             switch continuation.action {
             case .resume:
-                guard let planID = continuation.planID, record.pending?.planID.rawValue == planID else { return }
+                guard let planID = continuation.planID, record.pending?.planID.rawValue == planID,
+                    !updateQueue.entries.contains(where: { $0.id == continuation.gameID && $0.ownsPlan(in: record) }) else { return }
                 setLanguageRestart(nil)
                 resumeGame(continuation.gameID)
             case .preDownload:

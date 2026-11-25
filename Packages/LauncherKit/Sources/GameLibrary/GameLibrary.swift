@@ -29,6 +29,18 @@ public protocol GameOperationGuard: Sendable {
     func willOperate(on game: String) async throws
 }
 
+/// An unattended request is bound to the record it inspected, including a
+/// missing record for a fresh install. Recheck under the actual operation lease.
+public struct GameDeliveryExpectation: Sendable {
+    public let record: GameRecord?
+    public let queueOwner: UUID?
+
+    public init(record: GameRecord?, queueOwner: UUID? = nil) {
+        self.record = record
+        self.queueOwner = queueOwner
+    }
+}
+
 public actor GameLibrary {
     // Synchronous filesystem/cache work must not occupy a cooperative worker.
     nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.game-library")
@@ -161,19 +173,19 @@ public actor GameLibrary {
     }
 
     public func install(_ game: GameDefinition, voices: Set<String>, at location: URL, approved: Bool,
-        profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, .install(voices, location, approved), profile: profile)
+        profile: DeliveryProfile = .standard, expectation: GameDeliveryExpectation? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, .install(voices, location, approved), profile: profile, expectation: expectation)
     }
     public func adopt(_ game: GameDefinition, folder: URL, voices: Set<String>) -> AsyncThrowingStream<OperationEvent, any Error> {
         stream(game, .adopt(voices, folder))
     }
     public func update(_ game: GameDefinition, approved: Bool,
-        profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, .update(approved), profile: profile)
+        profile: DeliveryProfile = .standard, expectation: GameDeliveryExpectation? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, .update(approved), profile: profile, expectation: expectation)
     }
     public func resume(_ game: GameDefinition, approved: Bool,
-        profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, .resume(approved), profile: profile)
+        profile: DeliveryProfile = .standard, expectation: GameDeliveryExpectation? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, .resume(approved), profile: profile, expectation: expectation)
     }
     public func verify(_ game: GameDefinition, mode: Verifier.Mode) -> AsyncThrowingStream<OperationEvent, any Error> { stream(game, .verify(mode)) }
     public func setVoices(_ game: GameDefinition, _ voices: Set<String>) -> AsyncThrowingStream<OperationEvent, any Error> { stream(game, .voices(voices)) }
@@ -257,14 +269,15 @@ public actor GameLibrary {
         return lock
     }
 
-    private func stream(_ game: GameDefinition, _ request: LibraryRequest, profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
-        let session = LibrarySession(owner: self, game: game, request: request, profile: profile)
+    private func stream(_ game: GameDefinition, _ request: LibraryRequest, profile: DeliveryProfile = .standard, expectation: GameDeliveryExpectation? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
+        let session = LibrarySession(owner: self, game: game, request: request, profile: profile, expectation: expectation)
         return AsyncThrowingStream(unfolding: {
             try await BlockingIO.$quality.withValue(profile.quality) { try await session.next() }
         })
     }
 
-    fileprivate func prepare(_ game: GameDefinition, request: LibraryRequest, profile: DeliveryProfile) async throws -> LibraryPrepared {
+    fileprivate func prepare(_ game: GameDefinition, request: LibraryRequest, profile: DeliveryProfile,
+        expectation: GameDeliveryExpectation?) async throws -> LibraryPrepared {
         try await operationGuard?.willOperate(on: game.id)
         let resumes = if case .resume = request { true } else { false }
         // A cancelled pipeline retains both locks until it drains. Resume joins
@@ -274,6 +287,7 @@ public actor GameLibrary {
         let lease = try await store.acquireOperationLease(retainedGameLock: gameLock)
         try await recoverSandbox(game.id)
         let records = try await store.records(); var record = records[game.id]
+        if let expectation, expectation.record != record { throw LauncherError.busy("Expected game record changed") }
         try GameRecordRules.check(request.action, record: record, others: others(records, game))
         var configuration: Result<GameConfig, LauncherError>?
         if let existing = record {
@@ -304,7 +318,7 @@ public actor GameLibrary {
             let plan = try SophonPlanner.fullPlan(id: planID(game, kind: .install, build: target.build, categories: target.categories), target: target.categories)
             return LibraryPrepared(lease: lease, stream: await runner.startInstall(game.id, at: location, executable: config.executable, plan: plan,
                 target: target.build, approved: approved, lease: lease, sandboxListPath: SandboxFiles.supportedList(config.wpfPackageVersion), managedPaths: target.managedPaths,
-                reservedLocations: [paths.root, paths.runtimes], profile: profile))
+                reservedLocations: [paths.root, paths.runtimes], profile: profile, queueOwner: expectation?.queueOwner))
         case .adopt(let voices, let location):
             try checkNewLocation(location, records: records, game: game, empty: false)
             let source = try ContainedFileSystem(root: location).pinRoot()
@@ -330,7 +344,7 @@ public actor GameLibrary {
         case .update(let approved):
             guard let record, let installed = record.installed else { throw LauncherError.io("game is not installed") }
             let target = try await resolve(game, voices: installed.voices)
-            return try await updateStream(game, record: record, installed: installed, target: target, kind: .update, approved: approved, lease: lease, configuration: configuration, profile: profile)
+            return try await updateStream(game, record: record, installed: installed, target: target, kind: .update, approved: approved, lease: lease, configuration: configuration, profile: profile, queueOwner: expectation?.queueOwner)
         case .voices(let voices):
             guard !game.voices.isEmpty else { throw LauncherError.io("Voice packs are unavailable") }
             guard let record, let installed = record.installed else { throw LauncherError.io("game is not installed") }
@@ -350,7 +364,7 @@ public actor GameLibrary {
 
     private func updateStream(_ game: GameDefinition, record: GameRecord, installed: InstalledBuild, target: LibraryTarget,
         kind: PendingOperation.Kind, approved: Bool, lease: GameOperationLease, configuration: Result<GameConfig, LauncherError>? = nil,
-        profile: DeliveryProfile = .standard) async throws -> LibraryPrepared {
+        profile: DeliveryProfile = .standard, queueOwner: UUID? = nil) async throws -> LibraryPrepared {
         let snapshot = InstalledSnapshot(categories: try await planned(installed.categories, game: game))
         let id = try planID(game, kind: kind, build: target.build, categories: target.categories)
         var requiresPatchMetadata = false
@@ -365,7 +379,7 @@ public actor GameLibrary {
         let plan = try patch ?? SophonPlanner.plan(id: id, target: target.categories, installed: snapshot)
         return LibraryPrepared(lease: lease, stream: await runner.start(game.id, record: record, plan: plan, kind: kind,
             target: target.build, approved: approved, lease: lease, managedPaths: target.managedPaths,
-                reservedLocations: [paths.root, paths.runtimes], profile: profile), maintainsSandbox: kind != .voices)
+                reservedLocations: [paths.root, paths.runtimes], profile: profile, queueOwner: queueOwner), maintainsSandbox: kind != .voices)
     }
 
     private func patchPlan(_ game: GameDefinition, id: SafeIdentifier, target: LibraryTarget,
@@ -568,13 +582,15 @@ fileprivate enum LibraryRequest: Sendable {
 private actor LibrarySession {
     let owner: GameLibrary; let game: GameDefinition; let request: LibraryRequest
     let profile: DeliveryProfile
+    let expectation: GameDeliveryExpectation?
     var lease: GameOperationLease?
     var iterator: AsyncThrowingStream<OperationEvent, any Error>.Iterator?
     var prepared = false, done = false, pulling = false
     var maintainingSandbox = false
     var sandboxMode: Verifier.Mode?
-    init(owner: GameLibrary, game: GameDefinition, request: LibraryRequest, profile: DeliveryProfile) {
+    init(owner: GameLibrary, game: GameDefinition, request: LibraryRequest, profile: DeliveryProfile, expectation: GameDeliveryExpectation?) {
         self.owner = owner; self.game = game; self.request = request; self.profile = profile
+        self.expectation = expectation
     }
     func next() async throws -> OperationEvent? {
         guard !pulling else { throw LauncherError.busy("game stream already in use") }
@@ -583,7 +599,7 @@ private actor LibrarySession {
         do {
             guard !Task.isCancelled else { throw LauncherError.cancelled }
             if !prepared {
-                let value = try await owner.prepare(game, request: request, profile: profile)
+                let value = try await owner.prepare(game, request: request, profile: profile, expectation: expectation)
                 lease = value.lease; iterator = value.stream.makeAsyncIterator(); prepared = true
                 sandboxMode = value.sandboxMode; maintainingSandbox = !value.maintainsSandbox
             }

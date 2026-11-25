@@ -17218,6 +17218,88 @@
         }
       }
     },
+    "Install Later" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Später installieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instalar más tarde"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installer plus tard"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instal nanti"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "後でインストール"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "나중에 설치"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instalar mais tarde"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Установить позже"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ติดตั้งภายหลัง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Встановити пізніше"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cài đặt sau"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "稍后安装"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "稍後安裝"
+          }
+        }
+      }
+    },
     "Install Miliastra Sandbox (%@)" : {
       "comment" : "Game menu item; the argument is the download size",
       "localizations" : {
@@ -17871,6 +17953,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "安裝位置無法使用 — 請連接所在的磁碟"
+          }
+        }
+      }
+    },
+    "Install scheduled for %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installation geplant für %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instalación programada para %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installation prévue le %@"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instalasi dijadwalkan pada %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インストール予定：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설치 예정 시간: %@"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instalação agendada para %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Установка запланирована на %@"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "กำหนดการติดตั้ง: %@"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Встановлення заплановано на %@"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã lên lịch cài đặt vào %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装已安排在 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝已排定於 %@"
           }
         }
       }
@@ -18865,6 +19029,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請保持 MacGacha 開啟 — 可隨時暫停和繼續"
+          }
+        }
+      }
+    },
+    "Keep this Mac awake for scheduled downloads" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ruhezustand für geplante Downloads verhindern"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mantener este Mac activo para las descargas programadas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Garder ce Mac éveillé pour les téléchargements planifiés"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jaga Mac ini tetap aktif untuk unduhan terjadwal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "予約ダウンロード中はこのMacのスリープを防ぐ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "예약 다운로드를 위해 이 Mac의 잠자기 방지"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manter este Mac ativo para downloads agendados"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не переводить Mac в режим сна для запланированных загрузок"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไม่ให้ Mac เครื่องนี้เข้าสู่โหมดพักเครื่องสำหรับการดาวน์โหลดตามกำหนด"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не переводити цей Mac у режим сну для запланованих завантажень"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giữ máy Mac này thức để tải xuống theo lịch"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为计划下载保持此 Mac 唤醒"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為排程下載保持此 Mac 喚醒"
           }
         }
       }
@@ -20600,6 +20846,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在尋找紀錄連結⋯"
+          }
+        }
+      }
+    },
+    "MacGacha is waiting to download %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha wartet auf den Download von %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha está esperando para descargar %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha attend de télécharger %@"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha sedang menunggu untuk mengunduh %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGachaは%@のダウンロードを待機中です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha가 %@ 다운로드를 기다리는 중입니다"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O MacGacha está aguardando para baixar %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha ожидает загрузки %@"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha กำลังรอดาวน์โหลด %@"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha очікує на завантаження %@"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha đang chờ tải xuống %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 正在等待下载 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacGacha 正在等待下載 %@"
           }
         }
       }
@@ -34508,6 +34836,88 @@
         }
       }
     },
+    "The display can sleep. Closing the lid still puts this Mac to sleep." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Bildschirm kann sich ausschalten. Beim Zuklappen wechselt dieser Mac weiterhin in den Ruhezustand."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La pantalla puede entrar en reposo. Si cierras la tapa, este Mac seguirá entrando en reposo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’écran peut se mettre en veille. Fermer le capot met toujours ce Mac en veille."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Layar dapat masuk mode tidur. Menutup penutup tetap membuat Mac ini masuk mode tidur."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ディスプレイはスリープできます。蓋を閉じると、このMacは引き続きスリープします。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "디스플레이는 잠자기 상태로 전환될 수 있습니다. 덮개를 닫으면 이 Mac은 여전히 잠자기 상태로 전환됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A tela pode entrar em repouso. Fechar a tampa ainda coloca este Mac em repouso."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Экран может погаснуть. При закрытии крышки этот Mac по-прежнему переходит в режим сна."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "จอภาพเข้าสู่โหมดพักได้ เมื่อปิดฝา Mac เครื่องนี้จะยังคงเข้าสู่โหมดพักเครื่อง"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Дисплей може перейти в режим сну. Якщо закрити кришку, цей Mac усе одно перейде в режим сну."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Màn hình có thể ngủ. Khi đóng nắp, máy Mac này vẫn chuyển sang chế độ ngủ."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示器可以休眠。合上机盖后，此 Mac 仍会进入睡眠状态。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示器可以休眠。闔上上蓋後，此 Mac 仍會進入睡眠狀態。"
+          }
+        }
+      }
+    },
     "The Miliastra Wonderland editor. The game opens it when you edit a stage or test-play it." : {
       "localizations" : {
         "de" : {
@@ -37544,6 +37954,170 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此資料夾不是空的。請選擇空資料夾，或使用現有的安裝。"
+          }
+        }
+      }
+    },
+    "This Mac may sleep on battery power. Scheduled downloads can start after it wakes." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Im Akkubetrieb kann dieser Mac in den Ruhezustand wechseln. Geplante Downloads können nach dem Aufwachen starten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Mac puede entrar en reposo con la batería. Las descargas programadas pueden comenzar cuando se reactive."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce Mac peut se mettre en veille sur batterie. Les téléchargements planifiés peuvent démarrer au réveil."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac ini dapat masuk mode tidur saat menggunakan baterai. Unduhan terjadwal dapat dimulai setelah Mac aktif kembali."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バッテリー駆動中は、このMacがスリープすることがあります。予約ダウンロードはスリープ解除後に開始できます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "배터리 사용 중에는 이 Mac이 잠자기 상태로 전환될 수 있습니다. 예약 다운로드는 잠자기에서 깨어난 뒤 시작할 수 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Mac pode entrar em repouso ao usar a bateria. Os downloads agendados podem começar quando ele despertar."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "При работе от аккумулятора Mac может перейти в режим сна. Запланированные загрузки могут начаться после пробуждения."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac เครื่องนี้อาจเข้าสู่โหมดพักเครื่องเมื่อใช้แบตเตอรี่ การดาวน์โหลดตามกำหนดจะเริ่มได้หลังจากเครื่องตื่น"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Під час роботи від акумулятора цей Mac може перейти в режим сну. Заплановані завантаження можуть початися після виходу з режиму сну."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Máy Mac này có thể ngủ khi dùng pin. Tải xuống theo lịch có thể bắt đầu sau khi máy thức dậy."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用电池供电时，此 Mac 可能会进入睡眠状态。计划下载可在唤醒后开始。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用電池供電時，此 Mac 可能會進入睡眠狀態。排程下載可在喚醒後開始。"
+          }
+        }
+      }
+    },
+    "This Mac may sleep. Scheduled downloads can start after it wakes." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Mac kann in den Ruhezustand wechseln. Geplante Downloads können nach dem Aufwachen starten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Mac puede entrar en reposo. Las descargas programadas pueden comenzar cuando se reactive."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce Mac peut se mettre en veille. Les téléchargements planifiés peuvent démarrer au réveil."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac ini dapat masuk mode tidur. Unduhan terjadwal dapat dimulai setelah Mac aktif kembali."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このMacがスリープすることがあります。予約ダウンロードはスリープ解除後に開始できます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac이 잠자기 상태로 전환될 수 있습니다. 예약 다운로드는 잠자기에서 깨어난 뒤 시작할 수 있습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Mac pode entrar em repouso. Os downloads agendados podem começar quando ele despertar."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac может перейти в режим сна. Запланированные загрузки могут начаться после пробуждения."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac เครื่องนี้อาจเข้าสู่โหมดพักเครื่อง การดาวน์โหลดตามกำหนดจะเริ่มได้หลังจากเครื่องตื่น"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Цей Mac може перейти в режим сну. Заплановані завантаження можуть початися після виходу з режиму сну."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Máy Mac này có thể ngủ. Tải xuống theo lịch có thể bắt đầu sau khi máy thức dậy."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Mac 可能会进入睡眠状态。计划下载可在唤醒后开始。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Mac 可能會進入睡眠狀態。排程下載可在喚醒後開始。"
           }
         }
       }

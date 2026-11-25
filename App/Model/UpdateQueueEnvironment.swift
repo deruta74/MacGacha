@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import AppKit
 import IOKit.ps
+import IOKit.pwr_mgt
 import Network
 
 /// Observes system policy only while the scheduler has work. No global input monitor or event tap.
@@ -102,4 +103,31 @@ import Network
     }
 
     isolated deinit { stop() }
+}
+
+
+@MainActor protocol UpdateQueuePowerAsserting {
+    func acquire(reason: String) -> Bool
+    func release()
+}
+
+@MainActor final class SystemUpdateQueuePowerAssertion: UpdateQueuePowerAsserting {
+    private var assertion: IOPMAssertionID?
+
+    func acquire(reason: String) -> Bool {
+        if assertion != nil { return true }
+        var id: IOPMAssertionID = 0
+        guard IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn), reason as CFString, &id) == kIOReturnSuccess else { return false }
+        assertion = id
+        return true
+    }
+
+    func release() {
+        guard let assertion else { return }
+        self.assertion = nil
+        _ = IOPMAssertionRelease(assertion)
+    }
+
+    isolated deinit { release() }
 }

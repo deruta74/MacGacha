@@ -48,6 +48,9 @@ public struct GameRecord: Codable, Sendable, Equatable {
     public var executable: SafeRelativePath
     public var installed: InstalledBuild?
     public var pending: PendingOperation?
+    /// Installed with the pending record and retained by its completion. A
+    /// subsequent delivery replaces it, including a manual delivery's nil.
+    public var deliveryQueueOwner: UUID?
     public var uninstalling: Bool
     /// Required identity of the directory claimed for this record.
     public var installIdentity: FileSystemIdentity
@@ -56,15 +59,16 @@ public struct GameRecord: Codable, Sendable, Equatable {
     /// Configuration reserves this path even when the optional package is absent.
     public var sandboxListPath: SafeRelativePath?
     public init(installPath: URL, ownership: FolderOwnership, executable: SafeRelativePath,
-        installed: InstalledBuild? = nil, pending: PendingOperation? = nil, uninstalling: Bool = false, installIdentity: FileSystemIdentity, uninstallFilesRemoved: Bool = false, sandbox: SandboxInstallation? = nil, sandboxListPath: SafeRelativePath? = nil) {
+        installed: InstalledBuild? = nil, pending: PendingOperation? = nil, deliveryQueueOwner: UUID? = nil, uninstalling: Bool = false, installIdentity: FileSystemIdentity, uninstallFilesRemoved: Bool = false, sandbox: SandboxInstallation? = nil, sandboxListPath: SafeRelativePath? = nil) {
         self.installPath = installPath; self.ownership = ownership; self.executable = executable
-        self.installed = installed; self.pending = pending; self.uninstalling = uninstalling
+        self.installed = installed; self.pending = pending; self.deliveryQueueOwner = deliveryQueueOwner
+        self.uninstalling = uninstalling
         self.installIdentity = installIdentity
         self.uninstallFilesRemoved = uninstallFilesRemoved
         self.sandbox = sandbox
         self.sandboxListPath = sandboxListPath
     }
-    private enum CodingKeys: String, CodingKey { case installPath, ownership, executable, installed, pending, uninstalling, installIdentity, uninstallFilesRemoved, sandbox, sandboxListPath }
+    private enum CodingKeys: String, CodingKey { case installPath, ownership, executable, installed, pending, deliveryQueueOwner, uninstalling, installIdentity, uninstallFilesRemoved, sandbox, sandboxListPath }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let sandbox: SandboxInstallation?
@@ -75,7 +79,8 @@ public struct GameRecord: Codable, Sendable, Equatable {
         } else { sandbox = nil }
         self.init(installPath: try c.decode(URL.self, forKey: .installPath), ownership: try c.decode(FolderOwnership.self, forKey: .ownership),
             executable: try c.decode(SafeRelativePath.self, forKey: .executable), installed: try c.decodeIfPresent(InstalledBuild.self, forKey: .installed),
-            pending: try c.decodeIfPresent(PendingOperation.self, forKey: .pending), uninstalling: try c.decode(Bool.self, forKey: .uninstalling),
+            pending: try c.decodeIfPresent(PendingOperation.self, forKey: .pending),
+            deliveryQueueOwner: try c.decodeIfPresent(UUID.self, forKey: .deliveryQueueOwner), uninstalling: try c.decode(Bool.self, forKey: .uninstalling),
             installIdentity: try c.decode(FileSystemIdentity.self, forKey: .installIdentity),
             uninstallFilesRemoved: try c.decodeIfPresent(Bool.self, forKey: .uninstallFilesRemoved) ?? false,
             sandbox: sandbox,

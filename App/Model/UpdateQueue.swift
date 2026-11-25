@@ -13,6 +13,44 @@ struct UpdateQueue: Codable, Equatable, Sendable {
         var pending: PendingOperation? = nil
         var source: GameRecord? = nil
         var automatic = false
+        var ownershipID: UUID?
+        var plannedInstall: PlannedInstall?
+        var approval: SpaceApproval?
+        var approvedRetry: Bool?
+
+        var kind: PendingOperation.Kind { plannedInstall == nil ? .update : .install }
+        var spaceApproved: Bool { approvedRetry == true || plannedInstall?.approved == true }
+
+        func matchesLocation(_ record: GameRecord) -> Bool {
+            if let source {
+                return source.installIdentity == record.installIdentity && source.installPath == record.installPath
+            }
+            return plannedInstall?.location.standardizedFileURL == record.installPath.standardizedFileURL
+        }
+
+        func ownsPlan(in record: GameRecord) -> Bool {
+            guard let current = record.pending, current.kind == kind, !record.uninstalling, matchesLocation(record) else { return false }
+            if let pending {
+                return pending == current && (record.deliveryQueueOwner == nil || ownsPublication(in: record))
+            }
+            return ownsPublication(in: record) && record.installed == source?.installed
+        }
+
+        func ownsPublication(in record: GameRecord) -> Bool {
+            ownershipID != nil && ownershipID == record.deliveryQueueOwner
+        }
+    }
+
+    struct PlannedInstall: Codable, Equatable, Sendable {
+        let startDate: Date
+        let location: URL
+        let voices: Set<String>
+        let approved: Bool
+    }
+
+    struct SpaceApproval: Codable, Equatable, Sendable {
+        let required: Int64
+        let available: Int64
     }
     var entries: [Entry] = []
     var enabled = true
@@ -27,6 +65,12 @@ struct UpdateQueue: Codable, Equatable, Sendable {
     var lastDiscovery: Date? = nil
     private var quietDownloadsPreference: Bool?
     var quietDownloadSpeedLimit: Int64?
+    private var keepAwakePreference: Bool?
+
+    var keepMacAwakeForScheduledDownloads: Bool {
+        get { keepAwakePreference ?? true }
+        set { keepAwakePreference = newValue }
+    }
 
     var quietDownloads: Bool {
         get { quietDownloadsPreference ?? true }
@@ -35,6 +79,10 @@ struct UpdateQueue: Codable, Equatable, Sendable {
 
     func permits(at date: Date, calendar: Calendar = .current, onAC: Bool?) -> Bool {
         guard enabled, !requiresAC || onAC == true else { return false }
+        return isInsideDailyWindow(at: date, calendar: calendar)
+    }
+
+    func isInsideDailyWindow(at date: Date, calendar: Calendar = .current) -> Bool {
         guard scheduled else { return true }
         let parts = calendar.dateComponents([.hour, .minute], from: date)
         let minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
@@ -70,7 +118,7 @@ enum UpdateQueueFailure: Equatable {
 }
 
 enum UpdateQueueWaiting: Equatable {
-    case connection, acPower, dailyWindow, idle
+    case connection, acPower, dailyWindow, idle, scheduledInstall(Date)
 
     var userMessage: String {
         switch self {
@@ -78,6 +126,31 @@ enum UpdateQueueWaiting: Equatable {
         case .acPower: String(localized: "Waiting for AC power.")
         case .dailyWindow: String(localized: "Waiting for scheduled hours.")
         case .idle: String(localized: "Waiting for idle time.")
+        case .scheduledInstall(let date): ScheduledInstallState.title(for: date)
+        }
+    }
+}
+
+struct ScheduledInstallState: Equatable {
+    let request: UpdateQueue.PlannedInstall
+    let isHeld: Bool
+    let isRunning: Bool
+    let failure: UpdateQueueFailure?
+
+    var title: String { Self.title(for: request.startDate) }
+
+    static func title(for date: Date) -> String {
+        String(localized: "Install scheduled for \(date.formatted(date: .abbreviated, time: .shortened))")
+    }
+}
+
+enum UpdateQueueSleepHint: Equatable {
+    case onBattery, powerUnknown, disabled, unavailable
+
+    var userMessage: String {
+        switch self {
+        case .onBattery: String(localized: "This Mac may sleep on battery power. Scheduled downloads can start after it wakes.")
+        case .powerUnknown, .disabled, .unavailable: String(localized: "This Mac may sleep. Scheduled downloads can start after it wakes.")
         }
     }
 }
@@ -121,6 +194,12 @@ struct UpdateQueueStore: Sendable {
         let data = try encoder.encode(queue)
         guard data.count <= Self.limit else { throw LauncherError.io("Queue file exceeds size limit") }
         let fs = try ContainedFileSystem(root: root)
-        try fs.writeAtomically(data, to: SafeRelativePath("update-queue.json"))
+        do {
+            try fs.writeAtomically(data, to: SafeRelativePath("update-queue.json"))
+        } catch {
+            // A parent directory sync can report failure after the rename.
+            // Reconcile the visible snapshot before reporting the edit lost.
+            guard (try? load(migrating: nil)) == queue else { throw error }
+        }
     }
 }

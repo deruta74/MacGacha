@@ -221,6 +221,9 @@ final class AppModel {
     var updateQueue = UpdateQueue()
     var updateQueueFailures: [String: UpdateQueueFailure] = [:]
     var updateQueuePersistenceFailure: LauncherError?
+    var isKeepingMacAwakeForQueue = false
+    @ObservationIgnored var updateQueueAssertionGame: String?
+    @ObservationIgnored let updateQueuePowerAssertion: (any UpdateQueuePowerAsserting)?
     @ObservationIgnored var updateQueueLoaded = false
     @ObservationIgnored let updateQueueStore: UpdateQueueStore?
     @ObservationIgnored let updateQueueLog: EventLog?
@@ -230,6 +233,8 @@ final class AppModel {
     var updateQueueNetworkAllowed = false
     var updateQueueOnAC: Bool?
     var updateQueueIdleSeconds: TimeInterval = 0
+    var updateQueueObservedDate: Date?
+    @ObservationIgnored var updateQueueUncommittedInstalls: Set<String> = []
     @ObservationIgnored let updateQueueEnvironment = UpdateQueueEnvironment()
     @ObservationIgnored let updateQueueSignals: (@MainActor () -> (network: Bool, onAC: Bool?, idle: TimeInterval))?
     @ObservationIgnored var updateQueueTimer: Task<Void, Never>?
@@ -405,7 +410,9 @@ final class AppModel {
         launchArguments: [String] = ProcessInfo.processInfo.arguments,
         prefixResetter: (any WinePrefixResetting)? = nil,
         updateQueueStore: UpdateQueueStore? = nil, updateQueueLog: EventLog? = nil,
+        updateQueuePowerAssertion: (any UpdateQueuePowerAsserting)? = nil,
         updateQueueSignals: (@MainActor () -> (network: Bool, onAC: Bool?, idle: TimeInterval))? = nil) {
+        self.updateQueuePowerAssertion = updateQueuePowerAssertion
         self.updateQueueStore = updateQueueStore
         self.updateQueueLog = updateQueueLog
         self.updateQueueSignals = updateQueueSignals
@@ -490,10 +497,7 @@ final class AppModel {
         } else { state.timing = nil }
         games[id] = state
     }
-    func setGameRecord(_ id: String, _ record: GameRecord?) {
-        gameRecords[id] = record
-        queuedUpdateRecordChanged(id, record: record)
-    }
+    func setGameRecord(_ id: String, _ record: GameRecord?) { gameRecords[id] = record }
     func setRosetta(_ status: RosettaStatus) { rosetta = status }
     func setRosettaInstallInProgress(_ inProgress: Bool) { rosettaInstallInProgress = inProgress }
     func setArtCacheState(_ state: ArtCacheState, in region: Region) {
@@ -567,7 +571,8 @@ final class AppModel {
                 configuration.createsNewApplicationInstance = true; configuration.arguments = arguments
                 _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
             }, terminateAfterLanguageRestart: { NSApp.terminate(nil) },
-            updateQueueStore: UpdateQueueStore(root: paths.root), updateQueueLog: log)
+            updateQueueStore: UpdateQueueStore(root: paths.root), updateQueueLog: log,
+            updateQueuePowerAssertion: SystemUpdateQueuePowerAssertion())
         model.shortcutWriter = LiveGameShortcutWriter(
             directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
             hostBundleID: Bundle.main.bundleIdentifier ?? "com.lo7ted.macgacha",

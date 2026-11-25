@@ -2,6 +2,7 @@
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
 import Observation
+import Synchronization
 import Launch
 import LauncherCore
 import DownloadEngine
@@ -45,7 +46,7 @@ import Testing
     }
 }
 
-@Suite @MainActor struct UpdateQueueModelTests {
+@Suite(.timeLimit(.minutes(1))) @MainActor struct UpdateQueueModelTests {
     @Test func editingPersistsOrderAndDoesNotDuplicate() async throws {
         let defaults = UserDefaults(suiteName: "UpdateQueueTests.\(UUID())")!
         let fake = QueueGameServices()
@@ -121,7 +122,7 @@ import Testing
         model.updateQueue.requiresIdle = true
         try await enqueue("genshin", model: model, fake: fake)
         await model.start()
-        try await eventually { model.updateQueue.entries.first?.pending != nil }
+        await observeUntil { model.updateQueue.entries.first?.pending != nil }
         let running = try #require(model.gameTask)
         signals.idle = 0
         model.saveUpdateQueue { $0.scheduled = true; $0.startMinute = $0.endMinute }
@@ -135,12 +136,187 @@ import Testing
         let fake = QueueGameServices(), model = fixture(fake)
         try await enqueue("genshin", model: model, fake: fake)
         await model.start()
-        try await eventually { model.updateQueue.entries.first?.pending != nil }
+        await observeUntil { model.updateQueue.entries.first?.pending != nil }
         await fake.fail("genshin", error: .transport("private URL"))
         await model.gameTask?.value
         #expect(model.lastError == nil)
         #expect(model.queueFailure(for: "genshin") == .operation(.transport("private URL")))
         #expect(model.updateQueue.entries.first?.paused == true)
+    }
+
+    @Test func scheduledInstallSurvivesRestartAndStartsOnlyAfterTimeAndIdle() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = UpdateQueueStore(root: root)
+        let signals = QueueSignals(), fake = QueueGameServices()
+        await fake.makeUninstalled("hi3-jp")
+        let model = fixture(fake, store: store, signals: signals)
+        await model.loadUpdateQueue()
+        let start = signals.clock.date.withLock { $0.addingTimeInterval(3600) }
+        let location = URL(fileURLWithPath: "/inert/install-later")
+        try await model.scheduleInstall("hi3-jp", voices: [], at: location, approved: true, startDate: start)
+        #expect(model.scheduledInstall(for: "hi3-jp")?.request.startDate == start)
+
+        signals.idle = 0
+        let restarted = fixture(fake, store: store, signals: signals)
+        await restarted.start()
+        #expect(restarted.keepsUpdateQueueRunning)
+        #expect(restarted.updateQueueTask == nil)
+        #expect(await fake.calls.isEmpty)
+        signals.clock.date.withLock { $0 = start.addingTimeInterval(1) }
+        restarted.refreshUpdateQueueEnvironment()
+        #expect(restarted.updateQueueWaiting == .idle)
+        #expect(restarted.updateQueueTask == nil)
+
+        signals.idle = 3600
+        restarted.refreshUpdateQueueEnvironment()
+        await observeUntil { restarted.updateQueue.entries.first?.pending != nil }
+        #expect(await fake.installRequests == [.init(id: "hi3-jp", location: location, voices: [], approved: true)])
+        #expect(restarted.gameOperation?.deliveryProfile == .quiet)
+        let transfer = try #require(restarted.gameTask)
+        signals.idle = 0
+        restarted.refreshUpdateQueueEnvironment()
+        #expect(!transfer.isCancelled)
+        await fake.finish("hi3-jp")
+        await transfer.value
+        await restarted.updateQueueWriteTask?.value
+        #expect(restarted.scheduledInstall(for: "hi3-jp") == nil)
+    }
+
+    @Test func restartRecoversPublicationBeforeTheQueueSawThePlan() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = UpdateQueueStore(root: root)
+        let fake = QueueGameServices(), signals = QueueSignals()
+        let model = fixture(fake, store: store, signals: signals)
+        await model.loadUpdateQueue()
+        let start = signals.clock.date.withLock { $0 }
+        let location = URL(fileURLWithPath: "/inert/claimed")
+        try await model.scheduleInstall("hi3-jp", voices: [], at: location, approved: false, startDate: start)
+        let entry = try #require(model.updateQueue.entries.first)
+        #expect(entry.pending == nil)
+        let owner = try #require(entry.ownershipID)
+        await fake.publishInstallPlan("hi3-jp", location: location, owner: owner)
+
+        let restarted = fixture(fake, store: store, signals: signals)
+        await restarted.start()
+        await fake.waitForResumeApproval()
+        #expect(await fake.calls == ["resume:hi3-jp"])
+        #expect(restarted.gameOperation?.isQueuedUpdate == true)
+        let task = try #require(restarted.gameTask)
+        restarted.cancelScheduledInstall("hi3-jp")
+        await task.value
+        await restarted.flushUpdateQueueWrites()
+    }
+
+    @Test func languageRestartLeavesQueueOwnedPlanForTheScheduler() async throws {
+        let defaults = try #require(UserDefaults(suiteName: "QueueLanguageRestart.\(UUID())"))
+        let fake = QueueGameServices(), model = fixture(fake, defaults: defaults)
+        try await enqueue("genshin", model: model, fake: fake)
+        await model.start()
+        await observeUntil { model.updateQueue.entries.first?.pending != nil }
+        await model.restartForLanguage()
+        #expect(defaults.data(forKey: LanguageRestartContinuation.defaultsKey) == nil)
+        #expect(model.gameOperation == nil)
+        #expect(model.updateQueue.entries.first?.pending != nil)
+        #expect(model.updateQueue.entries.first?.paused == false)
+    }
+
+    @Test func scheduledInstallApprovalIsHeldWithoutAnAlert() async throws {
+        let signals = QueueSignals(), fake = QueueGameServices(), model = fixture(fake, signals: signals)
+        await fake.makeUninstalled("genshin")
+        let start = signals.clock.date.withLock { $0 }
+        try await model.scheduleInstall("genshin", voices: ["en-us"], at: URL(fileURLWithPath: "/inert/scheduled"),
+            approved: false, startDate: start)
+        await model.start()
+        await observeUntil { model.updateQueue.entries.first?.pending != nil }
+        let transfer = try #require(model.gameTask)
+        await fake.requireApproval("genshin", required: 10, available: 5)
+        await transfer.value
+        #expect(model.queueFailure(for: "genshin") == .approvalRequired(required: 10, available: 5))
+        #expect(model.lastError == nil)
+        #expect(!model.keepsUpdateQueueRunning)
+
+        model.retryQueuedUpdate("genshin", approved: true)
+        await observeUntil { model.gameOperation?.id == "genshin" }
+        await fake.waitForResumeApproval()
+        #expect(await fake.resumeApproval == true)
+        model.cancelScheduledInstall("genshin")
+        await model.gameTask?.value
+        #expect(model.scheduledInstall(for: "genshin") == nil)
+    }
+
+    @Test func scheduledWorkKeepsTheMacAwakeOnlyOnACAndReleasesOnQuit() async throws {
+        let signals = QueueSignals(), fake = QueueGameServices(), power = QueuePowerAssertion()
+        signals.idle = 0
+        let model = fixture(fake, signals: signals, power: power)
+        let start = signals.clock.date.withLock { $0.addingTimeInterval(3600) }
+        try await model.scheduleInstall("hi3-jp", voices: [], at: URL(fileURLWithPath: "/inert/scheduled"),
+            approved: false, startDate: start)
+        await model.start()
+        #expect(model.isKeepingMacAwakeForQueue)
+        #expect(power.reasons.last?.contains("JP Server") == true)
+        signals.onAC = false
+        model.refreshUpdateQueueEnvironment()
+        #expect(model.updateQueueSleepHint == .onBattery)
+        #expect(!model.isKeepingMacAwakeForQueue)
+        #expect(power.releases == 1)
+        signals.onAC = true
+        model.refreshUpdateQueueEnvironment()
+        #expect(power.reasons.count == 2)
+        model.setKeepMacAwakeForScheduledDownloads(false)
+        #expect(model.updateQueueSleepHint == .disabled)
+        #expect(power.releases == 2)
+        model.setKeepMacAwakeForScheduledDownloads(true)
+        #expect(power.reasons.count == 3)
+        let stopped = model.stopUpdateQueueForQuit()
+        await stopped?.value
+        #expect(power.releases == 3)
+        #expect(!model.isKeepingMacAwakeForQueue)
+    }
+
+    @Test func dailyWindowKeepsARunningTransferAwakeUntilItFinishes() async throws {
+        let signals = QueueSignals(), fake = QueueGameServices(), power = QueuePowerAssertion()
+        let day = Calendar.current.startOfDay(for: signals.clock.date.withLock { $0 })
+        let start = try #require(Calendar.current.date(bySettingHour: 22, minute: 0, second: 0, of: day))
+        let tomorrow = try #require(Calendar.current.date(byAdding: .day, value: 1, to: day))
+        let end = try #require(Calendar.current.date(bySettingHour: 6, minute: 0, second: 0, of: tomorrow))
+        signals.clock.date.withLock { $0 = start }
+        let model = fixture(fake, signals: signals, power: power)
+        model.saveUpdateQueue { $0.scheduled = true }
+        try await enqueue("genshin", model: model, fake: fake)
+        await model.start()
+        await observeUntil { model.updateQueue.entries.first?.pending != nil }
+        let transfer = try #require(model.gameTask)
+        #expect(model.isKeepingMacAwakeForQueue)
+        signals.clock.date.withLock { $0 = end }
+        model.refreshUpdateQueueEnvironment()
+        #expect(!transfer.isCancelled)
+        #expect(model.isKeepingMacAwakeForQueue)
+        #expect(power.releases == 0)
+        await fake.finish("genshin")
+        await transfer.value
+        await observeUntil { !model.isKeepingMacAwakeForQueue }
+        #expect(power.releases == 1)
+    }
+
+    @Test func futureInstallLetsReadyUpdatesRunAndRejectsADuplicate() async throws {
+        let signals = QueueSignals(), fake = QueueGameServices(), model = fixture(fake, signals: signals)
+        let date = signals.clock.date.withLock { $0.addingTimeInterval(3600) }
+        let location = URL(fileURLWithPath: "/inert/scheduled")
+        try await model.scheduleInstall("hi3-jp", voices: [], at: location, approved: false, startDate: date)
+        await #expect(throws: LauncherError.busy("This edition already has an installation or queued work")) {
+            try await model.scheduleInstall("hi3-jp", voices: [], at: location, approved: true, startDate: date)
+        }
+        try await enqueue("genshin", model: model, fake: fake)
+        await model.start()
+        await observeUntil { model.updateQueue.entries.last?.pending != nil }
+        #expect(await fake.calls == ["update:genshin"])
+        await fake.finish("genshin")
+        await model.gameTask?.value
+        #expect(model.updateQueue.entries.map(\.id) == ["hi3-jp"])
+        model.cancelScheduledInstall("hi3-jp")
+        #expect(!model.keepsUpdateQueueRunning)
     }
 
     @Test func queueStartsActualUpdateAndCompletesInOrder() async throws {
@@ -339,10 +515,12 @@ import Testing
     }
 
     private func fixture(_ fake: QueueGameServices, defaults: UserDefaults? = nil, store: UpdateQueueStore? = nil,
-        signals: QueueSignals = QueueSignals()) -> AppModel {
-        AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/Queue")),
+        signals: QueueSignals = QueueSignals(), power: (any UpdateQueuePowerAsserting)? = nil) -> AppModel {
+        let clock = signals.clock
+        return AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/Queue")),
             services: PreviewRuntimeServices(), defaults: defaults, gameServices: fake,
-            launchPreferences: QueueLaunchPreferences(), updateQueueStore: store, updateQueueSignals: { (signals.network, signals.onAC, signals.idle) })
+            launchPreferences: QueueLaunchPreferences(), eventsNow: { clock.date.withLock { $0 } }, updateQueueStore: store,
+            updateQueuePowerAssertion: power, updateQueueSignals: { (signals.network, signals.onAC, signals.idle) })
     }
 
     private func enqueue(_ id: String, model: AppModel, fake: QueueGameServices) async throws {
@@ -374,7 +552,19 @@ private struct QueueLaunchPreferences: LaunchPreferencesPersistence {
     func saveGlobal(_ settings: GlobalLaunchSettings) throws {}
 }
 
+@MainActor private final class QueuePowerAssertion: UpdateQueuePowerAsserting {
+    private(set) var reasons: [String] = []
+    private(set) var releases = 0
+    func acquire(reason: String) -> Bool { reasons.append(reason); return true }
+    func release() { releases += 1 }
+}
+
+private final class QueueWallClock: Sendable {
+    let date = Mutex(Date(timeIntervalSince1970: 1_800_000_000))
+}
+
 @MainActor private final class QueueSignals {
+    let clock = QueueWallClock()
     var network = true
     var onAC: Bool? = true
     var idle: TimeInterval = 3600
@@ -383,13 +573,24 @@ private struct QueueLaunchPreferences: LaunchPreferencesPersistence {
 private actor QueueGameServices: GameServices {
     var calls: [String] = []
     var checks: [String] = []
+    struct InstallCall: Sendable, Equatable {
+        let id: String
+        let location: URL
+        let voices: Set<String>
+        let approved: Bool
+    }
+    private(set) var installRequests: [InstallCall] = []
+    private(set) var resumeApproval: Bool?
+    private let resumed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private var uninstalled: Set<String> = []
     private var records: [String: GameRecord] = [:]
     private var streams: [String: GameEventStream.Continuation] = [:]
     private let backend = PreviewGameServices()
     func start() async {}
     func waitUntilIdle(_ id: String) async throws {}
     func status(_ id: String) async -> GameStatus {
-        if records[id]?.pending != nil { return .paused(.update) }
+        if let pending = records[id]?.pending { return .paused(pending.kind) }
+        if uninstalled.contains(id), records[id]?.installed == nil { return .notInstalled }
         return .installed(tag: records[id]?.installed?.tag ?? "1.0")
     }
     func checkForUpdate(_ id: String) async throws -> GameStatus {
@@ -397,14 +598,25 @@ private actor QueueGameServices: GameServices {
     }
     func record(_ id: String) async throws -> GameRecord? {
         if let record = records[id] { return record }
+        if uninstalled.contains(id) { return nil }
         let record = GameRecord(installPath: URL(fileURLWithPath: "/inert/\(id)"), ownership: .created,
             executable: try SafeRelativePath("Game.exe"), installed: InstalledBuild(tag: "1.0", buildID: "1", categories: [], voices: []),
             installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: UInt64(records.count + 1)))
         records[id] = record; return record
     }
-    func makePending(_ id: String) async {
+    func makeUninstalled(_ id: String) {
+        uninstalled.insert(id)
+        records[id] = nil
+    }
+
+    func requireApproval(_ id: String, required: Int64, available: Int64) {
+        streams[id]?.yield(.needsBatchApproval(required: required, available: available))
+        fail(id, error: .insufficientSpace(required: required, available: available))
+    }
+
+    func makePending(_ id: String, kind: PendingOperation.Kind = .update) async {
         _ = try? await record(id)
-        records[id]?.pending = try! PendingOperation(kind: .update, planID: SafeIdentifier("owned-\(id)"),
+        records[id]?.pending = try! PendingOperation(kind: kind, planID: SafeIdentifier("owned-\(id)"),
             planDigest: Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)),
             target: InstalledBuild(tag: "2.0", buildID: "2", categories: [], voices: []))
     }
@@ -419,9 +631,26 @@ private actor QueueGameServices: GameServices {
         streams[id]?.yield(.phase(.completed)); streams[id]?.finish(); streams[id] = nil
     }
     func update(_ id: String, approved: Bool) async -> GameEventStream {
-        calls.append("update:\(id)"); await makePending(id); return stream(id)
+        await update(id, approved: approved, profile: .standard, expectation: nil)
     }
-    func resume(_ id: String, approved: Bool) async -> GameEventStream { calls.append("resume:\(id)"); return stream(id) }
+    func update(_ id: String, approved: Bool, profile: DeliveryProfile,
+        expectation: GameDeliveryExpectation?) async -> GameEventStream {
+        calls.append("update:\(id)")
+        await makePending(id)
+        records[id]?.deliveryQueueOwner = expectation?.queueOwner
+        return stream(id)
+    }
+    func resume(_ id: String, approved: Bool) async -> GameEventStream {
+        calls.append("resume:\(id)")
+        resumeApproval = approved
+        let result = stream(id)
+        resumed.continuation.yield(())
+        return result
+    }
+    func waitForResumeApproval() async {
+        var iterator = resumed.stream.makeAsyncIterator()
+        _ = await iterator.next()
+    }
     private func stream(_ id: String) -> GameEventStream {
         let pair = GameEventStream.makeStream()
         streams[id] = pair.continuation
@@ -429,7 +658,22 @@ private actor QueueGameServices: GameServices {
         return pair.stream
     }
     func estimate(_ id: String, voices: Set<String>, at location: URL) async throws -> GameEstimate { try await backend.estimate(id, voices: voices, at: location) }
-    func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool) async -> GameEventStream { await backend.install(id, voices: voices, at: location, approved: approved) }
+    func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool) async -> GameEventStream {
+        await install(id, voices: voices, at: location, approved: approved, profile: .standard, expectation: nil)
+    }
+    func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool,
+        profile: DeliveryProfile, expectation: GameDeliveryExpectation?) async -> GameEventStream {
+        calls.append("install:\(id)")
+        installRequests.append(.init(id: id, location: location, voices: voices, approved: approved))
+        await publishInstallPlan(id, location: location, owner: expectation?.queueOwner)
+        return stream(id)
+    }
+    func publishInstallPlan(_ id: String, location: URL, owner: UUID?) async {
+        records[id] = GameRecord(installPath: location, ownership: .created,
+            executable: try! SafeRelativePath("Game.exe"), deliveryQueueOwner: owner,
+            installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: UInt64(records.count + 1)))
+        await makePending(id, kind: .install)
+    }
     func adopt(_ id: String, folder: URL, voices: Set<String>) async -> GameEventStream { await backend.adopt(id, folder: folder, voices: voices) }
     func verify(_ id: String, mode: Verifier.Mode) async -> GameEventStream { await backend.verify(id, mode: mode) }
     func setVoices(_ id: String, _ voices: Set<String>) async -> GameEventStream { await backend.setVoices(id, voices) }

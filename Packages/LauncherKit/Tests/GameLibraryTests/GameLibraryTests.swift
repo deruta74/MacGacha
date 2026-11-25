@@ -14,6 +14,18 @@ import TestSupport
 extension SandboxArchiveExtractor: SandboxPackageExtracting {}
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
+    @Test func scheduledDeliveryRechecksTheExpectedRecordUnderTheOperationLease() async throws {
+        let f = try LibraryFixture()
+        try f.advertise(1)
+        try await f.installGame()
+        let before = f.cdn.requestLog
+        let scheduled = await f.library.install(game, voices: ["en-us"], at: f.install,
+            approved: false, profile: .quiet, expectation: .init(record: nil))
+        await #expect(throws: LauncherError.busy("Expected game record changed")) { _ = try await libraryCollect(scheduled) }
+        #expect(f.cdn.requestLog.count == before.count)
+        #expect(try await f.store.load(game.id)?.installed?.tag == "1.0")
+    }
+
     @Test func quietInstallAndUpdateUseBackgroundDeliveryWithSmallPipeline() async throws {
         let f = try LibraryFixture()
         let settings = Mutex<[(Int, PipelineConfiguration)]>([])

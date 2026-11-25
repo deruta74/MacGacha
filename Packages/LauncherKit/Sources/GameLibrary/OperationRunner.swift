@@ -51,8 +51,8 @@ public actor OperationRunner {
 
     package func start(_ game: String, record: GameRecord, plan: InstallPlan, kind: PendingOperation.Kind,
         target: InstalledBuild, approved: Bool, lease: GameOperationLease,
-        managedPaths: Set<SafeRelativePath>, reservedLocations: [URL] = [], profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, request: .start(.record(record), plan, kind, target, managedPaths, reservedLocations), approved: approved, lease: lease, profile: profile)
+        managedPaths: Set<SafeRelativePath>, reservedLocations: [URL] = [], profile: DeliveryProfile = .standard, queueOwner: UUID? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, request: .start(.record(record), plan, kind, target, managedPaths, reservedLocations), approved: approved, lease: lease, profile: profile, queueOwner: queueOwner)
     }
     package func resume(_ game: String, approved: Bool, lease: GameOperationLease, profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
         stream(game, request: .resume, approved: approved, lease: lease, profile: profile)
@@ -62,8 +62,8 @@ public actor OperationRunner {
     /// manufactured until the root exists and its identity has been measured.
     package func startInstall(_ game: String, at root: URL, executable: SafeRelativePath, plan: InstallPlan,
         target: InstalledBuild, approved: Bool, lease: GameOperationLease? = nil, sandboxListPath: SafeRelativePath? = nil,
-        managedPaths: Set<SafeRelativePath>, reservedLocations: [URL] = [], profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, request: .start(.fresh(root, executable, sandboxListPath), plan, .install, target, managedPaths, reservedLocations), approved: approved, lease: lease, profile: profile)
+        managedPaths: Set<SafeRelativePath>, reservedLocations: [URL] = [], profile: DeliveryProfile = .standard, queueOwner: UUID? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, request: .start(.fresh(root, executable, sandboxListPath), plan, .install, target, managedPaths, reservedLocations), approved: approved, lease: lease, profile: profile, queueOwner: queueOwner)
     }
 
     func preDownloadSettings() -> (fetcher: ChunkFetcher, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, deliveryWorkController: DeliveryWorkController) {
@@ -107,12 +107,12 @@ public actor OperationRunner {
     }
 
     private func stream(_ game: String, request: RunnerRequest, approved: Bool, lease: GameOperationLease? = nil,
-        profile: DeliveryProfile) -> AsyncThrowingStream<OperationEvent, any Error> {
+        profile: DeliveryProfile, queueOwner: UUID? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
         let (limit, configuration) = profile.pipeline(maxConcurrentObjects: maxConcurrentObjects, configuration: pipeline)
         let session = RunnerSession(game: game, request: request, approved: approved, store: store, fetcher: fetcher,
             disk: disk, log: log, hooks: crashHooks, fileOps: fileOps, lease: lease, identityProvider: identityProvider,
             maxConcurrentObjects: limit, pipeline: configuration, locationProbe: locationProbe,
-            deliveryWorkController: deliveryWorkController, quality: profile.quality)
+            deliveryWorkController: deliveryWorkController, quality: profile.quality, queueOwner: queueOwner)
         return AsyncThrowingStream(unfolding: {
             try await BlockingIO.$quality.withValue(profile.quality) { try await session.next() }
         })
@@ -141,6 +141,7 @@ private actor RunnerSession {
     private let game: String
     private let request: RunnerRequest
     private let approved: Bool
+    private let queueOwner: UUID?
     private let store: GameRecordStore
     private let fetcher: ChunkFetcher
     private let disk: any DiskSpaceProbe
@@ -163,9 +164,10 @@ private actor RunnerSession {
     init(game: String, request: RunnerRequest, approved: Bool, store: GameRecordStore, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe, log: EventLog?, hooks: CrashHooks, fileOps: any FileOps, lease: GameOperationLease?,
         identityProvider: any FileSystemIdentityProvider, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, locationProbe: any GameLocationProbing, deliveryWorkController: DeliveryWorkController,
-        quality: BlockingIO.Quality) {
+        quality: BlockingIO.Quality, queueOwner: UUID?) {
         ioQueue = DispatchSerialQueue(label: "org.macgacha.runner-session", qos: quality.actorQoS)
         self.game = game; self.request = request; self.approved = approved; self.store = store
+        self.queueOwner = queueOwner
         self.fetcher = fetcher; self.disk = disk; self.log = log; self.hooks = hooks; self.fileOps = fileOps
         self.lease = lease; self.identityProvider = identityProvider
         self.maxConcurrentObjects = maxConcurrentObjects; self.pipeline = pipeline; self.deliveryWorkController = deliveryWorkController; self.locationProbe = locationProbe
@@ -265,6 +267,9 @@ private actor RunnerSession {
                 throw LauncherError.io("folder is not empty — use an existing installation instead")
             }
             guard try root.rootIdentity() == identity else { throw LauncherError.io("install folder was replaced") }
+            // Publish ownership with the plan. The app may be cancelled before
+            // it sees the first stream event or saves its own plan snapshot.
+            current.deliveryQueueOwner = queueOwner
             current.pending = PendingOperation(kind: kind, planID: requested.id, planDigest: requested.planDigest, target: target)
             try await store.save(current, for: game)
             hooks.reach(.afterGamePendingSaved)
