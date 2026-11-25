@@ -4,6 +4,7 @@ import GameLibrary
 import AppKit
 import Launch
 import LauncherCore
+import Observation
 import SwiftUI
 
 @main
@@ -70,6 +71,7 @@ struct MacGachaApp: App {
 
     /// Shortcut URLs that arrived before the model was bound.
     private var pendingURLs: [URL] = []
+    private var isWaitingForWindowlessQueue = false
     static var launchModel: AppModel?
 
     func bind(_ model: AppModel) {
@@ -110,12 +112,33 @@ struct MacGachaApp: App {
 
     /// Scheduled work survives closing the window. Explicit Quit still terminates the app.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        if dockModel?.keepsUpdateQueueRunning == true { return false }
+        if let dockModel, dockModel.keepsUpdateQueueRunning {
+            isWaitingForWindowlessQueue = true
+            watchWindowlessQueue(dockModel)
+            return false
+        }
         return !(dockModel?.launchedHidden ?? CommandLine.arguments.contains(GameShortcut.launchArgument))
+    }
+
+    private func watchWindowlessQueue(_ model: AppModel) {
+        withObservationTracking {
+            _ = model.keepsUpdateQueueRunning
+        } onChange: { [weak self, weak model] in
+            Task { @MainActor in
+                guard let self, let model, self.isWaitingForWindowlessQueue else { return }
+                if model.keepsUpdateQueueRunning {
+                    self.watchWindowlessQueue(model)
+                } else {
+                    self.isWaitingForWindowlessQueue = false
+                    if !model.launchedHidden, !NSApp.windows.contains(where: \.isVisible) { NSApp.terminate(nil) }
+                }
+            }
+        }
     }
 
     /// A Dock click while a shortcut kept the launcher hidden shows it.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        isWaitingForWindowlessQueue = false
         guard let model = dockModel, model.launchedHidden else { return true }
         model.revealLauncher(selecting: nil)
         return false
@@ -131,11 +154,26 @@ struct MacGachaApp: App {
             }
             return .terminateLater
         }
-        guard let game = liveGameName() else { return .terminateNow }
+        guard let game = liveGameName() else { return finishTermination() }
         Task { @MainActor [weak self] in
             self?.requestConfirmation(game) { [weak self] reply in
-                self?.replyToTermination(reply == .terminateNow)
+                guard let self else { return }
+                if reply == .terminateNow {
+                    if self.finishTermination() == .terminateNow { self.replyToTermination(true) }
+                } else {
+                    self.replyToTermination(false)
+                }
             }
+        }
+        return .terminateLater
+    }
+
+    private func finishTermination() -> NSApplication.TerminateReply {
+        isWaitingForWindowlessQueue = false
+        guard let draining = dockModel?.stopUpdateQueueForQuit() else { return .terminateNow }
+        Task { @MainActor [weak self] in
+            await draining.value
+            self?.replyToTermination(true)
         }
         return .terminateLater
     }

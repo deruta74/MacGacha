@@ -311,7 +311,7 @@ private struct GameSnapshot: Sendable {
         beginGame(id, pending == nil ? .update : .resume(false), expectedPending: pending, expectedUnplanned: initial, queued: true)
     }
     func pauseGame(_ id: String) {
-        manuallyPauseQueuedUpdate(id)
+        if gameOperation?.id == id, gameOperation?.isQueuedUpdate == true { manuallyPauseQueuedUpdate(id) }
         cancelPlayDownloadResume(for: id)
         if gameOperation?.id == id { gameTask?.cancel() }
     }
@@ -374,15 +374,15 @@ private struct GameSnapshot: Sendable {
     }
 
     private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity, isVerification: Bool, isUninstall: Bool, installPath: URL?, isMoving: Bool = false, isSandbox: Bool = false, automaticSandboxVersion: String? = nil, moveDestination: URL? = nil, notificationCompletion: GameNotificationKind? = nil, isDownload: Bool = false, unplannedDownload: PlayUnplannedDownload? = nil, queued: Bool = false) -> GameOperationToken? {
-        guard canBeginGameOrRuntimeOperation(), canOperateGameDuringPlay(id, isDownload: isDownload) else { return nil }
-        guard GameDefinition.all.contains(where: { $0.id == id }) else { show(LauncherError.io("Unknown game")); return nil }
-        guard gameOperation == nil || (isMoving && gameOperation?.id == id && gameOperation?.isPreDownload == true && gameOperation?.isUninstall == false) else { show(LauncherError.busy("another game operation is running")); return nil }
+        guard canBeginGameOrRuntimeOperation(reportBusy: !queued), canOperateGameDuringPlay(id, isDownload: isDownload) else { return nil }
+        guard GameDefinition.all.contains(where: { $0.id == id }) else { if !queued { show(LauncherError.io("Unknown game")) }; return nil }
+        guard gameOperation == nil || (isMoving && gameOperation?.id == id && gameOperation?.isPreDownload == true && gameOperation?.isUninstall == false) else { if !queued { show(LauncherError.busy("another game operation is running")) }; return nil }
         let token = GameOperationToken(id: id, generation: UUID(), kind: kind, notificationCompletion: notificationCompletion, isVerification: isVerification, isUninstall: isUninstall, isDownload: isDownload, isQueuedUpdate: queued, unplannedDownload: unplannedDownload, isMoving: isMoving, isSandbox: isSandbox, automaticSandboxVersion: automaticSandboxVersion, moveDestination: moveDestination, installPath: installPath)
         cancelPlayDownloadResume(for: id)
         gameOperation = token; gameRevisions[id] = token.generation
         gameProgress = GameProgress()
         sandboxFailures[id] = nil
-        if automaticSandboxVersion == nil { dismissError() }
+        if automaticSandboxVersion == nil, !queued { dismissError() }
         setGameState(id, GameState(status: games[id]?.status ?? .unknown, activity: activity))
         return token
     }
@@ -499,8 +499,10 @@ private struct GameSnapshot: Sendable {
                 } else if let failure { self.show(failure) }
             } else {
                 if failure == .installVolumeUnavailable { self.gameLocationPauseReasons[id] = .installVolumeUnavailable }
-                if let reason = self.gameLocationPauseReasons[id], !completed { self.show(reason) }
-                else if let failure { self.show(failure) }
+                if !token.isQueuedUpdate {
+                    if let reason = self.gameLocationPauseReasons[id], !completed { self.show(reason) }
+                    else if let failure { self.show(failure) }
+                }
             }
             let activity: GameActivity?
             if !completed, failure == nil, let approval { activity = .needsApproval(required: approval.required, available: approval.available) }
@@ -508,7 +510,7 @@ private struct GameSnapshot: Sendable {
             // Publish for the latest observed revision without replacing it.
             // No suspension may separate this publication from releasing the token.
             let finalRevision = snapshotRevision
-            self.applyGame(snapshot, id: id, activity: activity, reportError: failure == nil && !moveStoppedByEject)
+            self.applyGame(snapshot, id: id, activity: activity, reportError: !token.isQueuedUpdate && failure == nil && !moveStoppedByEject)
             if let cacheInfo {
                 self.preDownloadRevisions[id] = UUID()
                 self.preDownloads[id] = PreDownloadOverlay(info: cacheInfo)
@@ -524,7 +526,9 @@ private struct GameSnapshot: Sendable {
             }
             let failed = failure.map { $0 != .cancelled } ?? false
             self.lastGameConsumerOutcome = (token, failed || snapshot.error != nil ? .failed : completed ? .completed : .stopped)
-            self.releaseGame(token, activity: activity)
+            let queueFailure = [failure, snapshot.error, self.gameLocationPauseReasons[id]].compactMap { $0 }
+                .first { $0 != .cancelled }
+            self.releaseGame(token, activity: activity, queueFailure: queueFailure)
             if let completion = notificationCompletion {
                 if completed { self.notify(completion, gameID: id) }
                 else if approval != nil { self.notify(.pausedForSpace, gameID: id) }
@@ -615,13 +619,15 @@ private struct GameSnapshot: Sendable {
         setGameState(id, GameState(status: snapshot.status, activity: activity, spaceShortage: shortage))
         if reportError, let error = snapshot.error { show(error) }
     }
-    private func releaseGame(_ token: GameOperationToken, activity: GameActivity?) {
+    private func releaseGame(_ token: GameOperationToken, activity: GameActivity?, queueFailure: LauncherError? = nil) {
         guard gameOperation == token else { return }
         var state = games[token.id] ?? GameState(status: .unknown)
         state.activity = activity
         gameProgress = GameProgress()
         setGameState(token.id, state)
-        if let outcome = lastGameConsumerOutcome, outcome.token == token { queuedUpdateFinished(token, outcome: outcome.outcome) }
+        if let outcome = lastGameConsumerOutcome, outcome.token == token {
+            queuedUpdateFinished(token, outcome: outcome.outcome, failure: queueFailure, activity: activity)
+        }
         gameOperation = nil; gameTask = nil
         resumeDownloadAfterPlayIfPossible()
     }

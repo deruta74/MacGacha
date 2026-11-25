@@ -47,13 +47,98 @@ import Testing
     @Test func editingPersistsOrderAndDoesNotDuplicate() async throws {
         let defaults = UserDefaults(suiteName: "UpdateQueueTests.\(UUID())")!
         let fake = QueueGameServices()
-        let model = fixture(fake, defaults: defaults)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = UpdateQueueStore(root: root)
+        let model = fixture(fake, defaults: defaults, store: store)
+        await model.loadUpdateQueue()
         for id in ["genshin", "zzz", "starrail"] { model.setGameRecord(id, try await fake.record(id)); model.enqueueUpdate(id) }
         model.enqueueUpdate("genshin")
         model.moveQueuedUpdate("starrail", by: -1)
         model.removeQueuedUpdate("zzz")
-        let restored = fixture(fake, defaults: defaults)
+        await model.updateQueueWriteTask?.value
+        let restored = fixture(fake, defaults: defaults, store: store)
+        await restored.loadUpdateQueue()
         #expect(restored.updateQueue.entries.map(\.id) == ["genshin", "starrail"])
+    }
+
+    @Test func defaultsMigrateOnceAndTheContainedFileWins() async throws {
+        let defaults = try #require(UserDefaults(suiteName: "UpdateQueueMigration.\(UUID())"))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = UpdateQueueStore(root: root)
+        var legacy = UpdateQueue()
+        legacy.entries = [.init(id: "hi3-jp", paused: true)]
+        let bytes = try JSONEncoder().encode(legacy)
+        defaults.set(bytes, forKey: UpdateQueueStore.legacyKey)
+        let model = fixture(QueueGameServices(), defaults: defaults, store: store)
+        await model.loadUpdateQueue()
+        #expect(model.updateQueue == legacy)
+        #expect(defaults.data(forKey: UpdateQueueStore.legacyKey) == nil)
+        model.removeQueuedUpdate("hi3-jp")
+        await model.updateQueueWriteTask?.value
+        defaults.set(bytes, forKey: UpdateQueueStore.legacyKey)
+        let restored = fixture(QueueGameServices(), defaults: defaults, store: store)
+        await restored.loadUpdateQueue()
+        #expect(restored.updateQueue.entries.isEmpty)
+        #expect(defaults.data(forKey: UpdateQueueStore.legacyKey) == nil)
+    }
+
+    @Test func pauseOfAManualOperationDoesNotHoldTheQueueEntry() {
+        let model = fixture(QueueGameServices())
+        model.updateQueue.entries = [.init(id: "genshin")]
+        model.gameOperation = GameOperationToken(id: "genshin", generation: UUID(), isDownload: true)
+        model.pauseGame("genshin")
+        #expect(model.updateQueue.entries.first?.paused == false)
+    }
+
+    @Test func heldEntriesDoNotKeepTheLauncherOpen() {
+        let model = fixture(QueueGameServices())
+        model.updateQueue.entries = [.init(id: "genshin", paused: true)]
+        #expect(!model.keepsUpdateQueueRunning)
+        model.updateQueue.entries.append(.init(id: "zzz"))
+        #expect(model.keepsUpdateQueueRunning)
+        model.updateQueue.entries.removeLast()
+        model.updateQueue.automatic = true
+        model.updateQueue.automaticGames = ["hi3-jp"]
+        #expect(model.keepsUpdateQueueRunning)
+    }
+
+    @Test func automaticPickerGroupsDistinctHonkaiServers() throws {
+        let model = fixture(QueueGameServices())
+        let group = try #require(model.automaticCheckGameGroups.first {
+            $0.editions.contains { $0.id == "hi3-jp" }
+        })
+        #expect(group.editions.map(\.id) == HonkaiImpactServer.allCases.map(\.rawValue))
+        #expect(Set(group.editions.map(\.displayName)).count == 5)
+        #expect(group.editions.allSatisfy { $0.region == .global && !$0.isInstalled })
+    }
+
+    @Test func idleAndWindowOnlyGateTheStart() async throws {
+        let signals = QueueSignals(), fake = QueueGameServices(), model = fixture(fake, signals: signals)
+        model.updateQueue.requiresIdle = true
+        try await enqueue("genshin", model: model, fake: fake)
+        await model.start()
+        try await eventually { model.updateQueue.entries.first?.pending != nil }
+        let running = try #require(model.gameTask)
+        signals.idle = 0
+        model.saveUpdateQueue { $0.scheduled = true; $0.startMinute = $0.endMinute }
+        #expect(!running.isCancelled)
+        await fake.finish("genshin")
+        await running.value
+        #expect(model.updateQueue.entries.isEmpty)
+    }
+
+    @Test func unattendedOperationFailureNeverPresentsAnAlert() async throws {
+        let fake = QueueGameServices(), model = fixture(fake)
+        try await enqueue("genshin", model: model, fake: fake)
+        await model.start()
+        try await eventually { model.updateQueue.entries.first?.pending != nil }
+        await fake.fail("genshin", error: .transport("private URL"))
+        await model.gameTask?.value
+        #expect(model.lastError == nil)
+        #expect(model.queueFailure(for: "genshin") == .operation(.transport("private URL")))
+        #expect(model.updateQueue.entries.first?.paused == true)
     }
 
     @Test func queueStartsActualUpdateAndCompletesInOrder() async throws {
@@ -231,10 +316,11 @@ import Testing
         model.pauseGame("genshin"); await model.gameTask?.value
     }
 
-    private func fixture(_ fake: QueueGameServices, defaults: UserDefaults? = nil, signals: QueueSignals = QueueSignals()) -> AppModel {
+    private func fixture(_ fake: QueueGameServices, defaults: UserDefaults? = nil, store: UpdateQueueStore? = nil,
+        signals: QueueSignals = QueueSignals()) -> AppModel {
         AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/Queue")),
             services: PreviewRuntimeServices(), defaults: defaults, gameServices: fake,
-            updateQueueSignals: { (signals.network, signals.onAC, signals.idle) })
+            updateQueueStore: store, updateQueueSignals: { (signals.network, signals.onAC, signals.idle) })
     }
 
     private func enqueue(_ id: String, model: AppModel, fake: QueueGameServices) async throws {
@@ -284,6 +370,10 @@ private actor QueueGameServices: GameServices {
             planDigest: Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64)),
             target: InstalledBuild(tag: "2.0", buildID: "2", categories: [], voices: []))
     }
+    func fail(_ id: String, error: LauncherError) {
+        streams.removeValue(forKey: id)?.finish(throwing: error)
+    }
+
     func finish(_ id: String) {
         let target = records[id]?.pending?.target
         records[id]?.installed = target

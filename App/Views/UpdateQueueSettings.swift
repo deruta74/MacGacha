@@ -84,14 +84,14 @@ struct UpdateQueueSettings: View {
     }
 
     private func gameAccessibilityLabel(_ game: GameDefinition) -> String {
-        let name = LauncherGame.all.first(where: { $0.id == game.id })?.name ?? game.defaultInstallDirectoryName
+        let name = model.queueEditionDisplayName(game.id) ?? game.defaultInstallDirectoryName
         let region = game.region == .global ? String(localized: "Global") : String(localized: "Mainland China (Beta)")
         return [name, region].joined(separator: ", ")
     }
 
     private func gameLabel(_ game: GameDefinition) -> some View {
         VStack(alignment: .leading) {
-            Text(LauncherGame.all.first(where: { $0.id == game.id })?.name ?? game.defaultInstallDirectoryName)
+            Text(model.queueEditionDisplayName(game.id) ?? game.defaultInstallDirectoryName)
             Text(game.region == .global ? String(localized: "Global") : String(localized: "Mainland China (Beta)"))
                 .font(.caption).foregroundStyle(.secondary)
         }

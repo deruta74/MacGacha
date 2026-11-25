@@ -124,7 +124,9 @@ struct PlayPausedDownload {
                 // A suspended read belongs to this saved token. A newer pause
                 // may already have replaced it while that read was in flight.
                 guard self.pausedDownloadForPlay?.token == saved.token else { return }
-                self.discardPlayDownloadResume(saved); self.show(error)
+                self.discardPlayDownloadResume(saved)
+                if saved.token.isQueuedUpdate { self.holdQueuedUpdate(saved.token.id, failure: .operation(launcherError(error))) }
+                else { self.show(error) }
             }
         }
     }
@@ -147,7 +149,10 @@ struct PlayPausedDownload {
             guard let self else { return }
             defer { self.playDownloadPauseTask = nil }
             do { try await self.pauseDownloadForPlay(operation) }
-            catch { self.show(error) }
+            catch {
+                if operation.isQueuedUpdate { self.holdQueuedUpdate(operation.id, failure: .operation(launcherError(error))) }
+                else { self.show(error) }
+            }
             self.resumeDownloadAfterPlayIfPossible()
         }
     }

@@ -323,9 +323,9 @@ struct GameFooter: View {
         switch launch {
         case .starting(let stage):
             switch stage {
-            case .preflight, .lock, .snapshot: return String(localized: "Checking \(game.name)…", comment: "Launch status; the argument is the game's name")
+            case .preflight, .lock, .snapshot: return String(localized: "Checking \(model.editionDisplayName(game))…", comment: "Launch status; the argument is the game's name")
             case .prepare: return String(localized: "Preparing Wine…")
-            case .proxy, .spawn: return String(localized: "Starting \(game.name)…", comment: "Launch status; the argument is the game's name")
+            case .proxy, .spawn: return String(localized: "Starting \(model.editionDisplayName(game))…", comment: "Launch status; the argument is the game's name")
             case .watch: return String(localized: "Waiting for the game window…")
             case .restore, .report: return String(localized: "Restoring game files…")
             }
@@ -339,9 +339,9 @@ struct GameFooter: View {
             if let note { return note }
             guard let other = playingElsewhere else { return nil }
             if case .recoveryNeeded = model.launchState(for: other.id) {
-                return String(localized: "Waiting for \(other.name) to put its files back", comment: "The argument is another game's name")
+                return String(localized: "Waiting for \(model.editionDisplayName(other)) to put its files back", comment: "The argument is another game's name")
             }
-            return String(localized: "\(other.name) is running — quit it to play this one", comment: "The argument is another game's name")
+            return String(localized: "\(model.editionDisplayName(other)) is running — quit it to play this one", comment: "The argument is another game's name")
         }
     }
 
@@ -368,8 +368,8 @@ struct GameFooter: View {
             return String(localized: "Another game is busy — this one can start when it finishes")
         }
         return phase == .staging
-            ? String(localized: "\(other.name) is downloading — pause it to start this one", comment: "The argument is another game's name")
-            : String(localized: "Waiting for \(other.name) to finish", comment: "The argument is another game's name")
+            ? String(localized: "\(model.editionDisplayName(other)) is downloading — pause it to start this one", comment: "The argument is another game's name")
+            : String(localized: "Waiting for \(model.editionDisplayName(other)) to finish", comment: "The argument is another game's name")
     }
 
     private var partsMessage: String {

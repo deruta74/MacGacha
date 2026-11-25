@@ -219,6 +219,14 @@ final class AppModel {
     @ObservationIgnored let prefixResetter: any WinePrefixResetting
     var gameMoveRecoveryReservation = false
     var updateQueue = UpdateQueue()
+    var updateQueueFailures: [String: UpdateQueueFailure] = [:]
+    var updateQueuePersistenceFailure: LauncherError?
+    @ObservationIgnored var updateQueueLoaded = false
+    @ObservationIgnored let updateQueueStore: UpdateQueueStore?
+    @ObservationIgnored let updateQueueLog: EventLog?
+    @ObservationIgnored var updateQueueWriteTask: Task<Void, Never>?
+    @ObservationIgnored var updateQueueWriteRevision: UUID?
+    @ObservationIgnored var updateQueueShuttingDown = false
     var updateQueueNetworkAllowed = false
     var updateQueueOnAC: Bool?
     var updateQueueIdleSeconds: TimeInterval = 0
@@ -396,7 +404,10 @@ final class AppModel {
         terminateAfterLanguageRestart: @escaping @MainActor () -> Void = {},
         launchArguments: [String] = ProcessInfo.processInfo.arguments,
         prefixResetter: (any WinePrefixResetting)? = nil,
+        updateQueueStore: UpdateQueueStore? = nil, updateQueueLog: EventLog? = nil,
         updateQueueSignals: (@MainActor () -> (network: Bool, onAC: Bool?, idle: TimeInterval))? = nil) {
+        self.updateQueueStore = updateQueueStore
+        self.updateQueueLog = updateQueueLog
         self.updateQueueSignals = updateQueueSignals
         self.wishHistoryExporter = wishHistoryExporter
         self.storageService = storageService ?? StorageInventory(paths: paths)
@@ -434,9 +445,6 @@ final class AppModel {
         self.honkaiServerPreference = gameServer
             ?? defaults?.string(forKey: Self.honkaiServerKey).flatMap(HonkaiImpactServer.init(rawValue:))
         if let gameServer { defaults?.set(gameServer.rawValue, forKey: Self.honkaiServerKey) }
-        if let data = defaults?.data(forKey: "updateQueue.v1"), let storedQueue = try? JSONDecoder().decode(UpdateQueue.self, from: data) {
-            self.updateQueue = storedQueue
-        }
         let preferred = Self.persistedRegion(defaults: defaults, locale: locale)
         defaults?.set(preferred.rawValue, forKey: "region")
         self.region = Self.initialRegion(defaults: defaults, locale: locale)
@@ -558,7 +566,8 @@ final class AppModel {
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.createsNewApplicationInstance = true; configuration.arguments = arguments
                 _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
-            }, terminateAfterLanguageRestart: { NSApp.terminate(nil) })
+            }, terminateAfterLanguageRestart: { NSApp.terminate(nil) },
+            updateQueueStore: UpdateQueueStore(root: paths.root), updateQueueLog: log)
         model.shortcutWriter = LiveGameShortcutWriter(
             directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
             hostBundleID: Bundle.main.bundleIdentifier ?? "com.lo7ted.macgacha",
@@ -625,6 +634,7 @@ final class AppModel {
         let eventsHydration = hydrateGameEvents()
         defer { isStarting = false; scheduleDependencyAutoUpdates() }
         refreshConnectedDisplays()
+        await loadUpdateQueue()
         await ensureGameStartup().value
         await continueLanguageRestart(arguments: launchArguments)
         await refreshRosetta()
