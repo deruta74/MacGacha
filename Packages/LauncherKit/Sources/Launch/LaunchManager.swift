@@ -246,6 +246,7 @@ public actor LaunchManager {
                 if refused { settings.unlockFPS = false }
                 return (settings, global, refused)
             }
+            event("Launch started", game: game.id, metadata: ["backend": settings.backend.rawValue])
             if riskRefused {
                 events.yield(.note(.fpsUnlockUnavailable))
                 event("FPS unlock unavailable", game: game.id, metadata: ["reason": "riskNotAcknowledged"])
@@ -259,7 +260,7 @@ public actor LaunchManager {
             let selection = try await runtimes.selection(for: settings)
             let bundle = selection.bundle
             unverified = !recipe.isVerified(build: gameBuild, settings: settings, runtimeBundleID: bundle.id.rawValue)
-            event("Launch started", game: game.id, metadata: ["backend": settings.backend.rawValue,
+            event("Launch runtime selected", game: game.id, metadata: ["runtimeBundle": bundle.id.rawValue,
                 "buildVerification": unverified ? "unverified" : "verified"])
             let prefix = try await prefixes.prefixURL(game: game.id, bundle: bundle)
             let requiredComponents = LaunchResolver.requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: selection.runtimeProfileID)

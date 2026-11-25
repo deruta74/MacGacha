@@ -5,15 +5,25 @@ import HoYoPlayAPI
 import LauncherCore
 
 struct HonkaiServerState: Identifiable, Equatable {
+    enum Status: Equatable { case playing, inProgress, installed }
+
     let server: HonkaiImpactServer
     let description: String
     let isInstalled: Bool
     let launch: LaunchUIState?
     let activity: GameActivity?
     let isOperating: Bool
+    let isCheckingForUpdate: Bool
 
     var id: String { server.rawValue }
     var isRunning: Bool { launch == .running || launch == .ready }
+
+    var status: Status? {
+        if isRunning { return .playing }
+        if case .starting = launch { return .inProgress }
+        if activity != nil || isOperating || isCheckingForUpdate { return .inProgress }
+        return isInstalled ? .installed : nil
+    }
 }
 
 @MainActor extension AppModel {
@@ -24,7 +34,8 @@ struct HonkaiServerState: Identifiable, Equatable {
             let id = server.rawValue
             return HonkaiServerState(server: server, description: honkaiServerDescription(server),
                 isInstalled: isHonkaiServerInstalled(server), launch: launchState(for: id),
-                activity: games[id]?.activity, isOperating: gameOperation?.id == id)
+                activity: games[id]?.activity, isOperating: gameOperation?.id == id,
+                isCheckingForUpdate: gameUpdateCheck[id] == .checking)
         }
     }
 

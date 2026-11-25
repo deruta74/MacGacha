@@ -55,7 +55,7 @@ Later versions arrive through **Check for Updates…** in the MacGacha menu, so 
 ## Roadmap
 
 **Done**
-- **Honkai Impact 3rd Global.** Install, update, verify, repair, adopt and play the Windows edition through MacGacha. The owner verified Europe & Americas gameplay on 9.1.0 with Wine 11.22 and the recommended D3DMetal backend. DXMT is available and awaits gameplay verification. The five HoYoPlay servers have separate installations under one HI3 card. The server picker view is pending.
+- **Honkai Impact 3rd Global.** Install, update, verify, repair, adopt and play the Windows edition through MacGacha. The owner verified Europe & Americas gameplay on 9.1.0 with Wine 11.22 and the recommended D3DMetal backend. Gameplay on the other four servers and on DXMT awaits verification. Use the server menu next to Play to switch between the five HoYoPlay servers. Each server has its own installation.
 - The Global catalog includes pre-registration for Petit Planet and Honkai: Nexus Anima.
 - **One-click Play.** Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game and minimizes itself to the Dock. When the game closes, it comes back and puts back any game files it hid. Genshin Impact, Honkai: Star Rail and Zenless Zone Zero passed testing on D3DMetal and DXMT.
 - **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space". **Check for Updates** in a game's menu looks for a new version right away.

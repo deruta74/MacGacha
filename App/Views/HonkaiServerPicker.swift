@@ -45,11 +45,12 @@ struct HonkaiServerPicker: View {
     }
 
     private func status(_ entry: HonkaiServerState) -> String? {
-        if entry.isRunning { return String(localized: "Playing") }
-        if entry.activity != nil || entry.isOperating {
-            return String(localized: "In progress", comment: "Honkai Impact 3rd server menu: an install, update or check is running for this server")
+        switch entry.status {
+        case .playing: String(localized: "Playing")
+        case .inProgress:
+            String(localized: "In progress", comment: "Honkai Impact 3rd server menu: an install, update or check is running for this server")
+        case .installed: String(localized: "Installed")
+        case nil: nil
         }
-        if entry.isInstalled { return String(localized: "Installed") }
-        return nil
     }
 }

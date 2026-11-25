@@ -413,6 +413,7 @@ final class AppModel {
         self.paths = paths; self.manifest = manifest; self.gameServices = gameServices; self.purgeableSpace = purgeable
         self.services = services ?? LiveRuntimeServices(paths: paths)
         self.defaults = defaults; self.now = now
+        if let defaults { UserDefaultsBackgroundSelectionStore.migrateLegacyHonkaiSelection(in: defaults) }
         if defaults?.string(forKey: Self.selectedGameKey) == "honkai-impact-3rd" {
             defaults?.set("hi3", forKey: Self.selectedGameKey)
         }

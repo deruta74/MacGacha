@@ -35,12 +35,15 @@ public struct GameEventsSnapshot: Codable, Equatable, Sendable {
 /// (a sibling of GameArt); CN uses a contained `cn` subdirectory just like art.
 public actor GameEventsService {
     private static let responseLimit = 2 << 20
-    private static let indexLimit = 1 << 20
+    // Reserve space for all 20 posts per edition, including JSON escaping of
+    // 8 KiB links, 512-scalar titles and 128-scalar dates.
+    private static let editionIndexLimit = 512 << 10
     public static let postLimit = 20
     public static let titleLimit = 512 // Unicode scalars, at most 2048 UTF-8 bytes.
     private let fileOps: any FileOps
     private let directory: URL
     private let region: Region
+    private let indexLimit: Int
     private let language: HoYoPlayLanguage
     private let http: any HTTPClient
     private let ownedHTTP: EventsHTTPSession?
@@ -60,6 +63,7 @@ public actor GameEventsService {
         self.fileOps = fileOps
         directory = region == .global ? cacheDirectory : cacheDirectory.appendingPathComponent(region.rawValue, isDirectory: true)
         self.region = region; self.language = region == .mainlandChina ? .zhCN : language
+        indexLimit = Self.editionIndexLimit * GameDefinition.inRegion(region).count
         currentDate = now; self.requestTimeout = requestTimeout
         if let http { self.http = http; ownedHTTP = nil }
         else { let session = EventsHTTPSession(region: region); ownedHTTP = session; self.http = session.client }
@@ -92,7 +96,8 @@ public actor GameEventsService {
 
     private func hydrate(_ fs: ContainedFileSystem, root: SafeRelativePath) async {
         guard !hydrated else { return }
-        let data = try? await BlockingIO.run { try fs.readFile(at: SafeRelativePath("\(root)/events-index.json"), maxBytes: Self.indexLimit) }
+        let indexLimit = indexLimit
+        let data = try? await BlockingIO.run { try fs.readFile(at: SafeRelativePath("\(root)/events-index.json"), maxBytes: indexLimit) }
         guard !hydrated, !Task.isCancelled else { return }
         hydrated = true
         guard let data, let saved = try? JSONDecoder().decode([String: GameEventsSnapshot].self, from: data),
@@ -141,7 +146,7 @@ public actor GameEventsService {
                     var next = snapshot.withLock { $0 }; next[id] = entry
                     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
                     let bytes = try encoder.encode(next)
-                    guard bytes.count <= Self.indexLimit else { continue }
+                    guard bytes.count <= indexLimit else { continue }
                     try await BlockingIO.run { try fs.writeAtomically(bytes, to: SafeRelativePath("\(root)/events-index.json")) }
                     snapshot.withLock { $0 = next }
                 } catch { /* Keep this game's previous successful result, including its original expiry. */ }

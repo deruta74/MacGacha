@@ -75,6 +75,47 @@ import RuntimeManager
         #expect(defaults.string(forKey: AppModel.selectedGameKey) == "petit-planet")
     }
 
+    @Test(arguments: [false, true])
+    func legacyHonkaiBackgroundMigratesIndependentlyOfSelectedGame(hasCurrent: Bool) throws {
+        let name = "MacGacha-HI3Background-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("starrail", forKey: AppModel.selectedGameKey)
+        let store = UserDefaultsBackgroundSelectionStore(defaults: defaults)
+        store.setLastShownID("first", for: "honkai-impact-3rd")
+        if hasCurrent { store.setLastShownID("second", for: "hi3") }
+        let model = model(defaults: defaults)
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "starrail")
+        #expect(store.lastShownID(for: "hi3") == (hasCurrent ? "second" : "first"))
+        let slides = ["first", "second", "third"].map { GameBackground(id: $0, image: URL(filePath: "/inert/\($0).png")) }
+        model.applyArt(["hi3": GameArt(backgrounds: slides)], in: .global)
+        let art = try #require(model.launcherArt(for: "hi3"))
+        var selection = BackgroundSelection(clock: ContinuousClock(), session: BackgroundSelectionSession(store: store))
+        selection.update(region: .global, gameID: "hi3", backgrounds: art.backgrounds, animated: true, reduceMotion: false)
+        #expect(selection.slides?.current.id == (hasCurrent ? "third" : "second"))
+        #expect(store.lastShownID(for: "honkai-impact-3rd") == "first")
+    }
+
+    @Test func honkaiServerStatusShowsLaunchPreparationAfterSwitching() throws {
+        let model = model()
+        let record = GameRecord(installPath: URL(filePath: "/inert/hi3-jp"), ownership: .created,
+            executable: try SafeRelativePath("BH3.exe"),
+            installed: InstalledBuild(tag: "9.1.0", buildID: "synthetic", categories: [], voices: []),
+            installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: 2))
+        model.setGameRecord("hi3-jp", record)
+        #expect(model.honkaiServers.first { $0.server == .japan }?.status == .installed)
+        model.selectHonkaiServer(.japan)
+        model.launchSlotOwner = "hi3-jp"
+        model.launchStates["hi3-jp"] = .starting(.preflight)
+        model.selectHonkaiServer(.korea)
+        #expect(model.selectedHonkaiServer == .korea)
+        #expect(model.honkaiServers.first { $0.server == .japan }?.status == .inProgress)
+        #expect(model.honkaiServers.first { $0.server == .korea }?.status == nil)
+        #expect(model.launchSlotOwner == "hi3-jp")
+        model.launchStates["hi3-jp"] = .running
+        #expect(model.honkaiServers.first { $0.server == .japan }?.status == .playing)
+    }
+
     @Test func honkaiServerListUsesTheOnlyInstalledServerAndKeepsOneCard() throws {
         let model = model()
         #expect(model.honkaiServers.map(\.id) == ["hi3", "hi3-jp", "hi3-kr", "hi3-sea", "hi3-tw"])

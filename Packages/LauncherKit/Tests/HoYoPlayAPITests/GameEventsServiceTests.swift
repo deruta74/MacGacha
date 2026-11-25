@@ -10,6 +10,33 @@ import DownloadEngine
 import TestSupport
 
 @Suite struct GameEventsServiceTests {
+    @Test func largeValidGlobalEventsRoundTripForEveryEdition() async throws {
+        let temp = try TempDir(), http = EventsHTTP()
+        let directory = temp.url.appendingPathComponent("GameEvents")
+        let games = GameDefinition.inRegion(.global)
+        #expect(games.count == 8)
+        http.games = try JSONSerialization.data(withJSONObject: ["retcode": 0, "data": ["games": games.map {
+            ["id": $0.gameID, "biz": $0.biz]
+        }]])
+        let links = (0..<20).map { "https://example.test/" + String(repeating: "a", count: 7_000) + "?post=\($0)" }
+        http.content = content(links.map {
+            ["type": "POST_TYPE_ACTIVITY", "title": "Event", "date": "10/22", "link": $0]
+        })
+        let service = GameEventsService(cacheDirectory: directory, http: http, now: { eventsFixtureDate })
+        let updated = await service.refresh()
+        #expect(Set(updated.keys) == Set(games.map(\.id)))
+        #expect(updated.values.allSatisfy { $0.posts.compactMap { $0.link?.absoluteString } == links })
+        #expect(http.requests.count == games.count + 1)
+        let data = try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: directory)
+            return try fs.readFile(at: SafeRelativePath("events-index.json"), maxBytes: 4 << 20)
+        }
+        #expect(data.count > 1 << 20)
+        let offline = EventsHTTP(), reloaded = GameEventsService(cacheDirectory: directory, http: offline, now: { eventsFixtureDate })
+        #expect(await reloaded.loadCached() == updated)
+        #expect(offline.requests.isEmpty)
+    }
+
     @Test func failedEventsPublicationPreservesCachedSnapshot() async throws {
         let temp = try TempDir(), http = EventsHTTP(), directory = temp.url.appendingPathComponent("GameEvents")
         let previous = await GameEventsService(cacheDirectory: directory, http: http).refresh()

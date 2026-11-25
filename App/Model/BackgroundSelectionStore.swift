@@ -12,6 +12,13 @@ import Foundation
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     func lastShownID(for gameID: String) -> String? { defaults.string(forKey: "lastBackgroundID." + gameID) }
     func setLastShownID(_ id: String, for gameID: String) { defaults.set(id, forKey: "lastBackgroundID." + gameID) }
+
+    static func migrateLegacyHonkaiSelection(in defaults: UserDefaults) {
+        let store = UserDefaultsBackgroundSelectionStore(defaults: defaults)
+        guard store.lastShownID(for: "hi3") == nil,
+            let previous = store.lastShownID(for: "honkai-impact-3rd") else { return }
+        store.setLastShownID(previous, for: "hi3")
+    }
 }
 
 /// Shared across view lifetimes, but not across app launches. Persistence uses
