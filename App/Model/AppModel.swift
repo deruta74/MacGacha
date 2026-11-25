@@ -300,6 +300,7 @@ final class AppModel {
     var launchStates: [String: LaunchUIState] = [:] {
         didSet { dockStartingIndicator.setStarting(launchStates.values.contains { $0.showsDockStarting }) }
     }
+    var successfulLaunches: [String: SuccessfulLaunch] = [:]
     var playTimeSummaries: [String: PlayTimeSummary] = [:]
     @ObservationIgnored var playTimeStartupTask: Task<Void, Never>?
     @ObservationIgnored var playTimeRefreshRevision = UUID()

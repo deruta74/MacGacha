@@ -14,6 +14,54 @@ import RuntimeManager
 
 @Suite(.serialized) @MainActor
 struct AppModelLaunchTests {
+    @Test func previousConfigurationRetryUsesOrdinaryReservationAndDedicatedService() async throws {
+        let fixture = try LaunchModelFixture(); defer { fixture.remove() }
+        await fixture.model.reattachOnStart()
+        let records = PreviewGameServices(states: ["genshin": GameState(status: .installed(tag: "1"))])
+        fixture.model.setGameRecord("genshin", try await records.record("genshin"))
+        let token = UUID()
+        let failure = LaunchFailureInfo(stage: .preflight, message: "Safe failure", hasLog: false, unverifiedBuild: false,
+            diagnosis: LaunchDiagnosis(reason: .runtime, previous: nil, attempted: nil, retryID: token))
+        fixture.model.launchStates["genshin"] = .failed(failure)
+        #expect(fixture.model.canRetrySuccessfulLaunch("genshin"))
+        fixture.model.launchSlotOwner = "zzz"
+        #expect(!fixture.model.canRetrySuccessfulLaunch("genshin"))
+        fixture.model.retrySuccessfulLaunch("genshin")
+        #expect(await fixture.services.retryRequests.isEmpty)
+        fixture.model.launchSlotOwner = nil
+        let before = fixture.model.launchSettings(for: "genshin")
+        fixture.model.retrySuccessfulLaunch("genshin")
+        #expect(fixture.model.launchSlotOwner == "genshin")
+        await fixture.model.launchTasks["genshin"]?.value
+        #expect(await fixture.services.retryRequests == [token])
+        #expect(fixture.model.launchSettings(for: "genshin") == before)
+        #expect(!fixture.model.canRetrySuccessfulLaunch("genshin"))
+    }
+
+    @Test func diagnosticsKeepUnknownFailuresUnknownAndUseTypedEvidence() {
+        let unknown = LaunchFailureInfo(stage: .preflight, message: "Private path or unrelated error", hasLog: false, unverifiedBuild: false)
+        #expect(LaunchDiagnosticText.explanation(unknown) == String(localized: "The cause could not be determined."))
+        let runtime = LaunchFailureInfo(stage: .preflight, message: "Private path", hasLog: false, unverifiedBuild: false,
+            diagnosis: LaunchDiagnosis(reason: .runtime, previous: nil, attempted: nil))
+        #expect(LaunchDiagnosticText.explanation(runtime) == String(localized: "The selected runtime is unavailable. Check Dependencies."))
+    }
+
+    @Test func diagnosticDiffShowsEveryChangedValueIncludingIndividualSettings() throws {
+        let digest = try Digest(algorithm: .sha256, hex: String(repeating: "a", count: 64))
+        var settings = LaunchSettings.defaults(for: "genshin")
+        let previous = LaunchConfiguration(gameBuild: "1", gameBuildID: "old-build", bundleID: "old-wine", runtimeProfileID: "profile", runtimeDigest: digest,
+            componentIDs: ["old-component"], compatibilityComponentIDs: [:], recipeVersion: 1, settings: settings, gameModeEnabled: true)
+        settings.backend = .dxmt; settings.metalHUD = true; settings.retina = true; settings.unlockTarget = 240
+        let attempted = LaunchConfiguration(gameBuild: "2", gameBuildID: "new-build", bundleID: "new-wine", runtimeProfileID: "profile", runtimeDigest: digest,
+            componentIDs: ["new-component"], compatibilityComponentIDs: [:], recipeVersion: 1, settings: settings, gameModeEnabled: false)
+        let changes = LaunchDiagnosticText.changedValues(previous: previous, attempted: attempted)
+        #expect(Set(changes.map(\.field)) == ["game", "runtime", "components", "backend", "metalHUD", "retina", "unlockTarget", "gameMode"])
+        #expect(changes.first { $0.field == "game" }?.previous.contains("old-build") == true)
+        #expect(changes.first { $0.field == "runtime" }?.attempted.contains("new-wine") == true)
+        #expect(changes.first { $0.field == "unlockTarget" }?.attempted == 240.formatted())
+        #expect(LaunchDiagnosticText.changedValues(previous: previous, attempted: previous).isEmpty)
+    }
+
     @Test(arguments: GameDefinition.all.map(\.id)) func metalHUDPersistsOnlyForItsEdition(game: String) async throws {
         let fixture = try LaunchModelFixture(); defer { fixture.remove() }
         let model = fixture.model
@@ -469,6 +517,11 @@ private actor LaunchModelServices: LaunchServices, GameOperationGuard {
         currentSession = launchSession
         let events = scriptedEvents
         return AsyncStream { continuation in events.forEach { continuation.yield($0) }; continuation.finish() }
+    }
+    var retryRequests: [UUID] = []
+    func retryLastSuccessful(game: GameDefinition, record: GameRecord, retryID: UUID) async throws -> AsyncStream<LaunchEvent> {
+        retryRequests.append(retryID)
+        return try await launch(game: game, record: record)
     }
     var ended = false
     var recoveryCalls = 0

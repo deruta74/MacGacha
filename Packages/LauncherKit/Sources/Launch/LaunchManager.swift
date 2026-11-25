@@ -47,6 +47,7 @@ public actor LaunchManager {
     private var reservedGame: String?
     private var recovering = false
     private var guardRecoveries: Set<String> = []
+    private var retries: [UUID: (game: String, configuration: LaunchConfiguration)] = [:]
     private var supervision: [String: Task<Void, Never>] = [:]
 
     private final class Context {
@@ -172,24 +173,57 @@ public actor LaunchManager {
         return (boot, Double(instant.tv_sec) + Double(instant.tv_nsec) / 1e9)
     }
 
-    public func launch(game: GameDefinition, installRoot: URL, gameBuild: String) -> AsyncStream<LaunchEvent> {
+    public func launch(game: GameDefinition, installRoot: URL, gameBuild: String, gameBuildID: String? = nil) -> AsyncStream<LaunchEvent> {
+        launch(game: game, installRoot: installRoot, gameBuild: gameBuild, gameBuildID: gameBuildID, previous: nil)
+    }
+
+    public func retryLastSuccessful(game: GameDefinition, installRoot: URL, gameBuild: String, gameBuildID: String? = nil, retryID: UUID) throws -> AsyncStream<LaunchEvent> {
+        guard let retry = retries.removeValue(forKey: retryID), retry.game == game.id,
+            retry.configuration.gameBuild == gameBuild, retry.configuration.gameBuildID == gameBuildID else { throw LaunchConfigurationError.previousUnavailable }
+        return launch(game: game, installRoot: installRoot, gameBuild: gameBuild, gameBuildID: gameBuildID, previous: retry.configuration)
+    }
+
+    public func successfulLaunches() async throws -> [String: SuccessfulLaunch] {
+        let paths = paths
+        return try await BlockingIO.run { try LaunchHistoryStore(paths: paths).load() }
+    }
+
+    /// Also serves failures before the app reaches the core launch boundary.
+    public func diagnose(game: String, gameBuild: String, gameBuildID: String? = nil, reason: LaunchFailureReason, attempted: LaunchConfiguration? = nil, allowRetry: Bool = true) async -> LaunchDiagnosis {
+        let previous = try? await successfulLaunches()[game]
+        var retryID: UUID?
+        if allowRetry, let previous, previous.configuration.gameBuild == gameBuild, previous.configuration.gameBuildID == gameBuildID,
+            previous.configuration.recipeVersion == (recipeOverrides[game] ?? Recipes.recipe(for: game))?.recipeVersion,
+            (attempted.map { previous.configuration != $0 } ?? (reason == .runtime)), ![.busy, .rosetta, .location, .gameFiles, .network].contains(reason),
+            (try? await runtimes.selection(for: previous.configuration)) != nil {
+            let id = UUID(); retryID = id
+            retries = retries.filter { $0.value.game != game }
+            retries[id] = (game, previous.configuration)
+        }
+        return LaunchDiagnosis(reason: reason, previous: previous, attempted: attempted, retryID: retryID)
+    }
+
+    private func launch(game: GameDefinition, installRoot: URL, gameBuild: String, gameBuildID: String?, previous: LaunchConfiguration?) -> AsyncStream<LaunchEvent> {
         let pair = AsyncStream<LaunchEvent>.makeStream()
         // Reserve synchronously, before an actor reentrancy point or any I/O.
         if let busy = reservedGame ?? contexts.keys.sorted().first ?? supervision.keys.sorted().first ?? unresolvedStartup.sorted().first {
             event("Launch failed", game: game.id, level: .error, metadata: Self.failureMetadata(LauncherError.busy("Launch slot unavailable"), stage: .lock))
             pair.continuation.yield(.stage(.lock))
             pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "\(Self.name(busy)) is running"), logURL: nil,
-                unverifiedBuild: (recipeOverrides[game.id] ?? Recipes.recipe(for: game.id))?.isVerified(build: gameBuild) != true)))
+                unverifiedBuild: (recipeOverrides[game.id] ?? Recipes.recipe(for: game.id))?.isVerified(build: gameBuild) != true,
+                diagnosis: LaunchDiagnosis(reason: .busy, previous: nil, attempted: nil))))
             pair.continuation.finish(); return pair.stream
         }
         if recovering || !guardRecoveries.isEmpty {
             event("Launch failed", game: game.id, level: .error, metadata: Self.failureMetadata(LauncherError.busy("Launch slot unavailable"), stage: .lock))
-            pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "Launch recovery is in progress"), logURL: nil, unverifiedBuild: false)))
+            pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "Launch recovery is in progress"), logURL: nil, unverifiedBuild: false,
+                diagnosis: LaunchDiagnosis(reason: .busy, previous: nil, attempted: nil))))
             pair.continuation.finish(); return pair.stream
         }
+        retries = retries.filter { $0.value.game != game.id }
         reservedGame = game.id
         // This owner task is deliberately unrelated to stream termination.
-        supervision[game.id] = Task { await self.start(game: game, installRoot: installRoot, gameBuild: gameBuild, events: pair.continuation) }
+        supervision[game.id] = Task { await self.start(game: game, installRoot: installRoot, gameBuild: gameBuild, gameBuildID: gameBuildID, previous: previous, events: pair.continuation) }
         return pair.stream
     }
 
@@ -229,9 +263,10 @@ public actor LaunchManager {
         note(context, "game window ready")
     }
 
-    private func start(game: GameDefinition, installRoot: URL, gameBuild: String, events: AsyncStream<LaunchEvent>.Continuation) async {
+    private func start(game: GameDefinition, installRoot: URL, gameBuild: String, gameBuildID: String?, previous: LaunchConfiguration?, events: AsyncStream<LaunchEvent>.Continuation) async {
         defer { finishedSupervision(game: game.id) }
         var stage = LaunchStage.preflight
+        var attempted: LaunchConfiguration?
         let recipe = recipeOverrides[game.id] ?? Recipes.recipe(for: game.id)
         var unverified = recipe?.isVerified(build: gameBuild) != true
         do {
@@ -239,8 +274,9 @@ public actor LaunchManager {
             guard let recipe else { throw LauncherError.io("Unknown launch game") }
             let paths = paths, journalFileOps = journalFileOps
             let (settings, globalSettings, riskRefused) = try await BlockingIO.run {
-                var settings = try LaunchSettingsStore(paths: paths).load(game.id)
-                let global = try GlobalLaunchSettingsStore(paths: paths).load()
+                var settings = try previous?.settings ?? LaunchSettingsStore(paths: paths).load(game.id)
+                var global = try GlobalLaunchSettingsStore(paths: paths).load()
+                if let mode = previous?.gameModeEnabled { global.gameModeEnabled = mode }
                 let refused = GenshinFps.applies(to: game.id) && settings.unlockFPS && !global.genshinFpsRiskAcknowledged
                 // Hand-edited or imported settings cannot bypass the one-time warning.
                 if refused { settings.unlockFPS = false }
@@ -254,16 +290,20 @@ public actor LaunchManager {
             let logsEnabled = globalSettings.sessionLogsEnabled
             let identity = try await BlockingIO.run {
                 let fs = try ContainedFileSystem(root: installRoot).pinRoot()
-                guard try fs.itemType(at: recipe.executable) == .regularFile else { throw LauncherError.io("Game executable is missing") }
+                guard try fs.itemType(at: recipe.executable) == .regularFile else { throw LaunchConfigurationError.gameFilesMissing }
                 return try fs.rootIdentity()
             }
-            let selection = try await runtimes.selection(for: settings)
+            if let previous {
+                guard previous.gameBuild == gameBuild, previous.gameBuildID == gameBuildID, previous.recipeVersion == recipe.recipeVersion else { throw LaunchConfigurationError.previousUnavailable }
+            }
+            let selection = try await previous.mapSelection(using: runtimes, settings: settings)
             let bundle = selection.bundle
             unverified = !recipe.isVerified(build: gameBuild, settings: settings, runtimeBundleID: bundle.id.rawValue)
             event("Launch runtime selected", game: game.id, metadata: ["runtimeBundle": bundle.id.rawValue,
                 "buildVerification": unverified ? "unverified" : "verified"])
             let prefix = try await prefixes.prefixURL(game: game.id, bundle: bundle)
             let requiredComponents = LaunchResolver.requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: selection.runtimeProfileID)
+            attempted = LaunchConfiguration(gameBuild: gameBuild, gameBuildID: gameBuildID, selection: selection, recipeVersion: recipe.recipeVersion, settings: settings, requiredComponents: requiredComponents)
             guard !selection.componentIDs.isEmpty else { throw LauncherError.io("The runtime bundle has no pinnable components") }
             let compatibilityIDs = try requiredComponents.map { kind in
                 guard let id = selection.compatibilityComponentIDs[kind] else { throw LauncherError.io("Required compatibility component has no pin identity") }
@@ -294,7 +334,18 @@ public actor LaunchManager {
                 let pin = try RuntimePin.pin(paths: paths, componentIDs: ids)
                 return (lock, pin)
             }
-            let validated = try await runtimes.selection(for: settings)
+            // The app's record was captured before preflight awaits. Recheck under
+            // session exclusion so another process cannot update/move the game in
+            // that interval and make the saved configuration evidence inaccurate.
+            if let gameBuildID {
+                guard let record = try await GameRecordStore(directory: paths.games).load(game.id),
+                    record.installed?.tag == gameBuild, record.installed?.buildID == gameBuildID,
+                    record.installPath.standardizedFileURL == installRoot.standardizedFileURL,
+                    record.installIdentity == identity, record.pending == nil, !record.uninstalling else {
+                    throw LauncherError.busy("Game installation changed before launch")
+                }
+            }
+            let validated = try await previous.mapSelection(using: runtimes, settings: settings)
             guard validated.bundle == bundle, validated.runtimeProfileID == selection.runtimeProfileID,
                 Set(validated.componentIDs) == Set(selection.componentIDs),
                 requiredComponents.allSatisfy({ validated.componentRoots[$0] == selection.componentRoots[$0]
@@ -323,11 +374,16 @@ public actor LaunchManager {
             guard try await read(game: game.id) == nil else { throw LauncherError.busy("Launch recovery is required") }
             let provenance = sessionProvenance
             let (bootSessionUUID, sessionStartTime) = try await BlockingIO.run { try provenance() }
-            let session = LaunchSession(sessionID: UUID(), game: game.id, installRoot: installRoot, installIdentity: identity,
+            var session = LaunchSession(sessionID: UUID(), game: game.id, installRoot: installRoot, installIdentity: identity,
                 prefix: prefix, bundleID: bundle.id.rawValue, runtimeDigest: bundle.digest, wineBinary: helper?.wineBinary ?? bundle.wineBinary,
                 wineserver: helper?.wineserver ?? bundle.wineBinary.deletingLastPathComponent().appendingPathComponent("wineserver"), componentIDs: ids,
                 recipeVersion: recipe.recipeVersion, settings: settings, gameExecutable: recipe.executable,
                 bootSessionUUID: bootSessionUUID, sessionStartTime: sessionStartTime)
+            attempted = LaunchConfiguration(gameBuild: gameBuild, gameBuildID: gameBuildID, selection: selection,
+                recipeVersion: recipe.recipeVersion, settings: settings, requiredComponents: requiredComponents,
+                gameModeEnabled: globalSettings.gameModeEnabled && helper != nil)
+            session.configuration = attempted
+            session.historyRetry = previous != nil
             let context = Context(session: session, lock: lock, pin: pin)
             context.endOutcome = "startup failure"
             context.continuation = events; context.unverifiedBuild = unverified; contexts[game.id] = context
@@ -411,6 +467,7 @@ public actor LaunchManager {
             return
         } catch {
             event("Launch failed", game: game.id, level: .error, metadata: Self.failureMetadata(error, stage: stage))
+            let diagnosis = await diagnose(game: game.id, gameBuild: gameBuild, gameBuildID: gameBuildID, reason: .classify(error), attempted: attempted, allowRetry: previous == nil)
             if let context = contexts[game.id] {
                 // hide() may have durably recorded more entries before throwing.
                 if let persisted = try? await read(game: game.id), persisted.sessionID == context.session.sessionID { context.session = persisted }
@@ -422,7 +479,7 @@ public actor LaunchManager {
                 if context.ownedWrapper != nil, let executable = Self.executable(context.session) {
                     // A successful spawn is irreversible: retain ownership and
                     // defer its failure report until verified end and restore.
-                    context.deferredFailure = Self.failure(error, stage: stage, log: context.lifecycleLog?.url, unverified: unverified)
+                    context.deferredFailure = Self.failure(error, stage: stage, log: context.lifecycleLog?.url, unverified: unverified, diagnosis: diagnosis)
                     await pending(context, reason: "Process state could not be confirmed")
                     await watch(game: game.id, executable: executable)
                 } else {
@@ -435,10 +492,10 @@ public actor LaunchManager {
                     }
                     if confirmedMissing { contexts[game.id] = nil; reservedGame = nil }
                     else { _ = await restore(context) }
-                    report(error, stage: stage, context: context, unverified: unverified)
+                    await report(error, stage: stage, context: context, unverified: unverified, diagnosis: diagnosis)
                 }
             } else {
-                events.yield(.failed(Self.failure(error, stage: stage, log: nil, unverified: unverified))); events.finish()
+                events.yield(.failed(Self.failure(error, stage: stage, log: nil, unverified: unverified, diagnosis: diagnosis))); events.finish()
                 reservedGame = nil
             }
         }
@@ -474,7 +531,7 @@ public actor LaunchManager {
                     context.continuation?.yield(.stage(.report)); context.continuation?.yield(.failed(failure)); context.continuation?.finish()
                 } else if !context.ready {
                     let cause = await endCause(context)
-                    report(LauncherError.io("The game ended before a window appeared"), stage: .watch, context: context,
+                    await report(LauncherError.io("The game ended before a window appeared"), stage: .watch, context: context,
                         unverified: context.unverifiedBuild, cause: cause)
                 } else { context.continuation?.yield(.stage(.report)); context.continuation?.finish() }
                 return
@@ -489,7 +546,7 @@ public actor LaunchManager {
                     context.continuation?.yield(.stage(.report)); context.continuation?.yield(.failed(failure)); context.continuation?.finish()
                 } else {
                     let cause = await endCause(context)
-                    report(LauncherError.io("The game did not start"), stage: .watch, context: context,
+                    await report(LauncherError.io("The game did not start"), stage: .watch, context: context,
                         unverified: context.unverifiedBuild, cause: cause)
                 }
                 return
@@ -628,14 +685,7 @@ public actor LaunchManager {
     private func startQualificationMonitor(_ context: Context) async {
         guard context.qualificationTask == nil, !context.hasEnded,
             (context.session.confirmedRunningSeconds ?? 0) < 120 else { return }
-        let paths = paths, session = context.session
-        let needed = (try? await BlockingIO.run {
-            try RuntimeAutomaticUpdateStore(paths: paths).load().replacements.contains { record in
-                !record.verified && (record.familyID.hasPrefix("bundle-")
-                    ? record.replacementID == session.bundleID : session.componentIDs.contains(record.replacementID))
-            }
-        }) ?? false
-        guard needed, contexts[session.game] === context, !context.hasEnded else { return }
+        let session = context.session
         let sampleClock = clock
         context.qualificationTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -822,8 +872,8 @@ public actor LaunchManager {
         if let qualification = context.qualificationTask {
             qualification.cancel(); await qualification.value; context.qualificationTask = nil
         }
-        if context.session.reachedRunning == true, context.session.reachedReady == true,
-            ["normal", "while MacGacha was closed"].contains(context.endOutcome), context.deferredFailure == nil {
+        let normal = ["normal", "while MacGacha was closed"].contains(context.endOutcome) && context.deferredFailure == nil
+        if context.session.qualifiesSuccessfulLaunch(normal: normal) {
             let paths = paths, session = context.session
             do {
                 try await BlockingIO.run {
@@ -840,6 +890,10 @@ public actor LaunchManager {
             await checkpointPlayTimeEnd(context)
             try await persist(context.session)
         }
+        do {
+            let paths = paths, session = context.session
+            try await BlockingIO.run { try LaunchHistoryStore(paths: paths).recordVerifiedSession(session, normal: normal) }
+        } catch { event("Launch history recording unavailable", game: context.session.game, level: .warning) }
         // This checkpoint remains in the journal until accounting and file recovery
         // both finish. A crash cannot replace the interval with a later detection.
         do { try await recordPlayTime(context.session) }
@@ -949,14 +1003,19 @@ public actor LaunchManager {
         let paths = paths, journalFileOps = journalFileOps, beforeJournalRead = beforeJournalRead
         return try await BlockingIO.run { try LaunchJournal(paths: paths, fileOps: journalFileOps, beforeRead: beforeJournalRead).read(game: game) }
     }
-    private func report(_ error: any Error, stage: LaunchStage, context: Context, unverified: Bool, cause: LaunchFailureCause? = nil) {
+    private func report(_ error: any Error, stage: LaunchStage, context: Context, unverified: Bool, cause: LaunchFailureCause? = nil, diagnosis: LaunchDiagnosis? = nil) async {
+        let diagnosis = if let diagnosis { diagnosis } else {
+            await diagnose(game: context.session.game, gameBuild: context.session.configuration?.gameBuild ?? "unknown",
+                gameBuildID: context.session.configuration?.gameBuildID, reason: cause == .antiCheatOffline ? .network : .classify(error), attempted: context.session.configuration,
+                allowRetry: context.session.historyRetry != true)
+        }
         if stage == .watch {
             var metadata = Self.failureMetadata(error, stage: stage)
             metadata["cause"] = cause?.rawValue
             event("Launch failed", game: context.session.game, level: .error, metadata: metadata)
         }
         context.continuation?.yield(.stage(.report))
-        context.continuation?.yield(.failed(Self.failure(error, stage: stage, log: context.lifecycleLog?.url, unverified: unverified, cause: cause)))
+        context.continuation?.yield(.failed(Self.failure(error, stage: stage, log: context.lifecycleLog?.url, unverified: unverified, cause: cause, diagnosis: diagnosis)))
         context.continuation?.finish(); context.continuation = nil
     }
     /// Reads the game's own startup error, if it wrote one during this session.
@@ -979,9 +1038,9 @@ public actor LaunchManager {
         let fields = Self.failureMetadata(error, stage: stage)
         note(context, "failed \(stage.rawValue) case=\(fields["case", default: "io"])" + (fields["reason"].map { " reason=\($0)" } ?? ""))
     }
-    private static func failure(_ error: any Error, stage: LaunchStage, log: URL?, unverified: Bool, cause: LaunchFailureCause? = nil) -> LaunchFailure {
+    private static func failure(_ error: any Error, stage: LaunchStage, log: URL?, unverified: Bool, cause: LaunchFailureCause? = nil, diagnosis: LaunchDiagnosis? = nil) -> LaunchFailure {
         LaunchFailure(stage: stage, message: String(localized: "Launch failed during \(stage.rawValue)."), logURL: log,
-            unverifiedBuild: unverified, cause: cause)
+            unverifiedBuild: unverified, cause: cause, diagnosis: diagnosis)
     }
     private static func name(_ game: String) -> String {
         let definition = GameDefinition.find(game)

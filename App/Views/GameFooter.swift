@@ -9,7 +9,7 @@ import SwiftUI
 
 /// Sheets that act on one game, opened from its footer.
 enum GameSheet: Identifiable, Hashable {
-    case install(String), voices(String), settings(String), setup(String), rosetta(String), wishExport(String)
+    case install(String), voices(String), settings(String), setup(String), rosetta(String), wishExport(String), launchDetails(String)
 
     var id: String {
         switch self {
@@ -19,6 +19,7 @@ enum GameSheet: Identifiable, Hashable {
         case .setup(let game): "setup-\(game)"
         case .rosetta(let game): "rosetta-\(game)"
         case .wishExport(let game): "wish-export-\(game)"
+        case .launchDetails(let game): "launch-details-\(game)"
         }
     }
 }
@@ -92,6 +93,10 @@ struct GameFooter: View {
                         model.openLaunchLog(game.id)
                     }
                     .transition(.opacity)
+                }
+                if isLaunchFailure {
+                    Button("Launch Details…") { gameSheet = .launchDetails(game.id) }
+                        .buttonStyle(.bordered)
                 }
                 if let held = state.spaceShortage?.heldByMacOS {
                     PurgeableSpaceHint(bytes: held)
@@ -344,7 +349,8 @@ struct GameFooter: View {
 
     /// Names the step that failed in plain words. Checks and locks already carry a message meant for people.
     private func failureLine(_ failure: LaunchFailureInfo) -> String {
-        switch failure.stage {
+        if failure.diagnosis?.reason != nil, failure.diagnosis?.reason != .unknown { return LaunchDiagnosticText.explanation(failure) }
+        return switch failure.stage {
         case .preflight, .lock: failure.message
         case .watch where failure.cause == .antiCheatOffline:
             // The game closes itself when its anti-cheat can't reach HoYoverse at startup.
@@ -698,6 +704,7 @@ struct GameMenu: View {
             }
             if isInstalled {
                 Button("Game Settings…", systemImage: "slider.horizontal.3") { gameSheet = .settings(game.id) }
+                Button("Launch Details…", systemImage: "clock.arrow.circlepath") { gameSheet = .launchDetails(game.id) }
             }
             if isInstalled, !waitingForApproval, !model.isGameOperationRunning, !isLive {
                 Button("Check for Updates", systemImage: "arrow.triangle.2.circlepath") { model.checkForGameUpdate(game.id) }

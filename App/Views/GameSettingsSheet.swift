@@ -343,7 +343,7 @@ struct GameSettingsSheet: View {
         )
     }
 
-    private static func name(of contents: MetalHUDContents) -> String {
+    nonisolated static func name(of contents: MetalHUDContents) -> String {
         switch contents {
         case .standard: String(localized: "Standard", comment: "Metal HUD contents or size: Apple's default")
         case .fpsOnly: String(localized: "FPS Only", comment: "Metal HUD contents")
@@ -352,7 +352,7 @@ struct GameSettingsSheet: View {
         }
     }
 
-    private static func name(of element: MetalHUDElement) -> String {
+    nonisolated static func name(of element: MetalHUDElement) -> String {
         switch element {
         case .device: String(localized: "Device and macOS version", comment: "Metal HUD element")
         case .rosetta: String(localized: "Rosetta", comment: "Metal HUD element: whether the game runs through Rosetta")
@@ -370,7 +370,7 @@ struct GameSettingsSheet: View {
         }
     }
 
-    private static func name(of position: MetalHUDPosition) -> String {
+    nonisolated static func name(of position: MetalHUDPosition) -> String {
         switch position {
         case .topLeft: String(localized: "Top Left", comment: "Metal HUD position")
         case .topCenter: String(localized: "Top Center", comment: "Metal HUD position")
@@ -384,7 +384,7 @@ struct GameSettingsSheet: View {
         }
     }
 
-    private static func name(of size: MetalHUDSize) -> String {
+    nonisolated static func name(of size: MetalHUDSize) -> String {
         switch size {
         case .small: String(localized: "Small", comment: "Metal HUD size")
         case .standard: String(localized: "Standard", comment: "Metal HUD contents or size: Apple's default")

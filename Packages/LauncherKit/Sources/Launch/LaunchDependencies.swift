@@ -21,6 +21,33 @@ public struct LaunchRuntimeSelection: Sendable {
 
 public protocol LaunchRuntimeProviding: Sendable {
     func selection(for settings: LaunchSettings) async throws -> LaunchRuntimeSelection
+    func selection(for configuration: LaunchConfiguration) async throws -> LaunchRuntimeSelection
+}
+
+extension LaunchRuntimeProviding {
+    public func selection(for configuration: LaunchConfiguration) async throws -> LaunchRuntimeSelection {
+        let result = try await selection(for: configuration.settings)
+        guard configuration.matches(result) else { throw LaunchConfigurationError.previousUnavailable }
+        return result
+    }
+}
+
+extension LaunchConfiguration {
+    func selectingPrevious(in captured: RuntimeCatalogSnapshot) throws -> RuntimeCatalogSnapshot {
+        // Pins govern persistent choices. A one-shot trial may pair unused helpers
+        // for the old ABI, while every helper actually used remains exact.
+        var unpinned = captured.selections
+        for (kind, selected) in unpinned.helpers { unpinned.helpers[kind] = .init(id: selected.id) }
+        let compatible = try captured.replacingSelections(unpinned).selectingBundle(id: SafeIdentifier(bundleID), pinned: false)
+        var selections = compatible.selections
+        for (kind, id) in compatibilityComponentIDs { selections.helpers[kind] = .init(id: try SafeIdentifier(id)) }
+        return try compatible.replacingSelections(selections)
+    }
+    func matches(_ selection: LaunchRuntimeSelection) -> Bool {
+        bundleID == selection.bundle.id.rawValue && runtimeDigest == selection.bundle.digest &&
+            runtimeProfileID == selection.runtimeProfileID && Set(componentIDs) == Set(selection.componentIDs) &&
+            compatibilityComponentIDs.allSatisfy { selection.compatibilityComponentIDs[$0.key] == $0.value }
+    }
 }
 public protocol LaunchPrefixProviding: Sendable {
     func prefixURL(game: String, bundle: InstalledRuntimeBundle) async throws -> URL
@@ -51,7 +78,16 @@ public struct LiveLaunchRuntimes: LaunchRuntimeProviding {
         self.manifest = nil; self.paths = paths; self.snapshot = snapshot; self.manager = manager; self.store = store
     }
     public func selection(for settings: LaunchSettings) async throws -> LaunchRuntimeSelection {
-        let current = try await snapshot?()
+        try await selection(for: settings, snapshot: try await snapshot?())
+    }
+    public func selection(for configuration: LaunchConfiguration) async throws -> LaunchRuntimeSelection {
+        var current = try await snapshot?()
+        if let captured = current { current = try configuration.selectingPrevious(in: captured) }
+        let result = try await selection(for: configuration.settings, snapshot: current)
+        guard configuration.matches(result) else { throw LaunchConfigurationError.previousUnavailable }
+        return result
+    }
+    private func selection(for settings: LaunchSettings, snapshot current: RuntimeCatalogSnapshot?) async throws -> LaunchRuntimeSelection {
         guard let manifest = current?.manifest ?? manifest else { throw LauncherError.io("Runtime catalog unavailable") }
         let selectedManager: RuntimeBundleManager
         if let paths {
@@ -59,7 +95,7 @@ public struct LiveLaunchRuntimes: LaunchRuntimeProviding {
             selectedManager = RuntimeBundleManager(manifest: manifest, store: store, consent: consent, installer: ComponentInstaller(store: store, consent: consent))
         } else { selectedManager = manager }
         guard let definition = manifest.defaultBundle(for: settings.backend),
-            let bundle = try await selectedManager.installed(definition) else { throw LauncherError.io("Install the selected runtime bundle first") }
+            let bundle = try await selectedManager.installed(definition) else { throw LaunchConfigurationError.runtimeUnavailable }
         let (roots, ids) = try await BlockingIO.run {
             let records = try store.installed()
             var roots: [ComponentKind: URL] = [:], ids: [ComponentKind: String] = [:]
@@ -99,5 +135,12 @@ package struct ClockSessionLogTicker: SessionLogTicker {
             } catch { }
         }
         return LogTickCancellation { worker.cancel() }
+    }
+}
+
+extension Optional where Wrapped == LaunchConfiguration {
+    func mapSelection(using runtimes: any LaunchRuntimeProviding, settings: LaunchSettings) async throws -> LaunchRuntimeSelection {
+        if let configuration = self { return try await runtimes.selection(for: configuration) }
+        return try await runtimes.selection(for: settings)
     }
 }

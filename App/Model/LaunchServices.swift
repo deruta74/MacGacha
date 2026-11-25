@@ -15,6 +15,9 @@ protocol LaunchServices: Sendable {
     func startupReattachment() async throws -> LaunchStartupResult
     func reattach() async throws -> [String: LaunchSession]
     func launch(game: GameDefinition, record: GameRecord) async throws -> AsyncStream<LaunchEvent>
+    func retryLastSuccessful(game: GameDefinition, record: GameRecord, retryID: UUID) async throws -> AsyncStream<LaunchEvent>
+    func successfulLaunches() async throws -> [String: SuccessfulLaunch]
+    func diagnose(game: String, gameBuild: String, gameBuildID: String?, reason: LaunchFailureReason) async -> LaunchDiagnosis
     func observation(_ id: String) async throws -> LaunchObservation?
     func recover(_ id: String) async throws
     func session(_ id: String) async -> LaunchSession?
@@ -25,6 +28,10 @@ protocol LaunchServices: Sendable {
 }
 
 extension LaunchServices {
+    func retryLastSuccessful(game: GameDefinition, record: GameRecord, retryID: UUID) async throws -> AsyncStream<LaunchEvent> { throw LaunchConfigurationError.previousUnavailable }
+    func successfulLaunches() async throws -> [String: SuccessfulLaunch] { [:] }
+    func diagnose(game: String, gameBuild: String, gameBuildID: String?, reason: LaunchFailureReason) async -> LaunchDiagnosis { LaunchDiagnosis(reason: reason, previous: nil, attempted: nil) }
+
     func startupReattachment() async throws -> LaunchStartupResult { LaunchStartupResult(sessions: try await reattach()) }
 }
 
@@ -79,7 +86,17 @@ actor LiveLaunchServices: LaunchServices, GameOperationGuard {
     }
     func launch(game: GameDefinition, record: GameRecord) async throws -> AsyncStream<LaunchEvent> {
         _ = try await reattach()
-        return await (try manager()).launch(game: game, installRoot: record.installPath, gameBuild: record.installed?.tag ?? "unknown")
+        return await (try manager()).launch(game: game, installRoot: record.installPath, gameBuild: record.installed?.tag ?? "unknown", gameBuildID: record.installed?.buildID)
+    }
+    func retryLastSuccessful(game: GameDefinition, record: GameRecord, retryID: UUID) async throws -> AsyncStream<LaunchEvent> {
+        _ = try await reattach()
+        return try await manager().retryLastSuccessful(game: game, installRoot: record.installPath,
+            gameBuild: record.installed?.tag ?? "unknown", gameBuildID: record.installed?.buildID, retryID: retryID)
+    }
+    func successfulLaunches() async throws -> [String: SuccessfulLaunch] { try await manager().successfulLaunches() }
+    func diagnose(game: String, gameBuild: String, gameBuildID: String?, reason: LaunchFailureReason) async -> LaunchDiagnosis {
+        guard let manager = try? await manager() else { return LaunchDiagnosis(reason: reason, previous: nil, attempted: nil) }
+        return await manager.diagnose(game: game, gameBuild: gameBuild, gameBuildID: gameBuildID, reason: reason)
     }
     func observation(_ id: String) async throws -> LaunchObservation? {
         try await manager().sessionObservation(for: id).map { LaunchObservation(session: $0.session, hasEnded: $0.hasEnded) }

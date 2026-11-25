@@ -20,6 +20,8 @@ public struct LaunchSession: Codable, Equatable, Sendable {
     public let componentIDs: [String]
     public let recipeVersion: Int
     public let settings: LaunchSettings
+    public var configuration: LaunchConfiguration?
+    public var historyRetry: Bool?
     public var state: State
     public var processes: [ProcessIdentity]
     /// Only groups created by our spawner. Observed Wine PIDs are not group IDs.
@@ -126,6 +128,7 @@ public struct LaunchSession: Codable, Equatable, Sendable {
                 location.identity.volume == installIdentity.volume,
                 location.parentIdentity.volume == installIdentity.volume else { throw LauncherError.journalCorrupt("Invalid recovery location") }
         }
+        try configuration?.validate(game: game)
         try settings.validate()
         var originals = Set<String>(), hidden = Set<String>()
         for entry in hides {

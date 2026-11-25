@@ -26,4 +26,5 @@ struct LaunchFailureInfo: Sendable, Equatable {
     let hasLog: Bool
     let unverifiedBuild: Bool
     var cause: LaunchFailureCause? = nil
+    var diagnosis: LaunchDiagnosis? = nil
 }

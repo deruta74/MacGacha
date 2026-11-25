@@ -125,12 +125,31 @@ import RuntimeManager
         await task.value
         await playTimeStartup.value
         await refreshPlayTime()
+        await refreshLaunchHistory()
     }
 
     /// Shared with the launcher view's selection, so it opens on the last game opened or started.
     static let selectedGameKey = "selectedGame"
 
-    func play(_ id: String) {
+    func refreshLaunchHistory() async {
+        if let history = try? await launchServices.successfulLaunches() { successfulLaunches = history }
+    }
+
+    func canRetrySuccessfulLaunch(_ id: String) -> Bool {
+        guard case .failed(let failure) = launchStates[id], failure.diagnosis?.retryID != nil else { return false }
+        return canBeginGameOrRuntimeOperation() && launchSlotOwner == nil && launchTasks.isEmpty &&
+            !runtimeCatalogUnavailable && runtimeCatalogMutationID == nil && canPlayAlongsideGameOperation(id)
+    }
+
+    func retrySuccessfulLaunch(_ id: String) {
+        guard canRetrySuccessfulLaunch(id), case .failed(let failure) = launchStates[id],
+            let retryID = failure.diagnosis?.retryID else { return }
+        play(id, retryID: retryID)
+    }
+
+    func play(_ id: String) { play(id, retryID: nil) }
+
+    private func play(_ id: String, retryID: UUID?) {
         guard canBeginGameOrRuntimeOperation() else { return }
         guard !runtimeCatalogUnavailable, runtimeCatalogMutationID == nil, launchSlotOwner == nil, launchTasks.isEmpty,
             canPlayAlongsideGameOperation(id),
@@ -186,7 +205,12 @@ import RuntimeManager
                         try await self.pauseDownloadForPlay(operation)
                     }
                 }
-                for await event in try await services.launch(game: game, record: record) {
+                let events = if let retryID {
+                    try await services.retryLastSuccessful(game: game, record: record, retryID: retryID)
+                } else {
+                    try await services.launch(game: game, record: record)
+                }
+                for await event in events {
                     if Task.isCancelled { return } // Detaches the observer; core supervision survives.
                     await self.handleLaunch(event, id: id)
                 }
@@ -197,8 +221,11 @@ import RuntimeManager
                 self.liveLaunchGames.remove(id)
                 if self.launchSlotOwner == id { self.launchSlotOwner = nil }
             } catch {
+                let diagnosed = await services.diagnose(game: id, gameBuild: self.gameRecords[id]?.installed?.tag ?? "unknown", gameBuildID: self.gameRecords[id]?.installed?.buildID, reason: .classify(error))
+                let diagnosis = retryID == nil ? diagnosed : LaunchDiagnosis(reason: diagnosed.reason,
+                    previous: diagnosed.previous, attempted: diagnosed.attempted)
                 self.recordLaunchFailure(LaunchFailureInfo(stage: .preflight,
-                    message: launcherError(error).userMessage, hasLog: false, unverifiedBuild: false), id: id)
+                    message: launcherError(error).userMessage, hasLog: false, unverifiedBuild: false, diagnosis: diagnosis), id: id)
                 _ = await self.refreshLaunchSession(id)
             }
         }
@@ -221,6 +248,7 @@ import RuntimeManager
         case .ended:
             recordVerifiedEnd(id)
             await refreshPlayTime()
+            await refreshLaunchHistory()
         case .restored(let outcome):
             switch outcome {
             case .pending:
@@ -237,13 +265,14 @@ import RuntimeManager
                 _ = await refreshLaunchSession(id)
             }
             await refreshPlayTime()
+            await refreshLaunchHistory()
         case .failed(let failure):
             if sessionLogsEnabled { launchLogURLs[id] = failure.logURL ?? launchLogURLs[id] }
             else { launchLogURLs[id] = nil }
             recordLaunchFailure(LaunchFailureInfo(stage: failure.stage,
                 message: LauncherError.io(failure.message).userMessage,
                 hasLog: sessionLogsEnabled && launchLogURLs[id] != nil, unverifiedBuild: failure.unverifiedBuild,
-                cause: failure.cause), id: id)
+                cause: failure.cause, diagnosis: failure.diagnosis), id: id)
             _ = await refreshLaunchSession(id)
         }
     }
