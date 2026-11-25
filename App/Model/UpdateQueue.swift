@@ -25,6 +25,13 @@ struct UpdateQueue: Codable, Equatable, Sendable {
     var automatic = false
     var automaticGames: Set<String> = []
     var lastDiscovery: Date? = nil
+    private var quietDownloadsPreference: Bool?
+    var quietDownloadSpeedLimit: Int64?
+
+    var quietDownloads: Bool {
+        get { quietDownloadsPreference ?? true }
+        set { quietDownloadsPreference = newValue }
+    }
 
     func permits(at date: Date, calendar: Calendar = .current, onAC: Bool?) -> Bool {
         guard enabled, !requiresAC || onAC == true else { return false }

@@ -39,6 +39,10 @@ protocol GameServices: Sendable {
     func adopt(_ id: String, folder: URL, voices: Set<String>) async -> GameEventStream
     func update(_ id: String, approved: Bool) async -> GameEventStream
     func resume(_ id: String, approved: Bool) async -> GameEventStream
+    func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool,
+        profile: DeliveryProfile) async -> GameEventStream
+    func update(_ id: String, approved: Bool, profile: DeliveryProfile) async -> GameEventStream
+    func resume(_ id: String, approved: Bool, profile: DeliveryProfile) async -> GameEventStream
     func verify(_ id: String, mode: Verifier.Mode) async -> GameEventStream
     func setVoices(_ id: String, _ voices: Set<String>) async -> GameEventStream
     func uninstall(_ id: String) async throws
@@ -47,6 +51,16 @@ protocol GameServices: Sendable {
 
 /// Existing fakes and previews opt out without touching delivery or disk.
 extension GameServices {
+    func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool,
+        profile: DeliveryProfile) async -> GameEventStream {
+        await install(id, voices: voices, at: location, approved: approved)
+    }
+    func update(_ id: String, approved: Bool, profile: DeliveryProfile) async -> GameEventStream {
+        await update(id, approved: approved)
+    }
+    func resume(_ id: String, approved: Bool, profile: DeliveryProfile) async -> GameEventStream {
+        await resume(id, approved: approved)
+    }
     func sandboxState(_ id: String) async throws -> SandboxState? { nil }
     func installSandbox(_ id: String) async -> GameEventStream { unavailableSandbox() }
     func updateSandbox(_ id: String) async -> GameEventStream { unavailableSandbox() }
@@ -207,20 +221,29 @@ final class LiveGameServices: GameServices, Sendable {
         catch { throw await failure(error, id: id) }
     }
     func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool) async -> GameEventStream {
+        await install(id, voices: voices, at: location, approved: approved, profile: .standard)
+    }
+    func install(_ id: String, voices: Set<String>, at location: URL, approved: Bool, profile: DeliveryProfile) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
-        return logged(await library(for: game).install(game, voices: voices, at: location, approved: approved), id: id)
+        return logged(await library(for: game).install(game, voices: voices, at: location, approved: approved, profile: profile), id: id)
     }
     func adopt(_ id: String, folder: URL, voices: Set<String>) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
         return logged(await library(for: game).adopt(game, folder: folder, voices: voices), id: id)
     }
     func update(_ id: String, approved: Bool) async -> GameEventStream {
+        await update(id, approved: approved, profile: .standard)
+    }
+    func update(_ id: String, approved: Bool, profile: DeliveryProfile) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
-        return logged(await library(for: game).update(game, approved: approved), id: id)
+        return logged(await library(for: game).update(game, approved: approved, profile: profile), id: id)
     }
     func resume(_ id: String, approved: Bool) async -> GameEventStream {
+        await resume(id, approved: approved, profile: .standard)
+    }
+    func resume(_ id: String, approved: Bool, profile: DeliveryProfile) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }
-        return logged(await library(for: game).resume(game, approved: approved), id: id)
+        return logged(await library(for: game).resume(game, approved: approved, profile: profile), id: id)
     }
     func verify(_ id: String, mode: Verifier.Mode) async -> GameEventStream {
         guard let game = Self.game(id) else { return logged(invalidGame(), id: id) }

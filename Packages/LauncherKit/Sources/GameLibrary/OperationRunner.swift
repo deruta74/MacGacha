@@ -41,29 +41,29 @@ public actor OperationRunner {
     /// managedPaths is the complete target build's path set, including files
     /// unchanged by this plan. A delta plan cannot reconstruct that ownership.
     public func start(_ game: String, record: GameRecord, plan: InstallPlan, kind: PendingOperation.Kind,
-        target: InstalledBuild, approved: Bool, managedPaths: Set<SafeRelativePath>) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, request: .start(.record(record), plan, kind, target, managedPaths, []), approved: approved)
+        target: InstalledBuild, approved: Bool, managedPaths: Set<SafeRelativePath>, profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, request: .start(.record(record), plan, kind, target, managedPaths, []), approved: approved, profile: profile)
     }
 
-    public func resume(_ game: String, approved: Bool) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, request: .resume, approved: approved)
+    public func resume(_ game: String, approved: Bool, profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, request: .resume, approved: approved, profile: profile)
     }
 
     package func start(_ game: String, record: GameRecord, plan: InstallPlan, kind: PendingOperation.Kind,
         target: InstalledBuild, approved: Bool, lease: GameOperationLease,
-        managedPaths: Set<SafeRelativePath>, reservedLocations: [URL] = []) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, request: .start(.record(record), plan, kind, target, managedPaths, reservedLocations), approved: approved, lease: lease)
+        managedPaths: Set<SafeRelativePath>, reservedLocations: [URL] = [], profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, request: .start(.record(record), plan, kind, target, managedPaths, reservedLocations), approved: approved, lease: lease, profile: profile)
     }
-    package func resume(_ game: String, approved: Bool, lease: GameOperationLease) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, request: .resume, approved: approved, lease: lease)
+    package func resume(_ game: String, approved: Bool, lease: GameOperationLease, profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, request: .resume, approved: approved, lease: lease, profile: profile)
     }
 
     /// Claims a fresh root under the store lease. A persisted GameRecord is never
     /// manufactured until the root exists and its identity has been measured.
     package func startInstall(_ game: String, at root: URL, executable: SafeRelativePath, plan: InstallPlan,
         target: InstalledBuild, approved: Bool, lease: GameOperationLease? = nil, sandboxListPath: SafeRelativePath? = nil,
-        managedPaths: Set<SafeRelativePath>, reservedLocations: [URL] = []) -> AsyncThrowingStream<OperationEvent, any Error> {
-        stream(game, request: .start(.fresh(root, executable, sandboxListPath), plan, .install, target, managedPaths, reservedLocations), approved: approved, lease: lease)
+        managedPaths: Set<SafeRelativePath>, reservedLocations: [URL] = [], profile: DeliveryProfile = .standard) -> AsyncThrowingStream<OperationEvent, any Error> {
+        stream(game, request: .start(.fresh(root, executable, sandboxListPath), plan, .install, target, managedPaths, reservedLocations), approved: approved, lease: lease, profile: profile)
     }
 
     func preDownloadSettings() -> (fetcher: ChunkFetcher, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, deliveryWorkController: DeliveryWorkController) {
@@ -106,11 +106,16 @@ public actor OperationRunner {
         return record
     }
 
-    private func stream(_ game: String, request: RunnerRequest, approved: Bool, lease: GameOperationLease? = nil) -> AsyncThrowingStream<OperationEvent, any Error> {
+    private func stream(_ game: String, request: RunnerRequest, approved: Bool, lease: GameOperationLease? = nil,
+        profile: DeliveryProfile) -> AsyncThrowingStream<OperationEvent, any Error> {
+        let (limit, configuration) = profile.pipeline(maxConcurrentObjects: maxConcurrentObjects, configuration: pipeline)
         let session = RunnerSession(game: game, request: request, approved: approved, store: store, fetcher: fetcher,
             disk: disk, log: log, hooks: crashHooks, fileOps: fileOps, lease: lease, identityProvider: identityProvider,
-            maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, locationProbe: locationProbe, deliveryWorkController: deliveryWorkController)
-        return AsyncThrowingStream(unfolding: { try await session.next() })
+            maxConcurrentObjects: limit, pipeline: configuration, locationProbe: locationProbe,
+            deliveryWorkController: deliveryWorkController, quality: profile.quality)
+        return AsyncThrowingStream(unfolding: {
+            try await BlockingIO.$quality.withValue(profile.quality) { try await session.next() }
+        })
     }
 }
 
@@ -130,7 +135,7 @@ private enum RunnerRecordProposal: Sendable {
 
 private actor RunnerSession {
     // Synchronous filesystem/cache work must not occupy a cooperative worker.
-    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.runner-session")
+    nonisolated private let ioQueue: DispatchSerialQueue
     nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
 
     private let game: String
@@ -157,7 +162,9 @@ private actor RunnerSession {
 
     init(game: String, request: RunnerRequest, approved: Bool, store: GameRecordStore, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe, log: EventLog?, hooks: CrashHooks, fileOps: any FileOps, lease: GameOperationLease?,
-        identityProvider: any FileSystemIdentityProvider, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, locationProbe: any GameLocationProbing, deliveryWorkController: DeliveryWorkController) {
+        identityProvider: any FileSystemIdentityProvider, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, locationProbe: any GameLocationProbing, deliveryWorkController: DeliveryWorkController,
+        quality: BlockingIO.Quality) {
+        ioQueue = DispatchSerialQueue(label: "org.macgacha.runner-session", qos: quality.actorQoS)
         self.game = game; self.request = request; self.approved = approved; self.store = store
         self.fetcher = fetcher; self.disk = disk; self.log = log; self.hooks = hooks; self.fileOps = fileOps
         self.lease = lease; self.identityProvider = identityProvider

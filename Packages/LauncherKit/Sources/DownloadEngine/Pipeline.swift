@@ -20,6 +20,20 @@ public struct PipelineConfiguration: Sendable, Equatable {
     }
 }
 
+/// Settings for one install, update or resume. Manual operations use standard delivery.
+public enum DeliveryProfile: Sendable {
+    case standard, quiet
+
+    package var quality: BlockingIO.Quality { self == .quiet ? .background : .standard }
+
+    package func pipeline(maxConcurrentObjects: Int, configuration: PipelineConfiguration) -> (Int, PipelineConfiguration) {
+        guard self == .quiet else { return (maxConcurrentObjects, configuration) }
+        return (min(2, maxConcurrentObjects), PipelineConfiguration(
+            prefetchBytes: min(64 << 20, configuration.prefetchBytes),
+            prefetchObjects: min(32, configuration.prefetchObjects), assemblies: min(1, configuration.assemblies)))
+    }
+}
+
 /// The stream owns work, not the reusable staging session. Discarding an idle
 /// iterator cancels its bounded producer, even without another next() call.
 private final class PipelineLifetime: Sendable {

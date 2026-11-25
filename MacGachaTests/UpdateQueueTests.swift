@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
 import Foundation
+import Observation
+import Launch
 import LauncherCore
 import DownloadEngine
 import GameLibrary
@@ -168,6 +170,26 @@ import Testing
         model.pauseGame("genshin"); await model.gameTask?.value
     }
 
+    @Test func quietProfileAndCapOnlyApplyToQueueOwnedTransfers() async throws {
+        let fake = QueueGameServices(), model = fixture(fake)
+        await model.start()
+        #expect(model.quietDownloads && model.quietDownloadSpeedLimit == nil)
+        try model.setDownloadSpeedLimit(4_000_000)
+        try model.setQuietDownloadSpeedLimit(2_000_000)
+        try await enqueue("genshin", model: model, fake: fake)
+        await observeUntil { model.updateQueue.entries.first?.pending != nil }
+        #expect(model.gameOperation?.deliveryProfile == .quiet)
+        #expect(model.effectiveDownloadSpeedLimit == 2_000_000)
+        await fake.finish("genshin")
+        await model.gameTask?.value
+        #expect(model.effectiveDownloadSpeedLimit == 4_000_000)
+        model.updateGame("genshin")
+        #expect(model.gameOperation?.deliveryProfile == .standard)
+        #expect(model.effectiveDownloadSpeedLimit == 4_000_000)
+        model.pauseGame("genshin")
+        await model.gameTask?.value
+    }
+
     @Test func constrainedPathCancelsAndResumesOnlyQueueOwnedPlan() async throws {
         let signals = QueueSignals(), fake = QueueGameServices(), model = fixture(fake, signals: signals)
         try await enqueue("genshin", model: model, fake: fake)
@@ -320,11 +342,20 @@ import Testing
         signals: QueueSignals = QueueSignals()) -> AppModel {
         AppModel(paths: AppPaths(root: URL(fileURLWithPath: "/inert/Queue")),
             services: PreviewRuntimeServices(), defaults: defaults, gameServices: fake,
-            updateQueueStore: store, updateQueueSignals: { (signals.network, signals.onAC, signals.idle) })
+            launchPreferences: QueueLaunchPreferences(), updateQueueStore: store, updateQueueSignals: { (signals.network, signals.onAC, signals.idle) })
     }
 
     private func enqueue(_ id: String, model: AppModel, fake: QueueGameServices) async throws {
         model.setGameRecord(id, try await fake.record(id)); model.enqueueUpdate(id)
+    }
+
+    private func observeUntil(_ condition: () -> Bool) async {
+        while !Task.isCancelled {
+            let (changes, sender) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            if withObservationTracking(condition, onChange: { sender.yield(()) }) { return }
+            var iterator = changes.makeAsyncIterator()
+            guard await iterator.next() != nil else { return }
+        }
     }
 
     private func eventually(_ condition: () async -> Bool) async throws {
@@ -334,6 +365,13 @@ import Testing
             try await Task.sleep(for: .milliseconds(10))
         }
     }
+}
+
+private struct QueueLaunchPreferences: LaunchPreferencesPersistence {
+    func loadGames() throws -> [String: LaunchSettings] { [:] }
+    func loadGlobal() throws -> GlobalLaunchSettings { GlobalLaunchSettings() }
+    func save(_ settings: LaunchSettings, game: String) throws {}
+    func saveGlobal(_ settings: GlobalLaunchSettings) throws {}
 }
 
 @MainActor private final class QueueSignals {
