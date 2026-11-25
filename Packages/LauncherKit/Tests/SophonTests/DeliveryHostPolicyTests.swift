@@ -101,6 +101,9 @@ private final class DeliveryRedirectStub: URLProtocol, @unchecked Sendable {
         if let location, let target = URL(string: location, relativeTo: url)?.absoluteURL {
             let response = HTTPURLResponse(url: url, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: ["Location": location])!
             client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: target), redirectResponse: response)
+            // A followed redirect must not also finish this load: URLSession could take the 302 as the final
+            // response before it starts the next hop. Only a refused redirect ends with the 302 itself.
+            guard !Self.followsRedirect(from: url, to: target) else { return }
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocolDidFinishLoading(self)
         } else {
@@ -111,4 +114,9 @@ private final class DeliveryRedirectStub: URLProtocol, @unchecked Sendable {
         }
     }
     override func stopLoading() {}
+
+    /// Every test policy here allows only HTTPS on the same delivery host, so same-host HTTPS hops are followed.
+    private static func followsRedirect(from url: URL, to target: URL) -> Bool {
+        target.scheme == "https" && target.host == url.host
+    }
 }
