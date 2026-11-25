@@ -10,7 +10,7 @@
 
 > ✨ **[MacGacha 0.3.5](https://github.com/deruta74/MacGacha/releases/tag/v0.3.5) is out**: install and auto-update Genshin Impact's Miliastra Sandbox editor, a clear message when your network blocks the game's servers and a fix for the background video playing too fast. Already on 0.3.1? MacGacha updates itself. Found something? Please [report it](#feedback).
 
-A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail** and **Zenless Zone Zero** on Apple Silicon. It installs, updates and verifies the games from HoYoverse's official servers, manages Wine / DXMT / D3DMetal runtimes, and starts each game with one click.
+A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero** and **Honkai Impact 3rd** on Apple Silicon. It installs, updates and verifies the games from HoYoverse's official servers, manages Wine / DXMT / D3DMetal runtimes, and starts each game with one click.
 
 - Requirements: Apple Silicon Mac with Rosetta 2 (MacGacha offers to install it), macOS 27 or later.
 
@@ -55,12 +55,13 @@ Later versions arrive through **Check for Updates…** in the MacGacha menu, so 
 ## Roadmap
 
 **Done**
-- The Global catalog includes pre-registration for Petit Planet and Honkai: Nexus Anima and an App Store link for Honkai Impact 3rd.
-- **One-click Play.** Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game and minimizes itself to the Dock. When the game closes, it comes back and puts back any game files it hid. Accepted in all three games on D3DMetal and DXMT.
+- **Honkai Impact 3rd Global.** Install, update, verify, repair, adopt and play the Windows edition through MacGacha. Tested in play on the Europe & Americas server, version 9.1.0, with Wine 11.22 and the recommended D3DMetal backend. Gameplay on the other four servers and on DXMT awaits verification. Use the server menu above Play to switch between the five HoYoPlay servers. Each server has its own installation.
+- The Global catalog includes pre-registration for Petit Planet and Honkai: Nexus Anima.
+- **One-click Play.** Press Play, and the launcher prepares the Wine prefix and the compatibility workaround, starts the game and minimizes itself to the Dock. When the game closes, it comes back and puts back any game files it hid. Genshin Impact, Honkai: Star Rail and Zenless Zone Zero passed testing on D3DMetal and DXMT.
 - **Installing games** through HoYoverse's official delivery: install, update, verify and repair, voice packs, using an existing installation, and uninstall. Pause and resume work across app restarts. Free space is checked before and during the download. If macOS is still holding space (Time Machine snapshots, caches), the launcher says so instead of just "not enough space". **Check for Updates** in a game's menu looks for a new version right away.
 - **Smaller updates and pre-download.** Genshin Impact and Honkai: Star Rail update with HoYoverse's patch files, the way HoYoPlay does. Genshin 7.1 to 7.2 with English voice is 8.4 GB instead of 22.7 GB. When HoYoverse offers the next version early, **Pre-download** fetches it ahead of release, and the installed version stays playable. Pressing Play pauses the pre-download, and you resume it after playing. On release day the update installs from the downloaded files. A file that can't be patched is downloaded normally.
 - **Download engine.** Resumable, verified downloads with a crash-safe journal. A file reaches the game folder only after its hash matches. Files are downloaded and assembled in parallel, close to the full speed of a 2.5 Gbit link. Downloads and full verification show the time left, and long steps show how long they have been running.
-- **Launcher.** One window for all three games with HoYoPlay's backgrounds, in HoYoPlay's order. Each time you open MacGacha, the next background appears, and the dots at the top switch between them. Animated backgrounds play with MacGacha's own video player, which uses about a third less memory than a web view. Each background's Version Highlights and the current events from HoYoPlay open in the browser.
+- **Launcher.** One window for the game library with HoYoPlay's backgrounds, in HoYoPlay's order. Each time you open MacGacha, the next background appears, and the dots at the top switch between them. Animated backgrounds play with MacGacha's own video player, which uses about a third less memory than a web view. Each background's Version Highlights and the current events from HoYoPlay open in the browser.
 - **Genshin Impact frame-rate unlock (opt-in).** A switch in Genshin's game settings, off by default, with a target of 120 FPS or a custom value up to 360. MacGacha loads a small helper into the game that only raises its frame-rate limit, using the method of [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock). We build it ourselves, reproducibly ([release](https://github.com/deruta74/MacGacha/releases/tag/genshin-fps-unlock-2)). The first time you turn it on, a warning explains the ban risk. Tested on Global Genshin 7.1: 120 FPS held through a 3.5-hour online session.
 - **Star Rail at 120 FPS.** A switch in Star Rail's game settings, Global and Mainland China, sets the game's own saved frame rate to 120 before each launch. On a new install, change any option in the game's graphics settings once so the game saves its settings, then play again.
 - **Surround sound.** Genshin Impact and Zenless Zone Zero can play in surround on D3DMetal, mixed into Spatial Audio for AirPods and other supported headphones. Speakers with six or more channels keep their own layout. Off by default, one switch per game.
@@ -88,7 +89,7 @@ Later versions arrive through **Check for Updates…** in the MacGacha menu, so 
 
 **Verified by hand (macOS 27.0.1)**
 
-All three games start and play with a community anti-cheat workaround. None of them needs `/etc/hosts` changes or administrator rights. Measured on a MacBook Pro 14″ with M5 Pro (48 GB) and on a base M5 (16 GB). Zenless Zone Zero used the same graphics preset on both.
+The three games in the table start and play with a community anti-cheat workaround. None of them needs `/etc/hosts` changes or administrator rights. Measured on a MacBook Pro 14″ with M5 Pro (48 GB) and on a base M5 (16 GB). Zenless Zone Zero used the same graphics preset on both.
 
 | Game | Default backend | M5 Pro, 48 GB | M5, 16 GB |
 |---|---|---|---|

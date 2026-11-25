@@ -4,12 +4,14 @@ import HoYoPlayAPI
 
 protocol GameArtProviding: Sendable {
     func cached() -> [String: GameArt]
+    func cachedHonkaiServerDescriptions() -> [String: String]
     func loadCached() async -> [String: GameArt]
     func refresh() async -> [String: GameArt]
     func invalidateStorageCache() async
 }
 
 extension GameArtProviding {
+    func cachedHonkaiServerDescriptions() -> [String: String] { [:] }
     func invalidateStorageCache() async {}
     func loadCached() async -> [String: GameArt] { cached() }
 }

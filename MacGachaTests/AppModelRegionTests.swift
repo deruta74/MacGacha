@@ -44,9 +44,13 @@ import RuntimeManager
     @Test func visibleGamesHaveEditionNamesOrderAndSharedTints() throws {
         let model = model()
         #expect(LauncherGame.all.map(\.id) == GameDefinition.all.map(\.id))
-        #expect(model.visibleGames.map(\.id) == ["genshin", "starrail", "zzz"])
+        #expect(model.visibleGames.map(\.id) == ["genshin", "starrail", "zzz"] + HonkaiImpactServer.allCases.map(\.rawValue))
+        #expect(model.launcherCards.map(\.id) == [
+            "genshin", "starrail", "zzz", "hi3", "petit-planet", "honkai-nexus-anima"
+        ])
         model.region = .mainlandChina
         #expect(model.visibleGames.map(\.id) == ["genshin-cn", "starrail-cn", "zzz-cn"])
+        #expect(LauncherGame.cards(in: .mainlandChina) == model.visibleGames)
         #expect(model.visibleGames.allSatisfy { $0.region == .mainlandChina })
         for (global, cn) in zip(LauncherGame.games(in: .global), model.visibleGames) {
             #expect(global.tint == cn.tint && global.deepTint == cn.deepTint)
@@ -54,6 +58,131 @@ import RuntimeManager
         #expect(model.visibleGames[0].name == "原神")
         #expect(model.visibleGames[1].name == "崩坏：星穹铁道")
         #expect(model.visibleGames[2].name == "绝区零")
+    }
+
+    @Test func legacyHonkaiImpactSelectionMigratesBeforeTheRailLoads() throws {
+        let name = "MacGacha-HI3Selection-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("honkai-impact-3rd", forKey: AppModel.selectedGameKey)
+        let first = model(defaults: defaults)
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "hi3")
+        #expect(first.selectedHonkaiServer == .europeAmericas)
+        #expect(defaults.string(forKey: AppModel.honkaiServerKey) == "hi3")
+        #expect(first.visibleGames.contains { $0.id == defaults.string(forKey: AppModel.selectedGameKey) })
+        defaults.set("petit-planet", forKey: AppModel.selectedGameKey)
+        _ = model(defaults: defaults)
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "petit-planet")
+    }
+
+    @Test(arguments: [false, true])
+    func legacyHonkaiBackgroundMigratesIndependentlyOfSelectedGame(hasCurrent: Bool) throws {
+        let name = "MacGacha-HI3Background-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("starrail", forKey: AppModel.selectedGameKey)
+        let store = UserDefaultsBackgroundSelectionStore(defaults: defaults)
+        store.setLastShownID("first", for: "honkai-impact-3rd")
+        if hasCurrent { store.setLastShownID("second", for: "hi3") }
+        let model = model(defaults: defaults)
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "starrail")
+        #expect(store.lastShownID(for: "hi3") == (hasCurrent ? "second" : "first"))
+        let slides = ["first", "second", "third"].map { GameBackground(id: $0, image: URL(filePath: "/inert/\($0).png")) }
+        model.applyArt(["hi3": GameArt(backgrounds: slides)], in: .global)
+        let art = try #require(model.launcherArt(for: "hi3"))
+        var selection = BackgroundSelection(clock: ContinuousClock(), session: BackgroundSelectionSession(store: store))
+        selection.update(region: .global, gameID: "hi3", backgrounds: art.backgrounds, animated: true, reduceMotion: false)
+        #expect(selection.slides?.current.id == (hasCurrent ? "third" : "second"))
+        #expect(store.lastShownID(for: "honkai-impact-3rd") == "first")
+    }
+
+    @Test func honkaiServerStatusShowsLaunchPreparationAfterSwitching() throws {
+        let model = model()
+        let record = GameRecord(installPath: URL(filePath: "/inert/hi3-jp"), ownership: .created,
+            executable: try SafeRelativePath("BH3.exe"),
+            installed: InstalledBuild(tag: "9.1.0", buildID: "synthetic", categories: [], voices: []),
+            installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: 2))
+        model.setGameRecord("hi3-jp", record)
+        #expect(model.honkaiServers.first { $0.server == .japan }?.status == .installed)
+        model.selectHonkaiServer(.japan)
+        model.launchSlotOwner = "hi3-jp"
+        model.launchStates["hi3-jp"] = .starting(.preflight)
+        model.selectHonkaiServer(.korea)
+        #expect(model.selectedHonkaiServer == .korea)
+        #expect(model.honkaiServers.first { $0.server == .japan }?.status == .inProgress)
+        #expect(model.honkaiServers.first { $0.server == .korea }?.status == nil)
+        #expect(model.launchSlotOwner == "hi3-jp")
+        model.launchStates["hi3-jp"] = .running
+        #expect(model.honkaiServers.first { $0.server == .japan }?.status == .playing)
+    }
+
+    @Test func honkaiServerListUsesTheOnlyInstalledServerAndKeepsOneCard() throws {
+        let model = model()
+        #expect(model.honkaiServers.map(\.id) == ["hi3", "hi3-jp", "hi3-kr", "hi3-sea", "hi3-tw"])
+        #expect(model.honkaiServers.map(\.description) == ["Europe & Americas Servers", "JP Server", "KR Server", "SEA Server", "Traditional Chinese Server"])
+        #expect(model.selectedHonkaiServer == .europeAmericas)
+        let japan = try #require(GameDefinition.find("hi3-jp"))
+        let korea = try #require(GameDefinition.find("hi3-kr"))
+        func installed(_ game: GameDefinition) throws -> GameRecord {
+            GameRecord(installPath: URL(filePath: "/inert/\(game.id)"), ownership: .created,
+                executable: try SafeRelativePath(game.executableName),
+                installed: InstalledBuild(tag: "9.1.0", buildID: "synthetic", categories: [], voices: []),
+                installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: 2))
+        }
+        model.setGameRecord(japan.id, try installed(japan))
+        #expect(model.selectedHonkaiServer == .japan)
+        #expect(model.honkaiServers.filter(\.isInstalled).map(\.id) == [japan.id])
+        #expect(model.launcherGame(for: "hi3").id == japan.id)
+        #expect(model.launcherCards.map(\.id) == ["genshin", "starrail", "zzz", japan.id, "petit-planet", "honkai-nexus-anima"])
+        model.setGameRecord(korea.id, try installed(korea))
+        #expect(model.selectedHonkaiServer == .europeAmericas)
+        model.selectHonkaiServer(.korea)
+        #expect(model.launcherGame(for: "hi3").id == korea.id)
+        let selection = self.model()
+        selection.setGameRecord(japan.id, try installed(japan))
+        selection.rememberHonkaiServer(for: selection.launcherGame(for: "hi3").id)
+        selection.setGameRecord(japan.id, nil)
+        #expect(selection.selectedHonkaiServer == .japan)
+    }
+
+    @Test(arguments: HonkaiImpactServer.allCases)
+    func globalSelectionRemembersTheSpecificHonkaiServer(server: HonkaiImpactServer) throws {
+        let name = "MacGacha-HI3Server-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("invalid", forKey: AppModel.honkaiServerKey)
+        defaults.set(server.rawValue, forKey: AppModel.selectedGameKey)
+        let first = model(defaults: defaults)
+        #expect(first.selectedHonkaiServer == server)
+        #expect(first.launcherGame(for: server.rawValue).id == server.rawValue)
+        first.selectHonkaiServer(.traditionalChinese)
+        #expect(defaults.string(forKey: AppModel.selectedGameKey) == "hi3-tw")
+        defaults.set("genshin", forKey: AppModel.selectedGameKey)
+        let second = model(defaults: defaults)
+        #expect(second.selectedHonkaiServer == .traditionalChinese)
+        #expect(second.launcherGame(for: "genshin").id == "genshin")
+    }
+
+    @Test func honkaiSelectionUsesServerArtworkAndCachedDescriptionsWithFallbacks() throws {
+        let model = model()
+        let defaultIcon = URL(filePath: "/shared-icon")
+        let defaultBackground = GameBackground(id: "europe", image: URL(filePath: "/europe-background"))
+        let japanBackground = GameBackground(id: "japan", image: URL(filePath: "/japan-background"))
+        model.applyArt(["hi3": GameArt(icon: defaultIcon, backgrounds: [defaultBackground]),
+            "hi3-jp": GameArt(backgrounds: [japanBackground])], in: .global, honkaiDescriptions: ["hi3-jp": "日本サーバー"])
+        #expect(model.honkaiServers.first { $0.server == .japan }?.description == "日本サーバー")
+        #expect(model.honkaiServers.first { $0.server == .korea }?.description == "KR Server")
+        #expect(model.launcherArt(for: "hi3-jp")?.backgrounds == [japanBackground])
+        #expect(model.launcherArt(for: "hi3-jp")?.icon == defaultIcon)
+        #expect(model.launcherArt(for: "hi3-tw")?.backgrounds == [defaultBackground])
+        let game = try #require(LauncherGame.all.first { $0.id == "hi3-jp" })
+        #expect(model.editionDisplayName(game).contains("日本サーバー"))
+        let event = GameEvent(title: "Europe", date: "", link: nil)
+        let date = Date()
+        model.applyEvents(["hi3": GameEventsSnapshot(posts: [event], region: .global, language: .enUS, fetchedAt: date),
+            "hi3-jp": GameEventsSnapshot(posts: [], region: .global, language: .enUS, fetchedAt: date)], in: .global)
+        #expect(model.launcherEvents(for: "hi3-jp").isEmpty)
+        #expect(model.launcherEvents(for: "hi3-tw") == [event])
     }
 
     @Test(arguments: [OtherRegionActivity.downloading, .updating, .verifying, .playing, .restoring])
@@ -111,7 +240,7 @@ import RuntimeManager
         #expect(model.otherRegionActivity == nil)
     }
 
-    @Test func remoteRefreshIsLazyAndThrottledPerRegionWhileRecordsCoverSix() async {
+    @Test func remoteRefreshIsLazyAndThrottledPerRegionWhileRecordsCoverEveryEdition() async {
         let services = RegionGameServices(), model = model(services: services)
         await model.start()
         #expect(Set(await services.statusReads) == Set(GameDefinition.inRegion(.global).map(\.id)))
@@ -123,7 +252,7 @@ import RuntimeManager
         #expect(model.games["starrail-cn"]?.status == .installed(tag: "1.0"))
         model.region = .global
         await model.regionLoadTasks[.global]?.value
-        #expect(await services.statusReads.count == 6)
+        #expect(await services.statusReads.count == GameDefinition.all.count)
     }
 
     @Test func artLoadsBothCachesButRefreshesOnlySelectedRegionAndKeepsBoth() async {

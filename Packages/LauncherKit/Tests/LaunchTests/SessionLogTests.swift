@@ -90,6 +90,21 @@ import LauncherCore
             #expect(try readTestLog(log).contains("buildVerification: verified build"))
         }
     }
+
+    @Test(arguments: ["d3dmetal", "dxmt"], [true, false])
+    func honkaiImpactLogReportsVerificationForTheSelectedConfiguration(backend: String, patches: Bool) async throws {
+        try await BlockingIO.run {
+            let temp = try TempDir()
+            var settings = LaunchSettings.defaults(for: "hi3")
+            settings.backend = backend == "d3dmetal" ? .d3dmetal : .dxmt
+            settings.compatibilityPatches = patches
+            let log = try SessionLog.create(paths: AppPaths(root: temp.url), game: "hi3",
+                header: ["gameBuild": "9.1.0", "backend": backend, "runtimeBundle": "d3dmetal-wine11.22mg1.0-gptk4.0b3"],
+                now: Date(), timeZone: .current, maxBytes: 4096, launchSettings: settings)
+            let label = backend == "d3dmetal" && patches ? "verified build" : "unverified build"
+            #expect(try readTestLog(log).contains("buildVerification: \(label)\n"))
+        }
+    }
     @Test func existingSymlinkIsACollisionAndNeverOpened() async throws {
         try await BlockingIO.run {
             let temp = try TempDir(), paths = AppPaths(root: temp.url), fs = try ContainedFileSystem(root: temp.url)

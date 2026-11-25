@@ -11,7 +11,7 @@ struct InstallSheet: View {
     @Environment(\.dismiss) private var dismiss
     let game: LauncherGame
     @State private var location: URL
-    @State private var voices: Set<String> = ["en-us"]
+    @State private var voices: Set<String>
     @State private var check = SizeCheck.loading
     @State private var attempt = 0
     @State private var picking = false
@@ -28,9 +28,13 @@ struct InstallSheet: View {
     init(game: LauncherGame, installRoot: URL) {
         self.game = game
         _location = State(initialValue: installRoot.appendingPathComponent(game.defaultInstallDirectoryName, isDirectory: true))
+        let options = GameDefinition.find(game.id)?.voices ?? []
+        let initialVoice = options.first { $0.code == "en-us" } ?? options.first
+        _voices = State(initialValue: initialVoice.map { [$0.code] } ?? [])
     }
 
-    private var definition: GameDefinition? { GameDefinition.all.first { $0.id == game.id } }
+    private var voiceOptions: [VoiceOption] { GameDefinition.find(game.id)?.voices ?? [] }
+    private var needsVoiceSelection: Bool { !voiceOptions.isEmpty && voices.isEmpty }
     private var estimate: GameEstimate? { if case .ready(let value) = check { value } else { nil } }
     private var verdict: SpaceVerdict? { estimate.map(SpaceVerdict.of) }
     private var immediateVerdict: SpaceVerdict? { estimate.map(SpaceVerdict.immediate) }
@@ -68,16 +72,18 @@ struct InstallSheet: View {
                             .foregroundStyle(.red)
                     }
                 }
-                Section {
-                    ForEach(definition?.voices ?? [], id: \.code) { voice in
-                        Toggle(voice.displayName, isOn: binding(for: voice.code))
+                if !voiceOptions.isEmpty {
+                    Section {
+                        ForEach(voiceOptions, id: \.code) { voice in
+                            Toggle(voice.displayName, isOn: binding(for: voice.code))
+                        }
+                    } header: {
+                        Text("Voice Packs")
+                    } footer: {
+                        Text("Choose at least one. You can change voice packs later.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                } header: {
-                    Text("Voice Packs")
-                } footer: {
-                    Text("Choose at least one. You can change voice packs later.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Section {
                     summary
@@ -112,7 +118,7 @@ struct InstallSheet: View {
             case .location:
                 location = folder.appendingPathComponent(game.defaultInstallDirectoryName, isDirectory: true)
             case .existing:
-                guard !voices.isEmpty, !adoptionBlocked else { return }
+                guard !needsVoiceSelection, !adoptionBlocked else { return }
                 model.adoptGame(game.id, folder: folder, voices: voices)
                 dismiss()
             }
@@ -124,7 +130,7 @@ struct InstallSheet: View {
         }
         .task(id: EstimateKey(location: location, voices: voices, attempt: attempt)) {
             check = .loading
-            guard !voices.isEmpty else { return }
+            guard !needsVoiceSelection else { return }
             // Toggling several voices quickly asks for one estimate, not one per click.
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
@@ -171,7 +177,7 @@ struct InstallSheet: View {
                     systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
             }
-        } else if voices.isEmpty {
+        } else if needsVoiceSelection {
             Text("Choose a voice pack to see the size.").foregroundStyle(.secondary)
         } else if case .failed(let reason, let retryable) = check {
             if retryable {
@@ -193,7 +199,7 @@ struct InstallSheet: View {
 
     private var existingButton: some View {
         Button("Use an Existing Installation…") { pickMode = .existing; picking = true }
-            .disabled(voices.isEmpty || adoptionBlocked)
+            .disabled(needsVoiceSelection || adoptionBlocked)
             .help("Choose a folder that already has \(game.name). MacGacha checks it and downloads only what's missing.")
     }
 

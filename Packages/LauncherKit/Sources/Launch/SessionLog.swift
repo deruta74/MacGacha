@@ -61,7 +61,7 @@ public struct SessionLog: Sendable {
     }
     package static func create(paths: AppPaths, game: String, header: [String: String], now: Date, timeZone: TimeZone, maxBytes: Int,
         ticker: any SessionLogTicker = SystemSessionLogTicker(), fileOps: any FileOps = SystemFileOps(),
-        beforeRetention: @Sendable (SafeRelativePath) -> Void = { _ in }) throws -> SessionLog {
+        launchSettings: LaunchSettings? = nil, beforeRetention: @Sendable (SafeRelativePath) -> Void = { _ in }) throws -> SessionLog {
         _ = try SafeIdentifier(game)
         guard now.timeIntervalSince1970.isFinite, maxBytes >= marker.count else { throw LauncherError.io("Invalid session log configuration") }
         let formatter = DateFormatter()
@@ -99,7 +99,9 @@ public struct SessionLog: Sendable {
         let recipe = Recipes.recipe(for: game)
         fields["recipe"] = header["recipe"] ?? game
         fields["recipeVersion"] = header["recipeVersion"] ?? recipe.map { String($0.recipeVersion) } ?? "unknown"
-        let verified = recipe?.verifiedBuilds.contains(header["gameBuild"] ?? "") == true && fields["recipeVersion"] == recipe.map { String($0.recipeVersion) }
+        let verified = recipe?.isVerified(build: header["gameBuild"] ?? "", settings: launchSettings,
+            runtimeBundleID: header["runtimeBundle"]) == true
+            && fields["recipeVersion"] == recipe.map { String($0.recipeVersion) }
         fields["buildVerification"] = verified ? "verified build" : "unverified build"
         let timestamp = ISO8601DateFormatter(); timestamp.timeZone = timeZone
         fields["dateTime"] = timestamp.string(from: now)

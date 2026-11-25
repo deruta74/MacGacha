@@ -55,7 +55,7 @@ struct GameFooter: View {
                 if let highlights {
                     HighlightsButton(highlights: highlights, images: images)
                 }
-                EventsPanel(events: model.gameEvents[game.id] ?? [])
+                EventsPanel(events: model.launcherEvents(for: game.id))
             }
             Spacer(minLength: 24)
             VStack(alignment: .trailing, spacing: 10) {
@@ -69,11 +69,16 @@ struct GameFooter: View {
                 if showsPreDownload {
                     PreDownloadBar(game: game, gameIsLive: launch.map { if case .failed = $0 { false } else { true } } ?? false)
                 }
-                if let installedVersion {
+                if installedVersion != nil || showsServerPicker {
                     HStack(spacing: 8) {
-                        InfoCapsule(text: installedVersion, systemImage: nil)
-                            .accessibilityLabel(Text("Version \(installedVersion)", comment: "A dependency's version or build number, e.g. Version 11.0-1"))
-                        if let playTime {
+                        if showsServerPicker {
+                            HonkaiServerPicker()
+                        }
+                        if let installedVersion {
+                            InfoCapsule(text: installedVersion, systemImage: nil)
+                                .accessibilityLabel(Text("Version \(installedVersion)", comment: "A dependency's version or build number, e.g. Version 11.0-1"))
+                        }
+                        if installedVersion != nil, let playTime {
                             InfoCapsule(text: TimeText.duration(playTime.totalSeconds), systemImage: "clock")
                                 .help(TimeText.lastSession(playTime))
                                 .accessibilityLabel(Text(verbatim: TimeText.played(playTime.totalSeconds)))
@@ -188,6 +193,9 @@ struct GameFooter: View {
         default: return nil
         }
     }
+
+    /// Honkai Impact 3rd has one card for five servers, as in HoYoPlay.
+    private var showsServerPicker: Bool { HonkaiImpactServer(rawValue: game.id) != nil }
 
     private var playTime: PlayTimeSummary? {
         guard let summary = model.playTime(for: game.id), summary.totalSeconds >= 60 else { return nil }
@@ -696,10 +704,12 @@ struct GameMenu: View {
                     .disabled(model.gameUpdateCheck[game.id] == .checking)
                 Button("Verify Files", systemImage: "checkmark.shield") { model.verifyGame(game.id) }
                     .disabled(!model.canOperateGameDuringPlay(game.id, isDownload: false))
-                Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
-                    .disabled(!model.canOperateGameDuringPlay(game.id, isDownload: false))
+                if GameDefinition.find(game.id)?.voices.isEmpty == false {
+                    Button("Voice Packs…", systemImage: "waveform") { gameSheet = .voices(game.id) }
+                        .disabled(!model.canOperateGameDuringPlay(game.id, isDownload: false))
+                }
                 sandboxItems
-                if model.wishHistoryEnabled {
+                if model.offersWishHistory(game.id) {
                     Button("Export Wish History…", systemImage: "square.and.arrow.up") { gameSheet = .wishExport(game.id) }
                         .disabled(!model.canExportWishHistory(game.id))
                 }

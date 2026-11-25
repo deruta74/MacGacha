@@ -146,6 +146,7 @@ import RuntimeManager
         automaticSandboxYieldingToPlay = automaticSandbox?.generation
         sandboxTask?.cancel()
         // A game started from the Dock menu or a shortcut is the one the launcher opens on next.
+        rememberHonkaiServer(for: id)
         defaults?.set(id, forKey: Self.selectedGameKey)
         launchLogURLs[id] = nil; launchFailures[id] = nil; launchNotes[id] = nil
         knownEndedLaunchGames.remove(id); launchRecoveryConflicts.remove(id)
@@ -274,7 +275,7 @@ import RuntimeManager
     }
     var liveSessionGameName: String? {
         guard let id = liveLaunchGames.sorted().first else { return nil }
-        return LauncherGame.all.first { $0.id == id }?.name
+        return LauncherGame.all.first { $0.id == id }.map(editionDisplayName)
     }
 
     func openLaunchLog(_ id: String) {

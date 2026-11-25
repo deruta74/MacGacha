@@ -9,7 +9,7 @@ import DownloadEngine
 @testable import Launch
 
 struct StorageInventoryTests {
-    @Test func sixEditionsAndOnlyOrphanPrefixesCanBeCleaned() async throws {
+    @Test func everyEditionIsListedAndOnlyOrphanPrefixesCanBeCleaned() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -19,7 +19,7 @@ struct StorageInventoryTests {
         let service = StorageInventory(paths: paths)
         let context = StorageContext(region: .global)
         let snapshot = try await service.refresh(context)
-        #expect(snapshot.editions.count == 6)
+        #expect(snapshot.editions.count == GameDefinition.all.count)
         let candidate = try #require(snapshot.candidates.first { $0.kind == .orphanedPrefix })
         #expect(candidate.bytes > 0)
         do {

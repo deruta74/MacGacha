@@ -61,7 +61,7 @@ extension AppModel {
             model = preview(logLines: [], games: Dictionary(uniqueKeysWithValues: games.map { ($0.id, state) }), region: region)
         } else if let name, name.hasPrefix("busy") {
             let requested = name == "busy" ? nil : GameDefinition.find(String(name.dropFirst(5)))
-            let busy = GameDefinition.inRegion(region).first { $0.family == (requested?.family ?? .genshin) }!.id
+            let busy = GameDefinition.inRegion(region).first { $0.family == requested?.family }?.id ?? games[0].id
             let downloading = GameState(status: .notInstalled, activity: .working(.staging, fraction: 0.12,
                 bytesPerSecond: 215_500_000, downloaded: 18_100_000_000, total: 146_480_000_000))
             model = preview(rows: [], logLines: [], games: Dictionary(uniqueKeysWithValues: games.map {

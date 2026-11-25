@@ -70,6 +70,18 @@ struct AppModelNotificationTests {
         #expect(center.delivered.count == 1)
     }
 
+    @Test func honkaiNotificationsNameAndSelectTheSpecificServer() async throws {
+        let center = TestGameNotificationCenter()
+        let model = try fixture(center)
+        model.notify(.installFinished, gameID: "hi3-jp")
+        await model.notificationTask?.value
+        #expect(center.delivered.first?.body.contains("JP Server") == true)
+        center.onResponse?("hi3-jp")
+        #expect(model.selectedHonkaiServer == .japan)
+        #expect(model.notificationSelection?.gameID == "hi3-jp")
+        #expect(model.launcherGame(for: "hi3-jp").id == "hi3-jp")
+    }
+
     @Test func permissionSuspensionRechecksActivityAndSwitch() async throws {
         for disable in [false, true] {
             let center = TestGameNotificationCenter(), activity = NotificationTestActivity()

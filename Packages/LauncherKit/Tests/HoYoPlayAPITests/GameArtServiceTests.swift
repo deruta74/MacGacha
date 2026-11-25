@@ -521,24 +521,89 @@ func highlightsBrowserLinksAreValidatedAlsoWhenDecoded(value: String) throws {
 }
 
 @Test
-func catalogCardsKeepTheirArtworkAndReservationStatusAcrossRestarts() async throws {
+func honkaiImpactArtworkMatchesTheExactServerAndCatalogCardsKeepReservationStatus() async throws {
     let temp = try TempDir(), cdn = MockCDN()
     try artFixtures(cdn)
     func game(_ id: String, _ biz: String, _ icon: String) -> [String: Any] {
         ["id": id, "biz": biz, "display": ["icon": ["url": "https://fastcdn.hoyoverse.com/" + icon]],
          "display_status": ["viiywh5G2H", "yneO4yGc4x"].contains(id) ? "LAUNCHER_GAME_DISPLAY_STATUS_RESERVATION_ENABLED" : ""]
     }
-    let games = [game("5TIVvvcwtM", "bh3_global", "icon"), game("viiywh5G2H", "hyg_global", "logo"),
+    var games = [game("5TIVvvcwtM", "bh3_global", "icon"), game("viiywh5G2H", "hyg_global", "logo"),
         game("yneO4yGc4x", "abc_global", "logo"), game("g0mMIvshDb", "bh3_global", "jp"), game("g", "hk4e_global", "icon"),
         game("s", "hkrpg_global", "icon"), game("z", "nap_global", "icon")]
+    games[0]["game_server_configs"] = [
+        ["game_id": "5TIVvvcwtM", "i18n_description": "Europe & Americas Servers"],
+        ["game_id": "g0mMIvshDb", "i18n_description": "JP Server "],
+        ["game_id": "uxB4MC7nzC", "i18n_description": ""],
+        ["game_id": "unknown", "i18n_description": "Unknown Server"]
+    ]
     cdn.serve(apiGames, data: try JSONSerialization.data(withJSONObject: ["data": ["games": games]]))
+    let basic = [("5TIVvvcwtM", "europe-americas", "preferred"), ("g0mMIvshDb", "japan", "jp")].map { id, slide, image in
+        ["game": ["id": id, "biz": "bh3_global"],
+         "backgrounds": [["id": slide, "background": ["url": "https://fastcdn.hoyoverse.com/" + image]]]] as [String: Any]
+    }
+    cdn.serve(apiBasic, data: try JSONSerialization.data(withJSONObject: ["data": ["game_info_list": basic]]))
     cdn.serve("jp", data: png)
     let service = GameArtService(cacheDirectory: temp.url, http: cdn)
     let cards = await service.refresh()
-    #expect(cards.count == 6)
-    #expect(cards["honkai-impact-3rd"]?.icon == cards["genshin"]?.icon)
+    #expect(cards.count == 7)
+    let hi3 = try #require(cards["hi3"])
+    #expect(hi3.icon == cards["genshin"]?.icon)
+    #expect(hi3.backgrounds.map(\.id) == ["europe-americas"])
+    let japan = try #require(cards["hi3-jp"])
+    #expect(japan.backgrounds.map(\.id) == ["japan"])
+    #expect(japan.icon != hi3.icon)
     #expect(cards["petit-planet"]?.reservationOpen == true)
     #expect(cards["honkai-nexus-anima"]?.reservationOpen == true)
-    #expect(await GameArtService(cacheDirectory: temp.url, http: cdn).loadCached() == cards)
+    let descriptions = ["hi3": "Europe & Americas Servers", "hi3-jp": "JP Server"]
+    #expect(service.cachedHonkaiServerDescriptions() == descriptions)
+    let reloaded = GameArtService(cacheDirectory: temp.url, http: MockCDN())
+    #expect(await reloaded.loadCached() == cards)
+    #expect(reloaded.cachedHonkaiServerDescriptions() == descriptions)
+    let changedLanguage = GameArtService(cacheDirectory: temp.url, language: .deDE, http: MockCDN())
+    #expect(await changedLanguage.loadCached() == cards)
+    #expect(changedLanguage.cachedHonkaiServerDescriptions().isEmpty)
     #expect(GameDefinition.find("honkai-impact-3rd") == nil && GameDefinition.find("petit-planet") == nil)
+}
+
+@Test
+func legacyHonkaiImpactArtHydratesOfflineAndRefreshesTheCatalogCount() async throws {
+    let temp = try TempDir(), cdn = MockCDN()
+    try artFixtures(cdn)
+    let root = temp.url.appendingPathComponent("GameArt")
+    let first = await GameArtService(cacheDirectory: root, http: cdn).refresh()
+    let otherArt = try #require(first["genshin"])
+    try await BlockingIO.run {
+        let fs = try ContainedFileSystem(root: root)
+        let path = try SafeRelativePath("art-index.json")
+        let data = try fs.readFile(at: path, maxBytes: 512 << 10)
+        var index = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var games = try #require(index["games"] as? [String: Any])
+        let legacy = try #require(games["genshin"] as? [String: Any])
+        games["honkai-impact-3rd"] = legacy
+        index["games"] = games
+        index["catalogCardCount"] = 3
+        index["honkaiServerDescriptions"] = nil
+        try fs.writeAtomically(JSONSerialization.data(withJSONObject: index), to: path)
+    }
+    let offline = MockCDN()
+    offline.enqueueFault(apiGames, .transportError)
+    let service = GameArtService(cacheDirectory: root, http: offline)
+    let restored = await service.loadCached()
+    #expect(restored.filter { $0.key != "hi3" } == first)
+    #expect(restored["hi3"] == otherArt)
+    #expect(await service.cachedIcon(for: "hi3") != nil)
+    #expect(offline.requestLog.isEmpty)
+    #expect(await service.refresh() == restored)
+    #expect(!offline.requestLog.isEmpty)
+
+    let refreshed = await GameArtService(cacheDirectory: root, http: cdn).refresh()
+    #expect(refreshed["hi3"] == otherArt)
+    let index = try await BlockingIO.run {
+        let fs = try ContainedFileSystem(root: root)
+        return try fs.readFile(at: SafeRelativePath("art-index.json"), maxBytes: 512 << 10)
+    }
+    let published = try #require(JSONSerialization.jsonObject(with: index) as? [String: Any])
+    #expect(published["catalogCardCount"] as? Int == 2)
+    #expect((published["games"] as? [String: Any])?["honkai-impact-3rd"] == nil)
 }

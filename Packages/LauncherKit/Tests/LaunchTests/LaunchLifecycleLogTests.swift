@@ -76,7 +76,9 @@ import TestSupport
         #expect(Recipes.recipe(for: "zzz")?.verifiedBuilds == ["3.3.0"])
         for game in Recipes.games {
             let recipe = try #require(Recipes.recipe(for: game))
-            #expect(recipe.verifiedBuilds.isEmpty == (GameDefinition.find(game)?.region == .mainlandChina))
+            let edition = try #require(GameDefinition.find(game))
+            let unverifiedServer = edition.honkaiImpactServer.map { $0 != .europeAmericas } ?? false
+            #expect(recipe.verifiedBuilds.isEmpty == (edition.region == .mainlandChina || unverifiedServer))
             for build in recipe.verifiedBuilds {
                 let parts = build.split(separator: ".", omittingEmptySubsequences: false)
                 #expect(parts.count >= 2)
@@ -95,15 +97,20 @@ import TestSupport
         try await f.end(manager); await consumer.value
         await manager.waitForSupervision(game: "starrail"); await manager.flushLogs()
         let records = try await readEvents(f)
-        try #require(records.count == 5)
-        #expect(records.map(\.message) == ["Launch started", "Game Mode skipped; using normal Wine", "Game running", "Session ended", "Restore outcome"])
+        try #require(records.count == 6)
+        #expect(records.map(\.message) == [
+            "Launch started", "Launch runtime selected", "Game Mode skipped; using normal Wine",
+            "Game running", "Session ended", "Restore outcome"
+        ])
         #expect(records.first?.metadata["game"] == "starrail")
         #expect(records.first?.metadata["backend"] == "d3dmetal")
-        #expect(records.first?.metadata["buildVerification"] == "verified")
-        #expect(records[1].metadata["reason"] == "helperUnavailable")
-        #expect(records[3].metadata["outcome"] == "normal")
-        #expect(records[4].metadata["outcome"] == "clean")
-        #expect(records[4].metadata["resolved"] == "1")
+        #expect(records.first?.metadata["buildVerification"] == nil)
+        #expect(records[1].metadata["buildVerification"] == "verified")
+        #expect(records[1].metadata["runtimeBundle"] == f.runtime.selected.bundle.id.rawValue)
+        #expect(records[2].metadata["reason"] == "helperUnavailable")
+        #expect(records[4].metadata["outcome"] == "normal")
+        #expect(records[5].metadata["outcome"] == "clean")
+        #expect(records[5].metadata["resolved"] == "1")
         if logsEnabled {
             let url = try #require(logURL)
             let text = try await sessionText(url)
@@ -140,7 +147,7 @@ import TestSupport
         }
         await consumer.value; await manager.waitForSupervision(game: "starrail"); await manager.flushLogs()
         let records = try await readEvents(f)
-        #expect(records.first?.metadata["buildVerification"] == "unverified")
+        #expect(records.first { $0.message == "Launch runtime selected" }?.metadata["buildVerification"] == "unverified")
         #expect(records.first { $0.message == "Session ended" }?.metadata["outcome"] == "startup failure")
         #expect(records.last?.metadata["stage"] == "watch")
         let values = await events.values
@@ -199,6 +206,20 @@ import TestSupport
         let records = try await readEvents(f)
         #expect(records.contains { $0.message == "Launch failed" && $0.metadata["stage"] == "prepare" })
         #expect(!records.contains { $0.message == "Game running" })
+    }
+
+    @Test func missingExecutableLogsTheAttemptWithSessionLogsOff() async throws {
+        let f = try await ManagerFixture.make(logsEnabled: false)
+        try await BlockingIO.run {
+            try ContainedFileSystem(root: f.installRoot).removeFile(at: SafeRelativePath("StarRail.exe"))
+        }
+        let manager = f.manager(), events = ManagerEvents()
+        let consumer = await f.consume(manager, events: events)
+        await consumer.value; await manager.waitForSupervision(game: "starrail"); await manager.flushLogs()
+        let records = try await readEvents(f)
+        #expect(records.map(\.message) == ["Launch started", "Launch failed"])
+        #expect(records.first?.metadata == ["game": "starrail", "backend": "d3dmetal"])
+        #expect(records.last?.metadata == ["game": "starrail", "stage": "preflight", "case": "io"])
     }
 
     @Test(arguments: [true, false])

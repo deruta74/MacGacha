@@ -24,7 +24,7 @@ import TestSupport
 
     @Test(arguments: GameDefinition.all, [RuntimeBackend.dxmt, .d3dmetal])
     func eligibilityAndRequirementsShareOneRule(game: GameDefinition, backend: RuntimeBackend) throws {
-        let eligible = game.family != .starrail && backend == .d3dmetal
+        let eligible = (game.family == .genshin || game.family == .zzz) && backend == .d3dmetal
         #expect(LaunchResolver.offersSurroundSound(game.id, backend: backend, runtimeBundleID: SurroundAudio.bundleID) == eligible)
         #expect(!LaunchResolver.offersSurroundSound(game.id, backend: backend, runtimeBundleID: "other"))
         let recipe = try #require(Recipes.recipe(for: game.id))

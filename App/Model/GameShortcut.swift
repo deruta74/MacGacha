@@ -68,8 +68,15 @@ enum GameShortcut {
     static func write(gameID: String, name: String, icns: Data?, hostBundleID: String, hostPath: String, in directory: URL) throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let fs = try ContainedFileSystem(root: directory)
-        let base = appName(for: name)
+        let displayName = appName(for: name)
+        let server = HonkaiImpactServer(rawValue: gameID)
+        // A description can change when the localized HoYoPlay cache hydrates.
+        let base = server.map { "Honkai Impact 3rd (\($0.englishDescription))" } ?? displayName
         var destination = try SafeRelativePath("\(base).app")
+        if server == .europeAmericas, try !isShortcut(destination, gameID: gameID, fs: fs),
+            let legacy = try legacyHonkaiShortcut(in: fs, gameID: gameID) {
+            destination = legacy
+        }
         if try fs.itemType(at: destination) != nil, try !isShortcut(destination, gameID: gameID, fs: fs) {
             destination = try SafeRelativePath("\(base) (MacGacha).app")
             if try fs.itemType(at: destination) != nil, try !isShortcut(destination, gameID: gameID, fs: fs) {
@@ -79,7 +86,7 @@ enum GameShortcut {
         let temporary = try SafeRelativePath(".\(base).macgacha-shortcut-\(UUID().uuidString)")
         do {
             try fs.createDirectory(at: SafeRelativePath("\(temporary)/Contents/MacOS"))
-            try fs.writeAtomically(infoPlist(gameID: gameID, name: base, hasIcon: icns != nil),
+            try fs.writeAtomically(infoPlist(gameID: gameID, name: displayName, hasIcon: icns != nil),
                 to: SafeRelativePath("\(temporary)/Contents/Info.plist"))
             if let icns {
                 try fs.createDirectory(at: SafeRelativePath("\(temporary)/Contents/Resources"))
@@ -96,6 +103,17 @@ enum GameShortcut {
             throw error
         }
         return destination.resolved(against: directory)
+    }
+
+    private static func legacyHonkaiShortcut(in fs: ContainedFileSystem, gameID: String) throws -> SafeRelativePath? {
+        // Match only the filenames the launcher generated before it named servers.
+        for name in ["Honkai Impact 3rd", "崩坏3", "崩壞3rd", "崩壊3rd", "붕괴3rd"] {
+            for suffix in [".app", " (MacGacha).app"] {
+                let path = try SafeRelativePath(name + suffix)
+                if try isShortcut(path, gameID: gameID, fs: fs) { return path }
+            }
+        }
+        return nil
     }
 
     /// Our earlier shortcut for this game, recognized by its bundle identifier.

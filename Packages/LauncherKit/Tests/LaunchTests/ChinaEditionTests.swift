@@ -38,9 +38,9 @@ import TestSupport
     @Test func definitionsAndRecipesCoverExactlyTheSameEditions() {
         #expect(Set(Recipes.games) == Set(GameDefinition.all.map(\.id)))
         #expect(Set(LaunchLogFiles.games) == Set(GameDefinition.all.map(\.id)))
-        #expect(GameDefinition.all.count == 6)
-        #expect(Set(GameDefinition.all.map(\.biz)).count == 6)
-        #expect(Set(GameDefinition.all.map(\.gameID)).count == 6)
+        #expect(GameDefinition.all.count == 11)
+        #expect(Set(GameDefinition.all.map(\.biz)).count == 7)
+        #expect(Set(GameDefinition.all.map(\.gameID)).count == 11)
     }
 
     @Test(arguments: ["genshin-cn", "starrail-cn", "zzz-cn"])
@@ -84,12 +84,15 @@ import TestSupport
                 prefix: URL(fileURLWithPath: "/prefix"), wineBinary: URL(fileURLWithPath: "/runtime/bin/wine"), proxyPort: 1234,
                 componentRoots: roots, baseEnvironment: [:])
             #expect(dx12.arguments.contains("-use-d3d12"))
+        case .honkaiImpact:
+            Issue.record("Honkai Impact 3rd is Global only")
         }
         if game.family != .starrail { #expect(value.copyIfPresent.first?.source.description == "HoYoKProtect.sys") }
         let product: String = switch game.family {
         case .genshin: "原神"
         case .starrail: "崩坏：星穹铁道"
         case .zzz: "绝区零"
+        case .honkaiImpact: "Honkai Impact 3rd"
         }
         #expect(recipe.gameLogPaths.map(\.description) == ["AppData/LocalLow/miHoYo/\(product)/Player.log", "AppData/LocalLow/miHoYo/\(product)/output_log.txt"])
         var off = settings; off.compatibilityPatches = false

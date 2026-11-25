@@ -13,7 +13,7 @@ import Launch
     @Test func forcedReadBypassesThrottleForOnlyRequestedGame() async throws {
         let fake = UpdateCheckServices(), model = fixture(fake)
         await model.refreshGames()
-        #expect(fake.normalReads.count == 3)
+        #expect(fake.normalReads.count == GameDefinition.inRegion(.global).count)
         fake.result = .success(.updateAvailable(from: "1.0", to: "2.0"))
         model.checkForGameUpdate("genshin")
         await model.gameUpdateCheckTasks["genshin"]?.value
@@ -21,7 +21,7 @@ import Launch
         #expect(model.games["genshin"]?.status == .updateAvailable(from: "1.0", to: "2.0"))
         #expect(model.gameUpdateCheck["genshin"] == .updateAvailable)
         await model.refreshGames()
-        #expect(fake.normalReads.count == 3)
+        #expect(fake.normalReads.count == GameDefinition.inRegion(.global).count)
     }
 
     @Test func upToDateUsesInjectedDateAndOtherStatusApplicationsClearResult() async {
@@ -44,6 +44,28 @@ import Launch
         await gate.release(); await task?.value
         #expect(model.gameUpdateCheck["genshin"] == .upToDate(Date(timeIntervalSince1970: 1234)))
         #expect(model.gameUpdateCheckTasks.isEmpty)
+    }
+
+    @Test func honkaiUpdateCheckKeepsItsServerStatusAfterSwitching() async throws {
+        let gate = UpdateCheckGate(), fake = UpdateCheckServices(gate: gate), model = fixture(fake)
+        let record = GameRecord(installPath: URL(filePath: "/inert/hi3-jp"), ownership: .created,
+            executable: try SafeRelativePath("BH3.exe"),
+            installed: InstalledBuild(tag: "9.1.0", buildID: "synthetic", categories: [], voices: []),
+            installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: 2))
+        fake.setRecord(record, for: "hi3-jp")
+        model.setGameRecord("hi3-jp", record)
+        #expect(model.honkaiServers.first { $0.server == .japan }?.status == .installed)
+        model.selectHonkaiServer(.japan)
+        model.checkForGameUpdate("hi3-jp")
+        let task = model.gameUpdateCheckTasks["hi3-jp"]
+        await gate.waitForEntry()
+        model.selectHonkaiServer(.korea)
+        #expect(model.honkaiServers.first { $0.server == .japan }?.status == .inProgress)
+        #expect(model.honkaiServers.first { $0.server == .korea }?.status == nil)
+        #expect(fake.freshReads == ["hi3-jp"])
+        await gate.release(); await task?.value
+        #expect(model.honkaiServers.first { $0.server == .japan }?.status == .installed)
+        #expect(model.selectedHonkaiServer == .korea)
     }
 
     @Test func automaticRefreshDuringCheckKeepsManualResult() async {
@@ -157,6 +179,7 @@ private final class UpdateCheckServices: GameServices, Sendable {
     private struct State {
         var normal: [String] = [], fresh: [String] = []
         var result: Result<GameStatus, LauncherError> = .success(.installed(tag: "1.0"))
+        var records: [String: GameRecord] = [:]
     }
     private let state = Mutex(State())
     private let gate: UpdateCheckGate?
@@ -176,7 +199,8 @@ private final class UpdateCheckServices: GameServices, Sendable {
         await gate?.wait()
         return try result.get()
     }
-    func record(_ id: String) async throws -> GameRecord? { nil }
+    func record(_ id: String) async throws -> GameRecord? { state.withLock { $0.records[id] } }
+    func setRecord(_ record: GameRecord, for id: String) { state.withLock { $0.records[id] = record } }
     func pendingRecord() throws -> GameRecord {
         GameRecord(installPath: URL(fileURLWithPath: "/inert/Game"), ownership: .created,
             executable: try SafeRelativePath("Game.exe"), pending: PendingOperation(kind: .update, planID: try SafeIdentifier("plan"),

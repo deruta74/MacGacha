@@ -35,12 +35,15 @@ public struct GameEventsSnapshot: Codable, Equatable, Sendable {
 /// (a sibling of GameArt); CN uses a contained `cn` subdirectory just like art.
 public actor GameEventsService {
     private static let responseLimit = 2 << 20
-    private static let indexLimit = 1 << 20
+    // Reserve space for all 20 posts per edition, including JSON escaping of
+    // 8 KiB links, 512-scalar titles and 128-scalar dates.
+    private static let editionIndexLimit = 512 << 10
     public static let postLimit = 20
     public static let titleLimit = 512 // Unicode scalars, at most 2048 UTF-8 bytes.
     private let fileOps: any FileOps
     private let directory: URL
     private let region: Region
+    private let indexLimit: Int
     private let language: HoYoPlayLanguage
     private let http: any HTTPClient
     private let ownedHTTP: EventsHTTPSession?
@@ -60,6 +63,7 @@ public actor GameEventsService {
         self.fileOps = fileOps
         directory = region == .global ? cacheDirectory : cacheDirectory.appendingPathComponent(region.rawValue, isDirectory: true)
         self.region = region; self.language = region == .mainlandChina ? .zhCN : language
+        indexLimit = Self.editionIndexLimit * GameDefinition.inRegion(region).count
         currentDate = now; self.requestTimeout = requestTimeout
         if let http { self.http = http; ownedHTTP = nil }
         else { let session = EventsHTTPSession(region: region); ownedHTTP = session; self.http = session.client }
@@ -92,11 +96,12 @@ public actor GameEventsService {
 
     private func hydrate(_ fs: ContainedFileSystem, root: SafeRelativePath) async {
         guard !hydrated else { return }
-        let data = try? await BlockingIO.run { try fs.readFile(at: SafeRelativePath("\(root)/events-index.json"), maxBytes: Self.indexLimit) }
+        let indexLimit = indexLimit
+        let data = try? await BlockingIO.run { try fs.readFile(at: SafeRelativePath("\(root)/events-index.json"), maxBytes: indexLimit) }
         guard !hydrated, !Task.isCancelled else { return }
         hydrated = true
-        guard let data,
-            let saved = try? JSONDecoder().decode([String: GameEventsSnapshot].self, from: data), saved.count <= 3 else { return }
+        guard let data, let saved = try? JSONDecoder().decode([String: GameEventsSnapshot].self, from: data),
+            saved.count <= GameDefinition.inRegion(region).count else { return }
         let valid = saved.filter { id, entry in
             GameDefinition.find(id)?.region == region && entry.region == region && entry.language == language
                 && entry.fetchedAt.timeIntervalSinceReferenceDate.isFinite && entry.posts.count <= Self.postLimit
@@ -118,11 +123,19 @@ public actor GameEventsService {
             let games = try JSONDecoder().decode(EventsEnvelope<EventsGames>.self,
                 from: await json(Self.apiURL("getGames", region: region, language: language)))
             guard games.retcode == 0, games.data.games.count <= 100 else { return cached() }
-            let registry = Dictionary(uniqueKeysWithValues: GameDefinition.inRegion(region).map { ($0.biz, $0.id) })
+            let editions = GameDefinition.inRegion(region)
             var requested: [String: String] = [:]
             for game in games.data.games {
-                guard let id = registry[game.biz], !game.id.isEmpty, game.id.utf8.count <= 128 else { continue }
-                requested[id] = game.id
+                guard !game.id.isEmpty, game.id.utf8.count <= 128,
+                    let edition = editions.first(where: {
+                        $0.biz == game.biz && ($0.requiredPublisherID.map { $0 == game.id } ?? true)
+                    }) else { continue }
+                requested[edition.id] = game.id
+                if edition.honkaiImpactServer == .europeAmericas {
+                    for config in (game.game_server_configs ?? []).prefix(32) {
+                        if let server = config.server { requested[server.rawValue] = server.gameID }
+                    }
+                }
             }
             for (id, remoteID) in requested.sorted(by: { $0.key < $1.key }) {
                 do {
@@ -133,7 +146,7 @@ public actor GameEventsService {
                     var next = snapshot.withLock { $0 }; next[id] = entry
                     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
                     let bytes = try encoder.encode(next)
-                    guard bytes.count <= Self.indexLimit else { continue }
+                    guard bytes.count <= indexLimit else { continue }
                     try await BlockingIO.run { try fs.writeAtomically(bytes, to: SafeRelativePath("\(root)/events-index.json")) }
                     snapshot.withLock { $0 = next }
                 } catch { /* Keep this game's previous successful result, including its original expiry. */ }
@@ -200,7 +213,10 @@ public actor GameEventsService {
 
 private struct EventsEnvelope<T: Decodable>: Decodable { let retcode: Int; let data: T }
 private struct EventsGames: Decodable { let games: [EventsGame] }
-private struct EventsGame: Decodable { let id: String; let biz: String }
+private struct EventsGame: Decodable {
+    let id: String; let biz: String
+    let game_server_configs: [HonkaiServerConfig]?
+}
 private struct EventsContent: Decodable { let content: EventsPosts }
 private struct EventsPosts: Decodable { let posts: [EventsPost] }
 private struct EventsPost: Decodable { let type: String; let title: String; let date: String; let link: String? }

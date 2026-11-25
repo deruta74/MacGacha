@@ -16,6 +16,25 @@ import Launch
         #expect(service.calls.withLock { $0 } == 0)
     }
 
+    @Test func installedHonkaiImpactOmitsWishHistoryAndSandbox() async throws {
+        let service = ModelWishExporter(), model = fixture(service)
+        model.wishHistoryEnabled = true
+        let game = try #require(GameDefinition.find("hi3"))
+        model.setGameRecord(game.id, GameRecord(installPath: URL(filePath: "/inert/hi3"), ownership: .created,
+            executable: try SafeRelativePath(game.executableName),
+            installed: InstalledBuild(tag: "9.1.0", buildID: "1", categories: [], voices: []),
+            installIdentity: FileSystemIdentity(volumeUUID: nil, device: 1, inode: 3)))
+        model.setGameState(game.id, GameState(status: .installed(tag: "9.1.0")))
+        #expect(!model.offersWishHistory(game.id) && !model.canExportWishHistory(game.id))
+        await #expect(throws: LauncherError.busy("Wish history export is unavailable")) {
+            try await model.exportWishHistory(game.id)
+        }
+        #expect(service.calls.withLock { $0 } == 0)
+        #expect(model.sandboxState(for: game.id) == nil)
+        #expect(!model.canInstallSandbox(game.id) && !model.canUpdateSandbox(game.id) && !model.canRemoveSandbox(game.id))
+        #expect(!model.offersGenshinFps(for: game.id) && !model.offersSurround(for: game.id))
+    }
+
     @Test func switchPersistsAndExportReturnsSavePanelDataAndCounts() async throws {
         let preferences = WishPreferences(), service = ModelWishExporter(), model = fixture(service, preferences)
         model.wishHistoryEnabled = true

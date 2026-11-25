@@ -6,6 +6,13 @@ import DownloadEngine
 
 /// No cache or network work occurs until export is explicitly called.
 public struct WishHistoryExporter: WishHistoryExporting {
+    public static func supports(_ game: GameDefinition) -> Bool {
+        switch game.family {
+        case .genshin, .starrail, .zzz: true
+        case .honkaiImpact: false
+        }
+    }
+
     private let log: EventLog?
     private let http: (any HTTPClient)?
     private let sleep: @Sendable (Duration) async throws -> Void
@@ -22,6 +29,7 @@ public struct WishHistoryExporter: WishHistoryExporting {
 
     @concurrent public func export(_ request: WishHistoryRequest,
         progress: @escaping @Sendable (WishHistoryProgress) async -> Void) async throws -> WishHistoryExport {
+        guard Self.supports(request.game) else { throw LauncherError.io("Wish history export is unavailable") }
         do {
             try Task.checkCancellation()
             let link = try await BlockingIO.run { try WishHistoryCache.find(request) }

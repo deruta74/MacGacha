@@ -77,13 +77,13 @@ struct DockGame: Identifiable, Equatable {
     var dockGames: [DockGame] {
         visibleGames.compactMap { game in
             guard gameRecords[game.id]?.installed != nil, gameRecords[game.id]?.uninstalling == false else { return nil }
-            return DockGame(id: game.id, name: game.name, canPlay: canPlayFromDock(game.id))
+            return DockGame(id: game.id, name: editionDisplayName(game), canPlay: canPlayFromDock(game.id))
         }
     }
 
     var dockRunningGame: DockGame? {
         guard let game = LauncherGame.all.first(where: { liveLaunchGames.contains($0.id) && !knownEndedLaunchGames.contains($0.id) && (launchStates[$0.id] == .running || launchStates[$0.id] == .ready) }) else { return nil }
-        return DockGame(id: game.id, name: game.name, canPlay: false)
+        return DockGame(id: game.id, name: editionDisplayName(game), canPlay: false)
     }
 
     func canPlayFromDock(_ id: String) -> Bool {

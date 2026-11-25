@@ -10,6 +10,33 @@ import DownloadEngine
 import TestSupport
 
 @Suite struct GameEventsServiceTests {
+    @Test func largeValidGlobalEventsRoundTripForEveryEdition() async throws {
+        let temp = try TempDir(), http = EventsHTTP()
+        let directory = temp.url.appendingPathComponent("GameEvents")
+        let games = GameDefinition.inRegion(.global)
+        #expect(games.count == 8)
+        http.games = try JSONSerialization.data(withJSONObject: ["retcode": 0, "data": ["games": games.map {
+            ["id": $0.gameID, "biz": $0.biz]
+        }]])
+        let links = (0..<20).map { "https://example.test/" + String(repeating: "a", count: 7_000) + "?post=\($0)" }
+        http.content = content(links.map {
+            ["type": "POST_TYPE_ACTIVITY", "title": "Event", "date": "10/22", "link": $0]
+        })
+        let service = GameEventsService(cacheDirectory: directory, http: http, now: { eventsFixtureDate })
+        let updated = await service.refresh()
+        #expect(Set(updated.keys) == Set(games.map(\.id)))
+        #expect(updated.values.allSatisfy { $0.posts.compactMap { $0.link?.absoluteString } == links })
+        #expect(http.requests.count == games.count + 1)
+        let data = try await BlockingIO.run {
+            let fs = try ContainedFileSystem(root: directory)
+            return try fs.readFile(at: SafeRelativePath("events-index.json"), maxBytes: 4 << 20)
+        }
+        #expect(data.count > 1 << 20)
+        let offline = EventsHTTP(), reloaded = GameEventsService(cacheDirectory: directory, http: offline, now: { eventsFixtureDate })
+        #expect(await reloaded.loadCached() == updated)
+        #expect(offline.requests.isEmpty)
+    }
+
     @Test func failedEventsPublicationPreservesCachedSnapshot() async throws {
         let temp = try TempDir(), http = EventsHTTP(), directory = temp.url.appendingPathComponent("GameEvents")
         let previous = await GameEventsService(cacheDirectory: directory, http: http).refresh()
@@ -140,15 +167,29 @@ import TestSupport
     func everySupportedEditionUsesItsRemoteIDAndOneFailureIsIndependent(region: Region) async throws {
         let temp = try TempDir(), http = EventsHTTP(region: region), clock = EventsDate()
         let games = GameDefinition.inRegion(region)
-        http.games = try JSONSerialization.data(withJSONObject: ["retcode": 0, "data": ["games": games.enumerated().map {
-            ["biz": $0.element.biz, "id": "remote-\($0.offset)"]
-        }]])
-        let service = GameEventsService(cacheDirectory: temp.url.appendingPathComponent("Events"), region: region, http: http, now: { clock.now })
+        let remoteIDs = games.enumerated().map { $0.element.honkaiImpactServer?.gameID ?? "remote-\($0.offset)" }
+        var entries: [[String: Any]] = []
+        for (game, id) in zip(games, remoteIDs) {
+            var entry: [String: Any] = ["biz": game.biz, "id": id]
+            if let server = game.honkaiImpactServer {
+                guard server == .europeAmericas else { continue }
+                entry["game_server_configs"] = (HonkaiImpactServer.allCases.map(\.gameID) + ["other-server"]).map { ["game_id": $0] }
+            }
+            entries.append(entry)
+        }
+        if region == .global { entries.append(["biz": "bh3_global", "id": "other-server"]) }
+        http.games = try JSONSerialization.data(withJSONObject: ["retcode": 0, "data": ["games": entries]])
+        let cache = temp.url.appendingPathComponent("Events")
+        let service = GameEventsService(cacheDirectory: cache, region: region, http: http, now: { clock.now })
         let first = await service.refresh()
         #expect(Set(first.keys) == Set(games.map(\.id)))
-        #expect(http.requests.count == 4)
-        let remoteIDs = Set(http.requests.compactMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "game_id" }?.value })
-        #expect(remoteIDs == ["remote-0", "remote-1", "remote-2"])
+        #expect(http.requests.count == games.count + 1)
+        let requestedIDs = Set(http.requests.compactMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "game_id" }?.value })
+        #expect(requestedIDs == Set(remoteIDs))
+        let offline = EventsHTTP(region: region)
+        let reloaded = GameEventsService(cacheDirectory: cache, region: region, http: offline, now: { clock.now })
+        #expect(await reloaded.loadCached() == first)
+        #expect(offline.requests.isEmpty)
         clock.advance(60)
         http.failedID = "remote-1"
         http.content = content([])

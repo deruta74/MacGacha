@@ -29,7 +29,7 @@ struct StorageView: View {
                         .foregroundStyle(.secondary)
                         ForEach(editions(snapshot)) { edition in
                             GridRow {
-                                Text(Self.gameName(edition.id)).frame(maxWidth: .infinity, alignment: .leading)
+                                Text(gameName(edition.id)).frame(maxWidth: .infinity, alignment: .leading)
                                 size(edition.game)
                                 size(edition.prefixes)
                                 size(edition.preDownload)
@@ -159,16 +159,16 @@ struct StorageView: View {
         return .available(x + y)
     }
 
-    private static func gameName(_ id: String?) -> String {
+    private func gameName(_ id: String?) -> String {
         guard let id else { return "" }
-        return LauncherGame.all.first { $0.id == id }?.name ?? id
+        return LauncherGame.all.first { $0.id == id }.map(model.editionDisplayName) ?? id
     }
 
     private func title(_ candidate: StorageCleanupCandidate) -> String {
         switch candidate.kind {
         case .orphanedPrefix:
             if let game = candidate.gameID {
-                return String(localized: "Old Wine prefix of \(Self.gameName(game))", comment: "Storage cleanup item; the argument is a game name")
+                return String(localized: "Old Wine prefix of \(gameName(game))", comment: "Storage cleanup item; the argument is a game name")
             }
             return String(localized: "Unused Wine prefix")
         case .runtimeVersion:
@@ -176,7 +176,7 @@ struct StorageView: View {
                 ?? String(localized: "Unused dependency version")
         case .oldSessionLog:
             if let game = candidate.gameID {
-                return String(localized: "Older session logs of \(Self.gameName(game))", comment: "Storage cleanup item; the argument is a game name")
+                return String(localized: "Older session logs of \(gameName(game))", comment: "Storage cleanup item; the argument is a game name")
             }
             return String(localized: "Older session logs")
         case .inactiveRegionCache:

@@ -179,7 +179,7 @@ public actor LaunchManager {
             event("Launch failed", game: game.id, level: .error, metadata: Self.failureMetadata(LauncherError.busy("Launch slot unavailable"), stage: .lock))
             pair.continuation.yield(.stage(.lock))
             pair.continuation.yield(.failed(LaunchFailure(stage: .lock, message: String(localized: "\(Self.name(busy)) is running"), logURL: nil,
-                unverifiedBuild: !((recipeOverrides[game.id] ?? Recipes.recipe(for: game.id))?.verifiedBuilds.contains(gameBuild) ?? false))))
+                unverifiedBuild: (recipeOverrides[game.id] ?? Recipes.recipe(for: game.id))?.isVerified(build: gameBuild) != true)))
             pair.continuation.finish(); return pair.stream
         }
         if recovering || !guardRecoveries.isEmpty {
@@ -232,10 +232,11 @@ public actor LaunchManager {
     private func start(game: GameDefinition, installRoot: URL, gameBuild: String, events: AsyncStream<LaunchEvent>.Continuation) async {
         defer { finishedSupervision(game: game.id) }
         var stage = LaunchStage.preflight
-        let unverified = !((recipeOverrides[game.id] ?? Recipes.recipe(for: game.id))?.verifiedBuilds.contains(gameBuild) ?? false)
+        let recipe = recipeOverrides[game.id] ?? Recipes.recipe(for: game.id)
+        var unverified = recipe?.isVerified(build: gameBuild) != true
         do {
             events.yield(.stage(stage))
-            guard let recipe = (recipeOverrides[game.id] ?? Recipes.recipe(for: game.id)) else { throw LauncherError.io("Unknown launch game") }
+            guard let recipe else { throw LauncherError.io("Unknown launch game") }
             let paths = paths, journalFileOps = journalFileOps
             let (settings, globalSettings, riskRefused) = try await BlockingIO.run {
                 var settings = try LaunchSettingsStore(paths: paths).load(game.id)
@@ -245,13 +246,12 @@ public actor LaunchManager {
                 if refused { settings.unlockFPS = false }
                 return (settings, global, refused)
             }
+            event("Launch started", game: game.id, metadata: ["backend": settings.backend.rawValue])
             if riskRefused {
                 events.yield(.note(.fpsUnlockUnavailable))
                 event("FPS unlock unavailable", game: game.id, metadata: ["reason": "riskNotAcknowledged"])
             }
             let logsEnabled = globalSettings.sessionLogsEnabled
-            event("Launch started", game: game.id, metadata: ["backend": settings.backend.rawValue,
-                "buildVerification": unverified ? "unverified" : "verified"])
             let identity = try await BlockingIO.run {
                 let fs = try ContainedFileSystem(root: installRoot).pinRoot()
                 guard try fs.itemType(at: recipe.executable) == .regularFile else { throw LauncherError.io("Game executable is missing") }
@@ -259,6 +259,9 @@ public actor LaunchManager {
             }
             let selection = try await runtimes.selection(for: settings)
             let bundle = selection.bundle
+            unverified = !recipe.isVerified(build: gameBuild, settings: settings, runtimeBundleID: bundle.id.rawValue)
+            event("Launch runtime selected", game: game.id, metadata: ["runtimeBundle": bundle.id.rawValue,
+                "buildVerification": unverified ? "unverified" : "verified"])
             let prefix = try await prefixes.prefixURL(game: game.id, bundle: bundle)
             let requiredComponents = LaunchResolver.requiredComponents(recipe: recipe, settings: settings, runtimeBundleID: selection.runtimeProfileID)
             guard !selection.componentIDs.isEmpty else { throw LauncherError.io("The runtime bundle has no pinnable components") }
@@ -337,7 +340,7 @@ public actor LaunchManager {
                         "recipeVersion": String(recipe.recipeVersion), "gameBuild": gameBuild, "backend": settings.backend.rawValue,
                         "runtimeBundle": bundle.id.rawValue, "runtimeDigest": bundle.digest.hex, "componentIDs": ids.joined(separator: ","),
                         "settings": String(describing: settings)], now: Date(), timeZone: .current, maxBytes: 64 << 20,
-                        ticker: ClockSessionLogTicker(clock: clock))
+                        ticker: ClockSessionLogTicker(clock: clock), launchSettings: settings)
                 }
                 context.lifecycleLog = context.log.map(SessionLifecycleLog.init)
             }
@@ -981,7 +984,11 @@ public actor LaunchManager {
             unverifiedBuild: unverified, cause: cause)
     }
     private static func name(_ game: String) -> String {
-        GameDefinition.find(game)?.defaultInstallDirectoryName ?? "A game"
+        let definition = GameDefinition.find(game)
+        if definition?.family == .honkaiImpact {
+            return String(localized: "Honkai Impact 3rd", comment: "Official name of the Honkai Impact 3rd Global edition")
+        }
+        return definition?.defaultInstallDirectoryName ?? "A game"
     }
 
     /// Startup recovery reads only durable snapshots. No proxy is recreated:
