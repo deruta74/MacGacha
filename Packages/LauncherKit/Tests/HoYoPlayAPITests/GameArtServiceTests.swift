@@ -124,13 +124,23 @@ func emptyOptionalURLsInOtherLayersDoNotDiscardGameArt() async throws {
     }
 }
 
-@Test(arguments: ["http://fastcdn.hoyoverse.com/evil", "https://hoyoverse.com.evil.test/evil", "https://evil.test/evil", "https://fastcdn.hoyoverse.com@evil.test/evil"])
+@Test(arguments: ["http://fastcdn.hoyoverse.com/evil", "https://hoyoverse.com.evil.test/evil", "https://evil.test/evil", "https://fastcdn.hoyoverse.com@evil.test/evil",
+    "https://other.mihoyo.com/evil", "https://launcher-webstatic.mihoyo.com.evil.test/evil"])
 func rejectsUnapprovedAssetURLs(url: String) async throws {
     let temp = try TempDir(); let cdn = MockCDN()
     try artFixtures(cdn, background: url)
     let art = await GameArtService(cacheDirectory: temp.url.appendingPathComponent("GameArt"), http: cdn).refresh()
     #expect(art["genshin"]?.background == nil)
     #expect(!cdn.requestLog.contains { $0.path == "evil" })
+}
+
+@Test(arguments: ["https://launcher-webstatic.mihoyo.com/preferred", "https://fastcdn.mihoyo.com/preferred"])
+func globalArtAcceptsExactMainlandArtHosts(url: String) async throws {
+    let temp = try TempDir(); let cdn = MockCDN()
+    try artFixtures(cdn, background: url)
+    let art = await GameArtService(cacheDirectory: temp.url.appendingPathComponent("GameArt"), http: cdn).refresh()
+    #expect(art["genshin"]?.background != nil)
+    #expect(cdn.requestLog.contains { $0.path == "preferred" })
 }
 
 @Test
