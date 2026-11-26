@@ -56,7 +56,8 @@ import TestSupport
 
     @Test(arguments: [Region.global, .mainlandChina]) func artRejectsOtherRegionsCDN(region: Region) async throws {
         let temp = try TempDir(), http = RegionArtHTTP()
-        let foreign = region == .global ? "https://fastcdn.mihoyo.com/foreign.png" : "https://fastcdn.hoyoverse.com/foreign.png"
+        // Global accepts only the exact Mainland China art CDN hosts HoYoPlay uses.
+        let foreign = region == .global ? "https://sdk-static.mihoyo.com/foreign.png" : "https://fastcdn.hoyoverse.com/foreign.png"
         let biz = region == .global ? "hk4e_global" : "hk4e_cn"
         let games = try JSONSerialization.data(withJSONObject: ["retcode": 0, "data": ["games": [["biz": biz, "display": ["background": ["url": foreign]]]]]])
         let cdn = region == .global ? http.global : http.cn

@@ -373,7 +373,9 @@ public actor GameArtService {
     private static func allowedAsset(_ url: URL, region: Region) -> Bool {
         guard validURL(url), let host = url.host?.lowercased() else { return false }
         switch region {
-        case .global: return region.artDomains.contains { host.hasSuffix("." + $0) }
+        // Global HoYoPlay serves some art (the Honkai: Nexus Anima background
+        // since 2026-11) from the exact Mainland China art CDN hosts.
+        case .global: return region.artDomains.contains { host.hasSuffix("." + $0) } || Region.mainlandChina.artDomains.contains(host)
         case .mainlandChina: return region.artDomains.contains(host)
         }
     }
