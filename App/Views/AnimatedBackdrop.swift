@@ -72,13 +72,18 @@ struct GameBackdrop: View {
     let slide: GameBackground?
     let images: ArtImageCache
     let crossfade: Bool
+    /// Off while art exists but its still isn't chosen yet: the tint would flash over the
+    /// previous game's picture during a switch.
+    var showsTint = true
     let onPlayback: @MainActor (BackgroundPlaybackState, BackgroundVideoToken) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            LinearGradient(colors: [game.deepTint, game.deepTint.mix(with: .black, by: 0.5)], startPoint: .top, endPoint: .bottom)
+            if showsTint || slide != nil {
+                LinearGradient(colors: [game.deepTint, game.deepTint.mix(with: .black, by: 0.5)], startPoint: .top, endPoint: .bottom)
+            }
             if let slide { still(slide) }
             if let video {
                 // The video appears only once a frame is on screen; the still stays underneath
@@ -106,9 +111,11 @@ struct GameBackdrop: View {
                     .allowsHitTesting(false)
             }
             // A scrim only behind the footer keeps the art clean while text stays legible.
-            LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
-                .frame(height: 260)
-                .allowsHitTesting(false)
+            if showsTint || slide != nil {
+                LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 260)
+                    .allowsHitTesting(false)
+            }
         }
         .animation(crossfade ? .easeInOut(duration: 0.8) : nil, value: slide?.id)
         .accessibilityHidden(true)

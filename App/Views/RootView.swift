@@ -33,6 +33,12 @@ struct RootView: View {
     /// The slide on screen: it follows the selection only once its image has loaded,
     /// so the background and its highlights button always change together.
     @State private var shownSlide: GameBackground?
+    /// The game `shownSlide` belongs to, so a switch never shows another game's slide.
+    @State private var shownSlideGameID: String?
+    /// The previous game's picture while the next one fades in over it: a crossfade of two
+    /// half-transparent layers would dip the window to its dark ground.
+    @State private var outgoing: OutgoingBackdrop?
+    @State private var incomingVisible = true
     /// Sheets size themselves from the window, so they grow and shrink with it.
     @State private var windowHeight: CGFloat = 720
 
@@ -64,7 +70,7 @@ struct RootView: View {
 
     /// The selected slide once its image is decoded; until then the previous slide stays.
     private var readySlide: GameBackground? {
-        guard let current = selection.slides?.current, images.image(current.image) != nil else { return nil }
+        guard selection.slidesGameID == game.id, let current = selection.slides?.current, images.image(current.image) != nil else { return nil }
         return current
     }
 
@@ -72,14 +78,55 @@ struct RootView: View {
         selection.setWindow(active: activeState != .inactive, visible: scenePhase == .active)
     }
 
+    /// The shown slide when it belongs to this game, else the decoded selection.
+    private var currentSlide: GameBackground? {
+        shownSlideGameID == game.id ? shownSlide : readySlide
+    }
+
+    /// The plain tint is only for games without art; with art, an unchosen still stays clear.
+    private var showsTint: Bool { (model.launcherArt(for: game.id)?.backgrounds ?? []).isEmpty }
+
+    /// A rail click keeps the current picture as a layer and hides the next game's
+    /// backdrop until its picture can fade in over it.
+    private func select(_ id: String) {
+        guard id != game.id else { return }
+        if outgoing == nil || incomingVisible {
+            // The image cache releases this game's art on the switch, so keep the decoded images.
+            outgoing = OutgoingBackdrop(game: game, still: images.image(currentSlide?.image),
+                theme: images.image(currentSlide?.theme), showsTint: showsTint)
+        }
+        incomingVisible = false
+        selectedID = id
+    }
+
+    private func revealIncomingIfReady() {
+        guard let leaving = outgoing, !incomingVisible, currentSlide != nil || showsTint else { return }
+        revealIncoming(replacing: leaving.token)
+    }
+
+    private func revealIncoming(replacing token: UUID) {
+        guard outgoing?.token == token, !incomingVisible else { return }
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.35)) { incomingVisible = true } completion: {
+            if outgoing?.token == token { outgoing = nil }
+        }
+    }
+
     var body: some View {
         ZStack {
             // An entry's video joins only once its own still is on screen, so the still, theme
-            // and highlights never lag behind the motion.
-            GameBackdrop(game: game, video: selection.video.flatMap { $0.background == shownSlide ? $0 : nil }, slide: shownSlide,
-                images: images, crossfade: selection.allowsCrossfade) { selection.setPlaybackState($0, for: $1) }
-                .id(game.id)
-                .transition(.opacity)
+            // and highlights never lag behind the motion. Switch animations are explicit below.
+            ZStack {
+                if let outgoing {
+                    OutgoingBackdropView(backdrop: outgoing)
+                        .id(outgoing.token)
+                        .transition(.identity)
+                }
+                GameBackdrop(game: game, video: selection.video.flatMap { $0.background == shownSlide ? $0 : nil }, slide: currentSlide,
+                    images: images, crossfade: selection.allowsCrossfade, showsTint: showsTint) { selection.setPlaybackState($0, for: $1) }
+                    .id(game.id)
+                    .transition(.identity)
+                    .opacity(incomingVisible ? 1 : 0)
+            }
             if let slides = selection.slides, !slides.dotIDs.isEmpty, let shown = shownSlide {
                 BackgroundDots(ids: slides.dotIDs, current: shown.id,
                     onHover: { id, inside in if inside { selection.hoverDot(id) } else { selection.leaveDot(id) } },
@@ -87,7 +134,7 @@ struct RootView: View {
                     .frame(maxHeight: .infinity, alignment: .top)
             }
             HStack(alignment: .bottom, spacing: 0) {
-                GameRail(selectedID: Binding(get: { game.id }, set: { selectedID = $0 }), panel: $panel)
+                GameRail(selectedID: Binding(get: { game.id }, set: { select($0) }), panel: $panel)
                     .padding(.leading, 12)
                     .padding(.top, 40) // below the window's traffic lights
                     .padding(.bottom, 12)
@@ -112,24 +159,35 @@ struct RootView: View {
                     .padding(24)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 } else {
-                    GameFooter(game: game, art: model.launcherArt(for: game.id), highlights: shownSlide?.highlights,
+                    GameFooter(game: game, art: model.launcherArt(for: game.id), highlights: currentSlide?.highlights,
                         images: images, panel: $panel, gameSheet: $gameSheet, animated: animated,
-                        slideHasVideo: shownSlide?.video != nil)
+                        slideHasVideo: currentSlide?.video != nil)
                         // A fresh footer per game, so a confirmation opened for one game can't act on another.
                         .id(game.id)
+                        // The old footer leaves at once, so two sets of cards never overlap.
+                        .transition(.asymmetric(insertion: .opacity, removal: .identity))
                         .padding(24)
                 }
             }
+            // Only the footer animates with the switch; the backdrop fades explicitly.
+            .animation(.smooth(duration: 0.35), value: game.id)
         }
-        .animation(.smooth(duration: 0.35), value: game.id)
         .onChange(of: selectionInputs, initial: true) { old, new in
-            if old.gameID != new.gameID || old.region != new.region { shownSlide = nil }
+            if old.gameID != new.gameID || old.region != new.region { shownSlide = nil; shownSlideGameID = nil }
             images.preload(new.backgrounds.flatMap { [$0.image, $0.theme, $0.highlights?.image, $0.highlights?.hoverImage].compactMap { $0 } })
             selection.update(region: new.region, gameID: new.gameID, backgrounds: new.backgrounds,
                 animated: new.animated, reduceMotion: new.reduceMotion)
+            revealIncomingIfReady()
         }
         .onChange(of: readySlide, initial: true) {
-            if let readySlide { shownSlide = readySlide } else if selection.slides == nil { shownSlide = nil }
+            if let readySlide { shownSlide = readySlide; shownSlideGameID = game.id } else if selection.slides == nil { shownSlide = nil; shownSlideGameID = nil }
+            revealIncomingIfReady()
+        }
+        // A picture that never decodes must not hide the next game: reveal it anyway.
+        .task(id: outgoing?.token) {
+            guard let token = outgoing?.token else { return }
+            try? await Task.sleep(for: .seconds(1))
+            revealIncoming(replacing: token)
         }
         // Resting on a dot selects it after a short delay; moving away cancels the token.
         .task(id: selection.dotHover) {
@@ -336,5 +394,38 @@ enum QuitConfirmation {
         alert.addButton(withTitle: String(localized: "Quit"))
         alert.addButton(withTitle: String(localized: "Cancel"))
         completion(alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel)
+    }
+}
+
+private struct OutgoingBackdrop {
+    let game: LauncherGame
+    let still: NSImage?
+    let theme: NSImage?
+    let showsTint: Bool
+    let token = UUID()
+}
+
+/// The previous game's still picture, theme and scrim, layered as `GameBackdrop` draws them.
+private struct OutgoingBackdropView: View {
+    let backdrop: OutgoingBackdrop
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if backdrop.showsTint || backdrop.still != nil {
+                LinearGradient(colors: [backdrop.game.deepTint, backdrop.game.deepTint.mix(with: .black, by: 0.5)],
+                    startPoint: .top, endPoint: .bottom)
+            }
+            ForEach(Array([backdrop.still, backdrop.theme].compactMap { $0 }.enumerated()), id: \.offset) { _, image in
+                Color.clear
+                    .overlay { Image(nsImage: image).resizable().scaledToFill() }
+                    .clipped()
+            }
+            if backdrop.showsTint || backdrop.still != nil {
+                LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 260)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
