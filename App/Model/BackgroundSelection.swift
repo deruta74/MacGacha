@@ -69,6 +69,8 @@ struct BackgroundVideo: Sendable, Equatable {
         return BackgroundVideo(background: background, token: BackgroundVideoToken(source: source, generation: generation),
             state: playback[source] ?? .preparing, isPaused: !windowActive || !windowVisible)
     }
+    /// The game the current slides belong to.
+    var slidesGameID: String? { gameID }
     var slides: BackgroundSlides? {
         guard let current else { return nil }
         return BackgroundSlides(current: current, dotIDs: available.count > 1 ? available.map(\.id) : [])
