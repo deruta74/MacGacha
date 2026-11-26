@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-0078D4?style=for-the-badge)](README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-555555?style=for-the-badge)](README.ja.md)
 
-> ✨ **[MacGacha 0.3.5](https://github.com/deruta74/MacGacha/releases/tag/v0.3.5) 已发布**：支持安装并自动更新原神的千星沙箱编辑器，网络屏蔽游戏服务器时会给出明确提示，并修复了背景视频播放过快的问题。已经在使用 0.3.1？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
+> ✨ **[MacGacha 0.4.0](https://github.com/deruta74/MacGacha/releases/tag/v0.4.0) 已发布**：支持崩坏3 的五个服务器，新增稍后安装和安静的计划下载，游戏启动失败时启动详情会显示发生了哪些变化，切换游戏也更流畅了。已经在使用 0.3.1？MacGacha 会自行更新。发现问题？欢迎[反馈](#feedback)。
 
 面向 Apple Silicon 的原生 macOS 启动器，支持 **《原神》**、**《崩坏：星穹铁道》**、**《绝区零》** 和 **《崩坏3》**。它从 HoYoverse 官方服务器安装、更新和校验游戏，管理 Wine / DXMT / D3DMetal 运行环境，并可一键启动各款游戏。
 

@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-555555?style=for-the-badge)](README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-0078D4?style=for-the-badge)](README.ja.md)
 
-> ✨ **[MacGacha 0.3.5](https://github.com/deruta74/MacGacha/releases/tag/v0.3.5) を公開しました**。原神の Miliastra Sandbox エディターのインストールと自動更新に対応し、ネットワークがゲームのサーバーをブロックしているときはその旨を表示します。背景動画が速く再生される問題も修正しました。すでに 0.3.1 をお使いの場合は、MacGacha が自動更新します。気になる点があれば[ご報告ください](#feedback)。
+> ✨ **[MacGacha 0.4.0](https://github.com/deruta74/MacGacha/releases/tag/v0.4.0) を公開しました**。崩壊3rd の5つのサーバーに対応し、後でインストールする機能と静かなスケジュールダウンロード、起動に失敗したときに何が変わったかを示す起動の詳細を追加しました。ゲームの切り替えもなめらかになりました。すでに 0.3.1 をお使いの場合は、MacGacha が自動更新します。気になる点があれば[ご報告ください](#feedback)。
 
 Apple Silicon で **『原神』**、**『崩壊：スターレイル』**、**『ゼンレスゾーンゼロ』**、**『崩壊3rd』** を利用するための、macOS ネイティブのランチャーです。HoYoverse の公式サーバーからゲームをインストール、更新、検証し、Wine / DXMT / D3DMetal の実行環境を管理して、各ゲームをワンクリックで起動します。
 

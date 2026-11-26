@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-555555?style=for-the-badge)](readme/README.zh-CN.md)
 [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-555555?style=for-the-badge)](readme/README.ja.md)
 
-> ✨ **[MacGacha 0.3.5](https://github.com/deruta74/MacGacha/releases/tag/v0.3.5) is out**: install and auto-update Genshin Impact's Miliastra Sandbox editor, a clear message when your network blocks the game's servers and a fix for the background video playing too fast. Already on 0.3.1? MacGacha updates itself. Found something? Please [report it](#feedback).
+> ✨ **[MacGacha 0.4.0](https://github.com/deruta74/MacGacha/releases/tag/v0.4.0) is out**: Honkai Impact 3rd on five servers, **Install Later** and quiet scheduled downloads, Launch Details that show what changed when a game fails to start, and smoother switching between games. Already on 0.3.1? MacGacha updates itself. Found something? Please [report it](#feedback).
 
 A native macOS launcher for **Genshin Impact**, **Honkai: Star Rail**, **Zenless Zone Zero** and **Honkai Impact 3rd** on Apple Silicon. It installs, updates and verifies the games from HoYoverse's official servers, manages Wine / DXMT / D3DMetal runtimes, and starts each game with one click.
 
