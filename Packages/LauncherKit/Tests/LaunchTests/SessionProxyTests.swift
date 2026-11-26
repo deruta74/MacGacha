@@ -39,7 +39,7 @@ import Darwin
             #expect(echoed == bytes)
             #expect(logs.withLock { $0 } == ["origin.test:443 allow"])
             try await client.finishWrite()
-            #expect(try await client.read().isEmpty)
+            #expect(try await client.readEOF())
         }
     }
     @Test func connectBlockedReturns403AndExactMatchingOnly() async throws {
