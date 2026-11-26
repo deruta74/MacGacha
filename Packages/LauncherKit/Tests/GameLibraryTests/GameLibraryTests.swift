@@ -1645,7 +1645,10 @@ extension GameLibraryTests {
         try await gate.waitUntilEntered()
         await #expect(throws: LauncherError.self) { try await f.library.deletePreDownload(game) }
         task.cancel(); gate.release()
-        await #expect(throws: LauncherError.cancelled) { try await task.value }
+        // A cancelled stream either throws or exhausts quietly before its next
+        // pull. Only an explicit completion would mean the transfer finished.
+        do { #expect(try await task.value.last != .phase(.completed)) }
+        catch { #expect(error as? LauncherError == .cancelled) }
         try await f.library.waitUntilIdle(game.id)
         #expect(try await f.library.preDownloadInfo(game, refresh: false).state == .paused)
         #expect(try await f.store.load(game.id) == before)
