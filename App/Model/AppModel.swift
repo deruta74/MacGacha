@@ -218,6 +218,29 @@ final class AppModel {
     var prefixResetGame: String?
     @ObservationIgnored let prefixResetter: any WinePrefixResetting
     var gameMoveRecoveryReservation = false
+    var updateQueue = UpdateQueue()
+    var updateQueueFailures: [String: UpdateQueueFailure] = [:]
+    var updateQueuePersistenceFailure: LauncherError?
+    var isKeepingMacAwakeForQueue = false
+    @ObservationIgnored var updateQueueAssertionGame: String?
+    @ObservationIgnored let updateQueuePowerAssertion: (any UpdateQueuePowerAsserting)?
+    @ObservationIgnored var updateQueueLoaded = false
+    @ObservationIgnored let updateQueueStore: UpdateQueueStore?
+    @ObservationIgnored let updateQueueLog: EventLog?
+    @ObservationIgnored var updateQueueWriteTask: Task<Void, Never>?
+    @ObservationIgnored var updateQueueWriteRevision: UUID?
+    @ObservationIgnored var updateQueueShuttingDown = false
+    var updateQueueNetworkAllowed = false
+    var updateQueueOnAC: Bool?
+    var updateQueueIdleSeconds: TimeInterval = 0
+    var updateQueueObservedDate: Date?
+    @ObservationIgnored var updateQueueUncommittedInstalls: Set<String> = []
+    @ObservationIgnored let updateQueueEnvironment = UpdateQueueEnvironment()
+    @ObservationIgnored let updateQueueSignals: (@MainActor () -> (network: Bool, onAC: Bool?, idle: TimeInterval))?
+    @ObservationIgnored var updateQueueTimer: Task<Void, Never>?
+    @ObservationIgnored var updateQueueTask: Task<Void, Never>?
+    @ObservationIgnored var updateQueueTaskIsAutomatic = false
+    @ObservationIgnored var updateQueueWatchID: UUID?
     var gameOperation: GameOperationToken?
     private(set) var languageRestart: UUID?
     func setLanguageRestart(_ value: UUID?) { languageRestart = value }
@@ -263,7 +286,7 @@ final class AppModel {
     @ObservationIgnored private var requestModes: [String: ConsentMode] = [:]
     @ObservationIgnored private var progressTimes: [String: ContinuousClock.Instant] = [:]
     @ObservationIgnored private var started = false
-    @ObservationIgnored private var startupFinished = false
+    @ObservationIgnored private(set) var startupFinished = false
     @ObservationIgnored private var startupWaiters: [CheckedContinuation<Void, Never>] = []
     /// A shortcut started this process: the launcher window stays hidden until something needs it.
     var launchedHidden = false
@@ -385,7 +408,14 @@ final class AppModel {
         relaunch: @escaping @MainActor ([String]) async throws -> Void = { _ in },
         terminateAfterLanguageRestart: @escaping @MainActor () -> Void = {},
         launchArguments: [String] = ProcessInfo.processInfo.arguments,
-        prefixResetter: (any WinePrefixResetting)? = nil) {
+        prefixResetter: (any WinePrefixResetting)? = nil,
+        updateQueueStore: UpdateQueueStore? = nil, updateQueueLog: EventLog? = nil,
+        updateQueuePowerAssertion: (any UpdateQueuePowerAsserting)? = nil,
+        updateQueueSignals: (@MainActor () -> (network: Bool, onAC: Bool?, idle: TimeInterval))? = nil) {
+        self.updateQueuePowerAssertion = updateQueuePowerAssertion
+        self.updateQueueStore = updateQueueStore
+        self.updateQueueLog = updateQueueLog
+        self.updateQueueSignals = updateQueueSignals
         self.wishHistoryExporter = wishHistoryExporter
         self.storageService = storageService ?? StorageInventory(paths: paths)
         self.storageCacheDirectory = storageCacheDirectory
@@ -540,7 +570,9 @@ final class AppModel {
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.createsNewApplicationInstance = true; configuration.arguments = arguments
                 _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
-            }, terminateAfterLanguageRestart: { NSApp.terminate(nil) })
+            }, terminateAfterLanguageRestart: { NSApp.terminate(nil) },
+            updateQueueStore: UpdateQueueStore(root: paths.root), updateQueueLog: log,
+            updateQueuePowerAssertion: SystemUpdateQueuePowerAssertion())
         model.shortcutWriter = LiveGameShortcutWriter(
             directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
             hostBundleID: Bundle.main.bundleIdentifier ?? "com.lo7ted.macgacha",
@@ -595,6 +627,7 @@ final class AppModel {
         notificationTask?.cancel(); notificationActivationTask?.cancel()
         eventsHydrationTask?.cancel(); eventsExpiryTask?.cancel(); eventsWindowTask?.cancel()
         volumeEventTask?.cancel()
+        updateQueueTimer?.cancel(); updateQueueTask?.cancel()
         gameTask?.cancel(); gameStartupTask?.cancel(); gameActivationTask?.cancel()
     }
 
@@ -606,6 +639,7 @@ final class AppModel {
         let eventsHydration = hydrateGameEvents()
         defer { isStarting = false; scheduleDependencyAutoUpdates() }
         refreshConnectedDisplays()
+        await loadUpdateQueue()
         await ensureGameStartup().value
         await continueLanguageRestart(arguments: launchArguments)
         await refreshRosetta()
@@ -631,6 +665,8 @@ final class AppModel {
         scheduleRuntimeCatalogRefresh()
         updater.start { [weak self] in self?.isBusyForUpdates ?? true }
         startupFinished = true
+        startUpdateQueueMonitoring()
+        evaluateUpdateQueue()
         let waiters = startupWaiters; startupWaiters = []
         for waiter in waiters { waiter.resume() }
     }

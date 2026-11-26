@@ -234,10 +234,26 @@ struct GameFooter: View {
         case .needsApproval: return true
         case nil: break
         }
+        // A planned install is cancelled from the menu.
+        if model.scheduledInstall(for: game.id)?.isRunning == false { return true }
         return switch state.status {
         case .installed, .updateAvailable, .paused: true
         default: false
         }
+    }
+
+    /// A planned install or a queued update that hasn't started yet says when and why it waits.
+    private var queueLine: String? {
+        guard state.activity == nil, let entry = model.updateQueue.entries.first(where: { $0.id == game.id }) else { return nil }
+        if let failure = model.queueFailure(for: game.id) {
+            if case .approvalRequired = failure { return String(localized: "Not enough free space to install in one go.") }
+            return failure.userMessage
+        }
+        if let install = model.scheduledInstall(for: game.id) {
+            return install.isRunning ? nil : install.title
+        }
+        if entry.paused { return String(localized: "Paused — retry when ready.") }
+        return model.queueWaiting(for: game.id)?.userMessage
     }
 
     private var statusLine: String {
@@ -289,6 +305,7 @@ struct GameFooter: View {
             return String(localized: "Couldn't check for updates: \(error.userMessage)", comment: "Manual game update check failed; the argument is the reason")
         case .updateAvailable, nil: break
         }
+        if let queued = queueLine { return queued }
         switch state.status {
         case .unknown: return String(localized: "Checking for updates…")
         case .notInstalled: return String(localized: "Not installed")
@@ -323,9 +340,9 @@ struct GameFooter: View {
         switch launch {
         case .starting(let stage):
             switch stage {
-            case .preflight, .lock, .snapshot: return String(localized: "Checking \(game.name)…", comment: "Launch status; the argument is the game's name")
+            case .preflight, .lock, .snapshot: return String(localized: "Checking \(model.editionDisplayName(game))…", comment: "Launch status; the argument is the game's name")
             case .prepare: return String(localized: "Preparing Wine…")
-            case .proxy, .spawn: return String(localized: "Starting \(game.name)…", comment: "Launch status; the argument is the game's name")
+            case .proxy, .spawn: return String(localized: "Starting \(model.editionDisplayName(game))…", comment: "Launch status; the argument is the game's name")
             case .watch: return String(localized: "Waiting for the game window…")
             case .restore, .report: return String(localized: "Restoring game files…")
             }
@@ -339,9 +356,9 @@ struct GameFooter: View {
             if let note { return note }
             guard let other = playingElsewhere else { return nil }
             if case .recoveryNeeded = model.launchState(for: other.id) {
-                return String(localized: "Waiting for \(other.name) to put its files back", comment: "The argument is another game's name")
+                return String(localized: "Waiting for \(model.editionDisplayName(other)) to put its files back", comment: "The argument is another game's name")
             }
-            return String(localized: "\(other.name) is running — quit it to play this one", comment: "The argument is another game's name")
+            return String(localized: "\(model.editionDisplayName(other)) is running — quit it to play this one", comment: "The argument is another game's name")
         }
     }
 
@@ -368,8 +385,8 @@ struct GameFooter: View {
             return String(localized: "Another game is busy — this one can start when it finishes")
         }
         return phase == .staging
-            ? String(localized: "\(other.name) is downloading — pause it to start this one", comment: "The argument is another game's name")
-            : String(localized: "Waiting for \(other.name) to finish", comment: "The argument is another game's name")
+            ? String(localized: "\(model.editionDisplayName(other)) is downloading — pause it to start this one", comment: "The argument is another game's name")
+            : String(localized: "Waiting for \(model.editionDisplayName(other)) to finish", comment: "The argument is another game's name")
     }
 
     private var partsMessage: String {
@@ -685,7 +702,16 @@ struct GameMenu: View {
             if case .recoveryNeeded = model.launchState(for: game.id) {
                 Button("Try Restoring Again", systemImage: "arrow.clockwise") { model.retryRecovery(game.id) }
             }
+            if model.scheduledInstall(for: game.id)?.isRunning == false {
+                Button("Cancel Scheduled Install", systemImage: "calendar.badge.minus") { model.cancelScheduledInstall(game.id) }
+            }
             if isInstalled {
+                if model.updateQueue.entries.contains(where: { $0.id == game.id }) {
+                    Button("Remove from queue", systemImage: "minus.circle") { model.removeQueuedUpdate(game.id) }
+                } else {
+                    Button("Queue Update", systemImage: "text.badge.plus") { model.enqueueUpdate(game.id) }
+                        .disabled(model.gameRecord(game.id)?.pending != nil || model.gameOperation?.id == game.id)
+                }
                 Button("Game Settings…", systemImage: "slider.horizontal.3") { gameSheet = .settings(game.id) }
                 if model.hasLaunchDetails(game.id) {
                     Button("Launch Details…", systemImage: "clock.arrow.circlepath") { gameSheet = .launchDetails(game.id) }

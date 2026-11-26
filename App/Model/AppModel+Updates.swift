@@ -32,7 +32,7 @@ import LauncherCore
         updater.checkForUpdates()
     }
 
-    func canBeginGameOrRuntimeOperation(allowingCatalogID: String? = nil) -> Bool {
+    func canBeginGameOrRuntimeOperation(allowingCatalogID: String? = nil, reportBusy: Bool = true) -> Bool {
         guard !storageCleanupInProgress, prefixResetGame == nil else { return false }
         guard !gameMoveRecoveryReservation else { return false }
         let capturedSetupItem = allowingCatalogID.map { id in
@@ -43,7 +43,7 @@ import LauncherCore
         } ?? false
         guard runtimeCatalogMutationID == nil || runtimeCatalogMutationID == allowingCatalogID || capturedSetupItem else { return false }
         guard languageRestart == nil, !updater.isInstallingUpdate else {
-            show(LauncherError.busy("Application update is installing"))
+            if reportBusy { show(LauncherError.busy("Application update is installing")) }
             return false
         }
         return true

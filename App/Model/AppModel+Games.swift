@@ -17,6 +17,10 @@ struct GameOperationToken: Sendable, Equatable {
     var isVerification = false
     var isUninstall = false
     var isDownload = false
+    var isQueuedUpdate = false
+    var isScheduledQueueDownload = false
+    var deliveryProfile: DeliveryProfile = .standard
+    var quietSpeedLimit: Int64?
     var unplannedDownload: PlayUnplannedDownload? = nil
     var isPreDownload = false
     var isMoving = false
@@ -274,10 +278,20 @@ private struct GameSnapshot: Sendable {
         return value
     }
 
-    func installGame(_ id: String, voices: Set<String>, at location: URL, approved: Bool) { beginGame(id, .install(voices, location, approved)) }
-    func adoptGame(_ id: String, folder: URL, voices: Set<String>) { beginGame(id, .adopt(folder, voices)) }
-    func updateGame(_ id: String) { beginGame(id, .update) }
-    func resumeGame(_ id: String, expectedPending: PendingOperation? = nil) { beginGame(id, .resume(false), expectedPending: expectedPending) }
+    func installGame(_ id: String, voices: Set<String>, at location: URL, approved: Bool) {
+        if beginGame(id, .install(voices, location, approved)) != nil { cancelScheduledInstall(id) }
+    }
+    func adoptGame(_ id: String, folder: URL, voices: Set<String>) {
+        if beginGame(id, .adopt(folder, voices)) != nil { cancelScheduledInstall(id) }
+    }
+    func updateGame(_ id: String) {
+        if updateQueue.entries.contains(where: { $0.id == id }) { removeQueuedUpdate(id) }
+        beginGame(id, .update)
+    }
+    func resumeGame(_ id: String, expectedPending: PendingOperation? = nil) {
+        if updateQueue.entries.contains(where: { $0.id == id }) { removeQueuedUpdate(id) }
+        beginGame(id, .resume(false), expectedPending: expectedPending)
+    }
     func resumeUnplannedDownload(_ initial: PlayUnplannedDownload, for id: String) {
         if case .preDownload = initial.request { restartUnplannedPreDownload(id, initial: initial); return }
         let request: GameRequest
@@ -300,12 +314,31 @@ private struct GameSnapshot: Sendable {
             automaticSandboxAttempts[id, default: []].insert(version)
         }
     }
+    func beginQueuedGame(_ id: String, pending: PendingOperation? = nil, initial: PlayUnplannedDownload? = nil) {
+        guard let entry = updateQueue.entries.first(where: { $0.id == id && !$0.paused }) else { return }
+        let request: GameRequest
+        if let pending {
+            guard let record = gameRecords[id], record.pending == pending, entry.ownsPlan(in: record) else {
+                holdQueuedUpdate(id, failure: .pendingOperation)
+                cancelPlayDownloadResume(for: id)
+                return
+            }
+            request = .resume(entry.spaceApproved)
+        } else if let install = entry.plannedInstall {
+            request = .install(install.voices, install.location, entry.spaceApproved)
+        } else {
+            request = .update
+        }
+        beginGame(id, request, expectedPending: pending, expectedUnplanned: initial, queued: true)
+    }
     func pauseGame(_ id: String) {
+        if gameOperation?.id == id, gameOperation?.isQueuedUpdate == true { manuallyPauseQueuedUpdate(id) }
         cancelPlayDownloadResume(for: id)
         if gameOperation?.id == id { gameTask?.cancel() }
     }
     func approveBatches(_ id: String) {
         guard case .needsApproval = games[id]?.activity else { return }
+        if updateQueue.entries.contains(where: { $0.id == id }) { removeQueuedUpdate(id) }
         beginGame(id, .resume(true)) // Resume the exact saved plan; never rebuild it.
     }
     func canMoveGame(_ id: String) -> Bool {
@@ -361,28 +394,34 @@ private struct GameSnapshot: Sendable {
         return task
     }
 
-    private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity, isVerification: Bool, isUninstall: Bool, installPath: URL?, isMoving: Bool = false, isSandbox: Bool = false, automaticSandboxVersion: String? = nil, moveDestination: URL? = nil, notificationCompletion: GameNotificationKind? = nil, isDownload: Bool = false, unplannedDownload: PlayUnplannedDownload? = nil) -> GameOperationToken? {
-        guard canBeginGameOrRuntimeOperation(), canOperateGameDuringPlay(id, isDownload: isDownload) else { return nil }
-        guard GameDefinition.all.contains(where: { $0.id == id }) else { show(LauncherError.io("Unknown game")); return nil }
-        guard gameOperation == nil || (isMoving && gameOperation?.id == id && gameOperation?.isPreDownload == true && gameOperation?.isUninstall == false) else { show(LauncherError.busy("another game operation is running")); return nil }
-        let token = GameOperationToken(id: id, generation: UUID(), kind: kind, notificationCompletion: notificationCompletion, isVerification: isVerification, isUninstall: isUninstall, isDownload: isDownload, unplannedDownload: unplannedDownload, isMoving: isMoving, isSandbox: isSandbox, automaticSandboxVersion: automaticSandboxVersion, moveDestination: moveDestination, installPath: installPath)
+    private func reserveGame(_ id: String, activity: GameActivity, kind: OtherRegionActivity, isVerification: Bool, isUninstall: Bool, installPath: URL?, isMoving: Bool = false, isSandbox: Bool = false, automaticSandboxVersion: String? = nil, moveDestination: URL? = nil, notificationCompletion: GameNotificationKind? = nil, isDownload: Bool = false, unplannedDownload: PlayUnplannedDownload? = nil, queued: Bool = false) -> GameOperationToken? {
+        guard canBeginGameOrRuntimeOperation(reportBusy: !queued), canOperateGameDuringPlay(id, isDownload: isDownload) else { return nil }
+        guard GameDefinition.all.contains(where: { $0.id == id }) else { if !queued { show(LauncherError.io("Unknown game")) }; return nil }
+        guard gameOperation == nil || (isMoving && gameOperation?.id == id && gameOperation?.isPreDownload == true && gameOperation?.isUninstall == false) else { if !queued { show(LauncherError.busy("another game operation is running")) }; return nil }
+        let quiet = queued && quietDownloads
+        let token = GameOperationToken(id: id, generation: UUID(), kind: kind, notificationCompletion: notificationCompletion, isVerification: isVerification, isUninstall: isUninstall, isDownload: isDownload, isQueuedUpdate: queued,
+            isScheduledQueueDownload: queued && (updateQueue.scheduled || scheduledInstall(for: id) != nil),
+            deliveryProfile: quiet ? .quiet : .standard, quietSpeedLimit: quiet ? quietDownloadSpeedLimit : nil, unplannedDownload: unplannedDownload, isMoving: isMoving, isSandbox: isSandbox, automaticSandboxVersion: automaticSandboxVersion, moveDestination: moveDestination, installPath: installPath)
         cancelPlayDownloadResume(for: id)
         gameOperation = token; gameRevisions[id] = token.generation
+        if token.quietSpeedLimit != nil { updateGameplayDeliveryPolicy() }
         gameProgress = GameProgress()
         sandboxFailures[id] = nil
-        if automaticSandboxVersion == nil { dismissError() }
+        if automaticSandboxVersion == nil, !queued { dismissError() }
         setGameState(id, GameState(status: games[id]?.status ?? .unknown, activity: activity))
         return token
     }
 
-    @discardableResult private func beginGame(_ id: String, _ request: GameRequest, expectedPending: PendingOperation? = nil, expectedUnplanned: PlayUnplannedDownload? = nil) -> Task<Void, Never>? {
+    @discardableResult private func beginGame(_ id: String, _ request: GameRequest, expectedPending: PendingOperation? = nil, expectedUnplanned: PlayUnplannedDownload? = nil, queued: Bool = false) -> Task<Void, Never>? {
         let previousPreDownload = request.isMoving && gameOperation?.id == id && gameOperation?.isPreDownload == true ? gameTask : nil
         let destination: URL? = if case .move(let folder) = request { folder } else { nil }
         guard let token = reserveGame(id, activity: request.isUninstall ? .working(.deleting, fraction: nil, bytesPerSecond: nil) : .resolving,
-            kind: request.activity(record: gameRecords[id]), isVerification: { if case .verify = request { true } else { false } }(), isUninstall: request.isUninstall, installPath: request.installPath ?? gameRecords[id]?.installPath, isMoving: request.isMoving, isSandbox: request.isSandbox, automaticSandboxVersion: request.automaticSandboxVersion, moveDestination: destination, notificationCompletion: request.notificationCompletion(record: gameRecords[id]), isDownload: request.isDownload(record: gameRecords[id]), unplannedDownload: request.unplannedDownload(record: gameRecords[id])) else { return nil }
+            kind: request.activity(record: gameRecords[id]), isVerification: { if case .verify = request { true } else { false } }(), isUninstall: request.isUninstall, installPath: request.installPath ?? gameRecords[id]?.installPath, isMoving: request.isMoving, isSandbox: request.isSandbox, automaticSandboxVersion: request.automaticSandboxVersion, moveDestination: destination, notificationCompletion: request.notificationCompletion(record: gameRecords[id]), isDownload: request.isDownload(record: gameRecords[id]), unplannedDownload: request.unplannedDownload(record: gameRecords[id]), queued: queued) else { return nil }
         previousPreDownload?.cancel()
         let services = gameServices, startup = ensureGameStartup()
-        let task = Task { [weak self] in
+        let queueOwner = updateQueue.entries.first(where: { $0.id == id })?.ownershipID
+        let expectation = queued ? GameDeliveryExpectation(record: gameRecords[id], queueOwner: queueOwner) : nil
+        let task = Task(priority: token.deliveryProfile == .quiet ? .background : nil) { [weak self] in
             var approval: (required: Int64, available: Int64)?
             var failure: LauncherError?
             var completed = false
@@ -404,10 +443,14 @@ private struct GameSnapshot: Sendable {
                 }
                 if let expectedUnplanned {
                     let current = try await services.record(id)
-                    guard current == expectedUnplanned.record, current?.pending == nil, current?.uninstalling != true else { throw LauncherError.cancelled }
+                    guard current == expectedUnplanned.record, current?.pending == nil, current?.uninstalling != true else {
+                        throw token.isQueuedUpdate ? LauncherError.busy("Installation changed") : LauncherError.cancelled
+                    }
                 }
                 if let expectedPending {
-                    guard try await services.record(id)?.pending == expectedPending else { throw LauncherError.cancelled }
+                    guard try await services.record(id)?.pending == expectedPending else {
+                        throw token.isQueuedUpdate ? LauncherError.busy("Pending operation changed") : LauncherError.cancelled
+                    }
                 }
                 switch request {
                 case .update, .resume, .verify, .voices, .uninstall, .move, .installSandbox, .updateSandbox, .removeSandbox: try await self?.recheckGameLocation(id)
@@ -415,7 +458,7 @@ private struct GameSnapshot: Sendable {
                 }
                 self?.gameLocationPauseReasons[id] = nil
                 try Task.checkCancellation()
-                let stream = await gameStream(services, id: id, request: request)
+                let stream = await gameStream(services, id: id, request: request, profile: token.deliveryProfile, expectation: expectation)
                 events: for try await event in stream {
                     try Task.checkCancellation()
                     guard self?.gameOperation == token else { return }
@@ -434,6 +477,7 @@ private struct GameSnapshot: Sendable {
                     case .phase(let phase):
                         if let record = try? await services.record(id), self?.gameOperation == token {
                             self?.setGameRecord(id, record)
+                            self?.recordQueuedPlan(token, record: record)
                         }
                         self?.setGameOperationPhase(id, phase: phase)
                     case .progress(let downloaded, let network, let staged, let totalStaged):
@@ -487,16 +531,21 @@ private struct GameSnapshot: Sendable {
                 } else if let failure { self.show(failure) }
             } else {
                 if failure == .installVolumeUnavailable { self.gameLocationPauseReasons[id] = .installVolumeUnavailable }
-                if let reason = self.gameLocationPauseReasons[id], !completed { self.show(reason) }
-                else if let failure { self.show(failure) }
+                if !token.isQueuedUpdate {
+                    if let reason = self.gameLocationPauseReasons[id], !completed { self.show(reason) }
+                    else if let failure { self.show(failure) }
+                }
             }
+            self.recordQueuedPlan(token, record: snapshot.record)
             let activity: GameActivity?
-            if !completed, failure == nil, let approval { activity = .needsApproval(required: approval.required, available: approval.available) }
+            if !completed, (failure == nil || (token.isQueuedUpdate && failure == .cancelled)), let approval {
+                activity = .needsApproval(required: approval.required, available: approval.available)
+            }
             else { activity = nil }
             // Publish for the latest observed revision without replacing it.
             // No suspension may separate this publication from releasing the token.
             let finalRevision = snapshotRevision
-            self.applyGame(snapshot, id: id, activity: activity, reportError: failure == nil && !moveStoppedByEject)
+            self.applyGame(snapshot, id: id, activity: activity, reportError: !token.isQueuedUpdate && failure == nil && !moveStoppedByEject)
             if let cacheInfo {
                 self.preDownloadRevisions[id] = UUID()
                 self.preDownloads[id] = PreDownloadOverlay(info: cacheInfo)
@@ -512,7 +561,9 @@ private struct GameSnapshot: Sendable {
             }
             let failed = failure.map { $0 != .cancelled } ?? false
             self.lastGameConsumerOutcome = (token, failed || snapshot.error != nil ? .failed : completed ? .completed : .stopped)
-            self.releaseGame(token, activity: activity)
+            let queueFailure = [failure, snapshot.error, self.gameLocationPauseReasons[id]].compactMap { $0 }
+                .first { $0 != .cancelled }
+            self.releaseGame(token, activity: activity, queueFailure: queueFailure)
             if let completion = notificationCompletion {
                 if completed { self.notify(completion, gameID: id) }
                 else if approval != nil { self.notify(.pausedForSpace, gameID: id) }
@@ -603,13 +654,17 @@ private struct GameSnapshot: Sendable {
         setGameState(id, GameState(status: snapshot.status, activity: activity, spaceShortage: shortage))
         if reportError, let error = snapshot.error { show(error) }
     }
-    private func releaseGame(_ token: GameOperationToken, activity: GameActivity?) {
+    private func releaseGame(_ token: GameOperationToken, activity: GameActivity?, queueFailure: LauncherError? = nil) {
         guard gameOperation == token else { return }
         var state = games[token.id] ?? GameState(status: .unknown)
         state.activity = activity
         gameProgress = GameProgress()
         setGameState(token.id, state)
+        if let outcome = lastGameConsumerOutcome, outcome.token == token {
+            queuedUpdateFinished(token, outcome: outcome.outcome, failure: queueFailure, activity: activity)
+        }
         gameOperation = nil; gameTask = nil
+        if token.quietSpeedLimit != nil { updateGameplayDeliveryPolicy() }
         resumeDownloadAfterPlayIfPossible()
     }
     func setGameOperationPhase(_ id: String, phase: OperationPhase) {
@@ -639,16 +694,16 @@ private struct GameSnapshot: Sendable {
     }
 }
 
-private func gameStream(_ services: any GameServices, id: String, request: GameRequest) async -> GameEventStream {
+private func gameStream(_ services: any GameServices, id: String, request: GameRequest, profile: DeliveryProfile, expectation: GameDeliveryExpectation?) async -> GameEventStream {
     switch request {
     case .installSandbox: return await services.installSandbox(id)
     case .updateSandbox: return await services.updateSandbox(id)
     case .automaticSandboxUpdate(let version): return await services.automaticallyUpdateSandbox(id, expectedVersion: version)
     case .removeSandbox: return await services.removeSandbox(id)
-    case .install(let voices, let location, let approved): return await services.install(id, voices: voices, at: location, approved: approved)
+    case .install(let voices, let location, let approved): return await services.install(id, voices: voices, at: location, approved: approved, profile: profile, expectation: expectation)
     case .adopt(let folder, let voices): return await services.adopt(id, folder: folder, voices: voices)
-    case .update: return await services.update(id, approved: false)
-    case .resume(let approved): return await services.resume(id, approved: approved)
+    case .update: return await services.update(id, approved: false, profile: profile, expectation: expectation)
+    case .resume(let approved): return await services.resume(id, approved: approved, profile: profile, expectation: expectation)
     case .verify: return await services.verify(id, mode: .full)
     case .voices(let voices): return await services.setVoices(id, voices)
     case .move(let folder): return await services.move(id, to: folder)

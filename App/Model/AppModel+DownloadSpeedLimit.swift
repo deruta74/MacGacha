@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MacGacha — https://github.com/deruta74/MacGacha — see LICENSE and NOTICE (additional term under GPL section 7(b)).
+import Foundation
 import LauncherCore
 
 @MainActor extension AppModel {
@@ -14,8 +15,21 @@ import LauncherCore
 
     /// Preparation and recovery retain the game cap until the shared launch reservation ends.
     var effectiveDownloadSpeedLimit: Int64? {
-        guard launchSlotOwner != nil else { return downloadSpeedLimit }
-        return min(downloadSpeedLimit ?? playingDownloadSpeedLimit, playingDownloadSpeedLimit)
+        [downloadSpeedLimit, launchSlotOwner == nil ? nil : playingDownloadSpeedLimit, gameOperation?.quietSpeedLimit]
+            .compactMap { $0 }.min()
+    }
+
+    var quietDownloadsLabel: String { String(localized: "Quiet downloads") }
+    var quietDownloads: Bool { updateQueue.quietDownloads }
+    var quietDownloadSpeedLimit: Int64? { updateQueue.quietDownloadSpeedLimit }
+
+    func setQuietDownloads(_ enabled: Bool) {
+        saveUpdateQueue { $0.quietDownloads = enabled }
+    }
+
+    func setQuietDownloadSpeedLimit(_ bytesPerSecond: Int64?) throws {
+        if let bytesPerSecond { try Self.validateDownloadSpeedLimit(bytesPerSecond) }
+        saveUpdateQueue { $0.quietDownloadSpeedLimit = bytesPerSecond }
     }
 
     func updateGameplayDeliveryPolicy() {

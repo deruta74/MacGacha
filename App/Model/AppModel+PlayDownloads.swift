@@ -58,6 +58,9 @@ struct PlayPausedDownload {
         let intent = playDownloadResumeInvalidations[token.id]
         let outcome = try await stopGameOperation(token)
         guard playDownloadResumeInvalidations[token.id] == intent else { return }
+        // A space-approval pause belongs to the queue's explicit Retry flow.
+        // Do not install an ineligible continuation after its consumer drains.
+        if token.isQueuedUpdate, updateQueue.entries.first(where: { $0.id == token.id })?.paused != false { return }
         switch outcome {
         case .preDownload(let planID, let digest):
             pausedDownloadForPlay = PlayPausedDownload(token: token, plan: .preDownload(planID, digest))
@@ -92,7 +95,8 @@ struct PlayPausedDownload {
                     guard self.canResumePlayDownload(saved) else { self.watchPlayDownloadResume(saved); return }
                     guard record?.pending == pending, record?.uninstalling == false else { self.discardPlayDownloadResume(saved); return }
                     self.setGameRecord(saved.token.id, record)
-                    self.resumeGame(saved.token.id, expectedPending: pending)
+                    if saved.token.isQueuedUpdate { self.beginQueuedGame(saved.token.id, pending: pending) }
+                    else { self.resumeGame(saved.token.id, expectedPending: pending) }
                 case .unresolved(let initial):
                     let record = try await self.gameServices.record(saved.token.id)
                     guard self.canResumePlayDownload(saved) else { self.watchPlayDownloadResume(saved); return }
@@ -105,7 +109,8 @@ struct PlayPausedDownload {
                         guard current == offer else { self.discardPlayDownloadResume(saved); return }
                     }
                     self.setGameRecord(saved.token.id, record)
-                    self.resumeUnplannedDownload(initial, for: saved.token.id)
+                    if saved.token.isQueuedUpdate { self.beginQueuedGame(saved.token.id, initial: initial) }
+                    else { self.resumeUnplannedDownload(initial, for: saved.token.id) }
                 case .preDownload(let planID, let digest):
                     let info = try await self.gameServices.preDownloadInfo(saved.token.id, refresh: false)
                     guard self.canResumePlayDownload(saved) else { self.watchPlayDownloadResume(saved); return }
@@ -119,7 +124,9 @@ struct PlayPausedDownload {
                 // A suspended read belongs to this saved token. A newer pause
                 // may already have replaced it while that read was in flight.
                 guard self.pausedDownloadForPlay?.token == saved.token else { return }
-                self.discardPlayDownloadResume(saved); self.show(error)
+                self.discardPlayDownloadResume(saved)
+                if saved.token.isQueuedUpdate { self.holdQueuedUpdate(saved.token.id, failure: .operation(launcherError(error))) }
+                else { self.show(error) }
             }
         }
     }
@@ -142,7 +149,10 @@ struct PlayPausedDownload {
             guard let self else { return }
             defer { self.playDownloadPauseTask = nil }
             do { try await self.pauseDownloadForPlay(operation) }
-            catch { self.show(error) }
+            catch {
+                if operation.isQueuedUpdate { self.holdQueuedUpdate(operation.id, failure: .operation(launcherError(error))) }
+                else { self.show(error) }
+            }
             self.resumeDownloadAfterPlayIfPossible()
         }
     }
@@ -177,7 +187,7 @@ struct PlayPausedDownload {
     }
 
     private func canResumePlayDownload(_ saved: PlayPausedDownload) -> Bool {
-        pausedDownloadForPlay?.token == saved.token && gameOperation == nil && playDownloadCanResumeInCurrentSession(saved.token.id) &&
+        pausedDownloadForPlay?.token == saved.token && queuedPlayContinuationPermitted(saved.token) && gameOperation == nil && playDownloadCanResumeInCurrentSession(saved.token.id) &&
             languageRestart == nil && !updater.isInstallingUpdate && !storageCleanupInProgress && prefixResetGame == nil &&
             !gameMoveRecoveryReservation && runtimeCatalogMutationID == nil
     }

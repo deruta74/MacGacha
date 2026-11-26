@@ -48,6 +48,7 @@ public struct InstallOperation: Sendable {
     /// Keep the caller's operation ownership alive until cancelled pipeline
     /// workers join, even if the caller discards its iterator between events.
     package func run(retaining owner: (any Sendable)?) -> AsyncThrowingStream<OperationEvent, any Error> {
+        OperationWork.pipelineObserver?(maxConcurrentObjects, pipeline)
         let session = CommitSession(requested: plan, fs: fs, fetcher: fetcher, disk: disk, mode: mode, crashHooks: crashHooks,
             writesCompletionReceipt: writesCompletionReceipt, requireRequestedPlan: requireRequestedPlan, maxConcurrentObjects: maxConcurrentObjects, pipeline: pipeline, retainedOwner: owner, patchApplier: patchApplier, log: log, objectCache: objectCache, deliveryWorkController: deliveryWorkController)
         return AsyncThrowingStream(unfolding: { try await session.next() })
@@ -66,7 +67,7 @@ private struct CommitPaths: Sendable {
 private actor CommitSession {
     // Capacity snapshots and metadata mutations can wait for filesystem I/O.
     // Actor serialization must not occupy a cooperative worker while they do.
-    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.install")
+    nonisolated private let ioQueue: DispatchSerialQueue
     nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
 
     private enum Step { case start, space, staging, commit, delete, cleanup, done }
@@ -115,6 +116,7 @@ private actor CommitSession {
     init(requested: InstallPlan, fs: ContainedFileSystem, fetcher: ChunkFetcher,
         disk: any DiskSpaceProbe, mode: InstallOperation.Mode, crashHooks: CrashHooks, writesCompletionReceipt: Bool,
         requireRequestedPlan: Bool, maxConcurrentObjects: Int, pipeline: PipelineConfiguration, retainedOwner: (any Sendable)?, patchApplier: (any WholeFilePatchApplier)?, log: EventLog?, objectCache: (any InstallObjectCache)?, deliveryWorkController: DeliveryWorkController) {
+        ioQueue = DispatchSerialQueue(label: "org.macgacha.install", qos: BlockingIO.quality.actorQoS)
         self.requested = requested; self.fs = fs; self.fetcher = fetcher; self.disk = disk; self.mode = mode; self.crashHooks = crashHooks; self.patchApplier = patchApplier; self.log = log; self.objectCache = objectCache
         self.writesCompletionReceipt = writesCompletionReceipt
         self.requireRequestedPlan = requireRequestedPlan

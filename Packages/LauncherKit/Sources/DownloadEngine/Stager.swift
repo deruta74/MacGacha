@@ -103,7 +103,7 @@ private final class StagingLease: Sendable {
 private actor StagingSession {
     // Capacity snapshots and metadata mutations can wait for filesystem I/O.
     // Actor serialization must not occupy a cooperative worker while they do.
-    nonisolated private let ioQueue = DispatchSerialQueue(label: "org.macgacha.staging")
+    nonisolated private let ioQueue: DispatchSerialQueue
     nonisolated var unownedExecutor: UnownedSerialExecutor { ioQueue.asUnownedSerialExecutor() }
 
     private let durableFiles: Bool
@@ -158,6 +158,7 @@ private actor StagingSession {
 
     init(plan: InstallPlan, files: [FileTask], fs: ContainedFileSystem, fetcher: ChunkFetcher,
         journal: OperationJournal, disk: any DiskSpaceProbe, limit: Int, lease: StagingLease, crashHooks: CrashHooks, pipeline: PipelineConfiguration, retention: PipelineRootRetention = PipelineRootRetention(key: ""), durableFiles: Bool = false, patchApplier: (any WholeFilePatchApplier)? = nil, log: EventLog? = nil, verifiedContainers: VerifiedContainers, operationWideProgress: Bool = false, deliveryWorkController: DeliveryWorkController) {
+        ioQueue = DispatchSerialQueue(label: "org.macgacha.staging", qos: BlockingIO.quality.actorQoS)
         self.deliveryWorkController = deliveryWorkController
         let ioGate = PipelineIOGate(); self.ioGate = ioGate
         self.plan = plan; self.files = files; self.fs = fs.replacingFileOps(PipelineFileOps(base: fs.fileOps, gate: ioGate)); self.fetcher = fetcher; self.journal = journal

@@ -14,6 +14,62 @@ import TestSupport
 extension SandboxArchiveExtractor: SandboxPackageExtracting {}
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct GameLibraryTests {
+    @Test func scheduledDeliveryRechecksTheExpectedRecordUnderTheOperationLease() async throws {
+        let f = try LibraryFixture()
+        try f.advertise(1)
+        try await f.installGame()
+        let before = f.cdn.requestLog
+        let scheduled = await f.library.install(game, voices: ["en-us"], at: f.install,
+            approved: false, profile: .quiet, expectation: .init(record: nil))
+        await #expect(throws: LauncherError.busy("Expected game record changed")) { _ = try await libraryCollect(scheduled) }
+        #expect(f.cdn.requestLog.count == before.count)
+        #expect(try await f.store.load(game.id)?.installed?.tag == "1.0")
+    }
+
+    @Test func quietInstallAndUpdateUseBackgroundDeliveryWithSmallPipeline() async throws {
+        let f = try LibraryFixture()
+        let settings = Mutex<[(Int, PipelineConfiguration)]>([])
+        let ioQualities = Mutex<[BlockingIO.Quality]>([])
+        let assemblyQualities = Mutex<[BlockingIO.Quality]>([])
+        try f.advertise(1)
+        try await OperationWork.$pipelineObserver.withValue({ limit, pipeline in
+            settings.withLock { $0.append((limit, pipeline)) }
+        }) {
+            try await BlockingIO.$executorObserver.withValue({ quality in
+                ioQualities.withLock { $0.append(quality) }
+            }) {
+                try await OperationWork.$observer.withValue({ work in
+                    if work == .assemblyStarted { assemblyQualities.withLock { $0.append(BlockingIO.quality) } }
+                }) {
+                    let installed = try await libraryCollect(await f.library.install(game, voices: ["en-us"],
+                        at: f.install, approved: true, profile: .quiet))
+                    #expect(installed.last == .phase(.completed))
+                    try f.advertise(2)
+                    let updated = try await libraryCollect(await f.library.update(game, approved: true, profile: .quiet))
+                    #expect(updated.last == .phase(.completed))
+                    #expect(!ioQualities.withLock { $0.isEmpty })
+                    #expect(ioQualities.withLock { $0.contains(.background) })
+                    #expect(!assemblyQualities.withLock { $0.isEmpty })
+                    #expect(assemblyQualities.withLock { $0.allSatisfy { $0 == .background } })
+                    ioQualities.withLock { $0.removeAll() }
+                    assemblyQualities.withLock { $0.removeAll() }
+
+                    try f.advertise(3)
+                    let manual = try await libraryCollect(await f.library.update(game, approved: true))
+                    #expect(manual.last == .phase(.completed))
+                }
+            }
+        }
+        let observed = settings.withLock { $0 }
+        #expect(observed.map { $0.0 } == [2, 2, SpaceBudget.defaultMaxConcurrentObjects])
+        let quiet = PipelineConfiguration(prefetchBytes: 64 << 20, prefetchObjects: 32, assemblies: 1)
+        #expect(observed.map { $0.1 } == [quiet, quiet, .default])
+        #expect(!ioQualities.withLock { $0.isEmpty })
+        #expect(ioQualities.withLock { $0.allSatisfy { $0 == .standard } })
+        #expect(!assemblyQualities.withLock { $0.isEmpty })
+        #expect(assemblyQualities.withLock { $0.allSatisfy { $0 == .standard } })
+    }
+
     @Test func honkaiImpactUsesItsExactServerAcrossTheGameLifecycle() async throws {
         let f = try LibraryFixture(), game = try #require(GameDefinition.find("hi3"))
         let executable = try SafeRelativePath("BH3.exe")
