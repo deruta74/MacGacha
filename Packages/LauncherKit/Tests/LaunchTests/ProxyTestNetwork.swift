@@ -13,6 +13,7 @@ final class ProxyTestPeer: Sendable {
     private let ready = TestEvent(), ended = TestEvent()
     private let failure = ProxyTestBox<NWError?>(nil)
     private let eof = ProxyTestBox(false)
+    private let cancelledLocally = ProxyTestBox(false)
     init(_ connection: NWConnection) {
         self.connection = connection
         connection.stateUpdateHandler = { [ready, ended, failure] state in
@@ -32,7 +33,7 @@ final class ProxyTestPeer: Sendable {
         connection.start(queue: queue); try await ready.wait()
         if let error = failure.withLock({ $0 }) { throw error }
     }
-    func cancel() { connection.cancel() }
+    func cancel() { cancelledLocally.withLock { $0 = true }; connection.cancel() }
     func stop() async { cancel(); try? await ended.wait() }
     func send(_ data: Data) async throws {
         try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, any Error>) in
@@ -52,10 +53,21 @@ final class ProxyTestPeer: Sendable {
     func read(_ maximum: Int = 65_536) async throws -> Data {
         if eof.withLock({ $0 }) { return Data() }
         return try await withCheckedThrowingContinuation { c in
-            connection.receive(minimumIncompleteLength: 1, maximumLength: maximum) { [eof] data, _, done, error in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: maximum) { [eof, failure] data, _, done, error in
                 if done { eof.withLock { $0 = true } }
-                if let error { c.resume(throwing: error) } else { c.resume(returning: data ?? Data()) }
+                // A failed state cancels pending reads; surface its cause.
+                if let error { c.resume(throwing: failure.withLock { $0 } ?? error) } else { c.resume(returning: data ?? Data()) }
             }
+        }
+    }
+    // After both TCP halves finish, Network.framework can cancel a pending
+    // receive with ECANCELED instead of reporting EOF. Only a cancellation
+    // this peer did not request counts as that clean end; resets still throw.
+    func readEOF() async throws -> Bool {
+        do { return try await read().isEmpty }
+        catch NWError.posix(.ECANCELED) where !cancelledLocally.withLock({ $0 }) {
+            if let failure = failure.withLock({ $0 }) { throw failure }
+            return true
         }
     }
     func exactly(_ count: Int) async throws -> Data {
